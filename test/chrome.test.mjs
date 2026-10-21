@@ -48,10 +48,15 @@ ok('it is drawn ABOVE the bar\'s glass', () => {
   assert.ok(z > sheet, `the portal (z ${z}) is under the nav glass (z ${sheet}) — it would be a blur behind frost`);
 });
 
-ok('on a phone the wordmark steps aside for it', () => {
+// (2026-10-20: it used to step 18px right of the portal alone; with life at
+// the bar's right end it is centred again, and capped to the gap instead)
+ok('on a phone the wordmark sits between the tree and life, never wider than the gap', () => {
   const i = css.indexOf('@media (max-width: 560px) { .home-brand {'); assert.ok(i > 0, 'the phone brand rule is gone');
   const blk = css.slice(i, css.indexOf('} }', i));
-  assert.ok(/left: calc\(50% \+ 18px\);/.test(blk), 'the wordmark is still centred on a phone — it will overlap the disc at the bar\'s left end');
+  assert.ok(/left: 50%;/.test(blk) && !/50% \+ 18px/.test(blk), 'the wordmark is off centre on a phone — with a glyph at each end it would crowd life');
+  // the gap: 100vw less both rails, each glyph (44px at the rail + 8) and 6px clear of each; the name is 2048:699
+  assert.ok(/--brand-h: min\(calc\(\(var\(--rail-w\) - 16px\) \* 1\.5\), calc\(\(100vw - 2 \* var\(--rail-w\) - 116px\) \/ 2\.93\)\);/.test(css),
+    'the phone wordmark is not capped to the gap between the tree and life — on a 375px phone it will cover one of them');
 });
 
 ok('the conversation still measures the portal, and knows it moved', () => {
@@ -131,19 +136,31 @@ ok('turning a dance off lets the presence choose how it comes to rest', () => {
   assert.ok(/if \(!r\?\.available \|\| alive \|\| gen !== getGen\(\)\) return;/.test(bow), 'a rest arriving after a new waking would overwrite it');
 });
 
-console.log('\nthe portal is light (2026-09-29):');
+console.log('\nthe top bar\'s two ends: a tree and a moon (2026-10-20):');
 
-ok('an oval of glitter drawn once, 4irden\'s mark poured on it, and its motion paused when it costs', () => {
-  assert.ok(/class="portal-light"/.test(html) && /id="portal-mark" class="portal-mark mercury"/.test(html) && /src="air_logo\.png(\?v=\w+)?"/.test(html), 'the light or the mark is missing');
-  assert.ok(/function sparkles\(kind, seed\)/.test(portal) && /light\.appendChild\(sparkles\(kind, seed\)\)/.test(portal), 'the glitter is not drawn');
-  assert.ok(/\$\('portal-mark'\)/.test(mount) && /imageEl: img/.test(mount), 'the mark is not poured in unimat');
-  // the moving parts move by transform and opacity only — never a repaint
-  for (const k of ['portal-turn', 'portal-turn-back', 'portal-flicker', 'portal-breathe', 'portal-motes']) {
-    const kf = css.slice(css.indexOf('@keyframes ' + k + ' '), css.indexOf('}', css.indexOf('@keyframes ' + k + ' ') + 20) + 40);
-    assert.ok(kf.length > 20 && !/(width|height|left|top|filter|box-shadow|background)\s*:/.test(kf), `${k} animates something that repaints`);
-  }
-  assert.ok(/:root:is\(\[data-gfx="low"\], \[data-gfx="smooth"\], \[data-motion="less"\]\) \.portal-light > \*/.test(css), 'the cheap graphics modes do not pause the portal');
-  assert.ok(/body:is\(\.panel-open, \.gated, \.viewing\) \.portal-light > \*/.test(css), 'the portal moves while nobody can see it');
+// Colin: "change the airden glyph from the portal to just a simple tree in
+// unimat ... add your new mode with name 'life' on the top right ... y3k logo
+// should be on top though in y3kode, as should airden and life" and "keep the
+// chat bar but only when the nav bar is expanded -- no floating chat bar".
+ok('the portal is a tree and life a moon, each poured in unimat at its end of the top bar', () => {
+  assert.ok(/id="portal-mark" class="portal-mark mercury"/.test(html) && /id="life-mark" class="life-mark mercury"/.test(html), 'a mark is missing');
+  assert.ok(!/air_logo\.png/.test(html.slice(html.indexOf('<button id="portal"'))), "4irden's old mark is back on the portal");
+  for (const id of ['portal-mark', 'life-mark']) assert.ok(mount.includes(`['${id}',`), `${id} is not poured in unimat`);
+  assert.ok(/svgEl: svgOf\(el\), size: base/.test(mount), 'the marks are not poured from their own drawings');
+  const life = rule('#nav-life');
+  assert.ok(/right: calc\(var\(--hole-r\) \+ 8px\);/.test(life), "life is not at the bar's right end");
+  assert.ok(/top: calc\(var\(--hole-t\) - var\(--rail-w\) \+ \(var\(--rail-w\) - var\(--portal-d\)\) \/ 2\);/.test(life), 'life does not fold with the top bar');
+});
+
+ok('y3kode keeps the name, the tree and the moon on top, and the chat bar only while the bottom bar is open', () => {
+  assert.ok(/body\.panel-open:is\(\.in-code, \.in-life\):not\(\.gated\):not\(\.viewing\) :is\(#portal, #nav-life\) \{ opacity: 1; pointer-events: auto; \}/.test(css), 'the tree and the moon leave y3kode');
+  assert.ok(/body\.panel-open\.in-code:not\(\.gated\) \.home-brand \{ opacity: 1; pointer-events: auto; \}/.test(css), 'the name leaves y3kode');
+  assert.ok(/body\.panel-open\.in-code\.nav-collapsed-top \.home-brand \{ opacity: 0; pointer-events: none; \}/.test(css), 'the name floats over the coder when the bar folds');
+  assert.ok(/body\.panel-open\.in-code:not\(\.nav-collapsed-bottom\):not\(\.gated\) #chat \{ opacity: 1; pointer-events: auto; \}/.test(css), 'no chat bar in y3kode with the bar open');
+  assert.ok(!/body\.panel-open\.in-code\.nav-collapsed-bottom[^{]*#chat \{ opacity: 1/.test(css), 'a floating chat bar in y3kode');
+  // and the metal follows the same rules: a canvas poured for nobody costs every frame
+  assert.ok(/\(b\.contains\('in-code'\) && !b\.contains\('nav-collapsed-top'\)\)/.test(mount), 'the name pours in y3kode with its bar folded');
+  assert.ok(/\(b\.contains\('in-code'\) && !b\.contains\('nav-collapsed-bottom'\)\)/.test(mount), 'the chat pours in y3kode with its bar folded');
 });
 
 console.log('\nwhat the review of 2026-10-02 found:');
@@ -157,6 +174,7 @@ const fakeEl = () => {
     getAttribute: (k) => attrs[k] ?? null,
     classList: { toggle: (c, f) => { if (f ?? !cls.has(c)) cls.add(c); else cls.delete(c); }, add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) },
     addEventListener: (t, fn) => { on[t] = fn; },
+    removeEventListener: (t, fn) => { if (on[t] === fn) delete on[t]; },
     fire: (t) => on[t]?.(),
     querySelector: () => null,
   };

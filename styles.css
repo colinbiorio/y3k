@@ -2134,7 +2134,9 @@ body {
   --model-h: 26px;
 }
 @media (max-width: 560px) { body {
-  --brand-h: calc((var(--rail-w) - 16px) * 1.5);
+  /* the name's height, or less: never wider than the gap between the portal
+     and life (each 44px at the rail + 8, and 6px clear), at its 2048:699 */
+  --brand-h: min(calc((var(--rail-w) - 16px) * 1.5), calc((100vw - 2 * var(--rail-w) - 116px) / 2.93));
   --brand-at: calc(70.6px - 1.26 * var(--hole-t));
   --brand-top: max(var(--brand-at) + 40 * (var(--hole-t) - var(--rail-w)),
     var(--hole-t) + 46px - var(--brand-h) * 0.28 - 40 * (var(--hole-t) - 10px),
@@ -2197,11 +2199,14 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 body.nav-dragging .home-model { transition: none; }
 body:not(.in-home) .home-model, body.panel-open .home-model, body.gated .home-model { opacity: 0; pointer-events: none; }
 @media (max-width: 560px) { .home-brand {
-  /* the portal has the bar's left end now: 44px at hole-l + 8, so the mark
-     steps right of it. Measured 185px wide in a 259px bar; +18 leaves 19 spare. */
-  left: calc(50% + 18px);
+  /* the portal has the bar's left end (44px at hole-l + 8) and since
+     2026-10-20 life has its right end, so the name is centred between them
+     again (it stepped 18px right of the portal alone) and is never wider
+     than the gap: --brand-h below. Measured at 430px: 184px of name in a
+     198px gap; at 375px the name shrinks to fit 143px. */
+  left: 50%;
   clip-path: inset(-200px -400px calc(2.5px - 40 * (var(--rail-w) - var(--hole-t))) -400px); } }  /* the bar is thinner here; the name fits inside it */
-@media (max-width: 560px) { .home-model { gap: 5px; left: calc(50% + 18px);
+@media (max-width: 560px) { .home-model { gap: 5px; left: 50%;
   top: max(calc(var(--brand-top) + var(--brand-h) * 0.67 + 4px), calc(var(--hole-t) + 48px)); } }
 
 /* ===== THE HAND ==========================================================
@@ -2956,6 +2961,64 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
    so these rules are only what a conversation of questions needs beyond a
    board. The chooser is discover's chips, held to the game column. */
 .games-pick { max-width: 560px; margin: 0 auto 14px; padding: 0 14px; }
+/* LIFE (src/life.js, Colin 2026-10-20): a window onto lucid, a life in a world
+   dreamed on your own computer. The dreamed picture is the room: square, as
+   large as the panel allows, in the house's rounded glass, with what it is
+   doing on a chip over its corner; under it, its thought, what it says aloud,
+   what it holds, and the controls lucid's own window has. */
+.life-root { grid-column: 1 / -1; width: 100%; padding: 0 14px 40px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+.life-stage { position: relative; width: min(100%, 560px, calc(100vh - var(--hole-t) - var(--hole-b) - 300px)); min-width: min(100%, 300px);
+  aspect-ratio: 1; border-radius: 22px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #1a1d26, #0b0c11 70%);
+  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.26), 0 30px 70px -30px rgba(0, 0, 0, 0.85); }
+.life-stage[hidden] { display: none; }
+.life-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; image-rendering: auto; }
+.life-frame[hidden] { display: none; }
+.life-veil { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 0.9rem; font-style: italic; }
+.life-veil:empty { display: none; }
+.life-status { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 6px 11px; border-radius: 999px;
+  font: 500 0.72rem ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.02em; color: #e8ecf4;
+  background: rgba(10, 12, 17, 0.72); box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.22); }
+.life-status:empty { display: none; }
+.life-body { width: min(100%, 560px); display: flex; flex-direction: column; gap: 10px; }
+.life-thought { margin: 0; color: #c9ced8; font-size: 0.98rem; line-height: 1.55; font-style: italic; }
+.life-said { margin: 0; color: #f2f4f8; font-size: 1.2rem; line-height: 1.4; font-weight: 450; }
+.life-intent { margin: 0; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.01em; }
+.life-err { margin: 0; color: #e8c98a; font-size: 0.82rem; }
+:is(.life-thought, .life-said, .life-intent):empty { display: none; }
+.life-controls { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.life-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.life-row .usage { flex: 1 1 200px; }
+.life-small { justify-content: center; gap: 12px; }
+.life-small .login-alt { font-size: 0.8rem; }
+.life-note { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.life-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.life-pad button { padding: 9px 6px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+  color: #d6dbe3; font: inherit; font-size: 0.82rem; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+.life-pad button:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(205, 213, 223, 0.3); }
+.life-pad .life-pad-back { grid-column: 2; }
+.life-speak { display: flex; gap: 8px; align-items: center; margin: 0; }
+.life-speak .field { flex: 1; min-width: 0; }
+.life-speak .create-go { flex: none; }
+.life-card { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border-radius: 20px; background: rgba(255, 255, 255, 0.035);
+  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.2); color: #b8bfc9; font-size: 0.92rem; line-height: 1.55; }
+.life-card b { color: #eceef2; font-weight: 550; font-size: 1rem; }
+.life-card p { margin: 0; }
+.life-card .create-go { align-self: flex-start; }
+.life-log { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, 0.35); color: #aab1bb;
+  font: 0.72rem/1.45 ui-monospace, 'SF Mono', Menlo, monospace; white-space: pre-wrap; max-height: 9em; overflow: auto; }
+@media (max-width: 560px) {
+  .life-root { padding: 0 0 40px; }
+  .life-said { font-size: 1.08rem; }
+}
+/* A wide screen has room for both at once: the picture on the left, what it
+   thinks and the controls beside it, so taking the controls needs no scroll. */
+@media (min-width: 1000px) {
+  .home-panel.mode-life { max-width: 1140px; }
+  .life-root { flex-direction: row; align-items: flex-start; justify-content: center; gap: 26px; }
+  .life-stage { flex: none; width: min(580px, calc(100vh - var(--hole-t) - var(--hole-b) - 110px)); }
+  .life-body { width: auto; flex: 1 1 380px; max-width: 480px; }
+}
+
 .twenty-card { gap: 14px; }
 .twenty-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .twenty-count { color: #eceef2; font-weight: 500; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
@@ -3622,62 +3685,57 @@ body.panel-open #portal, body.gated #portal, body.viewing #portal { opacity: 0; 
 #portal:hover { transform: scale(1.045); }
 #portal:active { transform: scale(0.985); }
 
-/* THE PORTAL IS AN OVAL OF LIGHT (Colin's drawing, 2026-09-29): a rim of
-   glittering points around a warm, bright core, with motes coming off it —
-   not a dark disc waiting for a feed. The box stays the square the top bar
-   measures; the oval is drawn inside it, 80% as wide as it is tall.
-   The far side, when there is one, shows through the same oval, held still —
-   a portal you can click through, not a page you can poke at through a hole. */
-.portal-glass { position: absolute; inset: 4px 12%; border-radius: 50%; overflow: hidden; display: block;
-  background: radial-gradient(ellipse at 50% 56%, rgba(255, 244, 222, 0.34), rgba(255, 226, 180, 0.10) 46%, rgba(8, 11, 16, 0.30) 78%); }
-.portal-view { position: absolute; left: 50%; top: 50%; width: 1280px; height: 800px;
-  border: 0; transform: translate(-50%, -50%) scale(0.14); transform-origin: 50% 50%;
-  pointer-events: none; opacity: 0; transition: opacity 1.1s ease; filter: saturate(1.15) contrast(1.05); }
-#portal.lit .portal-view { opacity: 0.9; }
-
-/* The light. Every moving part is a canvas portal.js drew ONCE, and the only
-   thing that changes per frame is a transform or an opacity — work the
-   compositor does without the page. The rim turns one way, the shimmer the
-   other, the motes swell outward and fade, the core breathes. The squash to
-   an oval is the parent's, so the parts turn in a circle and the whole stays
-   an oval. */
-.portal-light { position: absolute; inset: 0; transform: scaleX(0.8); pointer-events: none; }
-.portal-light > * { position: absolute; inset: 0; width: 100%; height: 100%; }
-.portal-core { border-radius: 50%; inset: 14% 10%;
-  background: radial-gradient(ellipse at 50% 55%, rgba(255, 253, 244, 1), rgba(255, 234, 194, 0.7) 20%, rgba(255, 216, 164, 0.24) 46%, rgba(255, 214, 160, 0) 70%);
-  animation: portal-breathe 4.2s ease-in-out infinite; }
-.portal-rim { animation: portal-turn 38s linear infinite; will-change: transform; }
-.portal-shimmer { animation: portal-turn-back 55s linear infinite, portal-flicker 3.1s ease-in-out infinite; will-change: transform, opacity; }
-.portal-motes { animation: portal-motes 4.6s ease-out infinite; will-change: transform, opacity; }
-.portal-motes.late { animation-delay: -2.3s; }
-/* a soft spill of the light onto the bar round it */
-#portal::before { content: ''; position: absolute; inset: 2px 9%; border-radius: 50%; pointer-events: none;
-  box-shadow: 0 0 22px 3px rgba(255, 236, 205, 0.22), inset 0 0 14px rgba(255, 246, 228, 0.28); }
-@keyframes portal-turn { to { transform: rotate(360deg); } }
-@keyframes portal-turn-back { to { transform: rotate(-360deg); } }
-@keyframes portal-flicker { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.95; } }
-@keyframes portal-breathe { 0%, 100% { transform: scale(0.95); opacity: 0.8; } 50% { transform: scale(1.05); opacity: 1; } }
-@keyframes portal-motes { 0% { transform: scale(0.94) rotate(0deg); opacity: 0; } 30% { opacity: 0.9; } 100% { transform: scale(1.16) rotate(14deg); opacity: 0; } }
-/* with the far side lit, the core steps back so the garden shows through */
-#portal.lit .portal-core { opacity: 0.35; animation: none; }
-#portal.lit .portal-mark { opacity: 0.6; }
-
-/* 4irden's mark, centred on the light. Poured in unimat once its picture
-   loads; until then (or without WebGL) the picture itself, and without the
-   file the light alone. */
-.portal-mark { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 46%; height: 46%;
-  display: grid; place-items: center; pointer-events: none; transition: opacity 0.6s ease; }
-.portal-mark > img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.portal-mark.missing { display: none; }
-
-/* THE MOTION PAUSES WHEN IT COSTS. Held still — every part where it is,
-   the light still on — whenever the graphics mode is one of the cheap ones
-   (the governor chooses those itself when frames drop), when less motion is
-   asked for, and whenever the portal cannot be seen. */
-:root:is([data-gfx="low"], [data-gfx="smooth"], [data-motion="less"]) .portal-light > *,
-body:not(.in-home) .portal-light > *,
-body:is(.panel-open, .gated, .viewing) .portal-light > * { animation-play-state: paused; }
+/* THE PORTAL IS A TREE (Colin, 2026-10-20: "let's change the airden glyph from
+   the portal to just a simple tree in unimat"). It was an oval of light with
+   4irden live behind it (Colin's drawing, 2026-09-29); now it is one glyph,
+   poured in the house's metal (mercury-mount.js), on nothing. The box stays
+   the square the top bar measures. */
+.portal-mark { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 74%; height: 74%;
+  display: grid; place-items: center; pointer-events: none; }
+.portal-mark > svg { width: 100%; height: 100%; display: block; }
 @media (prefers-reduced-motion: reduce) { #portal { transition: opacity 0.2s linear; } }
+
+/* LIFE: the portal's twin at the top bar's RIGHT end (Colin, 2026-10-20: "add
+   your new mode with name 'life' on the top right"). Same disc, same metal,
+   mirrored: it rides the bar's inset the way the portal does, so it folds
+   away with the bar and comes back with it. Lit while you are in it. */
+#nav-life {
+  --portal-d: max(44px, calc(var(--rail-w) - 20px));
+  position: fixed; z-index: 40;
+  padding: 0; border: none; background: none;
+  right: calc(var(--hole-r) + 8px);
+  top: calc(var(--hole-t) - var(--rail-w) + (var(--rail-w) - var(--portal-d)) / 2);
+  width: var(--portal-d); height: var(--portal-d); border-radius: 50%;
+  cursor: pointer; opacity: 0; pointer-events: none;
+  transition: opacity 0.5s ease, transform 0.32s cubic-bezier(0.22,0.61,0.36,1),
+    right 0.42s cubic-bezier(0.22,0.61,0.36,1), top 0.42s cubic-bezier(0.22,0.61,0.36,1);
+}
+body.in-home #nav-life { opacity: 1; pointer-events: auto; }
+body.panel-open #nav-life, body.gated #nav-life, body.viewing #nav-life { opacity: 0; pointer-events: none; }
+#nav-life:hover { transform: scale(1.045); }
+#nav-life:active { transform: scale(0.985); }
+.life-mark { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 74%; height: 74%;
+  display: grid; place-items: center; pointer-events: none; }
+.life-mark > svg { width: 100%; height: 100%; display: block; }
+#nav-life.on::after { content: ''; position: absolute; left: 50%; bottom: -3px; width: 5px; height: 5px; margin-left: -2.5px;
+  border-radius: 50%; background: #e9edf4; box-shadow: 0 0 8px rgba(233, 237, 244, 0.8); }
+
+/* IN y3kode AND IN LIFE, THE TOP BAR IS THE HOUSE'S (Colin, 2026-10-20: "y3k
+   logo should be on top though in y3kode, as should airden and life"). Every
+   other panel lets the name, the portal and life go; these two keep them. */
+body.panel-open:is(.in-code, .in-life):not(.gated):not(.viewing) :is(#portal, #nav-life) { opacity: 1; pointer-events: auto; }
+body.panel-open.in-code:not(.gated) .home-brand { opacity: 1; pointer-events: auto; }
+/* (folded, the name goes with the bar: anywhere else it floats in the room
+   above the orb, but in y3kode the room under the top bar is the coder's pane) */
+body.panel-open.in-code.nav-collapsed-top .home-brand { opacity: 0; pointer-events: none; }
+/* …and the chat bar only while the bottom bar is open (Colin: "keep the chat
+   bar but only when the nav bar is expanded — no floating chat bar in
+   y3kode — just the one when you hit the arrow"). Folded, it goes with the
+   bar instead of floating in its stadium over the coder. What the presence
+   says back is captioned over its own column, beside the orb. */
+body.panel-open.in-code:not(.nav-collapsed-bottom):not(.gated) #chat { opacity: 1; pointer-events: auto; }
+body.panel-open.in-code #caption { opacity: 1; z-index: 35; left: calc(100% - var(--hole-r) - var(--code-orb-w) / 2);
+  max-width: calc(var(--code-orb-w) - 28px); bottom: calc(var(--hole-b) + 28px); }
 
 /* a refusal the person needs to read, inside a settings pane */
 .set-pane .warn { color: #ffb4a2; background: rgba(255,120,90,0.08);
@@ -3733,11 +3791,6 @@ body:is(.panel-open, .gated, .viewing) .portal-light > * { animation-play-state:
 }
 .drop-hint { font-size: 0.82rem; color: var(--muted); text-align: center; padding: 2px 0 0; }
 .drop-hint strong { color: var(--ink); font-weight: 500; }
-
-/* the far side as a picture: same circle, no browsing context */
-.portal-shot { position: absolute; inset: 0; width: 100%; height: 100%;
-  border-radius: 50%; object-fit: cover; display: block; pointer-events: none; }
-#portal.shared .portal-view { display: none; }
 
 /* Inside the browser's own fullscreen layer the window IS the screen: its
    rounded corners and drop shadow are framing nothing, and the frosted pane has
@@ -4147,12 +4200,11 @@ body.viewing .world-tools { display: none; }
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) brightness(1.18); }
 :root[data-gfx="smooth"] .mercury > canvas.merc-canvas { filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); }
 
-/* 4. THE REST OF THE ROOM'S EXTRAS. The portal's far side is a whole second
-      website rendering into a 68px disc: in Smooth the disc keeps its glass and
-      its light, and the site behind it is not drawn. The conversation keeps a
+/* 4. THE REST OF THE ROOM'S EXTRAS. (The portal's far side was a whole second
+      website rendering into a 68px disc, kept out of Smooth here; since
+      2026-10-20 the portal is a tree in metal and has no far side.) The conversation keeps a
       halo that stays legible over the orb's bright core, in three shadows
       instead of four (the 22px one was most of the raster). */
-:root[data-gfx="smooth"] .portal-view { display: none; }
 :root[data-gfx="smooth"] #chat-history .hl {
   text-shadow: 0 0 4px rgba(0, 0, 0, 0.95), 0 0 9px rgba(0, 0, 0, 0.75), 0 1px 2px #000; }
 :root[data-gfx="smooth"] #chat-history .hw-live {
@@ -4183,10 +4235,6 @@ body.viewing .world-tools { display: none; }
 :root[data-motion="less"] body.airden #chat-air::after,
 :root[data-motion="less"] .cc-pill[data-state="checking"]::before,
 :root[data-motion="less"] .cc-pill[data-state="updating"]::before,
-:root[data-motion="less"] .portal-core,
-:root[data-motion="less"] .portal-rim,
-:root[data-motion="less"] .portal-shimmer,
-:root[data-motion="less"] .portal-motes,
 :root[data-motion="less"] #chat-voice.active,
 :root[data-motion="less"] .world-univi.alive::before,
 :root[data-motion="less"] .pfp-wrap.live::before,

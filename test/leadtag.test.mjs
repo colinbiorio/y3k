@@ -871,42 +871,32 @@ ok('a dropped file cannot navigate the page away from a half-written gift', () =
 });
 
 
-// --- THE PORTAL'S FAR SIDE ---------------------------------------------------
-// The disc used to frame 4irden's front door, because a framed 4irden is
-// third-party and Safari/Firefox partition its localStorage — it finds no token
-// and boots signed out. A share link makes it a PICTURE instead, and that one
-// substitution removes the browsing context, the storage, the CORS and the
-// script all at once. These guard the parts that would quietly undo that.
-console.log('\nthe portal\'s far side:');
+// --- THE PORTAL, A TREE (2026-10-20) ------------------------------------------
+// The disc was an oval of light with 4irden live behind it, and for anyone who
+// pasted a view link, their garden's picture. Colin asked for "just a simple
+// tree in unimat": no far side at all, so no frame, no picture, no link kept.
+console.log('\nthe portal:');
 
-ok('the far side is an image, never a frame pointed at a share', () => {
+ok('the portal is a tree in metal with no far side: no frame, no picture, no share link', () => {
   const src = read('src/portal.js');
-  assert.ok(/createElement\('img'\)/.test(src),
-    'the share must render as an <img> — a frame brings back every problem it solves');
-  assert.ok(!/view\.src = portalSrc|view\.src = `\$\{HOME\}\/share/.test(src),
-    'the iframe is being pointed at a share URL, which re-opens a third-party context');
-  assert.ok(/addEventListener\('error'/.test(src),
-    'a dead link falls through to 4irden\'s SPA catch-all as HTML with a 200 — ' +
-    'onerror is the only way the portal can tell, and without it a revoked view ' +
-    'is a permanently broken image');
+  assert.ok(!/createElement\('(iframe|img)'\)/.test(src) && !/portal-view|LINK_KEY|localStorage/.test(src),
+    'a far side is back in the portal: a frame re-opens a third-party context, a kept link a capability to hold');
+  const html = read('index.html');
+  const at = html.indexOf('<button id="portal"');
+  const portal = html.slice(at, html.indexOf('</button>', at));
+  assert.ok(!/<iframe|<img/.test(portal), 'the portal frames or pictures something again');
+  assert.ok(/id="portal-mark" class="portal-mark mercury"/.test(portal) && /<svg viewBox="0 0 24 24"/.test(portal), 'the tree is not a drawing to pour in unimat');
+  assert.ok(!/portal-link|portalLink/.test(read('src/settings.js')), 'Settings still offers a link for a portal with no far side');
 });
 
 ok('the local-testing override cannot name a foreign origin', () => {
-  // HOME is handed to window.open() AND to an img src. A query parameter that
-  // could name any origin is an open redirect with extra steps.
+  // HOME is handed to window.open(). A query parameter that could name any
+  // origin is an open redirect with extra steps.
   const src = read('src/portal.js');
-  const home = src.slice(src.indexOf('const HOME = ('), src.indexOf('const LINK_KEY'));
+  const home = src.slice(src.indexOf('const HOME = ('), src.indexOf('export function createPortal'));
   assert.ok(/localhost/.test(home) && /127\.0\.0\.1/.test(home), 'the override must be localhost-only');
   assert.ok(/return local \? u\.origin : DEFAULT_HOME/.test(home),
     'anything not localhost must fall back to the real home, not be used');
-});
-
-ok('the link is kept in the browser and sent only to the place that issued it', () => {
-  const src = read('src/portal.js');
-  assert.ok(/localStorage/.test(src), 'a capability URL belongs on the machine its owner is at');
-  // it must never be posted to y3k's own API
-  assert.ok(!/fetch\([^)]*LINK_KEY|body:.*portalLink/.test(src),
-    'the share link is being sent to y3k — it is 4irden\'s capability, not ours to hold');
 });
 
 

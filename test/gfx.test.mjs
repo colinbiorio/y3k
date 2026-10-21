@@ -715,7 +715,9 @@ ok('smooth: solid panes, grain kept, no blur filters, no loops', () => {
   assert.ok(!/--frost-grain/.test(swap), 'smooth took the grain away — it is a static raster and costs nothing per frame');
   assert.ok(!/(^|[^-])filter:[^;}]*blur\(/.test(smooth), 'smooth brings a blur filter back');
   assert.ok(!/infinite/.test(smooth), 'smooth starts a loop');
-  assert.ok(/\.portal-view \{ display: none; \}/.test(smooth), 'smooth still draws the portal\u2019s far side');
+  // (the portal had a far side to leave undrawn here; since 2026-10-20 it is a
+  // tree in metal with none, so there is nothing for smooth to switch off)
+  assert.ok(!/portal-view/.test(css), 'the portal has a far side again: smooth must not draw it');
   // The frame snaps: no layout property transitions on the frame in smooth.
   assert.ok(/:root\[data-gfx="smooth"\] :is\([^)]*#nav-sheet[^)]*#nav-hole[^)]*\) \{ transition: none; \}/.test(css),
     'smooth still animates the frame\u2019s geometry');

@@ -222,30 +222,17 @@ ok('a line faded to nothing is taken off the screen, and lines rest unlayered', 
     'the lines keep a compositor layer each while nothing is moving them');
 });
 
-console.log('\nthe portal, only while someone can see it (2026-09-26):');
+console.log('\nthe portal has nothing running behind it (2026-10-20):');
 
-ok('the portal frame is unloaded while the disc is out of sight, and relit on return', () => {
-  const portal = readFileSync(new URL('../src/portal.js', import.meta.url), 'utf8');
-  const code = portal.replace(/^\s*\/\/.*$/gm, '');
-  // opacity 0 does not throttle a frame: 4irden ran on behind every panel
-  const dark = code.slice(code.indexOf('function darkFrame()'), code.indexOf('function sync()'));
-  assert.ok(/view\.src = 'about:blank'/.test(dark), 'nothing unloads the frame when the disc is hidden');
-  const seen = code.slice(code.indexOf('const seen = '), code.indexOf('let onScreen'));
-  for (const k of ['document.hidden', "'in-home'", "'panel-open'", "'gated'", "'viewing'"])
-    assert.ok(seen.includes(k), `the portal no longer counts ${k} as out of sight`);
-  // and it is asked again whenever one of those can change
-  assert.ok(/addEventListener\('visibilitychange', sync\)/.test(code), 'a hidden tab keeps the far side running');
-  assert.ok(/attributeFilter: \['class'\]/.test(code), 'a panel or the world opening is never noticed');
-  assert.ok(/addEventListener\('y3k:gfx', sync\)/.test(code), 'a tier change does not reach the portal');
-});
-
-ok('the low and smooth tiers never light the frame', () => {
-  const portal = readFileSync(new URL('../src/portal.js', import.meta.url), 'utf8');
-  assert.ok(/const frameAllowed = \(\) => !coarse && !saveData && tier\(\) !== 'low' && tier\(\) !== 'smooth'/.test(portal),
-    'the portal frame is allowed on a cheap tier');
-  const light = portal.slice(portal.indexOf('function lightFrame()'), portal.indexOf('function darkFrame()'));
-  assert.ok(/!frameAllowed\(\)/.test(light), 'lightFrame lights without asking the tier');
-  assert.ok(/window\.Y3K\?\.gfx\?\.profile\?\.\(\)/.test(portal), 'the portal does not read the gfx profile');
+// The disc used to frame 4irden live, and these guarded unloading that frame
+// whenever the disc was out of sight and never lighting it on a cheap tier.
+// Since 2026-10-20 the portal is a tree in metal with no frame at all, which
+// is the strongest form of both: there is nothing to unload and nothing to light.
+ok('the portal loads no second site, on any tier, seen or not', () => {
+  const portal = readFileSync(new URL('../src/portal.js', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/\.src\s*=|iframe|lightFrame|darkFrame/.test(portal), 'the portal loads something behind its glass again');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(!/id="portal-view"/.test(html), 'the portal frame is back in the page');
 });
 
 console.log('\nthe feed, changed and not rebuilt (2026-09-26):');

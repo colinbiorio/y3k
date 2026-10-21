@@ -25,15 +25,17 @@ import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
 import { THINKERS, thinkWithClaude } from './brain.mjs';
 import { createComputer } from './computer.mjs';
+import { createLife } from './life.mjs';
 import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.3';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.4';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
                                   // 0.3.3: brain.complete says how fast it wrote (speed: the stream's own clock, brain.mjs speedOf); session.start aside (kode's /compare); the orb tool names all twelve rooms (orb.mjs)
+                                  // 0.3.4: life.* — lucid on this computer, for the site's life mode (life.mjs)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -237,6 +239,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   // Off until asked; asked here (a native dialog in the y3k app); every action
   // shown before it happens and kept in the audit.
   const computer = createComputer({ ask, emit, audit, tmpDir: (mkdirSync(join(store.tmpDir, 'computer'), { recursive: true }), join(store.tmpDir, 'computer')) });
+  // a life in a dreamed world (lucid), shown in the site's life mode (life.mjs)
+  const life = createLife({ ask, audit, env, config: () => store.config() });
 
   // --- your presence, on your own sign-in (brain.mjs) ---------------------------
   // One turn of thinking for the presence, through the client the person signed
@@ -606,6 +610,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'computer.look': async () => computer.look(),
     'computer.act': async (c) => computer.act(c),
     'computer.stop': async () => computer.stop(),
+    'life.status': async () => life.status(),
+    'life.start': async (c) => life.start(c),
+    'life.state': async (c) => life.state(c),
+    'life.do': async (c) => life.act(c),
+    'life.stop': async () => life.stop(),
     // what a turn has said so far (done: the turn is over or never was)
     'brain.partial': async ({ tag }) => (partials.has(tag) ? { ok: true, text: partials.get(tag), done: false } : { ok: true, text: '', done: true }),
     'engine.update': async (c) => updater.run(c),
@@ -709,6 +718,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
 
   function shutdown() {
     for (const s of sessions.values()) { try { s.adapter.stop(); } catch { /* ignore */ } }
+    try { life.dispose(); } catch { /* ignore */ }   // the life is asked to rest first, like a coder
     const left = liveChildren();
     setTimeout(() => reap(left), 5500).unref?.();
   }

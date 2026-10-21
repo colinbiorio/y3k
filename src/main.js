@@ -974,6 +974,12 @@ const social = createSocial({
   // the way Code's replies are read (codeLink.speak: stop() back, never over
   // a turn); and the microphone through the dictation lease, so a spoken
   // question goes to the game and never to the conversation.
+  // life (src/life.js): its words in the browser's own voice, not the
+  // presence's, and the orb stays still; and the way to kode, to connect y3kode
+  life: {
+    speak: (t) => { const sp = voice.speaker({}); sp.push(String(t || '')); sp.end(); return () => { try { sp.stop(); } catch { /* already quiet */ } }; },
+    openKode: () => { const n = $('nav-code'); if (n) { n.hidden = false; n.click(); } },
+  },
   games: {
     mood: (m) => { if (busy) return; currentMood = m; body.setMood(m); setMoodTag(m); },
     say: (t, o) => codeLink.speak(t, o),
@@ -1367,6 +1373,12 @@ $('nav-world').addEventListener('click', () => {
 // the room says plainly that digging needs one.
 $('nav-mine').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('mine');
+});
+// LIFE, the moon at the top bar's right end (Colin, 2026-10-20): lucid on your
+// own computer, watched from here (src/life.js). A second press goes home.
+$('nav-life')?.addEventListener('click', () => {
+  collapseTyping(); if (viewing()) showHome();
+  social.showView(document.body.classList.contains('in-life') ? 'orb' : 'life');
 });
 $('nav-settings').addEventListener('click', () => settings.open());
 

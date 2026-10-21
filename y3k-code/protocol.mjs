@@ -107,6 +107,14 @@ export const COMMANDS = {
   'computer.look': {},
   'computer.act': { action: S(10), x: N(), y: N(), dy: N(), text: S(2000, false), key: S(40, false), label: S(120, false) },
   'computer.stop': {},
+  // life (life.mjs): lucid on this computer, shown in the site's life mode
+  'life.status': {},
+  'life.start': { fresh: B() },
+  'life.state': { since: N() },
+  // (to: the life's mode, human or autonomous; not `mode`, which every command
+  // shares as kode's permission mode and is checked against MODES below)
+  'life.do': { do: S(12), to: S(12, false), move: S(10, false), text: S(500, false), delta: N() },
+  'life.stop': {},
   // the newest version from the site, on the person's yes (update.mjs)
   'engine.update': { token: S(300), version: S(20) },
 };
