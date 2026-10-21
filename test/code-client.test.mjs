@@ -170,7 +170,7 @@ mkdirSync(repo);
 writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
 const store = createStore(join(base, 'config'));
 store.setConfig({ signIn: true });
-const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(base, 'log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(base, 'log'), FAKE_CLAUDE_GATE: join(base, 'bg-gate') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
 const S = createState();
 const seen = [];
 engine.subscribe((e) => { seen.push(e); apply(S, e); });
@@ -273,9 +273,57 @@ await ok('todos and a subagent with its own tool, nested under it', () => {
   assert.ok(!s.items.some((i) => i.kind === 'tool' && i.name === 'Grep'), 'not at the top level');
   assert.equal(task.status, 'ok');
   assert.equal(s.agents.size, 1, 'one subagent, announced once');
-  assert.equal([...s.agents.values()][0].status, 'completed');
+  const a = [...s.agents.values()][0];
+  assert.equal(a.status, 'completed');
+  // as Claude Code counts it under the card (2.1.286's task events)
+  assert.deepEqual([a.agentType, a.kind, a.background, a.tokens, a.tools, a.ms], ['Explore', 'agent', false, 11800, 1, 2600]);
+  assert.ok(!s.items.some((i) => i.kind === 'task-done'), 'one the turn waited for needs no line of its own');
 });
 
+// SENT TO THE BACKGROUND (2026-10-21): Claude Code's default for a subagent.
+// Its launch answers at once and the subagent works on, after the turn; a
+// shell can be left running the same way.
+await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'send it off' });
+await until((e) => e.type === 'subagent.progress' && e.taskId === 'toolu_bga');
+await until((e) => e.type === 'tool.result' && e.callId === 'toolu_bgg');
+
+await ok('a subagent and a shell sent to the background stay running after their launch and after the turn', () => {
+  const card = s.byKey.get('t:toolu_bga'), shell = s.byKey.get('t:toolu_bgs');
+  assert.equal(card.status, 'running', 'its launch is not its end');
+  assert.equal(card.background, true);
+  assert.equal(card.output, null, 'the CLI\'s launch note is written for the model, and not shown');
+  assert.equal(shell.status, 'running');
+  assert.match(shell.output.text, /running in background/, 'a shell\'s launch says where its output goes');
+  const a = s.agents.get('toolu_bga');
+  assert.deepEqual([a.status, a.agentType, a.kind, a.background, a.tokens, a.tools, a.text], ['running', 'general-purpose', 'agent', true, 12722, 1, 'Finding test/*.mjs']);
+  assert.equal(s.agents.get('toolu_bgs').kind, 'shell');
+  assert.equal(s.state, 'idle', 'the turn is over; the tasks are not');
+  assert.equal(nowDoing(s), '', 'and the turn\'s line does not claim them');
+  assert.ok(card.children.some((c) => c.kind === 'tool' && c.name === 'Glob'), 'its own tool, in its card');
+});
+
+writeFileSync(join(base, 'bg-gate'), '');
+await until((e) => e.type === 'turn.ended' && seen.some((x) => x.type === 'turn.started' && x.by === 'task'));
+
+await ok('each finishes with its numbers and says so where the conversation is; the coder told of it is a turn of its own', () => {
+  const card = s.byKey.get('t:toolu_bga'), shell = s.byKey.get('t:toolu_bgs');
+  assert.equal(card.status, 'ok');
+  assert.equal(card.output.text, 'There are 2 test files.', 'what it reported');
+  assert.equal(shell.status, 'ok');
+  assert.match(shell.output.text, /running in background[\s\S]*completed \(exit code 0\)/);
+  const a = s.agents.get('toolu_bga');
+  assert.deepEqual([a.status, a.tokens, a.tools, a.ms], ['completed', 14123, 1, 10464]);
+  const done = s.items.filter((i) => i.kind === 'task-done');
+  assert.deepEqual(done.map((d) => [d.description, d.task.kind, d.task.status]), [['sleep 1; echo done', 'shell', 'completed'], ['Count the tests', 'agent', 'completed']]);
+  assert.equal(done[1].task.tokens, 14123);
+  assert.equal(seen.filter((e) => e.type === 'turn.started' && e.by === 'task').length, 1, 'the CLI\'s own turn, started once');
+  const last = s.items.filter((i) => i.kind === 'assistant').at(-1);
+  assert.match(last.blocks.map((b) => b.text).join(''), /The count is in/);
+  assert.equal(s.state, 'idle');
+  assert.equal([...s.agents.values()].filter((x) => x.status === 'running').length, 0);
+});
+
+const sumsBefore = sums(s).length;
 await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'go slow' });
 await until((e) => e.type === 'message.delta' && /Working/.test(e.text));
 await engine.handle({ cmd: 'session.interrupt', sid: st.sid });
@@ -284,7 +332,7 @@ await until((e) => e.type === 'turn.ended' && e.status === 'interrupted');
 await ok('stopping mid-turn says so', () => {
   assert.equal(s.items.at(-1).kind, 'turn-end');
   assert.equal(s.items.at(-1).status, 'interrupted');
-  assert.equal(sums(s).length, 2, 'a stopped turn has no summary: it says "Stopped." instead');
+  assert.equal(sums(s).length, sumsBefore, 'a stopped turn has no summary: it says "Stopped." instead');
 });
 
 await ok('a session reloaded from disk builds the same transcript', async () => {
@@ -1404,6 +1452,59 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       assert.equal(ring.getAttribute('aria-expanded'), 'false');
       assert.equal(document.activeElement, ring);
       assert.equal(asked('permission.answer').length, 0, 'Escape there closed only the panel');
+      cv.close();
+    } finally {
+      Date.now = realNow;
+      delete window.y3kCode;
+    }
+  });
+
+  // Colin, 2026-10-21: "make sure that there is a way to display to the user
+  // how many subagents are running, progress, etc -- everything that would be
+  // shown in claude code"
+  await ok('the view: the tasks at work are counted, each with its type, what it is doing and how far it has come; one sent off says when it is done', async () => {
+    bridge();
+    const realNow = Date.now;
+    const T = Date.parse('2026-10-21T10:00:00Z');
+    Date.now = () => T + 72500;
+    try {
+      const cv = await viewWith('tasks', {});
+      const sid = 'ag1';
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/ag1', mode: 'ask' });
+      cv.open();
+      await settle();
+      cv._feed({ sid, type: 'session.state', state: 'idle' });   // (the stand-in engine's hello ended it)
+      cv._feed({ sid, type: 'tool.call', callId: 'ta', name: 'Agent', kind: 'task', title: 'Count the tests', input: { description: 'Count the tests', prompt: 'count' }, t: T });
+      cv._feed({ sid, type: 'subagent.started', taskId: 'ta', callId: 'ta', description: 'Count the tests', agentType: 'general-purpose', kind: 'agent', background: true, t: T });
+      cv._feed({ sid, type: 'tool.result', callId: 'ta', status: 'running', background: true, output: null, t: T + 100 });
+      cv._feed({ sid, type: 'subagent.progress', taskId: 'ta', text: 'Finding test/*.mjs', tool: 'Glob', tokens: 12722, tools: 1, ms: 1485 });
+      cv._feed({ sid, type: 'tool.call', callId: 'tb', name: 'Bash', kind: 'bash', title: 'sleep 9', input: { command: 'sleep 9', run_in_background: true }, t: T + 60000 });
+      cv._feed({ sid, type: 'subagent.started', taskId: 'tb', callId: 'tb', description: 'sleep 9', kind: 'shell', background: true, t: T + 60000 });
+      await settle();
+      tick();
+      assert.equal($('div.cv-agents .ag-count').textContent, '1 agent · 1 shell running');
+      const rows = $$('div.cv-agents button.ag-row');
+      assert.equal(rows.length, 2);
+      assert.deepEqual(['.ag-desc', '.ag-chip', '.ag-now', '.ag-stats'].map((q) => rows[0].querySelector(q).textContent),
+        ['Count the tests', 'general-purpose', 'Finding test/*.mjs', '1 tool use · 12.7k tokens · 1m 12s']);
+      assert.deepEqual(['.ag-chip', '.ag-stats'].map((q) => rows[1].querySelector(q).textContent), ['shell', '12s']);
+      // its card says the same in its head, open or folded, and is still running
+      const card = $('div.cv-list div.it.tl.tk-task');
+      assert.ok(card.classList.contains('st-running'), 'its launch did not end it');
+      assert.equal(card.querySelector('.tl-sum').textContent, 'in the background · 1 tool use · 12.7k tokens · 1m 12s');
+      // done: the strip counts one fewer, and a line says so where the conversation is
+      cv._feed({ sid, type: 'subagent.ended', taskId: 'ta', status: 'completed', summary: 'There are 2 test files.', tokens: 14123, tools: 1, ms: 10464, t: T + 72600 });
+      cv._feed({ sid, type: 'tool.result', callId: 'ta', status: 'ok', output: { text: 'There are 2 test files.' }, t: T + 72600 });
+      tick();
+      assert.equal($('div.cv-agents .ag-count').textContent, '1 shell running');
+      const line = $('div.cv-list div.cv-taskdone');
+      assert.ok(line, 'a line where the conversation is');
+      assert.ok(line.classList.contains('st-ok'));
+      assert.match(line.textContent, /^Count the tests finished\s*general-purpose\s*1 tool use · 14\.1k tokens · 10\.5s$/);
+      cv._feed({ sid, type: 'subagent.ended', taskId: 'tb', status: 'killed', summary: 'stopped', t: T + 73000 });
+      tick();
+      assert.equal($('div.cv-agents'), null, 'nothing running: no strip');
+      assert.ok($$('div.cv-list div.cv-taskdone')[1].classList.contains('st-stopped'));
       cv.close();
     } finally {
       Date.now = realNow;

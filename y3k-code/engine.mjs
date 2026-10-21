@@ -30,12 +30,13 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.4';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.5';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
                                   // 0.3.3: brain.complete says how fast it wrote (speed: the stream's own clock, brain.mjs speedOf); session.start aside (kode's /compare); the orb tool names all twelve rooms (orb.mjs)
                                   // 0.3.4: life.* — lucid on this computer, for the site's life mode (life.mjs)
+                                  // 0.3.5: subagents and background shells as Claude Code shows them: type, doing, tool uses, tokens, time; a background task's card held open until it is done (adapters/claude.mjs)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;

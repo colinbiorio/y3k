@@ -19,6 +19,34 @@ const STATUS = { running: 'running', waiting: 'waiting on you', ok: '', error: '
 const secs = (ms) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`);
 const lines = (t) => (t ? t.split('\n').length : 0);
 
+// A TASK OF THE CODER'S (a subagent, or a command left running in the
+// background), named and measured the way Claude Code does under each one.
+// Its name: the subagent's type (general-purpose, Explore…), or "shell".
+export function taskName(a) {
+  if (!a) return 'agent';
+  if (a.kind === 'shell' || a.agentType === 'local_bash') return 'shell';
+  return a.agentType && !/^local_/.test(a.agentType) ? a.agentType : a.kind === 'task' ? 'task' : 'agent';
+}
+// How long: whole seconds while it runs (a clock that ticks), tenths once done.
+const taskTime = (ms, running) => {
+  const t = Math.max(0, ms) / 1000;
+  if (t < 60) return running ? `${Math.floor(t)}s` : `${t.toFixed(1)}s`;
+  const m = Math.floor(t / 60), sec = Math.floor(t % 60);
+  return m < 60 ? `${m}m ${String(sec).padStart(2, '0')}s` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+};
+// How far it has come: "4 tool uses · 14.1k tokens · 10.5s". While it runs,
+// the time counts on from when it started.
+export function taskStats(a, now = Date.now()) {
+  if (!a) return '';
+  const parts = [];
+  if (a.tools != null && taskName(a) !== 'shell') parts.push(`${a.tools} tool use${a.tools === 1 ? '' : 's'}`);
+  if (a.tokens != null) parts.push(`${fmtTokens(a.tokens)} tokens`);
+  const running = a.status === 'running';
+  const ms = running ? (a.at ? now - a.at : a.ms) : (a.ms ?? (a.end && a.at ? a.end - a.at : null));
+  if (ms != null) parts.push(taskTime(ms, running));
+  return parts.join(' · ');
+}
+
 // Collapsible block: a head that toggles a body. It follows its default (which
 // can change as a tool runs and finishes) until the person opens or closes it;
 // from then on their choice is kept on the item.
@@ -113,8 +141,11 @@ function toolBody(it) {
   }
 }
 
-function toolSummary(it) {
+function toolSummary(it, now) {
   const o = it.output?.text || '';
+  const away = it.background && it.status === 'running' ? 'in the background' : '';
+  if (it.tkind === 'task') return [away, taskStats(it.agent, now)].filter(Boolean).join(' · ');
+  if (away) return away;
   switch (it.tkind) {
     case 'read': return it.status === 'ok' ? `${lines(o.replace(/\n$/, ''))} lines` : '';
     case 'search': return it.status === 'ok' ? (o.trim() ? `${lines(o.trim())} results` : 'nothing found') : '';
@@ -171,7 +202,7 @@ function toolCard(it, ctx) {
       const kids = h('div.tl-children');
       for (const c of it.children || []) kids.appendChild(ctx.renderChild(c));
       const a = it.agent;
-      parts.push(h('div.ag-head', h('span.ag-chip', a?.agentType || 'agent'), h('span.ag-desc', it.input?.description || ''), a?.text ? h('span.ag-prog.muted', a.text) : null));
+      parts.push(h('div.ag-head', h('span.ag-chip', taskName(a)), h('span.ag-desc', it.input?.description || ''), a?.text ? h('span.ag-prog.muted', a.text) : null));
       parts.push(kids);
       if (it.status === 'ok' && it.output?.text) parts.push(fold(it, 'res', h('span.muted', 'what it reported'), () => h('div.ag-res', markdown(it.output.text)), false));
     }
@@ -190,7 +221,14 @@ export function childrenOf(el) {
 // A subagent's latest progress line, written into its card where it stands.
 // It used to show only because the whole card was redrawn on every change
 // inside it; now that nothing redraws the card, the line is set on its own.
-export function agentLine(el, text) {
+// And its numbers in the card's head (sum: what toolSummary would say now),
+// which shows whether the card is open or not.
+export function agentLine(el, text, sum) {
+  if (sum != null) {
+    const s = el?.querySelector(':scope > .fold > .fold-head .tl-sum');
+    if (s && s.textContent !== sum) s.textContent = sum;
+  }
+  if (text === null) return;   // the numbers only (the strip's clock)
   const head = el?.querySelector(':scope > .fold > .fold-body > .ag-head');
   if (!head) return;
   let p = head.querySelector('.ag-prog');
@@ -198,6 +236,8 @@ export function agentLine(el, text) {
   if (!p) { p = h('span.ag-prog.muted'); head.appendChild(p); }
   if (p.textContent !== text) p.textContent = text;
 }
+// what a task card's head says, for agentLine
+export const taskSummary = (it, now) => toolSummary(it, now);
 
 // --- the cards that ask ----------------------------------------------------------
 function riskLabel(r) { return r === 'exec' ? 'runs a command' : r === 'write' ? 'changes files' : r === 'network' ? 'uses the network' : r === 'mcp' ? 'uses a connector' : 'reads'; }
@@ -438,6 +478,16 @@ export function renderItem(it, ctx) {
     case 'plan': return planCard(it, ctx);
     case 'compact': return h('div.it.sys', icon('compact'), `The conversation was compacted${it.preTokens ? ` (from ${Math.round(it.preTokens / 1000)}k tokens)` : ''}.`);
     case 'turn-sum': return turnSum(it, ctx);
+    // a task sent to the background finished: said where the conversation is,
+    // as Claude Code says it (the coder is told too, and answers below)
+    case 'task-done': {
+      const t = it.task || {};
+      const st = t.status === 'completed' ? 'ok' : /^(killed|stopped|cancelled)$/.test(String(t.status)) ? 'stopped' : 'error';
+      const stats = taskStats(t);
+      return h('div.it.sys.cv-taskdone.st-' + st, h('i.cv-taskmark'),
+        h('span', `${it.description || taskName(t)} ${st === 'ok' ? 'finished' : st === 'stopped' ? 'was stopped' : 'failed'}`),
+        h('span.ag-chip', taskName(t)), stats ? h('span.muted', stats) : null);
+    }
     case 'turn-end':
       if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
       return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);

@@ -11,7 +11,7 @@
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools } from './state.js';
-import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
+import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
 import { makerOf, makerMark, modelName } from './render/maker.js';
@@ -440,7 +440,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       for (const id of agentDirty) {
         const a = s.agents.get(id);
         const t = a?.callId && s.byKey.get('t:' + a.callId);
-        if (t) agentLine(els.get(t.uid), a.text);
+        if (t) agentLine(els.get(t.uid), a.text, taskSummary(t));
       }
       fresh.clear();
       if (!ro && atBottom) ui.scroll.scrollTop = ui.scroll.scrollHeight; // no ResizeObserver: the old way
@@ -1871,10 +1871,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       el.addEventListener('toggle', () => { s.todosOpen = el.open; });
       return el;
     });
-    const agents = [...s.agents.values()].filter((a) => a.status === 'running');
-    const ag = keyed(d.agents, agents.length ? s.sid + agents.map((a) => `|${a.taskId}:${a.description}:${a.agentType}`).join('') : null,
-      () => h('div.cv-agents', agents.map((a) => h('span.ag-chip.run', h('i.td-spin'), a.description || a.agentType || 'agent'))));
-    if (ag) agents.forEach((a, i) => { if (ag.children[i]) put(ag.children[i], 'title', a.text || a.description || ''); });
+    // the coder's tasks at work, as Claude Code lists them: how many, and for
+    // each what it is doing and how far it has come (a press finds its card)
+    const agents = runningTasks(s);
+    const ag = keyed(d.agents, agents.length ? s.sid + agents.map((a) => `|${a.taskId}:${a.description}:${taskName(a)}`).join('') : null,
+      () => h('div.cv-agents', h('div.ag-count', { role: 'status' }),
+        agents.map((a) => h('button.ag-row', { type: 'button', onclick: () => revealTask(s, a) },
+          h('i.td-spin'), h('span.ag-desc', a.description || taskName(a)), h('span.ag-chip', taskName(a)),
+          h('span.ag-now.muted'), h('span.ag-stats.muted')))));
+    if (ag) agentRows(ag, agents);
     const n = notes.get(s.sid);
     keyed(d.card, [s.sid, comp?.name, viewingSid, n ? `${n.state}:${n.include}:${s.items.some((i) => i.kind === 'user')}` : '', s.noteBack && !told.has(s.sid) ? 'back' : ''].join('|'),
       () => noteCard(s) || noteBackCard(s));
@@ -1959,9 +1964,45 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
   function workClock() {
     const s = root ? currentSession() : null;
-    const want = !!s && !viewingSid && (s.state === 'running' || s.state === 'waiting') && globalThis.document?.visibilityState !== 'hidden';
-    if (want && !work.timer) { work.timer = setInterval(workLine, 1000); workLine(); }
+    // (a task in the background keeps working after the turn has ended, and its clock with it)
+    const want = !!s && !viewingSid && (s.state === 'running' || s.state === 'waiting' || runningTasks(s).length > 0) && globalThis.document?.visibilityState !== 'hidden';
+    if (want && !work.timer) { work.timer = setInterval(clockTick, 1000); clockTick(); }
     else if (!want && work.timer) { clearInterval(work.timer); work.timer = 0; }
+  }
+  function clockTick() {
+    workLine();
+    const s = currentSession();
+    if (s && dockUi?.agents.el) agentRows(dockUi.agents.el, runningTasks(s));
+  }
+  function runningTasks(s) { return [...s.agents.values()].filter((a) => a.status === 'running'); }
+  // The strip's words, rewritten where they changed: the count, and each
+  // task's doing and numbers (its rows are in the order runningTasks gives).
+  function agentRows(el, agents, now = Date.now()) {
+    const sh = agents.filter((a) => taskName(a) === 'shell').length, n = agents.length - sh;
+    const count = [n ? `${n} agent${n === 1 ? '' : 's'}` : '', sh ? `${sh} shell${sh === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') + ' running';
+    const head = el.querySelector('.ag-count');
+    if (head) put(head, 'textContent', count);
+    const rows = el.querySelectorAll('.ag-row');
+    agents.forEach((a, i) => {
+      const r = rows[i];
+      if (!r) return;
+      put(r.querySelector('.ag-now'), 'textContent', a.text || '');
+      put(r.querySelector('.ag-stats'), 'textContent', taskStats(a, now));
+      put(r, 'title', a.text || a.description || '');
+      // and its card's head, wherever it is in the transcript
+      const t = cardOf(a);
+      if (t) agentLine(els.get(t.uid), null, taskSummary(t, now));
+    });
+  }
+  function cardOf(a) { return (a.callId && currentSession()?.byKey.get('t:' + a.callId)) || null; }
+  // A row pressed: its card, brought into view and opened.
+  function revealTask(s, a) {
+    const t = a.callId && s.byKey.get('t:' + a.callId);
+    const el = t && els.get(t.uid);
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    const head = el.querySelector(':scope > .fold > .fold-head');
+    if (head && head.getAttribute('aria-expanded') !== 'true') head.click();
   }
 
   // The model that answered last (what the tool actually ran, where it says),

@@ -49,6 +49,11 @@ function place(s, it, parentCallId) {
   return null;
 }
 
+// the numbers Claude Code gives as a task goes on: tokens, tool uses, time
+function taskNumbers(a, e) {
+  for (const k of ['tokens', 'tools', 'ms']) if (Number.isFinite(e[k])) a[k] = e[k];
+}
+
 // THE TURN UNDER WAY (2026-10-08). The view draws its line while it works
 // (code-view.js workLine) and items.js its summary when it lands, from what
 // the tools already say and nothing else: the files each edit's diff touched,
@@ -222,6 +227,7 @@ export function apply(S, e, { replay = false } = {}) {
       // anything still asking can no longer be answered
       for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) { it.resolved = 'cancelled'; touch(it); }
       for (const it of s.byKey.values()) if (it.kind === 'tool' && it.status === 'running') { it.status = 'stopped'; touch(it); }
+      for (const a of s.agents.values()) if (a.status === 'running') a.status = 'stopped';
       s.waiting = 0;
       if (e.reason && !/^(exited|stopped)$/.test(e.reason)) {
         const n = item('notice', { level: 'error', text: e.reason === 'not-installed' ? 'The coding tool is not installed on this computer.' : `The session ended (${e.reason})${e.detail ? ': ' + String(e.detail).split('\n').slice(-3).join(' ') : ''}` });
@@ -333,6 +339,14 @@ export function apply(S, e, { replay = false } = {}) {
     }
     case 'tool.result': {
       const it = s.byKey.get('t:' + e.callId);
+      // sent to the background: the card goes on running until the task is done
+      // (y3kode before 0.3.5 said it was done at launch, with the CLI's own note)
+      const launched = e.background || (it?.tkind === 'task' && e.status === 'ok' && /^Async agent launched/.test(e.output?.text || ''));
+      if (it && launched) {
+        if (it.status !== 'ok' && it.status !== 'error') { Object.assign(it, { status: 'running', background: true, output: it.tkind === 'task' ? null : e.output || null }); touch(it); }
+        const a = it.agent; if (a) a.background = true;
+        break;
+      }
       if (it) {
         Object.assign(it, { status: e.status, output: e.output || null, diff: e.diff || it.diff, exitCode: e.exitCode ?? null, ms: e.t && it.at ? e.t - it.at : null });
         touch(it);
@@ -384,17 +398,51 @@ export function apply(S, e, { replay = false } = {}) {
     }
 
     case 'todo.update': s.todos = e.items || []; out.meta = true; break;
+    // SUBAGENTS AND BACKGROUND TASKS, as Claude Code shows them (Colin,
+    // 2026-10-21: "make sure that there is a way to display to the user how
+    // many subagents are running, progress, etc -- everything that would be
+    // shown in claude code"): each one's type, what it is doing now, its tool
+    // uses, tokens and time, and when one sent to the background finishes, a
+    // line saying so where the conversation is. A task is announced twice
+    // (its call, then the CLI's own word, which knows more), so what comes is
+    // merged into what is known.
     case 'subagent.started': {
-      s.agents.set(e.taskId, { taskId: e.taskId, callId: e.callId, description: e.description, agentType: e.agentType, status: 'running', text: '' });
-      const t = e.callId && s.byKey.get('t:' + e.callId);
-      if (t) { t.agent = s.agents.get(e.taskId); touch(t); }
+      const a = s.agents.get(e.taskId) || { taskId: e.taskId, status: 'running', text: '', at: e.t || null };
+      for (const k of ['callId', 'description', 'agentType', 'kind', 'background']) if (e[k] != null && e[k] !== '') a[k] = e[k];
+      s.agents.set(e.taskId, a);
+      const t = a.callId && s.byKey.get('t:' + a.callId);
+      if (t) { t.agent = a; touch(t); }
       out.meta = true;
       break;
     }
-    case 'subagent.progress': { const a = s.agents.get(e.taskId); if (a) { a.text = e.text; out.meta = true; } break; }
+    case 'subagent.progress': {
+      const a = s.agents.get(e.taskId);
+      if (a) { a.text = e.text; if (e.tool) a.tool = e.tool; taskNumbers(a, e); out.meta = true; }
+      break;
+    }
     case 'subagent.ended': {
       const a = s.agents.get(e.taskId);
-      if (a) { a.status = e.status; a.summary = e.summary; const t = a.callId && s.byKey.get('t:' + a.callId); if (t) touch(t); }
+      if (!a) { out.meta = true; break; }
+      // y3kode before 0.3.5 ended a background subagent when it was launched
+      if (/^Async agent launched/.test(e.summary || '')) { a.background = true; out.meta = true; break; }
+      const was = a.status;
+      a.status = e.status; if (e.summary) a.summary = e.summary;
+      taskNumbers(a, e);
+      a.end = e.t || a.end || null;
+      const t = a.callId && s.byKey.get('t:' + a.callId);
+      if (t) {
+        // a background task's card waited for this (the engine sends its result
+        // next; one before 0.3.5 never does)
+        if (a.background && t.status === 'running') { t.status = e.status === 'completed' ? 'ok' : 'error'; if (e.summary) t.output = { text: e.summary }; }
+        touch(t);
+      }
+      if (a.background && was === 'running' && !a.told) {
+        a.told = true;
+        // (what it was, kept as it ended: the line is drawn from this alone)
+        const task = { kind: a.kind || null, agentType: a.agentType || null, status: a.status, tokens: a.tokens ?? null, tools: a.tools ?? null, ms: a.ms ?? (a.end && a.at ? a.end - a.at : null) };
+        const n = item('task-done', { taskId: a.taskId, callId: a.callId || null, description: a.description || '', task });
+        s.items.push(n); touch(n);
+      }
       out.meta = true;
       break;
     }
@@ -488,7 +536,8 @@ export function nowDoing(s) {
     if (it.uid <= mark || it.code === 'prior') break;
     recent.push(it);
   }
-  const tool = recent.find((it) => it.kind === 'tool' && it.status === 'running');
+  // (a task sent to the background is not what the turn is doing: the agents strip shows it)
+  const tool = recent.find((it) => it.kind === 'tool' && it.status === 'running' && !it.background);
   if (tool) return toolDoing(innermost(tool));
   for (const it of recent) {
     if (it.kind !== 'assistant' || it.done) continue;

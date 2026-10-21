@@ -7,9 +7,11 @@
 //   - waits for the permission answer, applies the edit only if allowed
 //   - records argv, env names, cwd and every line it received in $FAKE_CLAUDE_LOG
 // FAKE_CLAUDE_SCENARIO=deny makes the recorded Edit be refused.
+// "send it off" launches a subagent and a shell to the background; they finish
+// once the file at $FAKE_CLAUDE_GATE exists (so a test can look in between).
 // FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
 // authentication_failed and ends in the real CLI's synthetic "API Error: 401".
-import { readFileSync, writeFileSync, appendFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +78,7 @@ async function turn(text) {
     return;
   }
   if (turns > 1 && /plan it/.test(text)) return rich();
+  if (turns > 1 && /send it off/.test(text)) return background();
   if (turns > 1 && /slow/.test(text)) {
     const id = `msg_fake_${turns}`;
     out({ type: 'stream_event', event: { type: 'message_start', message: { id, model: 'claude-haiku-4-5-20251001' } }, parent_tool_use_id: null });
@@ -133,12 +136,14 @@ function rich() {
   out({ type: 'assistant', message: { id: 'msg_rich_1', content: [{ type: 'tool_use', id: 'toolu_todo1', name: 'TodoWrite', input: { todos } }] }, ...P(null) });
   out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_todo1', content: 'Todos have been modified successfully.' }] }, ...P(null) });
   out({ type: 'assistant', message: { id: 'msg_rich_2', content: [{ type: 'tool_use', id: 'toolu_task1', name: 'Task', input: { description: 'Look for flaky tests', subagent_type: 'Explore', prompt: 'find flaky tests' } }] }, ...P(null) });
-  out({ type: 'system', subtype: 'task_started', task_id: 't1', tool_use_id: 'toolu_task1', description: 'Look for flaky tests', task_type: 'Explore', session_id: sessionId });
+  out({ type: 'system', subtype: 'task_started', task_id: 't1', tool_use_id: 'toolu_task1', description: 'Look for flaky tests', subagent_type: 'Explore', is_backgrounded: false, spawn_depth: 1, task_type: 'local_agent', prompt: 'find flaky tests', session_id: sessionId });
   out({ type: 'assistant', message: { id: 'msg_sub_1', content: [{ type: 'tool_use', id: 'toolu_g1', name: 'Grep', input: { pattern: 'flaky' } }] }, ...P('toolu_task1') });
+  out({ type: 'system', subtype: 'task_progress', task_id: 't1', tool_use_id: 'toolu_task1', description: 'Searching for flaky', subagent_type: 'Explore', usage: { total_tokens: 9100, tool_uses: 1, duration_ms: 1400 }, last_tool_name: 'Grep', session_id: sessionId });
   out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_g1', content: 'test/a.test.mjs:3: // flaky' }] }, ...P('toolu_task1') });
   out({ type: 'assistant', message: { id: 'msg_sub_2', content: [{ type: 'text', text: 'Found one flaky test.' }] }, ...P('toolu_task1') });
-  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_task1', content: [{ type: 'text', text: 'One flaky test, in **test/a.test.mjs**.' }] }] }, ...P(null) });
-  out({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'One flaky test', session_id: sessionId });
+  out({ type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'completed', end_time: 1792611084975 }, session_id: sessionId });
+  out({ type: 'system', subtype: 'task_notification', task_id: 't1', tool_use_id: 'toolu_task1', status: 'completed', output_file: '/tmp/t1.output', summary: 'One flaky test', usage: { total_tokens: 11800, tool_uses: 1, duration_ms: 2600 }, session_id: sessionId });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_task1', content: [{ type: 'text', text: 'One flaky test, in **test/a.test.mjs**.' }] }] }, ...P(null), tool_use_result: { status: 'completed', agentId: 't1', agentType: 'Explore' } });
   out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_rich_3', model: 'claude-haiku-4-5-20251001' } }, ...P(null) });
   out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'All set. ' } }, ...P(null) });
   out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Here is `the plan`:\n\n- one\n- two' } }, ...P(null) });
@@ -146,6 +151,40 @@ function rich() {
   out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } }, ...P(null) });
   out({ type: 'stream_event', event: { type: 'message_stop' }, ...P(null) });
   out({ ...ev[RESULT], total_cost_usd: 0.061 });
+}
+
+// A turn that sends a subagent and a shell to the background, as Claude Code
+// 2.1.286 does (its events as recorded then): each launch answers at once, the
+// turn ends, the subagent works on after it; then each finishes, and that
+// starts a turn of the CLI's own (an init, the main agent told, its answer).
+async function background() {
+  const P = (parent) => ({ parent_tool_use_id: parent, session_id: sessionId });
+  out({ type: 'assistant', message: { id: 'msg_bg_1', content: [{ type: 'tool_use', id: 'toolu_bga', name: 'Agent', input: { description: 'Count the tests', prompt: 'count them', run_in_background: true } }] }, ...P(null) });
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'abg1', task_type: 'local_agent', description: 'Count the tests' }], session_id: sessionId });
+  out({ type: 'system', subtype: 'task_started', task_id: 'abg1', tool_use_id: 'toolu_bga', description: 'Count the tests', subagent_type: 'general-purpose', is_backgrounded: true, spawn_depth: 1, task_type: 'local_agent', prompt: 'count them', session_id: sessionId });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_bga', content: [{ type: 'text', text: 'Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: abg1' }] }] }, ...P(null),
+    tool_use_result: { isAsync: true, status: 'async_launched', agentId: 'abg1', description: 'Count the tests', prompt: 'count them', outputFile: '/tmp/abg1.output' } });
+  out({ type: 'assistant', message: { id: 'msg_bg_2', content: [{ type: 'tool_use', id: 'toolu_bgs', name: 'Bash', input: { command: 'sleep 1; echo done', run_in_background: true } }] }, ...P(null) });
+  out({ type: 'system', subtype: 'task_started', task_id: 'bsh1', tool_use_id: 'toolu_bgs', description: 'sleep 1; echo done', is_backgrounded: true, task_type: 'local_bash', session_id: sessionId });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_bgs', content: 'Command running in background with ID: bsh1. Output is being written to: /tmp/bsh1.output' }] }, ...P(null),
+    tool_use_result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: 'bsh1' } });
+  out({ type: 'assistant', message: { id: 'msg_bg_3', content: [{ type: 'text', text: 'Both are running in the background.' }] }, ...P(null) });
+  out({ ...ev[RESULT] });
+  // the subagent at work after the turn: its own tool, and how far it has come
+  out({ type: 'assistant', message: { id: 'msg_bgsub_1', content: [{ type: 'tool_use', id: 'toolu_bgg', name: 'Glob', input: { pattern: 'test/*.mjs' } }] }, ...P('toolu_bga') });
+  out({ type: 'system', subtype: 'task_progress', task_id: 'abg1', tool_use_id: 'toolu_bga', description: 'Finding test/*.mjs', subagent_type: 'general-purpose', usage: { total_tokens: 12722, tool_uses: 1, duration_ms: 1485 }, last_tool_name: 'Glob', session_id: sessionId });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_bgg', content: 'test/a.test.mjs\ntest/b.test.mjs' }] }, ...P('toolu_bga') });
+  const gate = process.env.FAKE_CLAUDE_GATE;
+  if (gate) while (!existsSync(gate)) await new Promise((r) => setTimeout(r, 15));
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'abg1', task_type: 'local_agent', description: 'Count the tests' }], session_id: sessionId });
+  out({ type: 'system', subtype: 'task_updated', task_id: 'bsh1', patch: { status: 'completed', end_time: 1792611230252 }, session_id: sessionId });
+  out({ type: 'system', subtype: 'task_notification', task_id: 'bsh1', tool_use_id: 'toolu_bgs', status: 'completed', output_file: '/tmp/bsh1.output', summary: 'Background command "sleep 1; echo done" completed (exit code 0)', session_id: sessionId });
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [], session_id: sessionId });
+  out({ type: 'system', subtype: 'task_updated', task_id: 'abg1', patch: { status: 'completed', end_time: 1792611231000 }, session_id: sessionId });
+  out({ type: 'system', subtype: 'task_notification', task_id: 'abg1', tool_use_id: 'toolu_bga', status: 'completed', output_file: '/tmp/abg1.output', summary: 'There are 2 test files.', usage: { total_tokens: 14123, tool_uses: 1, duration_ms: 10464 }, session_id: sessionId });
+  out({ ...ev.find((e) => e.type === 'system' && e.subtype === 'init'), permissionMode: mode });
+  out({ type: 'assistant', message: { id: 'msg_bg_4', content: [{ type: 'text', text: 'The count is in: 2 test files.' }] }, ...P(null) });
+  out({ ...ev[RESULT] });
 }
 
 const rl = createInterface({ input: process.stdin });
