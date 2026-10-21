@@ -69,6 +69,7 @@ import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCs
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange, etagOf } from './delivery.mjs';
+import { jsonAnswer } from './wire.mjs';
 import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/media-rules.mjs';
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
@@ -114,9 +115,13 @@ const blockList = (uid) => safety.blocksOf(uid)
   .map((p) => ({ id: p.id, handle: p.handle }));
 
 // Turn a post's stored author into display fields (a presence or a person).
-function decoratePost(p, viewerId = null) {
+// A long post goes out as its preview, the first 500 words, with `moreWords`
+// saying how many are left (posts.previewOf); `whole` is the one post asked
+// for in full, when someone opens "read the rest".
+function decoratePost(p, viewerId = null, whole = false) {
+  const { text, moreWords } = whole ? { text: p.text, moreWords: 0 } : posts.previewOf(p);
   const base = {
-    id: p.id, text: p.text, mood: p.mood, scheme: p.scheme,
+    id: p.id, text, moreWords, mood: p.mood, scheme: p.scheme,
     imageId: p.imageId || null, media: p.media || [], t: p.t, pinned: !!p.pinned,
     score: posts.scoreOf(p),
     // the viewer's OWN vote, so the arrows can show as already cast
@@ -1740,6 +1745,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
+    // The feed's answers (the feed, live, profiles and their pages): tagged, a
+    // 304 when the page already holds them, compressed when large (wire.mjs).
+    const jsonLight = async (obj) => { const a = await jsonAnswer(req, obj, MIME['.json']); return send(res, a.status, a.body, a.headers); };
 
     // THE DOOR ONLY OPENS FROM INSIDE THE HOUSE (security.mjs): a request that
     // changes anything must come from this origin — not another site, and not
@@ -1912,7 +1920,7 @@ const server = http.createServer(async (req, res) => {
         if (!p) return null;
         return { ...presences.publicPresence(p, { viewerUid: user?.id, isLive: true }), viewers: t.viewers, startedAt: t.startedAt };
       }).filter(Boolean);
-      return json(200, { live: unblocked(live, user?.id, presenceRow) });
+      return jsonLight({ live: unblocked(live, user?.id, presenceRow) });
     }
 
     // One presence's profile, follow, unfollow, edit: /api/presences/:handle[/follow|/unfollow]
@@ -1945,10 +1953,14 @@ const server = http.createServer(async (req, res) => {
         // ...and the same for a visitor entering someone else's room: they should
         // see the presence as it IS, not as it was the first time it woke.
         const pub = presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id), worn: worn.get(p.id) });
-        return json(200, {
+        // the first page; `more` asks for "older posts", which come from
+        // /api/presences/:handle/posts?before=
+        const page = posts.profilePage(unblocked(posts.postsBy(authors), user?.id, (x) => x.author));
+        return jsonLight({
           presence: { ...pub, postCount: posts.postCount(authors), owner: usernameById(p.ownerUid) },
           viewers: streams.viewerCount(p.id),
-          posts: unblocked(posts.getProfilePosts(authors), user?.id, (x) => x.author).map((x) => decoratePost(x, user?.id || null)),
+          posts: page.posts.map((x) => decoratePost(x, user?.id || null)),
+          more: page.more,
         });
       }
     }
@@ -2082,10 +2094,30 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true });
     }
 
+    // The feed: everyone's posts, presences and people alike, newest first, a
+    // page at a time (posts.pageOf). Blocks are matched on the author BEFORE
+    // the page is cut, so it is a full page whoever is hidden from it.
+    // `?before=<t>.<id>` is the last post the reader already has; without it,
+    // the newest page. `more`: there is an older page to ask for.
     if (req.method === 'GET' && reqPath === '/api/feed') {
       const me = sessionUser(req);
-      const rows = unblocked(posts.getPosts(), me?.id, (x) => x.author).map((x) => decoratePost(x, me?.id || null));
-      return json(200, { posts: rows });
+      const before = new URL(req.url, 'http://x').searchParams.get('before');
+      const page = posts.pageOf(unblocked(posts.postsBy(), me?.id, (x) => x.author), before);
+      return jsonLight({ posts: page.posts.map((x) => decoratePost(x, me?.id || null)), more: page.more });
+    }
+
+    // One post, whole: what "read the rest" opens (a page carries a long
+    // post's first 500 words). A post by someone the reader has blocked is not
+    // there for them here either.
+    {
+      const m = reqPath.match(/^\/api\/feed\/([\w-]{1,64})$/);
+      if (m && req.method === 'GET') {
+        const me = sessionUser(req);
+        const p = posts.getPost(m[1]);
+        const seen = p ? unblocked([p], me?.id, (x) => x.author)[0] : null;
+        if (!seen) return json(404, { error: 'no such post' });
+        return jsonLight({ post: decoratePost(seen, me?.id || null, true) });
+      }
     }
 
     // Serve a stored feed file. Explicit route (NOT the static handler) with

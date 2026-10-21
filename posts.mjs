@@ -30,10 +30,10 @@ const BUDGETS_FILE = join(DATA_DIR, '.budgets.json');
 // Real posts are nowhere near it, but the worst case wants either a lower cap
 // or long bodies moved out of the index before this sees many users.
 const MAX_POST_LEN = 130000;
-const FEED_PREVIEW_WORDS = 500;    // the feed shows this much; the rest opens on tap
+export const FEED_PREVIEW_WORDS = 500;   // the feed shows this much; the rest opens on tap (previewOf)
 const MAX_POSTS_PER_PRESENCE = 200;
 const MAX_POSTS_TOTAL = 5000;      // global ring — oldest fall off the end of the world
-const FEED_PAGE = 50;
+export const FEED_PAGE = 50;       // posts a page of the feed or a profile holds (pageOf)
 const MAX_PINS = 5;                // pinned posts shown atop a profile
 const MAX_MEDIA_PER_POST = 20;     // the composer enforces this too
 const COMMENTS_FILE = join(DATA_DIR, '.comments.json');
@@ -183,21 +183,100 @@ export function deletePost(postId, author, onDrop) {
   return true;
 }
 
-// Newest first. Pass an author { kind, id } to narrow to one profile; omit for the feed.
-export function getPosts(author = null, limit = FEED_PAGE) {
-  const src = author ? posts.filter((p) => sameAuthor(p.author, author)) : posts;
-  return src.slice(-limit).reverse();
+// --- the feed, a page at a time ---------------------------------------------
+// THE FEED IN PAGES (2026-10-21). It was the newest fifty and nothing more: a
+// post past the fiftieth could not be reached from the feed or from a profile.
+// Now a page ends somewhere, and the next one starts there.
+//
+// The caller narrows the list BEFORE it is cut into pages (server.mjs takes
+// out who the reader has blocked), so a page is a full page whoever is hidden
+// from it. Cut first and filtered after, as it was, someone who had blocked a
+// prolific poster was handed a short page, and an empty one meant nothing.
+
+// Every post, oldest first as they are kept, or one profile's: pass an author
+// { kind, id } or several (an array). A copy, so the caller may filter it.
+export function postsBy(authors = null) {
+  if (!authors) return posts.slice();
+  const set = Array.isArray(authors) ? authors : [authors];
+  return posts.filter((p) => set.some((a) => sameAuthor(p.author, a)));
 }
 
-// A profile's posts: pinned first (newest pin first, capped), then the rest
-// newest-first. Accepts several authors (a profile shows both the account's
-// presence posts and its human posts) — pass an array of { kind, id }.
-export function getProfilePosts(authors, limit = FEED_PAGE) {
-  const set = Array.isArray(authors) ? authors : [authors];
-  const mine = posts.filter((p) => set.some((a) => sameAuthor(p.author, a)));
-  const pinned = mine.filter((p) => p.pinned).slice(-MAX_PINS).reverse();
-  const rest = mine.filter((p) => !p.pinned).slice(-limit).reverse();
-  return [...pinned, ...rest];
+// A CURSOR is the last post a page showed, as "<t>.<id>". The id finds it
+// exactly; if it has gone since (deleted, or off the end of the ring), its
+// time still says where it stood, since posts are kept in the order they were
+// made. The client writes it from the last card it has (src/social.js).
+export const cursorOf = (p) => `${p.t}.${p.id}`;
+function readCursor(s) {
+  const m = /^(\d{1,15})(?:\.([\w-]{1,64}))?$/.exec(String(s));
+  return m ? { t: Number(m[1]), id: m[2] || null } : null;
+}
+
+// One page of `list` (oldest first, as postsBy gives it), newest first: the
+// `limit` posts before the cursor, or the newest when there is none. `more`
+// says whether anything older is left. A cursor that does not read is the
+// end of the list, not its start: a page the asker already has, sent again,
+// would only be drawn twice.
+export function pageOf(list, before = null, limit = FEED_PAGE) {
+  let end = list.length;
+  if (before != null && before !== '') {
+    const c = readCursor(before);
+    if (!c) return { posts: [], more: false };
+    const at = c.id ? list.findIndex((p) => p.id === c.id) : -1;
+    if (at >= 0) end = at;
+    else { const k = list.findIndex((p) => p.t >= c.t); end = k < 0 ? list.length : k; }
+  }
+  const start = Math.max(0, end - limit);
+  return { posts: list.slice(start, end).reverse(), more: start > 0 };
+}
+
+// A profile's first page: its pins on top (newest pin first, capped), then the
+// newest of the rest. Its older pages are pageOf over the same list, pins and
+// all, where a pin comes round again in its place (the client skips a card it
+// already shows).
+export function profilePage(list, limit = FEED_PAGE) {
+  const pinned = list.filter((p) => p.pinned).slice(-MAX_PINS).reverse();
+  const rest = pageOf(list.filter((p) => !p.pinned), null, limit);
+  return { posts: [...pinned, ...rest.posts], more: rest.more };
+}
+
+// THE FEED CARRIES WHAT IT SHOWS (2026-10-21). A card shows a long post's first
+// FEED_PREVIEW_WORDS words and opens the rest on a tap, but every answer
+// carried every post whole (up to MAX_POST_LEN characters), on every poll, and
+// the card kept a second copy of it in an attribute. A card is now sent what
+// it shows: the text up to the end of its 500th word, with the author's own
+// line breaks (the old preview joined its words with spaces and lost every
+// paragraph), and how many words are left. The whole text is one request,
+// made only when someone asks to read it (GET /api/feed/:id).
+// PREVIEW_CHARS bounds a preview whose words are long (a pasted run with no
+// spaces is one word), so a page of fifty cards stays small at worst.
+const PREVIEW_CHARS = 5000;
+const previews = new WeakMap();   // post → its preview: a post's text never changes
+export function previewOf(post) {
+  const hit = previews.get(post);
+  if (hit) return hit;
+  const text = String(post.text || '');
+  let words = 0, shown = 0, cut = -1, lastEnd = 0;
+  const word = /\S+/g;
+  for (let m = word.exec(text); m; m = word.exec(text)) {
+    words += 1;
+    const end = m.index + m[0].length;
+    if (cut < 0 && end > PREVIEW_CHARS) {
+      // the word that crosses the line ends the preview before it, unless
+      // that would leave little: then the word itself is cut
+      cut = lastEnd >= PREVIEW_CHARS / 2 ? lastEnd : PREVIEW_CHARS;
+      if (/[\uD800-\uDBFF]/.test(text[cut - 1] || '')) cut -= 1;   // never half a character
+      shown = words - 1;
+    } else if (cut < 0 && words === FEED_PREVIEW_WORDS) {
+      cut = end;
+      shown = words;
+    }
+    lastEnd = end;
+  }
+  const v = cut >= 0 && words > shown
+    ? { text: text.slice(0, cut), moreWords: words - shown }
+    : { text, moreWords: 0 };
+  previews.set(post, v);
+  return v;
 }
 
 // Owner pins/unpins one of their posts. Enforces the per-author pin cap. The
