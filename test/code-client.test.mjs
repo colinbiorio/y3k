@@ -2500,6 +2500,9 @@ console.log('\ny3kode\'s front door:');
   const opened = [];
   globalThis.window = { open: (url, name) => { opened.push([url, name]); return {}; }, addEventListener() {}, removeEventListener() {} };
   const clipboard = [];
+  // Node 20 has no navigator (Node 21 brought one): a stand-in shaped like
+  // Node's own, so the onboarding reads the same on every version we test
+  if (!globalThis.navigator) globalThis.navigator = { userAgent: `Node.js/${process.versions.node.split('.')[0]}` };
   Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { clipboard.push(t); } } });
   const all = (el, pred, out = []) => { for (const c of el.childNodes || []) { if (c instanceof FakeEl) { if (pred(c)) out.push(c); all(c, pred, out); } } return out; };
   const byClass = (el, cls) => all(el, (e) => e.className.split(' ').includes(cls));

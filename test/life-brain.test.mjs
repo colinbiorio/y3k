@@ -62,7 +62,7 @@
 // would. A second, tiny server, with an old RATE_GLOBAL_MAX of three still
 // set, shows that nothing counts everyone together any more.
 import assert from 'node:assert';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -71,6 +71,13 @@ import { createServer } from 'node:net';
 import { WEB_PAGE } from './fakes/brain-scripted.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// What `npm test` runs. package.json hands it to scripts/test-run.mjs, which
+// finds test/*.test.mjs on its own; --list names every file it would run.
+const suite = () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  assert.match(pkg.scripts.test, /^node scripts\/test-run\.mjs\b/, 'npm test is no longer the runner');
+  return execFileSync(process.execPath, ['scripts/test-run.mjs', '--list'], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n');
+};
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
 
@@ -271,7 +278,7 @@ await ok('no site key, no house, no breaker: the door counts each person, or eac
     assert.ok(!/from '\.\/house\.mjs'/.test(readFileSync(join(ROOT, f), 'utf8')), f + ' imports the house');
   }
   assert.ok(!readFileSync(join(ROOT, 'hull.mjs'), 'utf8').includes("'.house.json'"));
-  assert.ok(!JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts.test.includes('house.test'));
+  assert.ok(!suite().some((f) => f.includes('house.test')), 'npm test runs the allowance\'s test again');
   // health reports no brain, model, effort or voice of the site's
   assert.match(SERVER, /return json\(200, \{ ok: true, brainProviders: Object\.keys\(BRAIN_PROVIDERS\), code: CODE_ROLLOUT,\n/);
   // the door counts in its class, and nothing else: a signed-in person's
@@ -429,8 +436,8 @@ await ok('the local variant stays gone: no file, no flag, no loopback bind, noth
       assert.ok(!/Y3K_LOCAL_CLAUDE_CODE: '1'|Y3K_CLAUDE_BIN/.test(src), `${dir}/${f} still runs the local brain`);
     }
   }
-  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-  assert.ok(pkg.scripts.test.includes('node test/life-brain.test.mjs') && !pkg.scripts.test.includes('local-claude-code'));
+  const files = suite();
+  assert.ok(files.includes('test/life-brain.test.mjs') && !files.some((f) => f.includes('local-claude-code')));
   // it listens as it did before there was a local brain to keep on loopback
   assert.match(SERVER, /server\.listen\(PORT, \(\) => \{/);
 });

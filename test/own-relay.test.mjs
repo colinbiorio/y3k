@@ -478,11 +478,12 @@ await ok('a page let go that reads is told why and ended cleanly, never cut; an 
   const server = http.createServer((req, res) => { res0 = res; relay.open(req, res, member, {}); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   try {
+    let read = 0;
     const got = new Promise((resolve, reject) => {
       http.get({ host: '127.0.0.1', port: server.address().port, path: '/api/own-brain' }, (inc) => {
         let body = '';
         inc.setEncoding('utf8');
-        inc.on('data', (d) => { body += d; });
+        inc.on('data', (d) => { body += d; read += d.length; });
         inc.on('end', () => resolve({ body, complete: inc.complete }));
         inc.on('error', reject);
       }).on('error', reject);
@@ -490,7 +491,10 @@ await ok('a page let go that reads is told why and ended cleanly, never cut; an 
     for (let i = 0; i < 200 && !relay.connected(member); i++) await new Promise((r) => setTimeout(r, 5));
     // a turn it is sent and reads, then newer pages arrive
     const asked = relay.ask(member, { system: 's', prompt: 'w'.repeat(MAX_PROMPT) });
-    await new Promise((r) => setTimeout(r, 50));
+    // ...and has read, however long 200KB takes this machine: the clean end
+    // below can only finish at once into a connection the page has emptied. A
+    // fixed 50ms was not always enough on a busy CI runner (2026-10-21).
+    for (let i = 0; i < 2000 && read < MAX_PROMPT; i++) await new Promise((r) => setTimeout(r, 5));
     for (let i = 0; i < MAX_PAGES; i++) { const q = page(); relay.open(q.req, q.res, member, {}); }
     // (Node marks a response destroyed once its connection is let go after a
     // clean end, so what is asked of it is asked now, and of what arrived)
