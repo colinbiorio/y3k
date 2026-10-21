@@ -6,20 +6,35 @@
 // internal addresses. Every hop is validated: http(s) only, the hostname is
 // DNS-resolved and EVERY address checked against private/loopback/link-local/
 // metadata ranges, redirects are followed manually with the same checks per
-// hop, and responses are text-only with hard size/time caps. Residual risk
-// (DNS answers changing between our check and the fetch's own lookup) is
-// accepted for v1 and noted here honestly.
+// hop, and responses are text-only with hard size/time caps.
+//
+// THE CONNECTION GOES TO THE ADDRESS THAT WAS CHECKED (2026-10-21). The name
+// used to be resolved and checked here, and then fetch() resolved it again for
+// itself. A name can answer differently the second time: public for the check,
+// 169.254.169.254 or 127.0.0.1 for the connection (DNS rebinding), and a
+// presence prompt-injected by a page it was reading could be sent to one. Now
+// the name is resolved once, by the connection itself (checkedLookup), every
+// address in the answer is judged, and the socket can only connect to what
+// passed. TLS still names the host (SNI, and the certificate is checked against
+// it), and so does the Host header. An address written into the URL is never
+// looked up, so it is judged as written, before anything connects.
 //
 // The page comes back as readable TEXT plus a bounded list of links, so the
 // model can read and choose where to go next — it never sees raw HTML.
 
-import { lookup } from 'node:dns/promises';
+import { lookup } from 'node:dns';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
+import { pipeline } from 'node:stream';
+import { createGunzip, createBrotliDecompress, createInflate } from 'node:zlib';
 
 const MAX_BYTES = 2 * 1024 * 1024;  // 2MB body cap
 const TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 4;
 const MAX_TEXT = 20_000;            // chars of readable text returned
 const MAX_LINKS = 40;
+const USER_AGENT = 'orion-reader/1.0 (+https://yearthreethousand.com)';
 
 function isPrivateV4(ip) {
   const p = ip.split('.').map(Number);
@@ -28,7 +43,9 @@ function isPrivateV4(ip) {
     || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)       // CGNAT
     || (p[0] === 169 && p[1] === 254)                     // link-local + cloud metadata
     || (p[0] === 172 && p[1] >= 16 && p[1] <= 31)
+    || (p[0] === 192 && p[1] === 0 && p[2] === 0)         // IETF protocol assignments (one cloud's metadata sat at 192.0.0.192)
     || (p[0] === 192 && p[1] === 168)
+    || (p[0] === 198 && (p[1] === 18 || p[1] === 19))     // benchmarking, used inside some networks
     || p[0] >= 224;                                       // multicast/reserved
 }
 function isPrivateAddr(addr, family) {
@@ -38,6 +55,7 @@ function isPrivateAddr(addr, family) {
   if (/^f[cd]/.test(a)) return true;   // fc00::/7 unique-local
   if (/^fe[89ab]/.test(a)) return true; // fe80::/10 link-local
   if (/^ff/.test(a)) return true;       // ff00::/8 multicast
+  if (/^64:ff9b:1:/.test(a)) return true; // 64:ff9b:1::/48, NAT64 for a local network's own use
   // Any IPv6 that EMBEDS an IPv4 — v4-mapped (::ffff:a.b.c.d), v4-compatible
   // (::a.b.c.d), or NAT64 (64:ff9b::a.b.c.d, and the hex tail forms) — is only
   // as safe as that inner v4. Pull it out and judge it as v4. A DNS64/NAT64
@@ -60,23 +78,54 @@ function embeddedV4(a) {
   return null;
 }
 
-// Throws with a human-readable reason when the URL must not be fetched.
-async function assertSafeUrl(url) {
+const hostOf = (u) => u.hostname.replace(/^\[|\]$/g, '');
+
+// Throws with a human-readable reason when the URL must not be fetched. A
+// name is judged when the connection resolves it (checkedLookup, below); an
+// address written as the host is never resolved, so it is judged here.
+function assertSafeUrl(url, guard = GUARD) {
   let u;
   try { u = new URL(url); } catch { throw new Error('not a valid URL'); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('only http(s)');
   if (u.username || u.password) throw new Error('credentials in URLs are not allowed');
-  const host = u.hostname.replace(/^\[|\]$/g, '');
+  const host = hostOf(u);
   if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) throw new Error('internal hostname');
-  let addrs;
-  try { addrs = await lookup(host, { all: true, verbatim: true }); }
-  catch { throw new Error('could not resolve host'); }
-  if (!addrs.length) throw new Error('could not resolve host');
-  for (const { address, family } of addrs) {
-    if (isPrivateAddr(address, family)) throw new Error('address is not public');
-  }
+  const family = isIP(host);
+  if (family && guard.isPrivate(host, family)) throw new Error('address is not public');
   return u;
 }
+
+// What a connection uses instead of resolving the name for itself: one answer,
+// EVERY address in it judged, and only those handed to the socket. A single
+// private address refuses the whole answer, since the socket may try any of
+// them (it races IPv6 and IPv4). Called the way net.connect calls dns.lookup:
+// with `all` it answers a list, without it one address.
+const refusal = (message, code) => Object.assign(new Error(message), { code });
+function checkedLookup(guard) {
+  return (hostname, options, callback) => {
+    if (typeof options === 'function') { callback = options; options = {}; }
+    guard.resolve(hostname, (err, addrs) => {
+      if (err || !Array.isArray(addrs) || !addrs.length) return callback(refusal('could not resolve host', 'ENOTFOUND'));
+      for (const { address, family } of addrs) {
+        if (guard.isPrivate(address, family)) return callback(refusal('address is not public', 'EADDRNOTPUBLIC'));
+      }
+      const fam = options?.family === 4 || options?.family === 6 ? options.family : 0;
+      const usable = addrs.filter((a) => !fam || a.family === fam).map(({ address, family }) => ({ address, family }));
+      if (!usable.length) return callback(refusal('could not resolve host', 'ENOTFOUND'));
+      if (options?.all) return callback(null, usable);
+      return callback(null, usable[0].address, usable[0].family);
+    });
+  };
+}
+
+// The real guard: the system's resolver and the ranges above. Tests hand
+// fetchPage a guard of their own (a resolver that changes its answer between
+// calls, or one that lets them reach a server of their own on loopback); the
+// exported readers below never take one.
+const GUARD = Object.freeze({
+  resolve: (hostname, cb) => lookup(hostname, { all: true, verbatim: true }, cb),
+  isPrivate: isPrivateAddr,
+});
 
 // Search engines wrap each result in a tracking redirect (DuckDuckGo's
 // duckduckgo.com/l/?uddg=<real url>) which 400s bots. Decode it to the real
@@ -251,40 +300,77 @@ function extractReadable(html, baseUrl, offset = 0) {
   };
 }
 
+// One GET, on a connection of its own (never a pooled socket some other
+// lookup opened) whose every address comes from checkedLookup. Resolves with
+// the response once its head arrives; the signal bounds the head and the body.
+function get(u, guard, signal) {
+  return new Promise((resolve, reject) => {
+    const request = u.protocol === 'https:' ? httpsRequest : httpRequest;
+    const req = request({
+      protocol: u.protocol, hostname: hostOf(u), port: u.port || undefined, path: u.pathname + u.search,
+      method: 'GET', agent: false, lookup: checkedLookup(guard), signal,
+      headers: { 'user-agent': USER_AGENT, accept: 'text/html,text/plain,application/xhtml+xml', 'accept-encoding': 'gzip, br' },
+    }, resolve);
+    req.once('error', reject);
+    req.end();
+  });
+}
+
+// The body as the page wrote it. fetch() undid the compression by itself;
+// this asks for gzip or brotli only, and opens either (and deflate, should a
+// server send it anyway). Anything else could only reach the model as noise.
+function opened(res) {
+  const enc = String(res.headers['content-encoding'] || 'identity').trim().toLowerCase();
+  const unzip = enc === 'gzip' || enc === 'x-gzip' ? createGunzip()
+    : enc === 'br' ? createBrotliDecompress()
+      : enc === 'deflate' ? createInflate() : null;
+  if (unzip) return pipeline(res, unzip, () => { /* an error reaches the reader through the stream */ });
+  return enc === 'identity' || enc === '' ? res : null;
+}
+
 // The shared safe fetch: SSRF-checked per hop, size/time capped, text-only.
-// Returns { url, html } or { error }.
-async function fetchPage(rawUrl) {
-  let u = await assertSafeUrl(rawUrl);
+// Returns { url, html } or { error }. `guard` and `timeoutMs` are the tests'.
+async function fetchPage(rawUrl, { guard = GUARD, timeoutMs = TIMEOUT_MS } = {}) {
+  let u = assertSafeUrl(rawUrl, guard);
   let r = null;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    r = await fetch(u, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { 'user-agent': 'orion-reader/1.0 (+https://yearthreethousand.com)', accept: 'text/html,text/plain,application/xhtml+xml' },
-    });
-    if (r.status >= 300 && r.status < 400) {
-      const loc = r.headers.get('location');
-      if (!loc || hop === MAX_REDIRECTS) return { error: 'too many redirects' };
-      u = await assertSafeUrl(new URL(loc, u).href); // every hop re-validated
-      continue;
+  let signal = null;
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      signal = AbortSignal.timeout(timeoutMs);
+      r = await get(u, guard, signal);
+      if (r.statusCode >= 300 && r.statusCode < 400) {
+        r.destroy();
+        const loc = r.headers.location;
+        if (!loc || hop === MAX_REDIRECTS) return { error: 'too many redirects' };
+        u = assertSafeUrl(new URL(loc, u).href, guard); // every hop re-validated, and resolved by its own connection
+        continue;
+      }
+      break;
     }
-    break;
+  } catch (e) {
+    if (signal?.aborted) throw new Error('the page took too long to answer');
+    throw e;
   }
-  if (!r.ok) return { error: `the page answered ${r.status}` };
-  const ctype = (r.headers.get('content-type') || '').toLowerCase();
-  if (!/text\/|xhtml|xml/.test(ctype)) return { error: 'not a text page' };
-  // Stream with a hard byte cap — a huge page truncates instead of exhausting memory.
-  const reader = r.body.getReader();
+  if (r.statusCode < 200 || r.statusCode > 299) { r.destroy(); return { error: `the page answered ${r.statusCode}` }; }
+  const ctype = String(r.headers['content-type'] || '').toLowerCase();
+  if (!/text\/|xhtml|xml/.test(ctype)) { r.destroy(); return { error: 'not a text page' }; }
+  const body = opened(r);
+  if (!body) { r.destroy(); return { error: 'not a text page' }; }
+  // Stream with a hard byte cap — a huge page truncates instead of exhausting
+  // memory. The cap counts the page as written, after any compression is undone.
   const dec = new TextDecoder();
   let html = '';
   let bytes = 0;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    bytes += value.length;
-    html += dec.decode(value, { stream: true });
-    if (bytes > MAX_BYTES) { reader.cancel().catch(() => {}); break; }
-  }
+  try {
+    for await (const chunk of body) {
+      bytes += chunk.length;
+      html += dec.decode(chunk, { stream: true });
+      if (bytes > MAX_BYTES) break;   // leaving the loop closes the stream and the connection
+    }
+  } catch (e) {
+    if (signal.aborted) throw new Error('the page took too long to answer');
+    throw e;
+  } finally { r.destroy(); }
   return { url: u.href, html };
 }
 
@@ -348,4 +434,6 @@ export async function fetchRenderable(rawUrl) {
 }
 
 // For test/redos.test.mjs: the two passes over a page, without the network.
-export const _test = { extractReadable, sanitizeHtml };
+// For test/harden.test.mjs: the fetch with a guard of the test's own, the
+// guard's two halves, and the real guard to build one from.
+export const _test = { extractReadable, sanitizeHtml, fetchPage, checkedLookup, isPrivateAddr, GUARD };
