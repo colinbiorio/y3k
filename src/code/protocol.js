@@ -28,7 +28,8 @@ export const COMMANDS = [
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork', 'session.rewind',
   'session.toolOutput', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',
-  'audit.tail', 'orb.done', 'brain.complete', 'brain.partial', 'computer.status', 'computer.look', 'computer.act', 'computer.stop', 'engine.update',
+  'audit.tail', 'orb.done', 'brain.complete', 'brain.partial', 'computer.status', 'computer.look', 'computer.act', 'computer.stop',
+  'life.status', 'life.start', 'life.state', 'life.do', 'life.stop', 'engine.update',
 ];
 
 // How each mode is named and explained on the screen.

@@ -10,6 +10,7 @@ import { getBrainConfig, canLive, keyFields, noBrain, reloaded, STALE_PAGE } fro
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createTwenty } from './twenty.js';
+import { createLifeView } from './life.js';
 import { createWorldView } from './world-view.js';
 import { createMine } from './mine.js';
 import { MEDIA_CAPS, MAX_MEDIA, POST_BODY_MAX, POST_TOO_LARGE, ANIMATED, tooLarge } from './media-rules.mjs';
@@ -45,7 +46,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code, games }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code, games, life }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -64,6 +65,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // chess until another is. A chess invitation still opens chess.
   let lastGame = 'chess';
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
+  // life (src/life.js): lucid on your own computer, watched from here; its words
+  // in the browser's own voice when asked (main.js `life`)
+  const lifeView = createLifeView({ toast: toastOnce, ...(life || {}) });
   // y3k Code is loaded only when someone opens it: most visitors never will,
   // and none of it should weigh on the first paint.
   let codeView = null;
@@ -102,6 +106,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('in-twenty', v === 'twenty');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
+    // life keeps the top bar's ends, as y3kode does (styles.css)
+    document.body.classList.toggle('in-life', v === 'life');
     // code takes the room beside the orb, which moves to a column and stays.
     // The canvas keeps the whole window (the sky runs behind the pane); the
     // BODY is re-framed in the column by body.js (THE FRAME), which refits
@@ -138,7 +144,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-twenty', 'mode-world', 'mode-mine', 'mode-code');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-twenty', 'mode-world', 'mode-mine', 'mode-code', 'mode-life');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -160,12 +166,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       }
     }
     $('nav-code')?.classList.toggle('on', v === 'code');
+    $('nav-life')?.classList.toggle('on', v === 'life');
     $('home-search').hidden = v !== 'search';
     // The discover furniture belongs to discover alone — left up, it framed the
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : inGames ? 'games' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : inGames ? 'games' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : v === 'life' ? 'life' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
@@ -175,11 +182,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     else if (v === 'world') worldView.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
     else if (v === 'code') openCode();
+    else if (v === 'life') lifeView.open($('home-grid'));
     if (v !== 'code' && codeView?.isOpen()) { codeView.close(); code?.react('closed'); }
     if (v !== 'chess') chess.close();
     if (v !== 'twenty') twenty.close();
     if (v !== 'world') worldView.close();
     if (v !== 'mine') mine.close();
+    if (v !== 'life') lifeView.close();
   }
   // THE GAMES' CHOOSER (2026-10-19): two chips under the title, chess and
   // twenty questions. Each is its own view, so chess opens, closes and keeps

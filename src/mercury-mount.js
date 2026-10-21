@@ -383,7 +383,9 @@ export function mountAppMercury() {
   const chatShown = () => {
     const b = document.body.classList;
     const shown = b.contains('in-home') && !b.contains('gated') && !b.contains('viewing')
-      && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world'));
+      && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world')
+        // y3kode keeps the chat bar only while the bottom bar is open (2026-10-20)
+        || (b.contains('in-code') && !b.contains('nav-collapsed-bottom')));
     if (shown) { hideAt = 0; return true; }
     if (!hideAt) hideAt = performance.now() + 420;   // 0.4s + a frame of slack
     return performance.now() < hideAt;
@@ -507,22 +509,23 @@ export function mountAppMercury() {
     const h = mount(el, { svgEl: svgOf(el), size: 19, viscosity: 2.2, seed });
     if (h && h.setSize) scalable.push({ h, base: 19 });
   }
-  // THE PORTAL'S MARK: 4irden's logo (air_logo.png), poured in unimat on the
-  // portal's light. Mounted once the picture has loaded, because its aspect is
-  // the file's own; a missing file leaves the light on its own (portal.js hides
-  // the empty mark). Not in `plans`, for the reason above: its seed is its own.
+  // THE PORTAL'S TREE AND LIFE'S MOON (Colin, 2026-10-20: "a simple tree in
+  // unimat" for the portal, and 'life' on the top right): the top bar's two
+  // ends, each its own pour of the metal from its own drawing. They show where
+  // the portal and life show (styles.css): at home, in y3kode and in life.
+  // Not in `plans`, for the reason above: their seeds are their own.
   {
-    const el = $('portal-mark');
-    const img = el && el.querySelector('img');
-    if (img) {
-      const base = narrow ? 16 : 26;
-      const pour = () => {
-        if (!img.naturalWidth || !img.naturalHeight) return;
-        const h = mount(el, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
-          viscosity: 1.8, thicken: 1.3, ss: 2, seed: 88.9 });
-        if (h && h.setSize) scalable.push({ h, base });
-      };
-      if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
+    const topShown = () => {
+      const b = document.body.classList;
+      return b.contains('in-home') && !b.contains('gated') && !b.contains('viewing')
+        && (!b.contains('panel-open') || b.contains('in-code') || b.contains('in-life'));
+    };
+    for (const [id, seed] of [['portal-mark', 88.9], ['life-mark', 93.7]]) {
+      const el = $(id);
+      if (!el) continue;
+      const base = narrow ? 33 : 56;   // the disc's 74% (styles.css .portal-mark): 72px on a desktop, 44 on a phone
+      const h = mount(el, { svgEl: svgOf(el), size: base, viscosity: 1.8, thicken: 1.1, ss: 2, seed, visibleWhen: topShown });
+      if (h && h.setSize) scalable.push({ h, base });
     }
   }
   // AIRDEN'S MARK, floating over the chat (src/airden.js): "air", and on hover
@@ -625,7 +628,8 @@ export function mountAppMercury() {
       let brandHideAt = 0;
       const brandShown = () => {
         const b = document.body.classList;
-        if (b.contains('in-home') && !b.contains('panel-open') && !b.contains('gated')) { brandHideAt = 0; return true; }
+        // (and in y3kode, where the top bar keeps the house's name: Colin, 2026-10-20)
+        if (b.contains('in-home') && (!b.contains('panel-open') || (b.contains('in-code') && !b.contains('nav-collapsed-top'))) && !b.contains('gated')) { brandHideAt = 0; return true; }
         if (!brandHideAt) brandHideAt = performance.now() + 420;   // 0.4s + a frame of slack
         return performance.now() < brandHideAt;
       };

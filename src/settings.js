@@ -20,7 +20,6 @@ import { enabled as computerEnabled, setEnabled as setComputerEnabled } from './
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
-import { portalLink, setPortalLink, portalSrc } from './portal.js';
 import { getVoiceKey, setVoiceKey, voiceKeyHeader, readRefusal, noteRefusal, voiceSpoke, lastRefusal, watchRefusal, refusalLine } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES, stepLine } from './gfx.js';
@@ -553,12 +552,6 @@ function kommandPane() {
         pane('room',
           '<div class="muted">The environment your presence lives in and how it looks. Changes apply immediately and are saved in this browser.</div>' +
           '<div id="env-picker" class="env-picker"></div>' +
-          '<h4>Portal</h4>' +
-          '<div class="muted">The disc in the corner opens 4irden. To show one of your 4irden gardens there instead, create a view link for it in 4irden and paste it here. The portal then shows that garden live. The link is saved in this browser and only sent to 4irden.</div>' +
-          '<label class="field"><input id="portal-link" type="text" placeholder="4irden view link" autocomplete="off" spellcheck="false" /></label>' +
-          '<div class="row"><button id="portal-save" class="btn">Use link</button>' +
-            '<button id="portal-clear" class="btn">Remove link</button></div>' +
-          '<div id="portal-status" class="muted"></div>' +
           '<h4>Appearance</h4>' +
           '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
           '<div id="room-only">' +
@@ -939,27 +932,6 @@ function kommandPane() {
           n(i.shelf, 'piece on the shelf', 'pieces on the shelf')].join(', ') + '.</div>'
           + '<div class="muted">' + esc(d.arrival || '') + '</div>';
       });
-    }
-
-    // ---- THE PORTAL'S FAR SIDE -------------------------------------------
-    {
-      const inp = $('portal-link'), st = $('portal-status');
-      if (inp) {
-        const held = portalLink();
-        if (held) { inp.value = portalSrc(held); st.textContent = 'Showing your garden.'; }
-        $('portal-save').addEventListener('click', () => {
-          if (!inp.value.trim()) { st.textContent = 'Paste a 4irden view link.'; return; }
-          if (!setPortalLink(inp.value)) {
-            st.textContent = 'That is not a view link. View links contain /share/.';
-            return;
-          }
-          inp.value = portalSrc(portalLink());
-          st.textContent = 'Showing your garden. If it stays dark, the view may be turned off in 4irden.';
-        });
-        $('portal-clear').addEventListener('click', () => {
-          setPortalLink(''); inp.value = ''; st.textContent = 'The portal opens 4irden again.';
-        });
-      }
     }
 
     // WHO YOU HAVE SILENCED, and undoing it.

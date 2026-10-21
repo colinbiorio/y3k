@@ -723,24 +723,20 @@
        global exists before any module asks src/motion.js for it. -->
   <script src="src/vendor/motion-13.1.1.js"></script>
   <script type="module" src="src/main.js"></script>
-  <!-- THE PORTAL. A way through to 4irden.com, which is Colin's other world.
-       Not a link with an icon: the far side is actually IN it — an iframe of
-       4irden, clipped to the circle, inert to the pointer so the whole disc
-       stays one target. If you have a session there, what turns behind the
-       glass is your own garden; if you do not, it is 4irden's own front door,
-       which is the honest thing to show a stranger. -->
+  <!-- THE PORTAL. A way through to 4irden.com, which is Colin's other world:
+       a simple tree in unimat at the top bar's left end (Colin, 2026-10-20:
+       "let's change the airden glyph from the portal to just a simple tree
+       in unimat"). It was an oval of light with the far side live behind it;
+       a click still opens 4irden, signed in as you there. -->
   <button id="portal" class="portal" type="button" aria-label="Through to 4irden" title="4irden">
-    <span class="portal-glass" aria-hidden="true">
-      <iframe id="portal-view" class="portal-view" src="about:blank" tabindex="-1"
-        aria-hidden="true" scrolling="no" referrerpolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin"></iframe>
-    </span>
-    <!-- THE LIGHT: a glittering oval, drawn once into three small canvases by
-         portal.js and only ever turned and breathed by CSS — the look Colin
-         drew for it. -->
-    <span class="portal-light" aria-hidden="true"><i class="portal-core"></i></span>
-    <!-- 4irden's mark, poured in unimat on top of it (mercury-mount.js) -->
-    <span id="portal-mark" class="portal-mark mercury" aria-hidden="true"><img src="air_logo.png?v=air" alt="" decoding="async" /></span>
+    <span id="portal-mark" class="portal-mark mercury" aria-hidden="true"><svg viewBox="0 0 24 24" width="72" height="72" fill="url(#merc)"><circle cx="12" cy="8.3" r="5.5"/><circle cx="7.3" cy="11.4" r="3.9"/><circle cx="16.7" cy="11.4" r="3.9"/><circle cx="12" cy="12.6" r="4.3"/><path d="M10.85 14 L13.15 14 L13.5 19.5 Q13.7 20.7 15.6 21.4 L8.4 21.4 Q10.3 20.7 10.5 19.5 Z"/></svg></span>
+  </button>
+  <!-- LIFE, at the top bar's right end, the portal's twin (Colin, 2026-10-20:
+       "add your new mode with name 'life' on the top right"): a crescent moon
+       and a star, for a life lived in a dreamed world (lucid, through y3kode
+       on your own computer; src/life.js). -->
+  <button id="nav-life" class="life-glyph" type="button" aria-label="life" title="life">
+    <span id="life-mark" class="life-mark mercury" aria-hidden="true"><svg viewBox="0 0 24 24" width="72" height="72" fill="url(#merc)"><path d="M9.65 4.45 A8.2 8.2 0 1 0 18.30 15.41 A7.0 7.0 0 0 1 9.65 4.45 Z"/><path d="M18.90 2.20 L19.50 4.60 L21.90 5.20 L19.50 5.80 L18.90 8.20 L18.30 5.80 L15.90 5.20 L18.30 4.60 Z"/></svg></span>
   </button>
 </body>
 </html>

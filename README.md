@@ -90,8 +90,16 @@ of its own, hosted by their account. The rails around the room are its places.
   microphone in the composer; shift-click for hands-free), plan with your
   presence first and hand it the prompt, or switch the composer to your
   presence mid-session. The presence never drives the coder.
-- **The portal** (`src/portal.js`) — a door to 4irden, the other world Colin
-  keeps (the project's root; *airden* was the name before y3k).
+- **The portal** (`src/portal.js`) — a tree in unimat at the top bar's left
+  end: a door to 4irden, the other world Colin keeps (the project's root;
+  *airden* was the name before y3k).
+- **Life** (`src/life.js`, `y3k-code/life.mjs`) — the crescent moon at the top
+  bar's right end. A window onto lucid (`colinbiorio/lucid`): Claude, on your
+  own Claude sign-in, living inside a world SD-Turbo dreams one picture at a
+  time on your own computer. y3kode runs it there (`lucid.py --serve`) and the
+  page watches it. You can take the controls, speak to it and hear it
+  answer. It asks on the computer before it starts, and rests when nobody is
+  watching.
 - **The desktop app** (`desktop/`, [`desktop/README.md`](desktop/README.md)) —
   an Electron window onto the live site with the kode engine built in.
 
@@ -214,6 +222,35 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-21** — **Life, a tree for the portal, and the top bar in
+  y3kode.** Colin: "add it as a new glyph on yearthreethousand.com -- a
+  unimat and the symbol can be any of your choice -- also let's change the
+  airden glyph from the portal to just a simple tree in unimat ... add your
+  new mode with name 'life' on the top right ... keep the chat bar but only
+  when the nav bar is expanded ... y3k logo should be on top though in
+  y3kode, as should airden and life."
+  - *Life* is the crescent moon at the top bar's right end: lucid, the life
+    in a dreamed world built on 2026-10-20, watched from the site. y3kode
+    0.3.4 runs it on your computer (`life.*`, `y3k-code/life.mjs`;
+    `lucid.py --serve` added to lucid for it). The page shows each dreamed
+    picture, its thought, what it says and what it holds. You can let it
+    live or take the controls (forward, back, turn, look up or down, from
+    buttons or W A S D Q E), speak to it, change its pace, or let it rest.
+    With "hear it" on, its words are spoken in the browser's own voice: the
+    one living there is not your presence, so not your presence's voice,
+    and the orb stays still.
+  - Before a life starts, the computer asks in its own dialog
+    (`life.run`), because each moment uses your Claude plan. It thinks on
+    the sign-in, never on a key in the environment. It rests by itself
+    after ten minutes with nobody watching.
+  - *The portal is a tree:* a simple tree in unimat. The oval of light, the
+    live 4irden behind it and the share link in Settings are gone; a click
+    still opens 4irden, signed in as you there.
+  - *In y3kode the top bar is the house's:* the name, the tree and the
+    moon. The chat bar shows while the bottom bar is open and folds away
+    with it, with no floating chat bar over the coder. What your presence
+    answers is captioned over its own column, beside the orb.
 
 - **2026-10-20** — **The world has a sky, and every hour of it is worth a
   look.** Colin, 2026-10-19: "tons of room to work on the world, new

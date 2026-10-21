@@ -11,7 +11,7 @@
 import { createInterface } from 'node:readline';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
-export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update', 'computer.control'];
+export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update', 'computer.control', 'life.run'];
 
 // A character a terminal or a dialog acts on instead of printing: an escape
 // sequence or a carriage return can erase the line just written and print
@@ -53,6 +53,8 @@ export function describe(kind, d = {}) {
       `The new version is downloaded from ${shown(d.site)} and y3kode restarts with it. Coding sessions running now will stop.`].join('\n');
     case 'computer.control': return ['Let your orb use this computer?',
       'It will see your main screen and move the mouse, click and type for you, one step at a time, with its cursor shown on the screen as it goes. Press Esc at any time to stop it. Asked again after ten idle minutes.'].join('\n');
+    case 'life.run': return ['Start a life on this computer?',
+      'lucid runs here: Claude, on your own Claude sign-in, looks at a dreamed picture and decides what to do, about once every few seconds, and SD-Turbo dreams the next picture on this computer\'s graphics chip. Each moment uses your Claude plan. It rests when you stop it, or when no page has looked at it for ten minutes.'].join('\n');
     default: return `${kind}: ${spelled(JSON.stringify(d))}`;
   }
 }
@@ -70,6 +72,7 @@ export function title(kind) {
     'brain.own': 'Your presence, on your own sign-in?',
     'engine.update': 'Update y3kode?',
     'computer.control': 'Your orb, on this computer?',
+    'life.run': 'A life, on this computer?',
   }[kind] || 'Allow this?';
 }
 

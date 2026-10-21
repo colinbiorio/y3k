@@ -77,6 +77,7 @@ npm i -g ./y3k-code                       # puts `y3kode` and `y3k-code` on your
 | `bin/y3k-code.cjs` | the `y3kode` / `y3k-code` command: checks the Node version, then starts `bin/y3k-code.mjs` |
 | `diff.mjs` | the change, shown before it is allowed |
 | `providers.mjs` | every provider, how to install it and sign in to it, whether you are signed in, and when a key is used instead |
+| `life.mjs` | the site's **life** mode: runs lucid (`lucid.py --serve`, `~/y3k-code/lucid` or `Y3K_LUCID`) on your own Claude sign-in after asking here (`life.run`), passes it the window's own controls, and lets it rest after ten minutes nobody watched (`life.status`, `life.start`, `life.state`, `life.do`, `life.stop`) |
 
 The screen lives in `src/code/` (loaded only when someone opens Code): the
 transport to this engine, a reducer that builds everything from events, and
@@ -85,7 +86,8 @@ renderers for markdown, diffs, tool cards and the cards that ask.
 Tests: `node test/code-engine.test.mjs`, `node test/code-http.test.mjs`,
 `node test/code-claude.test.mjs` (a fake `claude` replaying a real recording),
 `node test/code-client.test.mjs` (the screen's rules and state),
-`node test/code-orb.test.mjs` (the orb tool and its door).
+`node test/code-orb.test.mjs` (the orb tool and its door),
+`node test/life.test.mjs` (life; with lucid installed it also runs lucid itself, scripted, in a scratch life).
 `node scripts/code-smoke.mjs --shots <dir>` runs the site, this engine and the
 fake in Chromium and checks what a person would see. With your own sign-in,
 `node scripts/code-real-claude.mjs` drives the real CLI in a throwaway repo;
