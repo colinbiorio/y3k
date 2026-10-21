@@ -1,0 +1,47 @@
+# THE SUITE, ON EVERY PUSH AND PULL REQUEST. Several branches are often in
+# flight at once, and nothing ran the tests between them: each one was checked
+# only on the machine it was written on, and a merge met the others' changes
+# with no shared check. This runs `npm test` (scripts/test-run.mjs) on Linux, on
+# the oldest Node package.json allows and on the two current ones.
+#
+# The repository is public, so these minutes cost nothing. The Chromium smokes
+# (scripts/*-smoke.mjs) are not part of `npm test` and do not run here: they
+# need a browser and a global Playwright.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an older run moot, except on main,
+# where every commit's own result is worth having.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20.6 is package.json's "engines" floor; 22 and 24 are what people run
+        node: ['20.6', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # Some files make git repositories of their own (code-tools commits to a
+      # scratch one), so git needs a name to commit under, as on anyone's machine.
+      - run: |
+          git config --global user.name "y3k tests"
+          git config --global user.email "tests@yearthreethousand.invalid"
+          git config --global init.defaultBranch main
+      # The runner is the only process here: every core at once.
+      - run: TEST_JOBS=$(nproc) npm test
