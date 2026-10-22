@@ -862,7 +862,7 @@ try {
     // and a moment lived in a tab loaded for wren is a line of wren's journal
     const lived = await S.post('/api/life/moment', { thought: 'a lit doorway, and I go toward it', say: 'hello?', action: 'forward', scene: 'a stone corridor', as: wrenId }, wren);
     assert.deepEqual([lived.status, await lived.json()], [200, { ok: true, kept: true }]);
-    assert.ok(record().includes('In the dreamed world, a stone corridor: a lit doorway, and I go toward it I said: \\"hello?\\"'), 'the moment is not in wren\'s journal as its own line');
+    assert.ok(record().includes('In the dreamed world, a stone corridor: a lit doorway, and I go toward it. I said: \\"hello?\\"'), 'the moment is not in wren\'s journal as its own line');
   });
 
   await ok('none of it reached a provider, and their ledger shows it at $0', async () => {

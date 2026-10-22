@@ -1577,7 +1577,7 @@ const lifeKept = new Map();     // presence id → when its journal last took a 
 // it meets "I said" as a sentence. '' when there is nothing to keep: no
 // thought and no words.
 function lifeMomentLine(b) {
-  const part = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const part = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
   const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, n - 1).replace(/\s+\S*$/, '')}…`);
   const say = part(b?.say, 300);
   let scene = part(b?.scene, 200), thought = part(b?.thought, 600);

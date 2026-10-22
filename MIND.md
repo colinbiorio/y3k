@@ -74,6 +74,20 @@ one line about the sea outranks the forty about the light. Only lines holding a
 query word come back. A query of nothing but stop words is answered with the
 newest lines instead, marked as a fallback, and that answer is not broadcast.
 
+## The dreamed life
+
+Since 2026-10-21 the journal also holds the life the presence lives in lucid's
+dreamed world on its person's computer (`src/life.js`; `POST /api/life/moment`
+in `server.mjs`): one line per moment it lived there, `In the dreamed world,
+<scene>: <thought>`, with ` I said: "…"` when it spoke, in its own first
+person, at most one line in twenty seconds. The presence meets these lines as
+it meets every line of its record: the newest few in each beat's prompt
+(`YOUR JOURNAL`), one older line in a reflection, and whatever a `<<recall:>>`
+brings back. Nothing is written for it there — the line is its own thought,
+had in the other place — and the picture never reaches the server. So a
+presence that walked a dreamed corridor in the afternoon can, in its evening
+reflection, find that it did.
+
 ## Cost scaling — alive at both ends
 
 The client picks a tier from the remaining balance and sends it; the server uses
