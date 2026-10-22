@@ -14,6 +14,7 @@ export function createState() {
     order: [],            // sids, newest last
     active: null,
     notices: [],
+    compares: new Map(),  // id → a /compare group: the question, the session it was asked from, the ones asked beside it (openCompare)
   };
 }
 
@@ -146,6 +147,97 @@ export function harnessRate(S, now) {
     if (r) { tps += r; writing++; }
   }
   return { tps, writing };
+}
+
+// THE ANSWERS, SIDE BY SIDE (code-view.js, the compare view). Colin asked
+// about "cross-model collaboration" on 2026-10-19, and on 2026-10-21 said
+// kode "can be majorly improved": /compare put each second opinion in a tab
+// of its own, with no way to see the answers together and no way to act on
+// one. A group is opened when /compare starts its asides; it holds the
+// question, the session it was asked from (main) and the sessions asked
+// beside it (asides), each joining as it takes the question. It ends when the
+// person closes it or every aside has ended. A session can be in more than
+// one group; the newest open one is its own.
+let compareNo = 0;
+export function openCompare(S, { question, main, asides = [], at = Date.now() } = {}) {
+  const g = { id: 'cmp' + (++compareNo), question: String(question || ''), at, main, asides: [...asides], closed: false };
+  S.compares.set(g.id, g);
+  return g;
+}
+export function closeCompare(S, id) {
+  const g = S.compares.get(id);
+  if (g) g.closed = true;
+  return g || null;
+}
+// Ended: closed by the person, or every aside has ended. One whose asides are
+// still being started has none yet and is not ended; one that starts none at
+// all is closed by compare() itself.
+export function compareEnded(S, g) {
+  if (!g || g.closed) return true;
+  if (!g.asides.length) return false;
+  return g.asides.every((sid) => S.sessions.get(sid)?.state === 'ended');
+}
+export function compareOf(S, sid) {
+  if (!sid) return null;
+  let found = null;
+  for (const g of S.compares.values()) if (!compareEnded(S, g) && (g.main === sid || g.asides.includes(sid))) found = g;
+  return found;
+}
+
+// What each coder in a group has answered so far, the one asked from first:
+//   [{ sid, main, provider, label, model, text, state, plan, tps, tpsRough, cost, tokens, ms, live }]
+//   text    every text block, and any plan it proposed, written after the
+//           question, in order, up to the next message of the person's
+//   state   starting · thinking · writing · waiting · done · stopped · failed
+//   tps, cost, tokens, ms   from the turn's own summary (turnSummary), once it
+//           landed — the tool's own numbers, never estimated
+//   live    how fast it is writing now (writingRate), while it is
+export const ANSWERING = new Set(['starting', 'thinking', 'writing', 'waiting']);
+export const stillAnswering = (a) => ANSWERING.has(a?.state);
+export function compareAnswers(S, g, now = Date.now()) {
+  if (!g) return [];
+  return [g.main, ...g.asides].map((sid) => answerOf(S, g, sid, now));
+}
+function answerOf(S, g, sid, now) {
+  const s = S.sessions.get(sid);
+  const prov = Array.isArray(S.providers) ? S.providers.find((p) => p?.id === s?.provider) : null;
+  const a = { sid, main: sid === g.main, provider: s?.provider || null, label: prov?.label || s?.provider || '', model: s?.model || null,
+    text: '', state: 'starting', plan: false, tps: null, tpsRough: false, cost: null, tokens: null, ms: null, live: null };
+  if (!s) return a;
+  // where the question stands: the newest message of the person's that is the
+  // question (else the newest at all — a tool may echo it trimmed)
+  let from = -1, newest = -1;
+  for (let i = s.items.length - 1; i >= 0; i--) {
+    const it = s.items[i];
+    if (it.kind !== 'user') continue;
+    if (newest < 0) newest = i;
+    if (it.text === g.question) { from = i; break; }
+  }
+  if (from < 0) from = newest;
+  if (from < 0) { if (s.state === 'ended') a.state = 'failed'; return a; }
+  const parts = [];
+  let end = null, sum = null, writing = false;
+  for (let i = from + 1; i < s.items.length; i++) {
+    const it = s.items[i];
+    if (it.kind === 'user') break;   // the next thing asked: the answer stops here
+    if (it.kind === 'assistant') {
+      if (it.model && !/^<.*>$/.test(it.model)) a.model = it.model;
+      for (const b of it.blocks) if (b.kind === 'text' && b.text) parts.push(b.text);
+      if (!it.done) writing = true;
+    } else if (it.kind === 'plan') { if (it.plan) parts.push(it.plan); a.plan = true; }
+    else if (it.kind === 'turn-end') end = it;
+    else if (it.kind === 'turn-sum') sum = it;
+  }
+  a.text = parts.join('\n\n');
+  if (sum) { a.tps = sum.tps ?? null; a.tpsRough = !!sum.tpsRough; a.cost = sum.cost ?? null; a.tokens = sum.tokens ?? null; a.ms = sum.ms ?? null; }
+  if (end) a.state = end.status === 'interrupted' ? 'stopped' : 'failed';
+  else if (s.state === 'ended') a.state = a.text ? 'done' : 'failed';
+  else if (sum) a.state = 'done';
+  else if (s.waiting > 0) a.state = a.plan ? 'done' : 'waiting';   // a plan proposed is the answer; its card waits in its own tab
+  else if (s.state === 'running') { a.state = writing ? 'writing' : 'thinking'; a.live = writingRate(s, now); }
+  else if (s.state === 'idle') a.state = a.text ? 'done' : 'thinking';
+  // (else starting: the tool has not taken the question yet)
+  return a;
 }
 
 // THE COST OF ONE TURN, NEVER ESTIMATED. Claude Code and OpenCode report the

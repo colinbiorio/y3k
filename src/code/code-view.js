@@ -10,9 +10,10 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary } from './render/items.js';
-import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
+import { updateRing, updateBars, updateCost, billingOf, usdText } from './render/meters.js';
+import { mdStream } from './render/markdown.js';
 import { contextPanel } from './render/context-panel.js';
 import { makerOf, makerMark, modelName } from './render/maker.js';
 import { glassSelect } from '../glass-select.js';
@@ -65,6 +66,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let metaDirty = false;
   let engineDirty = false;
   let tabsDirty = false;          // only a background tab's light changed
+  let cmpDirty = false;           // a session in a /compare group moved: its strip and view (compareStrip)
   const agentDirty = new Set();   // subagents whose progress line moved (taskIds)
   const fresh = new Set();        // uids drawn during this flush — already current
   let shown = null;               // the session object the transcript shows
@@ -327,6 +329,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // usually lit already. (Plan limits are the account's, shown from whichever
     // session heard them last, so those still reach the meters.)
     if (out.meta) { if (!out.sid || here || e.type === 'usage.limits') metaDirty = true; else tabsDirty = true; }
+    // ...but the answers side by side are read from every session in their
+    // group, whichever tab it is in (the strip and the view are keyed, so an
+    // event that changes nothing they show costs a comparison and no DOM)
+    if (out.sid && S.compares.size) cmpDirty = true;
     // only the session on screen redraws; the others catch up when opened
     if (here) {
       for (const it of out.changed) dirty.add(it);
@@ -433,7 +439,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     tabsDirty = false;
     // a session became the one to show without anyone asking for it (started
     // from another page, or by the engine): draw it, don't patch into another
-    if (s && (s !== shown || viewingSid !== shownAs)) rebuildTranscript();
+    const switched = !!s && (s !== shown || viewingSid !== shownAs);
+    if (switched) rebuildTranscript();
     else if (s && (dirty.size || agentDirty.size)) {
       fresh.clear();
       for (const it of dirty) patchItem(it);
@@ -445,6 +452,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       fresh.clear();
       if (!ro && atBottom) ui.scroll.scrollTop = ui.scroll.scrollHeight; // no ResizeObserver: the old way
     }
+    // the comparison follows every session in its group, and the session on screen
+    if (cmpDirty || switched) { cmpDirty = false; renderCompareStrip(); renderCompareView(); }
     dirty.clear();
     agentDirty.clear();
   }
@@ -462,6 +471,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui = {
       pane: h('div.cv-pane'),
       bar: h('div.cv-bar'),
+      cmp: h('div.cv-cmpstrip', { hidden: true, role: 'status' }),   // "comparing: … · 3 answering" (renderCompareStrip)
       banner: h('div.cv-banner'),
       main: h('div.cv-main'),
       scroll: h('div.cv-scroll'),
@@ -472,7 +482,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     };
     ui.scroll.append(ui.list);
     ui.main.append(ui.scroll, ui.homeEl, ui.drawer);
-    ui.pane.append(ui.bar, ui.banner, ui.main, ui.dock);
+    ui.pane.append(ui.bar, ui.cmp, ui.banner, ui.main, ui.dock);
     root.append(ui.pane);
     // On BODY, like the world: the home panel carries transforms, and a
     // transformed ancestor quietly turns position:fixed into a small box.
@@ -496,6 +506,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     closeSlash(); slash.el = null;
     shortcuts.open = false; shortcuts.el = null;
     closePanel();
+    closeCompareView(); cmp.key = null;
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
     window.removeEventListener('y3k:code-mic', onMicAsk);
@@ -528,6 +539,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!ui) return;
     const s = currentSession();
     renderBar(s);
+    renderCompareStrip();
     renderBanners(s);
   }
 
@@ -1637,6 +1649,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       ['↑ ↓', 'what you said before'],
       ['/', 'its commands'],
       ['/compare …', 'ask every coder here at once, side by side'],
+      ['/compare', 'their answers side by side (Esc closes)'],
       ['@', 'a file in this folder'],
       ['Shift+Tab', 'the next mode'],
       ['Esc', 'stop it · decline · close a menu'],
@@ -2175,6 +2188,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const first = !s.items.some((i) => i.kind === 'user');
     const handoff = first && note?.state === 'ready' && note.include && note.text.trim()
       ? { name: note.presence?.name || companion()?.name, handle: note.presence?.handle || companion()?.handle, note: note.text.trim() } : undefined;
+    // `/compare` alone: the answers side by side, where a comparison is open here
+    if (COMPARE_VIEW.test(text) && !attachments.length) {
+      setDraft(''); recall.i = -1; renderDock();
+      if (compareOf(S, s.sid)) openCompareView(true);
+      else toast('Nothing to compare yet. /compare <question> asks every coder here at once.');
+      return;
+    }
     const asked = COMPARE.exec(text);
     if (asked && !attachments.length) {
       setDraft(''); recall.i = -1; renderDock();
@@ -2206,6 +2226,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // line 1); the second opinions leave the folder's remembered tool and mode
   // as they were (session.start aside). → whether this coder got it
   const COMPARE = /^\/compare\s+([\s\S]+)$/i;
+  const COMPARE_VIEW = /^\/compare\s*$/i;
   const readyIn = async (sid, ms = 60000) => {
     for (let t = 0; t < ms; t += 250) {
       const x = S.sessions.get(sid);
@@ -2222,6 +2243,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const tools = asideTools(S.providers, s.provider, (p) => !needsSetup(p));
     if (!tools.length) { toast('No other coding tool is ready on this computer to compare with. Set one up on the folder screen.'); return true; }
     toast(`Asking ${tools.map((t) => AGENT_NAME[t.id] || t.label).join(', ')} too, in plan mode, each in its own tab…`);
+    // the group the strip and the compare view read (state.js openCompare):
+    // each second opinion joins it as it starts, and leaves it again if it
+    // never takes the question, so a column is only ever a coder that was asked
+    const g = openCompare(S, { question, main: s.sid });
+    const drop = (sid) => { const i = g.asides.indexOf(sid); if (i >= 0) g.asides.splice(i, 1); };
+    const moved = () => { cmpDirty = true; frame(); };
+    moved();
     const asked = [], missed = [];
     for (const t of tools) {
       const name = AGENT_NAME[t.id] || t.label;
@@ -2230,13 +2258,175 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         if (r.code === 'too-many') { missed.push('the rest: y3kode runs four sessions at once'); break; }
         missed.push(name); continue;
       }
-      if (!(await readyIn(r.sid))) { missed.push(name); continue; }
+      g.asides.push(r.sid); moved();
+      if (!(await readyIn(r.sid))) { missed.push(name); drop(r.sid); moved(); continue; }
       const q = await cmd({ cmd: 'session.send', sid: r.sid, text: question });
-      if (q.ok) asked.push(name); else missed.push(name);
+      if (q.ok) asked.push(name); else { missed.push(name); drop(r.sid); moved(); }
     }
+    if (!asked.length) closeCompare(S, g.id);
+    moved();
     renderChrome();
-    toast((asked.length ? `${asked.join(', ')} ${asked.length === 1 ? 'is' : 'are'} answering too, in plan mode.` : 'No second opinion started.') + (missed.length ? ` Not asked: ${missed.join(', ')}.` : ''));
+    toast((asked.length ? `${asked.join(', ')} ${asked.length === 1 ? 'is' : 'are'} answering too, in plan mode. /compare alone shows the answers side by side.` : 'No second opinion started.') + (missed.length ? ` Not asked: ${missed.join(', ')}.` : ''));
     return true;
+  }
+
+  // THE ANSWERS SIDE BY SIDE (Colin, 2026-10-19: "cross-model collaboration";
+  // 2026-10-21: kode "can be majorly improved"). /compare put each second
+  // opinion in a tab of its own, with no way to see the answers together and
+  // no way to act on one. Now, while a comparison is open and the session on
+  // screen is in it, a strip under the toolbar says "comparing: <question> ·
+  // 3 answering", and its button (or `/compare` alone) opens the view: a
+  // panel over the transcript with one column per coder, the one you asked
+  // first, each with its maker's mark and model, its answer as it streams
+  // (the transcript's own markdown), a status line, and its tok/s and cost
+  // once its turn landed. Columns scroll on their own; on a narrow screen
+  // they stack. Esc closes the view; the strip stays until the person ends
+  // the comparison (its ×) or every second opinion's session has ended.
+  const cmp = { key: null, view: null, gid: null, cols: new Map() };
+  const STATE_SAYS = { starting: 'starting', thinking: 'thinking', writing: 'writing', waiting: 'waiting on you', done: 'done', stopped: 'stopped', failed: 'failed' };
+  const EMPTY_SAYS = { starting: 'starting up…', thinking: 'thinking…', writing: 'thinking…', waiting: 'asking you, in its tab', done: 'said nothing', stopped: 'stopped before it answered', failed: 'no answer' };
+  const coderName = (a) => AGENT_NAME[a.provider] || a.label || 'the coder';
+  const countSays = (answers) => {
+    const n = answers.filter(stillAnswering).length;
+    if (n) return `${n} answering`;
+    const done = answers.filter((a) => a.state === 'done').length;
+    return done === answers.length ? 'all answered' : `${done} of ${answers.length} answered`;
+  };
+  function renderCompareStrip() {
+    if (!ui) return;
+    // a comparison that ended is let go of, unless its view is still open
+    for (const [id, g] of S.compares) if (compareEnded(S, g) && id !== cmp.gid) S.compares.delete(id);
+    const s = currentSession();
+    const g = s && !viewingSid ? compareOf(S, s.sid) : null;
+    // the view belongs to the comparison of the session on screen
+    if (cmp.view && (!g || g.id !== cmp.gid)) closeCompareView();
+    if (!g) { if (cmp.key !== null) { cmp.key = null; clear(ui.cmp); ui.cmp.hidden = true; } return; }
+    const answers = compareAnswers(S, g);
+    const key = [g.id, g.question, answers.length ? countSays(answers) : ''].join('|');
+    if (key === cmp.key) return;
+    cmp.key = key;
+    const open = h('button.cv-cmpopen', { type: 'button', title: 'The answers side by side (or type /compare alone)' }, 'side by side');
+    open.addEventListener('click', () => openCompareView());
+    const x = h('button.cv-iconbtn.cv-cmpx', { type: 'button', title: 'Stop comparing. The tabs stay.', 'aria-label': 'Stop comparing' }, icon('close'));
+    x.addEventListener('click', () => endCompare(g));
+    swap(ui.cmp, h('span.cv-cmplab', 'comparing: '), h('span.cv-cmpq', { title: g.question }, g.question),
+      h('span.cv-cmpn.muted', ' · ' + (g.asides.length ? countSays(answers) : 'starting the others…')), h('span.cv-grow'), open, x);
+    ui.cmp.hidden = false;
+  }
+  // the person ends it: the grouping goes, the tabs and the sessions stay
+  function endCompare(g) {
+    closeCompare(S, g.id);
+    closeCompareView();
+    cmp.key = null;
+    renderCompareStrip();
+  }
+  // `byKey`: opened from the keyboard (/compare alone), so focus goes in and comes back on Esc
+  function openCompareView(byKey = false) {
+    const s = ui ? currentSession() : null;
+    const g = s && !viewingSid ? compareOf(S, s.sid) : null;
+    if (!g) return;
+    if (cmp.view && cmp.gid === g.id) { if (byKey) cmp.view.close.focus(); return; }
+    closeCompareView();
+    cmp.gid = g.id;
+    const close = h('button.cv-iconbtn.cv-cmpclose', { type: 'button', title: 'Close (Esc). The comparison stays in the strip.', 'aria-label': 'Close the comparison' }, icon('close'));
+    close.addEventListener('click', () => closeCompareView(true));
+    const stop = h('button.btn.cv-cmpstop', { type: 'button', title: 'Interrupt the second opinions still writing. Their tabs stay.' }, 'stop the others');
+    stop.addEventListener('click', () => stopOthers(g));
+    const n = h('span.cv-cmpn.muted');
+    const cols = h('div.cv-cmpcols');
+    const el = h('div.cv-cmp', { role: 'dialog', 'aria-label': 'Answers side by side', tabIndex: -1 },
+      h('div.cv-cmphead', h('span.cv-cmplab', 'comparing: '), h('span.cv-cmpq', { title: g.question }, g.question), n, h('span.cv-grow'), stop, close),
+      cols);
+    cmp.view = { el, cols, n, stop, close, byKey };
+    ui.main.appendChild(el);
+    renderCompareView();
+    if (byKey) close.focus();
+  }
+  function closeCompareView(refocus = false) {
+    const V = cmp.view;
+    if (!V) return;
+    const back = refocus && !!V.el.contains(document.activeElement);
+    V.el.remove();
+    cmp.view = null; cmp.gid = null; cmp.cols.clear();
+    if (back) (V.byKey ? dockUi?.ta : ui?.cmp.querySelector('.cv-cmpopen') || dockUi?.ta)?.focus();
+  }
+  // one column per coder, patched in place: the reply's own streaming
+  // renderer (mdStream) draws only what arrived since
+  function renderCompareView() {
+    const V = cmp.view;
+    if (!V) return;
+    const g = S.compares.get(cmp.gid);
+    if (!g) { closeCompareView(); return; }
+    const answers = compareAnswers(S, g);
+    put(V.n, 'textContent', ' · ' + (g.asides.length ? countSays(answers) : 'starting the others…'));
+    const kids = [];
+    for (const a of answers) {
+      let c = cmp.cols.get(a.sid);
+      if (!c) {
+        const md = mdStream();
+        const use = h('button.btn.cv-cmpuse', { type: 'button', title: 'Put this answer in your composer, as a draft, to read, change and send yourself' }, 'use this');
+        use.addEventListener('click', () => useAnswer(g, a.sid));
+        c = { md, use, maker: null, mark: h('span.cv-cmpmark'), name: h('span.cv-cmpname'), model: h('span.cv-cmpmodel.muted'), empty: h('div.cv-cmpempty.muted'),
+          dot: h('i.cv-live'), status: h('span.cv-cmpstate'), nums: h('span.cv-cmpnums.muted') };
+        c.el = h('div.cv-cmpcol', { 'data-sid': a.sid },
+          h('div.cv-cmpcolhead', c.mark, h('span.cv-cmpwho', c.name, c.model), a.main ? h('span.ag-chip', { title: 'The session you asked from' }, 'yours') : null),
+          h('div.cv-cmpbody', c.empty, md.el),
+          h('div.cv-cmpfoot', c.dot, c.status, c.nums, h('span.cv-grow'), c.use));
+        cmp.cols.set(a.sid, c);
+      }
+      const maker = makerOf(a.provider, a.model);
+      if (c.maker !== maker) { c.maker = maker; swap(c.mark, makerMark(maker)); put(c.el, 'className', `cv-cmpcol mk-${maker}${a.main ? ' main' : ''}`); }
+      put(c.name, 'textContent', coderName(a));
+      put(c.model, 'textContent', a.model ? modelName(a.model) : '');
+      // (only a column whose words moved is drawn: three coders streaming at
+      // once would otherwise redraw every column's tail on each other's deltas)
+      const done = !stillAnswering(a);
+      if (a.text !== c.text || done !== c.done) { c.text = a.text; c.done = done; c.md.update(a.text, done); }
+      const empty = !a.text ? EMPTY_SAYS[a.state] || '' : '';
+      put(c.empty, 'textContent', empty);
+      put(c.empty, 'hidden', !empty);
+      put(c.dot, 'className', 'cv-live ' + (a.state === 'waiting' ? 'ask' : a.state === 'done' ? '' : stillAnswering(a) ? 'run' : 'off'));
+      put(c.status, 'textContent', a.state === 'done' && a.plan ? 'plan proposed' : STATE_SAYS[a.state] || a.state);
+      const nums = [];
+      if (a.live) nums.push(`~${Math.round(a.live)} tok/s`);
+      else if (a.tps) nums.push(`${a.tpsRough ? '~' : ''}${Math.round(a.tps)} tok/s`);
+      if (a.cost != null && a.cost > 0) nums.push(usdText(a.cost));
+      put(c.nums, 'textContent', nums.join(' · '));
+      put(c.use, 'disabled', !a.text);
+      kids.push(c.el);
+    }
+    arrange(V.cols, kids);
+    for (const [sid, c] of cmp.cols) if (!answers.some((a) => a.sid === sid)) { c.el.remove(); cmp.cols.delete(sid); }
+    put(V.stop, 'disabled', !othersWriting(g).length);
+  }
+  const othersWriting = (g) => g.asides.map((sid) => S.sessions.get(sid)).filter((x) => x && (x.state === 'running' || x.state === 'waiting'));
+  // USE THIS: the answer goes into the composer of the session the question was
+  // asked from, as a draft under one line saying whose it is. It is never sent
+  // from here: the person reads it, changes it and sends it themselves
+  // (CODE.md, line 1: the person drives the coder — not the presence, and not
+  // a second coder either).
+  function useAnswer(g, sid) {
+    const a = compareAnswers(S, g).find((x) => x.sid === sid);
+    const main = S.sessions.get(g.main);
+    if (!a?.text) { toast('Nothing to use yet.'); return; }
+    if (!main || main.state === 'ended') { toast('The session you asked from has ended.'); return; }
+    if (currentSession()?.sid !== g.main) { viewingSid = null; S.active = g.main; main.unread = false; rebuildTranscript(); renderChrome(); renderDock(); }
+    closeCompareView();
+    talkTo = 'coder';
+    setDraft(`Plan from ${coderName(a)}, from /compare:\n\n${a.text}`);
+    recall.i = -1;
+    renderDock();
+    dockUi?.ta.focus();
+    toast(`${coderName(a)}'s answer is in your composer: read it, change it, and send it when you are ready.`);
+  }
+  // STOP THE OTHERS: the second opinions still writing are interrupted, as Esc
+  // in their own tabs would; their tabs stay.
+  async function stopOthers(g) {
+    const live = othersWriting(g);
+    if (!live.length) { toast('None of the others is still writing.'); return; }
+    const rs = await Promise.all(live.map((x) => cmd({ cmd: 'session.interrupt', sid: x.sid })));
+    const failed = rs.filter((r) => !r?.ok).length;
+    if (failed) toast(failed === live.length ? (rs.find((r) => !r?.ok)?.error || 'Could not stop them.') : `Stopped ${live.length - failed} of ${live.length}.`);
   }
 
   async function interrupt(s) {
@@ -2251,6 +2441,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (onSlashKey(e)) return;
     // the keys list is the thing on top: Esc puts it away and stops nothing
     if (shortcuts.open && e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); showKeys(false); return; }
+    // so is the comparison: Esc closes the view and stops nothing (the strip stays)
+    if (cmp.view && e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); closeCompareView(true); return; }
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');
