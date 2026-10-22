@@ -18,7 +18,8 @@
 // every return to a world was a hitch the veil had to hide. A kept world
 // costs a material and its dust — the dome's sphere is one geometry shared
 // by every sky (see skydome) — and its parked tap: 358KB of buffers for all
-// eleven together (counted 2026-10-19), and one copy of them on the GPU.
+// twelve together (counted 2026-10-19; the sand plate, 2026-10-22, adds a
+// dome material and nothing else), and one copy of them on the GPU.
 //
 // EVERY SKY ENDS IN three's COLOUR-SPACE ENCODE (#include <colorspace_fragment>).
 // The skies write LINEAR light — each one converts its authored look back with
@@ -38,6 +39,8 @@ import * as THREE from 'three';
 // The list itself lives in rooms.mjs, where the kommand grammar can read it.
 import { ENVIRONMENTS } from './rooms.mjs';
 export { ENVIRONMENTS };
+// The sand plate's maths: the figure's ladder of modes and what a voice does to them.
+import { LADDER, RUNGS, modeAt, agitationOf, rungOf, idleRung, cadence, QUIET } from './plate.mjs';
 
 // --- shared GLSL ------------------------------------------------------------
 // One hash/noise/fbm kit every sky shares. Cheap 3D value noise: smooth enough
@@ -1410,6 +1413,126 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// --- SAND PLATE -------------------------------------------------------------
+// The room that listens. Built 2026-10-22, the week Colin's video on the
+// Egyptians shaping the pyramids with cymatics passed 90k views in thirty
+// hours; he said "go crazy. build us something amazing". A vast dark plate
+// under the orb, sand on it, and the sand gathered along the nodal lines of
+// a standing wave — Chladni's figure for a square plate, drawn on the floor
+// plane the way the moon draws its craters and the pond its ripples. The
+// figure is PERIODIC (the plate's function repeats every two units), so one
+// cell of it fills the window's bottom and the rest tile away to the horizon:
+// the standing wave of a plate with no edge. What drives it is the presence's
+// own voice (the ear in createEnvironments: a note picks the rung of the
+// ladder, loudness lifts the grains) and, left alone, it drifts through the
+// figures by itself. A tap is a strike (makeStrike).
+//
+// The sand is a band around the nodal line measured as |f| / |grad f| — about
+// the distance to the line, in the plate's own units — so the band is as wide
+// on a fine figure as on a coarse one once scaled by the mode, and it has an
+// edge of grain rather than a line. It is lit from one low light, so each
+// ridge has a lit flank and a dark one: that, and the grain, is what makes a
+// line of sand read as sand. Cost: eight cosines and eight sines for the two
+// rungs, three noise lookups (grain, pile, brush) and two hashes on the
+// plate, one two-octave fbm above it — under the storm's eleven.
+const PLATE_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright, uTap;
+uniform vec2 uModeA, uModeB;   // the two rungs of the ladder the figure stands between (plate.mjs LADDER)
+uniform float uBlend;          // how far from the first rung to the second
+uniform float uAgit;           // how hard the plate is driven: 0 the sand lies still, 1 every grain is in the air
+uniform vec4 uRipple;          // a strike: where it fell (x, y in figure units), the ring's radius, its height
+${NOISE}
+
+#define PI 3.14159265
+
+// Chladni's figure for the pair nm at q, and its gradient: (f, df/dx, df/dy).
+// f = cos(n pi x) cos(m pi y) - cos(m pi x) cos(n pi y)
+vec3 figure(vec2 q, vec2 nm) {
+  vec2 a = nm.x * PI * q, b = nm.y * PI * q;
+  vec2 ca = cos(a), sa = sin(a), cb = cos(b), sb = sin(b);
+  return vec3(ca.x * cb.y - cb.x * ca.y,
+              PI * (nm.y * sb.x * ca.y - nm.x * sa.x * cb.y),
+              PI * (nm.x * cb.x * sa.y - nm.y * ca.x * sb.y));
+}
+
+void main() {
+  vec3 d = normalize(vDir);
+  float t = uTime;
+  // THE ONE LIGHT: low, from the left and a little ahead, about sixteen degrees
+  // up — the angle a plate is photographed at, so every ridge throws a shadow
+  vec3 L = normalize(vec3(-0.72, 0.28, -0.62));
+  vec3 haze = vec3(0.105, 0.086, 0.066);
+  vec3 col;
+  if (d.y >= 0.0) {
+    // THE HALL above the plate: dark, with the light's warm haze lying along
+    // the far edge, strongest where the light is
+    float e = d.y;
+    float toward = max(0.0, dot(normalize(d.xz), normalize(L.xz)));
+    col = mix(vec3(0.011, 0.011, 0.015), haze, exp(-e * 7.0) * (0.35 + 0.65 * toward));
+    col += vec3(0.030, 0.024, 0.018) * fbm(vec3(d * 3.0 + vec3(0.0, t * 0.01, 0.0)), 2) * exp(-e * 3.5);
+  } else {
+    float de = -d.y;
+    vec2 p = d.xz / max(de, 0.004);              // the plate, from an eye one unit above it
+    float near = smoothstep(0.015, 0.14, de);    // detail fades toward the horizon before it can shimmer
+    // figure units: the near cell [-1, 1]^2 spans 2.4..5.4 ahead — from the
+    // window's bottom edge (22.5 degrees down) up to a third of the way to the horizon
+    vec2 q = vec2(p.x, p.y + 3.9) * (2.0 / 3.0);
+    vec3 F = mix(figure(q, uModeA), figure(q, uModeB), uBlend);
+    float k = mix(dot(uModeA, uModeA), dot(uModeB, uModeB), uBlend);   // the plate's frequency, n^2 + m^2
+    // how far to the nearest nodal line: |f| over its slope. The slope is
+    // floored: where two lines cross it vanishes, and the sand gathers there too.
+    float grad = length(F.yz) + 0.35;
+    float dist = abs(F.x) / grad;
+    // a strike's ring, running out across the sand from where the blow fell
+    float rr = length(q - uRipple.xy);
+    float ring = exp(-pow((rr - uRipple.z) / 0.20, 2.0)) * uRipple.w;
+    float agit = min(1.0, uAgit + ring);
+    // THE SAND. The band is as wide as the mode allows — a finer figure, finer
+    // lines — and spreads when the plate is driven; its edge is grain, not a
+    // line; and the sand is thin here and heaped there along the line.
+    float w = (0.10 / sqrt(k)) * (1.0 + 0.9 * agit);
+    float grain = fbm(vec3(q * 48.0, 2.0), de > 0.07 ? 3 : 2);
+    float pile = fbm(vec3(q * 2.6, 7.0), 2);
+    float heap = 0.50 + 0.95 * pile;
+    float edge = dist + (grain - 0.5) * w * (0.9 + 1.3 * agit);
+    float u = clamp((w - edge) / (0.75 * w), 0.0, 1.0);
+    // driven, the sand on the lines thins: what left them is in the air below
+    float sand = u * u * (3.0 - 2.0 * u) * heap * mix(0.25, 1.0, near) * (1.0 - 0.40 * agit);
+    // the ridge's slope, for the light: the band's own edge, along the figure's gradient
+    float dSand = 6.0 * u * (1.0 - u) / (0.75 * w);
+    vec2 slope = -dSand * sign(F.x) * (F.yz / grad) * 0.045 * heap;
+    vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
+    float lit = max(dot(n, L), 0.0);
+    // THE PLATE: dark steel, brushed along its length, the low light lying on
+    // it in one long glance, the haze lying on it toward the far edge
+    float brush = vnoise(vec3(p.x * 60.0, p.y * 2.0, 1.0));
+    vec3 plate = vec3(0.038, 0.040, 0.048) * (0.75 + 0.5 * brush);
+    float glance = pow(max(dot(reflect(d, vec3(0.0, 1.0, 0.0)), L), 0.0), 14.0);
+    plate += vec3(0.16, 0.14, 0.12) * glance * (0.4 + 0.6 * brush);
+    plate += haze * 0.8 * smoothstep(0.25, 0.0, de);
+    // the sand, lit: pale quartz, its lit flank catching the low light, the other in its own shadow
+    vec3 quartz = vec3(0.82, 0.74, 0.60) * (0.30 + 0.70 * lit) * (0.72 + 0.56 * grain);
+    col = mix(plate, quartz, sand);
+    // GRAINS IN THE AIR. Loose sand lies about off the lines; when the plate is
+    // driven the grains jump and catch the light, re-rolled a dozen times a
+    // second so they dance rather than slide. A ring throws its own crest up.
+    vec2 gq = q * 64.0;
+    vec2 gi = floor(gq);
+    float gc = smoothstep(0.30, 0.12, length(fract(gq) - 0.5)) * near;
+    float lying = step(0.965, hash13(vec3(gi, 3.0))) * gc * (1.0 - sand);
+    float jumping = step(1.0 - 0.30 * agit, hash13(vec3(gi, 11.0 + floor(t * 12.0)))) * gc * agit;
+    col += quartz * (lying * 0.35 + jumping * 1.1 + ring * 0.75 * near);
+    // a shoulder, as the moon has: a flank square to the light would bloom, and this is sand
+    col = col / (1.0 + col * 0.45);
+    col = mix(col, haze, smoothstep(0.05, 0.0, de));   // into the haze at the far edge
+  }
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
 function dotTexture() {
   if (DOT) return DOT;
   const S = 64;
@@ -1634,7 +1757,12 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => res
 // camera is optional too: with it, a tap that lands somewhere (a strike, a
 // passing train) is placed where this window can see it — a phone held
 // upright sees about 11 degrees either side of the orb, a desktop about 33.
-export function createEnvironments({ scene, renderer, camera = null, getOrb, roomObjects = [], warm = null }) {
+//
+// sound({ hz, seconds }) is optional and comes from body.js, which gets it
+// from main.js (voice.js ring): a world that can make a sound — the sand
+// plate, struck — asks for it here, and it sounds only through a voice path
+// the person has already switched on and heard, never through one of its own.
+export function createEnvironments({ scene, renderer, camera = null, getOrb, roomObjects = [], warm = null, sound = null }) {
   let bakedSpace = null;   // built once, reused every time space is chosen
   let current = 'room';
   const worlds = new Map();   // id -> a built world, kept for the page's life (see the header)
@@ -1800,6 +1928,25 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
       g.add(drizzle);
       drift.push({ pts: drizzle, kind: 'rain', fall: 11, slant: 1.2, len: 0.35, span: 12, base: 0.20 });
       w.spare.push(makeStreak(w));
+    } else if (id === 'plate') {
+      // the figure's two rungs and where between them it stands, how hard the
+      // plate is driven, and a strike's ring (plate.mjs for the ladder; the
+      // ear below for how a voice moves them). It is born on the third rung,
+      // a figure with something to look at, for the Room tab's photograph.
+      const m0 = modeAt(PLATE_REST);
+      u.uModeA = { value: new THREE.Vector2(m0.a[0], m0.a[1]) };
+      u.uModeB = { value: new THREE.Vector2(m0.b[0], m0.b[1]) };
+      u.uBlend = { value: m0.blend };
+      u.uAgit = { value: 0 };
+      u.uRipple = { value: new THREE.Vector4(0, 0, 0, 0) };
+      const sky = skydome(PLATE_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Deliberately no particles: the grains that lift are drawn in the sand
+      // itself, where the one light lights them as it lights the ridges, and a
+      // point field in front of a figure this fine reads as dirt on the lens
+      // (the cloud sea's lesson).
+      w.spare.push(makeStrike(w));   // parked: the first strike rings on the first tap, not a frame late
     }
     return w;
   }
@@ -2178,6 +2325,106 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
     launch(s);
   }
 
+  // sand plate: a STRIKE — the plate rings. Every grain is thrown up, a ring
+  // runs out across the sand from where the blow fell and settles in about
+  // two seconds, and the figure jumps to another rung of the ladder, the sand
+  // re-forming on it as it settles (plateTick). This object draws nothing of
+  // its own — the ring is the sky's uRipple, written here — but it is parked
+  // like the bolt all the same, so a strike keeps its ring and its clock
+  // between taps. If the page has a voice path open, the plate's note sounds
+  // through it (voice.js ring: never a new path, never a first sound).
+  const PLATE_REST = 2;    // the rung it is born on: (2, 3)
+  const PLATE_HZ = 220;    // the lowest rung's note; the rest rise with the figure
+  function makeStrike(w) {
+    const obj = new THREE.Group();   // nothing to draw: the ring is the sand's
+    obj.visible = false;
+    w.group.add(obj);
+    const SPEED = 1.0;               // figure units a second across the sand: the near cell in two
+    return {
+      obj, home: w.spare, ttl: 2.2, born: 0,
+      reset(half) {
+        // where it fell: in the near cell, within what this window shows of it
+        const reach = Math.min(1.0, Math.tan(half) * 3.9 * (2 / 3) * 0.8);
+        w.u.uRipple.value.set((Math.random() * 2 - 1) * reach, (Math.random() * 2 - 1) * 0.7, 0, 0);
+      },
+      step(age) {
+        const s = age * this.ttl;
+        w.u.uRipple.value.z = SPEED * s;
+        w.u.uRipple.value.w = Math.exp(-s / 0.55);
+      },
+      done() { w.u.uRipple.value.w = 0; },
+    };
+  }
+  function strike() {
+    const st = active.spare.pop() || makeStrike(active);
+    st.reset(halfWidth());
+    launch(st);
+    // the figure jumps: another rung, never the one it is on
+    const was = Math.round(plate.s);
+    let to = Math.floor(Math.random() * RUNGS);
+    if (to >= was) to += 1;
+    plate.struck = to;
+    plate.struckAt = lastT;
+    plate.agit = Math.max(plate.agit, 0.55);   // the whole plate jumps; the ring carries the rest
+    // its note: a membrane's law (the pitch with the square root of the
+    // mode), not a plate's (with the mode itself), which climbs to a shriek
+    // by the fifth rung. A sound chosen for the room, said as such.
+    const [n, m] = LADDER[to];
+    if (sound) { try { sound({ hz: PLATE_HZ * Math.sqrt((n * n + m * m) / 5), seconds: 1.6 }); } catch { /* a silent strike is still a strike */ } }
+  }
+
+  // ---- THE PLATE'S EAR -----------------------------------------------------
+  // What the voice bus last brought (body.js setAudioLevel and setSpeaking
+  // call hear), and where the sand plate stands: s is its place on the
+  // ladder (plate.mjs modeAt), agit how hard it is driven. A note moves the
+  // figure up and down the ladder; loudness lifts the grains, at once, and
+  // lets them settle slowly; a silence of a second and a half hands the
+  // figure to its own slow wander. The browser's voice brings no waveform
+  // (speechSynthesis plays outside Web Audio), only that it is speaking, so
+  // while it speaks a cadence stands in for one (plate.mjs cadence).
+  const heard = { level: 0, hz: 0, speaking: false, at: -100 };
+  const plate = { s: PLATE_REST, agit: 0, pitch: PLATE_REST, struck: -1, struckAt: -100, silentFor: 100 };
+  function hear({ level, hz, speaking } = {}) {
+    if (level !== undefined) {
+      heard.level = Math.max(0, Math.min(1, Number(level) || 0));
+      heard.hz = Math.max(0, Number(hz) || 0);
+      heard.at = lastT;
+    }
+    if (speaking !== undefined) heard.speaking = !!speaking;
+  }
+  const ease = (dt, tau) => 1 - Math.exp(-dt / tau);
+  function plateTick(dt, t) {
+    let { level, hz } = heard;
+    if (heard.speaking && t - heard.at > 0.5) ({ level, hz } = cadence(t));
+    // the sand lifts at once and settles slowly
+    const want = agitationOf(level);
+    plate.agit += (want - plate.agit) * ease(dt, want > plate.agit ? 0.04 : 0.35);
+    let target, tau;
+    if (t - plate.struckAt < 1.2) {
+      // struck: for a moment the figure goes where the blow sent it, whatever is said
+      target = plate.struck; tau = 0.25;
+      plate.pitch = plate.struck;
+    } else if (level > QUIET && hz > 0) {
+      // spoken to: the note picks the rung, smoothed so a syllable moves it and a frame does not
+      plate.silentFor = 0;
+      plate.pitch += (rungOf(hz) - plate.pitch) * ease(dt, 0.15);
+      target = plate.pitch; tau = 0.2;
+    } else {
+      plate.silentFor += dt;
+      if (plate.silentFor > 1.5) {
+        // left alone: it wanders from where it is, at the wander's own slow pace
+        plate.pitch = Math.max(0, Math.min(RUNGS, plate.pitch + idleRung(t) - idleRung(t - dt)));
+      }
+      target = plate.pitch; tau = 0.6;
+    }
+    plate.s += (target - plate.s) * ease(dt, tau);
+    const m = modeAt(plate.s);
+    uniforms.uModeA.value.set(m.a[0], m.a[1]);
+    uniforms.uModeB.value.set(m.b[0], m.b[1]);
+    uniforms.uBlend.value = m.blend;
+    uniforms.uAgit.value = plate.agit;
+  }
+
   // One tap, one answer, per world. The metal room keeps its own tap (the lit
   // panels live in body.js); everything here is for the skies.
   function tap() {
@@ -2191,6 +2438,7 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
     else if (current === 'storm') lightning();
     else if (current === 'moon') dustPuff();
     else if (current === 'neon') lightStreak();
+    else if (current === 'plate') strike();
     // taiga / cavern / cloudsea / ember answer in their shaders via uTap
   }
 
@@ -2205,7 +2453,7 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
   // pipeline, and the old way paid it once a world in one task.
   function atlas(size) {
     const n = ENVIRONMENTS.length;
-    const cols = Math.min(n, 4), rows = Math.ceil(n / cols);   // 4 wide: 672x504px at 168 for twelve, well inside any texture limit
+    const cols = Math.min(n, 4), rows = Math.ceil(n / cols);   // 4 wide: 672x672px at 168 for thirteen, well inside any texture limit
     const W = cols * size, H = rows * size;
     const cam = new THREE.PerspectiveCamera(62, 1, 0.05, 200);
     cam.position.set(0, 0, 0);
@@ -2372,6 +2620,11 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
     // lifts the cap. A uniform, so a change of mode never recompiles a sky.
     setDetail(detail) { octCap.value = detail === 'lite' ? 3 : 99; },
     tap,
+    // The voice bus: { level, hz } from a meter on the voice (body.js hands
+    // them on from voice.js), { speaking } when a voice without a waveform
+    // starts and stops. Only the sand plate listens today; it is cheap to
+    // tell every world.
+    hear,
     tick(dt, t) {
       lastT = t;
       if (!uniforms) return;
@@ -2380,6 +2633,8 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
       if (current === 'dunes') {
         uniforms.uDusk.value += (duskTarget - uniforms.uDusk.value) * Math.min(1, dt * 0.9);
       }
+      // the sand plate follows the voice, or wanders
+      if (current === 'plate') plateTick(dt, t);
       // short-lived tap effects: step, then retire when their time is up
       for (let i = transients.length - 1; i >= 0; i--) {
         const tr = transients[i];
