@@ -21,21 +21,26 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
-const feed = (S, sid, list) => { for (const e of list) apply(S, { sid, ...e }, { replay: true }); return S.sessions.get(sid); };
+// `replay`: as events read back from the engine's file go in (no live writing
+// rate is kept for those); false feeds them as the stream would
+const feed = (S, sid, list, replay = true) => { for (const e of list) apply(S, { sid, ...e }, { replay }); return S.sessions.get(sid); };
 
 const Q = 'why is the build slow?';
-// a session that took the question and answered it, with the tool's own numbers
+// a session that took the question and answered it, with the tool's own
+// numbers: `cost` is the running total before and after the turn (null: a
+// tool that reports none)
 const answered = (provider, model, words, { tout = 300, apiMs = 3000, cost = [0.4, 0.52] } = {}) => [
   { type: 'session.started', provider, cwd: '/w', mode: 'plan' },
   { type: 'session.ready', model },
   { type: 'session.state', state: 'idle' },
   { type: 'message.user', text: Q },
-  { type: 'turn.started', t: 1000 }, { type: 'usage.cost', totalUsd: cost[0] },
+  ...(cost ? [{ type: 'usage.cost', totalUsd: cost[0] }] : []),
+  { type: 'turn.started', t: 1000 },
   { type: 'message.start', id: 'm1', model },
   ...words.map((w) => ({ type: 'message.delta', id: 'm1', block: 0, kind: 'text', text: w, t: 1500 })),
   { type: 'message.end', id: 'm1' },
   { type: 'usage.turn', inputTokens: 1000, outputTokens: tout, durationMs: 5000, apiMs },
-  { type: 'usage.cost', totalUsd: cost[1] },
+  ...(cost ? [{ type: 'usage.cost', totalUsd: cost[1] }] : []),
   { type: 'turn.ended', status: 'success', t: 6000 },
 ];
 
@@ -105,16 +110,17 @@ await ok('answers are assembled from the sessions\' items, the one asked from fi
   feed(S, 'm', [
     { type: 'session.started', provider: 'claude', cwd: '/w', mode: 'ask', model: 'claude-sonnet-4-5' },
     { type: 'message.user', text: 'hello' }, { type: 'turn.started', t: 1 }, { type: 'message.block', id: 'm0', block: 0, kind: 'text', text: 'Hi.' }, { type: 'turn.ended', status: 'success', t: 2 },
-    ...answered('claude', 'claude-opus-4-1', ['The build runs ', 'every test twice.\n\n', '- drop the second run'], { tout: 200, apiMs: 2000, cost: [0.1, 0.3] }).slice(3),
+    ...answered('claude', 'claude-opus-4-1', ['The build runs ', 'every test twice.\n\n', '- drop the second run'], { tout: 200, apiMs: 2000, cost: [0.25, 0.75] }).slice(3),
   ]);
-  feed(S, 'a1', answered('codex', 'gpt-5-codex', ['Cache the ', 'dependencies.'], { tout: 150, apiMs: 0, cost: [0, 0] }));
+  feed(S, 'a1', answered('codex', 'gpt-5-codex', ['Cache the ', 'dependencies.'], { tout: 150, apiMs: 0, cost: null }));
+  // still writing, as the stream brings it (not a replay: the live rate counts)
   feed(S, 'a2', [
     { type: 'session.started', provider: 'gemini', cwd: '/w', mode: 'plan', model: 'gemini-2.5-pro' },
     { type: 'session.ready', model: 'gemini-2.5-pro' }, { type: 'session.state', state: 'idle' },
     { type: 'message.user', text: Q }, { type: 'turn.started', t: 1000 },
     { type: 'message.delta', id: 'g1', block: 0, kind: 'thinking', text: 'hmm', t: 1200 },
     { type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'Parallelise the', t: 1400 },
-  ]);
+  ], false);
   const g = openCompare(S, { question: Q, main: 'm', asides: ['a1', 'a2'] });
   const out = compareAnswers(S, g, 1500);
   assert.deepEqual(out.map((a) => a.sid), ['m', 'a1', 'a2'], 'the main first, then the asides in order');
@@ -126,7 +132,7 @@ await ok('answers are assembled from the sessions\' items, the one asked from fi
   assert.equal(m.state, 'done');
   assert.equal(m.tps, 100, '200 output tokens over the model\'s own 2s');
   assert.equal(m.tpsRough, false);
-  assert.equal(m.cost, 0.2, 'the running total after less before');
+  assert.equal(m.cost, 0.5, 'the running total after less before');
   assert.equal(m.tokens, 1200); assert.equal(m.ms, 5000);
   assert.deepEqual([c.label, c.model, c.text, c.state], ['Codex', 'gpt-5-codex', 'Cache the dependencies.', 'done']);
   assert.equal(c.tps, 30, 'no model time: the whole turn, marked rough');
@@ -270,17 +276,21 @@ console.log('\nthe screen:');
   const S = cv._state;
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
-  const key = (k, extra = {}) => {
-    const ev = { key: k, target: document.activeElement || document.body, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}, ...extra };
-    for (const fn of (document._on?.keydown || [])) fn(ev);
-    return ev;
-  };
   // the document's listeners, as installDom keeps them
   const addL = document.addEventListener;
   document._on = {};
   document.addEventListener = (t, fn) => { (document._on[t] ||= []).push(fn); addL(t, fn); };
   const rmL = document.removeEventListener;
   document.removeEventListener = (t, fn) => { document._on[t] = (document._on[t] || []).filter((f) => f !== fn); rmL(t, fn); };
+  // a key as a browser has it: the page's capture listener, then the target's own
+  const key = (k, extra = {}) => {
+    let stopped = false;
+    const target = extra.target || document.activeElement || document.body;
+    const ev = { type: 'keydown', key: k, target, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() { stopped = true; }, ...extra };
+    for (const fn of (document._on.keydown || []).slice()) fn(ev);
+    if (!stopped) for (const fn of [...(target.listeners?.keydown || [])]) fn(ev);
+    return ev;
+  };
 
   cv._feed({ sid: 'main', type: 'session.started', provider: 'claude', cwd: '/tmp/cmp', mode: 'ask', model: 'claude-opus-4-1' });
   cv.open();
@@ -299,11 +309,12 @@ console.log('\nthe screen:');
     tick();
     const strip = $('div.cv-cmpstrip');
     assert.equal(strip.hidden, false);
-    assert.equal(strip.textContent, `comparing: ${Q} · 3 answering`);
+    assert.equal(strip.querySelector('span.cv-cmplab').textContent + strip.querySelector('span.cv-cmpq').textContent + strip.querySelector('span.cv-cmpn').textContent, `comparing: ${Q} · 3 answering`);
     assert.equal(strip.previousSibling, $('div.cv-bar'), 'right under the toolbar');
     assert.ok($('button.cv-cmpopen'), 'with a button that opens the view');
     assert.ok(!$('div.cv-cmp'), 'the view is not open by itself');
   });
+  const stripSays = () => $('div.cv-cmpstrip').querySelector('span.cv-cmpn').textContent;
 
   await ok('the screen: the view shows one column per coder, the main first, with mark, model, streaming words, status, tok/s and cost', () => {
     $('button.cv-cmpopen').click();
@@ -320,11 +331,13 @@ console.log('\nthe screen:');
     assert.equal(cols[0].querySelector('span.ag-chip').textContent, 'yours');
     assert.deepEqual(cols.map((c) => c.querySelector('span.cv-cmpstate').textContent), ['thinking', 'starting', 'starting']);
     assert.ok(cols.every((c) => c.querySelector('button.cv-cmpuse').disabled), 'nothing to use yet');
-    // words stream into their own column, as the transcript's markdown
+    // words stream into their own column, as the transcript's markdown (the
+    // engine's clock is the wall clock: the live rate reads the last seconds)
     cv._feed({ sid: 'a1', type: 'session.state', state: 'idle' });
     cv._feed({ sid: 'a1', type: 'message.user', text: Q });
-    cv._feed({ sid: 'a1', type: 'turn.started', t: 1000 });
-    for (const w of ['Cache the **dependencies**', ' between runs.\n\n- one\n- two']) cv._feed({ sid: 'a1', type: 'message.delta', id: 'c1', block: 0, kind: 'text', text: w, t: 1500 });
+    cv._feed({ sid: 'a1', type: 'usage.cost', totalUsd: 0.05 });
+    cv._feed({ sid: 'a1', type: 'turn.started', t: Date.now() - 2000 });
+    for (const w of ['Cache the **dependencies**', ' between runs.\n\n- one\n- two']) cv._feed({ sid: 'a1', type: 'message.delta', id: 'c1', block: 0, kind: 'text', text: w, t: Date.now() });
     tick();
     cols = $$('div.cv-cmpcol');
     assert.equal(cols.length, 3);
@@ -336,16 +349,15 @@ console.log('\nthe screen:');
     assert.equal(cols[1].querySelector('button.cv-cmpuse').disabled, false);
     assert.equal($('div.cv-cmp span.cv-cmpn').textContent, ' · 3 answering');
     // the turn lands: the tool's own numbers
-    cv._feed({ sid: 'a1', type: 'usage.cost', totalUsd: 0.05 });
     cv._feed({ sid: 'a1', type: 'message.end', id: 'c1' });
     cv._feed({ sid: 'a1', type: 'usage.turn', inputTokens: 900, outputTokens: 120, durationMs: 4000, apiMs: 2000 });
     cv._feed({ sid: 'a1', type: 'usage.cost', totalUsd: 0.17 });
-    cv._feed({ sid: 'a1', type: 'turn.ended', status: 'success', t: 5000 });
+    cv._feed({ sid: 'a1', type: 'turn.ended', status: 'success', t: Date.now() });
     tick();
     cols = $$('div.cv-cmpcol');
     assert.equal(cols[1].querySelector('span.cv-cmpstate').textContent, 'done');
-    assert.equal(cols[1].querySelector('span.cv-cmpnums').textContent, '60 tok/s · $0.12');
-    assert.equal($('div.cv-cmpstrip').textContent, `comparing: ${Q} · 2 answering`);
+    assert.equal(cols[1].querySelector('span.cv-cmpnums').textContent, '60 tok/s · $0.12', '120 output tokens over the model\'s 2s; the total after less before');
+    assert.equal(stripSays(), ' · 2 answering');
     assert.equal(cols[1].querySelector('div.cv-cmpbody').textContent.replace(/^\s+/, ''), 'Cache the dependencies between runs.onetwo', 'the finished render says the same');
   });
 
@@ -367,11 +379,10 @@ console.log('\nthe screen:');
   });
 
   await ok('the screen: "use this" puts the answer in the main session\'s composer, prefixed, and sends nothing', async () => {
-    // from an aside's tab: the view follows the session on screen
+    // from an aside's tab: the same comparison, so the strip and the view stay
     S.active = 'a1'; tick(); cv._feed({ sid: 'a1', type: 'session.state', state: 'idle' }); tick();
     assert.equal($('div.cv-cmpstrip').hidden, false, 'the strip shows in an aside too');
-    assert.ok(!$('div.cv-cmp'), 'the view closed with the tab change');
-    $('button.cv-cmpopen').click();
+    assert.ok($('div.cv-cmp'), 'the view stays open across the comparison\'s own tabs');
     const cols = $$('div.cv-cmpcol');
     cols[1].querySelector('button.cv-cmpuse').click();
     await settle();
@@ -389,6 +400,7 @@ console.log('\nthe screen:');
     const before = asked('session.interrupt').length;
     $('button.cv-cmpopen').click();
     assert.ok($('div.cv-cmp'));
+    $('textarea.cv-input').focus();
     const ev = key('Escape');
     assert.equal(ev.defaultPrevented, true);
     assert.ok(!$('div.cv-cmp'), 'closed');

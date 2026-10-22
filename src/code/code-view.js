@@ -2314,10 +2314,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.cmp.hidden = false;
   }
   // the person ends it: the grouping goes, the tabs and the sessions stay
+  // (the strip's key is left as drawn, so renderCompareStrip sees a strip to clear)
   function endCompare(g) {
     closeCompare(S, g.id);
     closeCompareView();
-    cmp.key = null;
     renderCompareStrip();
   }
   // `byKey`: opened from the keyboard (/compare alone), so focus goes in and comes back on Esc

@@ -91,7 +91,9 @@ of its own, hosted by their account. The rails around the room are its places.
   orb reacts; the room runs behind a glass pane. Talk to the coder by typing or by voice (the
   microphone in the composer; shift-click for hands-free), plan with your
   presence first and hand it the prompt, or switch the composer to your
-  presence mid-session. The presence never drives the coder.
+  presence mid-session. `/compare <question>` asks every coding tool on the
+  computer at once and shows the answers side by side, one of them a press
+  away from being your next prompt. The presence never drives the coder.
 - **The portal** (`src/portal.js`) — a tree in unimat at the top bar's left
   end: a door to 4irden, the other world Colin keeps (the project's root;
   *airden* was the name before y3k).
@@ -224,6 +226,32 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-21** — **kode: `/compare`'s answers side by side, and one of them
+  as your next prompt.** Colin asked about "cross-model collaboration"
+  (2026-10-19) and said kode "can be majorly improved" (2026-10-21).
+  `/compare <question>` already asked every other coding tool on the
+  computer in plan mode, each in a tab of its own; there was no way to see
+  the answers together and no way to act on one. Now the question opens a
+  comparison (`state.js` `openCompare`): while you are in any of its
+  sessions a strip under the toolbar says "comparing: <question> · 3
+  answering", and its button, or `/compare` alone, opens a panel over the
+  transcript with one column per coder, the one you asked first, each with
+  its maker's mark and model, its answer as it streams (the transcript's own
+  markdown), a status line (starting, thinking, writing, waiting on you,
+  done, stopped, failed), and its tok/s and cost once its turn landed, the
+  tool's own numbers. Columns scroll on their own; on a narrow screen they
+  stack; Esc closes the panel and the strip stays. *Use this* puts that
+  answer in the composer of the session you asked from, under one line
+  (`Plan from Codex, from /compare:`) and a blank one, as a draft: it is
+  never sent — you read it, change it and send it yourself (CODE.md, line
+  1: the person drives the coder; neither the presence nor a second coder
+  does). *Stop the others* interrupts the second opinions still writing.
+  The comparison ends when you close it from the strip or every second
+  opinion's session has ended. `test/compare-view.test.mjs` runs the group's
+  life and the answers with no DOM, pins that *use this* writes the composer
+  and never calls `session.send`, and drives the screen under the stand-in
+  DOM.
 
 - **2026-10-21** — **Kode shows the coder's subagents the way Claude Code
   does.** Colin: "make sure that there is a way to display to the user how
