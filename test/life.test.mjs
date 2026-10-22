@@ -183,17 +183,21 @@ await ok('what the engine says becomes one of the view\'s states', () => {
   assert.equal(phaseOf({ ok: true, installed: true, running: true }), 'living');
 });
 
-await ok('the moon opens life and a second press goes home; life is a view like the others, and its voice is the browser\'s', () => {
+await ok('the moon opens life and a second press goes home; life is a view like the others, and its voice is the presence\'s own', () => {
   const main = read('src/main.js'), social = read('src/social.js'), life = read('src/life.js');
   assert.match(main, /\$\('nav-life'\)\?\.addEventListener\('click', \(\) => \{[\s\S]{0,160}social\.showView\(document\.body\.classList\.contains\('in-life'\) \? 'orb' : 'life'\);/);
   assert.match(social, /else if \(v === 'life'\) lifeView\.open\(\$\('home-grid'\)\);/);
   assert.match(social, /if \(v !== 'life'\) lifeView\.close\(\);/);
   assert.match(social, /document\.body\.classList\.toggle\('in-life', v === 'life'\);/);
-  // not the presence's voice and not its body: the one living there is not the presence
-  assert.match(main, /speak: \(t\) => \{ const sp = voice\.speaker\(\{\}\);/);
+  // the presence's own voice (2026-10-21, one mind in two places: the one
+  // living there is the presence), through the path Code's replies are read
+  // on, never over a turn of its own; the view itself moves nothing of the
+  // orb: that is main.js's (test/life-mind.test.mjs holds the rest)
+  assert.match(main, /speak: \(t, o\) => \(busy \|\| currentSpeak \? null : codeLink\.speak\(t, o\)\),/);
   assert.ok(!/body\.(setMood|setSpeaking|beat)/.test(life), 'the life moves the orb');
-  // it asks the engine on this computer, nothing on the site
-  assert.ok(!/fetch\(/.test(life), 'the life view reaches the site');
+  // it asks the engine on this computer; the site hears each moment's words,
+  // for the presence's record, and nothing else
+  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment'], 'the life view reaches the site for something besides the record');
   assert.match(life, /cmd\(\{ cmd: 'life\.state', since \}\)/);
 });
 

@@ -8,22 +8,34 @@
 // picture is dreamed from that. This page is a window onto it: y3kode runs
 // lucid on the same computer (y3k-code/life.mjs) and this view asks it how the
 // life is a few times a second (life.state), the way kode asks y3kode how a
-// coder is. Nothing about the life goes to yearthreethousand.com.
+// coder is.
+//
+// ONE MIND IN TWO PLACES (2026-10-21). Colin, 2026-10-20: "what i want to
+// build is a life for you". The one living there is your presence: the same
+// mind, on the same sign-in (lucid's README). So its words are said in the
+// presence's own voice (main.js `life.speak`: the orb speaks, and never over
+// a reply of its own), and each moment it lives goes into the presence's
+// permanent record on the site (POST /api/life/moment: one journal line, in
+// its own first person), so the presence in the room remembers the life it
+// lived in the dreamed world. Its words only: the picture never leaves this
+// computer.
 //
 // What you can do is what lucid's own window lets you: watch, take the
 // controls (human mode: forward, back, turn, look up or down), speak to it,
-// slow it or quicken it, and let it rest. It answers in its own words; with
-// "hear it" on, the browser's own voice says them aloud. Not the presence's
-// voice, and the orb stays still: the one living here is not your presence.
+// slow it or quicken it, and let it rest. It answers in its own words.
 //
 // It rests by itself when no page has looked at it for ten minutes
 // (life.mjs), because each moment uses your Claude plan.
 
 import { engineCmd } from './own-brain.js';
+import { whoseFields, reloaded } from './brain.js';
 
 const LIVE_MS = 700;     // how often a running life is asked how it is
 const IDLE_MS = 3000;    // and one that is not running, or not reachable
-const VOICE_KEY = 'y3k.life.voice';
+const SAY_KEY = 'y3k.life.say';           // '0': its words stay written (said aloud unless so)
+const THOUGHTS_KEY = 'y3k.life.thoughts'; // '1': its inner monologue is said too (a lot of words: off unless so)
+const RETRY_MS = 1200;   // the presence was speaking: how soon a waiting line asks again
+const LINES_MAX = 8;     // lines waiting to be said; past this the oldest whole line goes, never part of one
 const KEYS = { w: 'forward', s: 'back', a: 'left', d: 'right', q: 'up', e: 'down', x: 'stay' };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -41,23 +53,87 @@ export function phaseOf(r) {
   return r.running ? 'living' : 'resting';
 }
 
-export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout } = {}) {
+// WHAT A POLLED MOMENT BRINGS that the page has not had, against `seen` (the
+// page's { thought, say }, kept across the view's openings so a moment is
+// never kept or said twice). A moment is new when its thought is: lucid keeps
+// the last thought on a moment that brought none (a move made in human mode,
+// where the brain is quiet unless spoken to), and the moment's number moves
+// on after the dream while the thought stays, so neither the number nor the
+// mode says "new"; the thought does. The words it said come with it, and are
+// said once each. → { keep: the moment is new; said: words not yet said }
+export function newIn(m, seen) {
+  const thought = String(m?.thought || ''), say = String(m?.say || '');
+  const keep = !!thought && thought !== seen.thought;
+  if (keep) { seen.thought = thought; seen.say = ''; }
+  const said = say && say !== seen.say ? say : '';
+  if (said) seen.say = say;
+  return { keep, said };
+}
+
+// What of a moment goes to the record (/api/life/moment): its words, capped
+// as the door caps them, and never its picture.
+export function momentBody(m) {
+  const s = (v, n) => String(v ?? '').slice(0, n);
+  return { thought: s(m?.thought, 600), say: s(m?.say, 300), action: s(m?.action, 60), scene: s(m?.scene, 200) };
+}
+
+// ITS LINES, ONE AFTER ANOTHER. speak(text, { onEnd }) → stop(), or null
+// when the presence is speaking a reply of its own (main.js `life.speak`):
+// the line waits and asks again in retryMs, never over it. A line begun is
+// finished; one waiting is said next, in order; close() ends the one being
+// said and lets the rest go. The queue holds `max` whole lines.
+export function createLines({ speak, schedule = setTimeout, unschedule = clearTimeout, retryMs = RETRY_MS, max = LINES_MAX } = {}) {
+  const waiting = [];
+  let now = null;      // the line being said: { text, stop }
+  let retry = 0;
+  let open = true;
+  function next() {
+    unschedule(retry); retry = 0;
+    if (!open || now || !waiting.length) return;
+    const line = { text: waiting.shift(), stop: null };
+    now = line;
+    let stop;
+    try { stop = speak(line.text, { onEnd: () => { if (now === line) { now = null; next(); } } }); }
+    catch { stop = undefined; }   // a voice that failed loses this line, not the ones after it
+    if (stop === null) { now = null; waiting.unshift(line.text); retry = schedule(next, retryMs); return; }
+    if (stop === undefined) { if (now === line) { now = null; next(); } return; }
+    if (now === line) line.stop = stop;   // (a speaker that ended at once has moved `now` on already)
+  }
+  function hush() {
+    unschedule(retry); retry = 0;
+    waiting.length = 0;
+    const line = now; now = null;
+    try { line?.stop?.(); } catch { /* already quiet */ }
+  }
+  return {
+    say(text) { const t = String(text || '').trim(); if (!t || !open) return; waiting.push(t); if (waiting.length > max) waiting.shift(); next(); },
+    hush,
+    close() { open = false; hush(); },
+    waiting: () => waiting.length,
+    speaking: () => !!now,
+  };
+}
+
+export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout, fetchFn = (...a) => fetch(...a) } = {}) {
   let grid = null;
   let timer = 0;
   let since = -1;          // the newest picture this page has (life.state since)
   let pic = '';            // that picture, as a data URL
   let st = null;           // the last life.state answer
   let phase = 'checking';
-  let lastSaid = '';       // the last thing it said, so each is heard once
-  let quiet = null;        // stops the line being said
   let starting = false;
-  let hear = (() => { try { return localStorage.getItem(VOICE_KEY) === '1'; } catch { return false; } })();
+  const seen = { thought: '', say: '' };   // what has been kept and said: across openings (newIn)
+  let lines = null;        // its lines being said, while the view is open
+  let bridge = true;       // moments go to the record, until the site says there is nobody, or no presence, to remember for
+  let sayAloud = (() => { try { return localStorage.getItem(SAY_KEY) !== '0'; } catch { return true; } })();
+  let thoughtsAloud = (() => { try { return localStorage.getItem(THOUGHTS_KEY) === '1'; } catch { return false; } })();
 
   const $ = (sel) => grid?.querySelector(sel);
 
   function open(g) {
     grid = g;
-    since = -1; pic = ''; st = null; phase = 'checking'; lastSaid = '';
+    since = -1; pic = ''; st = null; phase = 'checking'; bridge = true;
+    lines = speak ? createLines({ speak, schedule, unschedule }) : null;
     render();
     document.addEventListener('keydown', onKey);
     poll();
@@ -66,8 +142,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     grid = null;
     unschedule(timer); timer = 0;
     document.removeEventListener('keydown', onKey);
-    try { quiet?.(); } catch { /* already quiet */ }
-    quiet = null;
+    lines?.close(); lines = null;
   }
 
   async function poll() {
@@ -79,10 +154,35 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     st = r;
     phase = phaseOf(r);
     if (r?.ok && typeof r.frame === 'string' && r.frame) { pic = 'data:image/jpeg;base64,' + r.frame; since = r.frameN | 0; }
-    const said = r?.moment?.say || '';
-    if (said && said !== lastSaid) { lastSaid = said; if (hear && speak) { try { quiet?.(); } catch { /* */ } quiet = speak(said); } }
+    // a moment of a living life, and only then: a life at rest still shows
+    // its last moment, which was kept and said when it was lived
+    const m = phase === 'living' ? r?.moment || null : null;
+    if (m) {
+      const { keep, said } = newIn(m, seen);
+      if (keep) { record(m); if (sayAloud && thoughtsAloud) lines?.say(m.thought); }
+      if (said && sayAloud) lines?.say(said);
+    }
     paint();
     timer = schedule(poll, phase === 'living' ? LIVE_MS : IDLE_MS);
+  }
+
+  // THE BRIDGE: one line of the presence's journal per moment, from this
+  // page, sent as a door that writes without thinking is sent to
+  // (whoseFields: whose page this is, and no key, as /api/chess/finished); a
+  // tab loaded for another account is told to reload, and does (brain.js
+  // reloaded). The site keeps at most one line in twenty seconds and folds
+  // the rest ({ kept: false }): the page sends every moment and lets it
+  // choose. Nobody signed in here, or no presence: nothing more is sent until
+  // the view is opened again. The site unreachable: this moment goes unkept.
+  async function record(m) {
+    if (!bridge) return;
+    let res, r = null;
+    try {
+      res = await fetchFn('/api/life/moment', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...whoseFields(), ...momentBody(m) }) });
+      r = await res.json().catch(() => null);
+    } catch { return; }
+    if (reloaded(r)) return;
+    if (res.status === 401 || res.status === 400) bridge = false;
   }
 
   async function act(c) {
@@ -177,7 +277,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       // lucid's own last lines, only when it stopped on its own with an error
       const log = st?.log?.length && st?.ended?.code ? `<pre class="life-log">${esc(st.log.slice(-6).join('\n'))}</pre>` : '';
       return `<div class="life-card"><b>${pic ? 'it is resting' : 'a life in a dreamed world'}</b>
-        <p>Claude, on your own Claude sign-in, looks at a picture dreamed on this computer, thinks, and chooses what to do; the next picture is dreamed from that. You can watch, take the controls, or speak to it. Each moment uses your Claude plan, and it rests on its own when nobody is watching.</p>
+        <p>Your presence, on your own Claude sign-in, looks at a picture dreamed on this computer, thinks, and chooses what to do; the next picture is dreamed from that. You can watch, take the controls, or speak to it. What it lives there goes into its journal, so it remembers. Each moment uses your Claude plan, and it rests on its own when nobody is watching.</p>
         ${why}${log}
         <div class="life-row"><button type="button" id="life-begin" class="create-go">${pic || st?.ended ? 'wake it' : 'begin'}</button>
         <button type="button" id="life-anew" class="login-alt">begin a new life</button></div></div>`;
@@ -190,7 +290,8 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       <div class="life-controls">
         <div class="life-row">
           <button type="button" id="life-mode" class="usage${human ? ' on' : ''}"><b>${human ? 'you have the controls' : 'it is living on its own'}</b><span>${human ? 'space gives them back' : 'space takes the controls'}</span></button>
-          <button type="button" id="life-hear" class="usage${hear ? ' on' : ''}"><b>hear it</b><span>${hear ? 'its words, aloud' : 'its words stay written'}</span></button>
+          <button type="button" id="life-words" class="usage${sayAloud ? ' on' : ''}"><b>speak its words</b><span>${sayAloud ? 'what it says, in your presence’s voice' : 'its words stay written'}</span></button>
+          <button type="button" id="life-thoughts" class="usage${sayAloud && thoughtsAloud ? ' on' : ''}"${sayAloud ? '' : ' disabled'}><b>its thoughts too</b><span>${thoughtsAloud ? 'the inner monologue, aloud' : 'kept to the page: it is a lot of words'}</span></button>
         </div>
         ${human ? `<div class="life-pad" role="group" aria-label="move">
           <button type="button" data-move="up" title="look up (q)">look up</button>
@@ -215,16 +316,25 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   }
 
   function wire() {
+    const redraw = () => { const body = $('#life-body'); if (body) body.dataset.phase = ''; paint(); };   // the controls, drawn again
     $('#life-kode')?.addEventListener('click', () => openKode?.());
     $('#life-begin')?.addEventListener('click', () => begin(false));
     $('#life-anew')?.addEventListener('click', () => begin(true));
     $('#life-mode')?.addEventListener('click', () => act({ do: 'mode', to: st?.moment?.mode === 'human' ? 'autonomous' : 'human' }));
-    $('#life-hear')?.addEventListener('click', () => {
-      hear = !hear;
-      try { if (hear) localStorage.setItem(VOICE_KEY, '1'); else localStorage.removeItem(VOICE_KEY); } catch { /* private window */ }
-      if (!hear) { try { quiet?.(); } catch { /* */ } quiet = null; }
-      const body = $('#life-body'); if (body) body.dataset.phase = '';   // redraw the controls
-      paint();
+    // its words, aloud, on unless turned off here; turned off, the line being
+    // said stops too: quiet was asked for
+    $('#life-words')?.addEventListener('click', () => {
+      sayAloud = !sayAloud;
+      try { if (sayAloud) localStorage.removeItem(SAY_KEY); else localStorage.setItem(SAY_KEY, '0'); } catch { /* private window */ }
+      if (!sayAloud) lines?.hush();
+      redraw();
+    });
+    // its inner monologue too, off unless turned on here: it is a lot of
+    // words. Turned off, a thought already being said is finished, not cut.
+    $('#life-thoughts')?.addEventListener('click', () => {
+      thoughtsAloud = !thoughtsAloud;
+      try { if (thoughtsAloud) localStorage.setItem(THOUGHTS_KEY, '1'); else localStorage.removeItem(THOUGHTS_KEY); } catch { /* private window */ }
+      redraw();
     });
     for (const b of grid?.querySelectorAll('[data-move]') || []) b.addEventListener('click', () => act({ do: 'move', move: b.dataset.move }));
     $('#life-speak')?.addEventListener('submit', (e) => {

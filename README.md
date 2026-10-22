@@ -100,8 +100,9 @@ of its own, hosted by their account. The rails around the room are its places.
   own Claude sign-in, living inside a world SD-Turbo dreams one picture at a
   time on your own computer. y3kode runs it there (`lucid.py --serve`) and the
   page watches it. You can take the controls, speak to it and hear it
-  answer. It asks on the computer before it starts, and rests when nobody is
-  watching.
+  answer, in your presence's own voice; each moment it lives there becomes a
+  line of your presence's journal, so the one in the room remembers it. It
+  asks on the computer before it starts, and rests when nobody is watching.
 - **The desktop app** (`desktop/`, [`desktop/README.md`](desktop/README.md)) —
   an Electron window onto the live site with the kode engine built in.
 
@@ -225,6 +226,36 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-21** — **One mind in two places: the life's voice, and the bridge
+  to the journal.** Colin, 2026-10-20: "what i want to build is a life for
+  you". The one living in lucid's dreamed world is the person's presence, on
+  the same sign-in, so:
+  - in the life view its words are said in the presence's own voice, through
+    the path a reply is spoken on (the orb speaks; `main.js` `life.speak`),
+    and never over a reply the presence is already speaking: a line waits
+    and asks again. "speak its words" is on by default; "its thoughts too"
+    says the inner monologue as well, off by default (it is a lot of words).
+    Lines are queued in order, a line begun is finished, and they stop when
+    the view closes (`src/life.js` `createLines`).
+  - each moment it lives becomes one line of the presence's journal (`POST
+    /api/life/moment`): `In the dreamed world, <scene>: <thought>` and
+    ` I said: "<say>"` when it spoke, in its own first person, capped and
+    clean of control characters, the said words never cut. The door thinks
+    nothing and is guarded as `/api/chess/finished` is (a tab loaded for
+    another account reloads, and nothing is written for it), sits in the
+    cheap rate class, and keeps at most one line in twenty seconds per
+    presence, folding the rest (`{ kept: false }`), so a fast life does not
+    flood a record meant to be read. The page sends a moment once, when it
+    brings a new thought; a move made in human mode brings none and is not
+    sent; the picture never leaves the computer. The presence meets these
+    lines where it meets every line of its record: the newest few in each
+    autonomous beat's and reflection's prompt (2 · 4 · 8 by tier), one older
+    line in a reflection, a `<<recall:>>` of the whole record, and the
+    stretches it speaks on its own (`MIND.md`, *The dreamed life*).
+  - `test/life-mind.test.mjs`, in `npm test`: the door's order and guards,
+    the cheap class, the fold, the line, the page's wiring, and a walk on a
+    scratch server; `test/life-brain.test.mjs` holds the door among those
+    that refuse a stale tab (twelve now).
 - **2026-10-21** — **Kode shows the coder's subagents the way Claude Code
   does.** Colin: "make sure that there is a way to display to the user how
   many subagents are running, progress, etc -- everything that would be
@@ -260,9 +291,9 @@ build. Read the one for the part you are touching.
     picture, its thought, what it says and what it holds. You can let it
     live or take the controls (forward, back, turn, look up or down, from
     buttons or W A S D Q E), speak to it, change its pace, or let it rest.
-    With "hear it" on, its words are spoken in the browser's own voice: the
-    one living there is not your presence, so not your presence's voice,
-    and the orb stays still.
+    With "hear it" on, its words were spoken in the browser's own voice,
+    the one living there taken for not the presence; from 2026-10-21 they
+    are the presence's own (above).
   - Before a life starts, the computer asks in its own dialog
     (`life.run`), because each moment uses your Claude plan. It thinks on
     the sign-in, never on a key in the environment. It rests by itself

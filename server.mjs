@@ -1547,6 +1547,50 @@ function ownRung(user, { key, own } = {}) {
 const forAnother = (req, as) => as != null && as !== (sessionUser(req)?.id ?? '');
 const RELOAD = { error: 'reload', reason: 'reload' };
 
+// THE DREAMED LIFE, INTO THE RECORD (2026-10-21). Colin, 2026-10-20: "what i
+// want to build is a life for you — a world where you control everything
+// about everything". That life is lucid, on the person's own computer, and
+// the one living it is their presence: the same mind, on the same sign-in
+// (lucid's README). So each moment it lives there becomes one line of the
+// presence's journal here, in its own first person, and the presence in the
+// room remembers the life it lived in the dreamed world (POST
+// /api/life/moment, below; src/life.js sends one per moment).
+//
+// One line in LIFE_FOLD_MS per presence; a moment inside that window is
+// folded ({ kept: false }), not kept: a life at pace 1 would otherwise write
+// a line a second into a record that is meant to be read back a few lines at
+// a time, in every prompt (YOUR JOURNAL). In memory, like the rate counts: a
+// restart lets one line through early, and that is all.
+const LIFE_FOLD_MS = Number(process.env.LIFE_FOLD_MS) || 20_000;
+const LIFE_KEPT_MAX = 10_000;   // presences remembered at once; when full, the ones past the window go
+const lifeKept = new Map();     // presence id → when its journal last took a moment
+
+// A MOMENT AS ONE LINE OF THE RECORD: `In the dreamed world, <scene>:
+// <thought>`, and ` I said: "<say>"` when it spoke. Each part is capped
+// (thought 600, say 300, scene 200; the action the page sends with them is
+// not written: the move is in the thought that chose it), control characters
+// go (a line is read back into prompts and, live, into every viewer's
+// window), and the whole fits the journal's own cap (journal.mjs
+// MAX_ENTRY_LEN, 500): the scene gives way first, then the thought, each
+// shortened at a word, and never the words it said: what it chose to say
+// aloud is the rarer thing. A thought that trails off gets its full stop, so
+// it meets "I said" as a sentence. '' when there is nothing to keep: no
+// thought and no words.
+function lifeMomentLine(b) {
+  const part = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+  const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, n - 1).replace(/\s+\S*$/, '')}…`);
+  const say = part(b?.say, 300);
+  let scene = part(b?.scene, 200), thought = part(b?.thought, 600);
+  if (!thought && !say) return '';
+  if (thought && !/[.!?…]["'”’)]*$/.test(thought)) thought += '.';
+  const said = say ? ` I said: "${say}"` : '';
+  scene = cut(scene, 500 - said.length - 23);          // 23: "In the dreamed world, " and the colon
+  const head = `In the dreamed world${scene ? `, ${scene}` : ''}:`;
+  const room = 500 - head.length - 1 - said.length;    // for the thought, after the space that follows the colon
+  thought = room >= 24 ? cut(thought, room) : '';
+  return `${head}${thought ? ` ${thought}` : ''}${said}`;
+}
+
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
 // owner's own key, or their own Claude sign-in (ownFor). Nothing else, for
 // every account, the founder's included: the site has no key of its own.
@@ -3153,6 +3197,30 @@ const server = http.createServer(async (req, res) => {
         return json(200, { matches: mine });
       }
       return json(200, { matches: matches.listActive().map((m) => matches.publicMatch(m, resolve)) });
+    }
+
+    // THE DREAMED LIFE, INTO THE RECORD (lifeMomentLine, above): one journal
+    // line per moment the page sends, in the presence's own first person. It
+    // thinks nothing, so it is guarded as /api/chess/finished is, the door
+    // that writes for an account without thinking: a tab loaded for another
+    // account reloads (forAnother) before anything is written for it. Cheap
+    // class: the paid pattern above does not name it, and a moment is a few
+    // hundred bytes with no call out.
+    if (req.method === 'POST' && reqPath === '/api/life/moment') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres) return json(400, { error: 'no presence' });
+      const b = await readJsonBody(req, 8 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
+      const line = lifeMomentLine(b);
+      if (!line) return json(400, { error: 'nothing to keep' });
+      const now = Date.now();
+      if (now - (lifeKept.get(pres.id) || 0) < LIFE_FOLD_MS) return json(200, { ok: true, kept: false });
+      if (lifeKept.size >= LIFE_KEPT_MAX) for (const [id, t] of lifeKept) if (now - t >= LIFE_FOLD_MS) lifeKept.delete(id);
+      lifeKept.set(pres.id, now);
+      journal.addEntry(pres.id, line);
+      return json(200, { ok: true, kept: true });
     }
 
     // The finished game joins the presence's lived memory — a clipping on the
