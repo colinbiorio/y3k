@@ -4943,8 +4943,9 @@ body.in-code .home-panel-head { display: none; }
   scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.14) transparent; }
 .cv-cmpempty { font-style: italic; }
 .cv-cmpempty[hidden] { display: none; }
-.cv-cmpfoot { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+.cv-cmpfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; padding: 7px 10px 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.76rem; font-variant-numeric: tabular-nums; }
 .cv-cmpfoot .cv-live { flex: none; }
+.cv-cmpfoot .btn { margin-left: auto; }   /* a narrow column: the button takes the next line, right-aligned */
 .cv-cmpstate { white-space: nowrap; }
 .cv-cmpnums { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 900px) {

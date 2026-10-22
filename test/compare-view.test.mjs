@@ -379,10 +379,11 @@ console.log('\nthe screen:');
   });
 
   await ok('the screen: "use this" puts the answer in the main session\'s composer, prefixed, and sends nothing', async () => {
-    // from an aside's tab: the same comparison, so the strip and the view stay
+    // from an aside's tab: the same comparison, so the view stays (and the
+    // strip, which says what the view's head says, waits behind it)
     S.active = 'a1'; tick(); cv._feed({ sid: 'a1', type: 'session.state', state: 'idle' }); tick();
-    assert.equal($('div.cv-cmpstrip').hidden, false, 'the strip shows in an aside too');
     assert.ok($('div.cv-cmp'), 'the view stays open across the comparison\'s own tabs');
+    assert.equal($('div.cv-cmpstrip').hidden, true, 'one at a time: the strip is behind the view');
     const cols = $$('div.cv-cmpcol');
     cols[1].querySelector('button.cv-cmpuse').click();
     await settle();

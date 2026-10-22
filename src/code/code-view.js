@@ -2301,6 +2301,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the view belongs to the comparison of the session on screen
     if (cmp.view && (!g || g.id !== cmp.gid)) closeCompareView();
     if (!g) { if (cmp.key !== null) { cmp.key = null; clear(ui.cmp); ui.cmp.hidden = true; } return; }
+    // while the view is open it says all this itself, right under the strip,
+    // and its × (close) would sit over the strip's × (end): one at a time
+    ui.cmp.hidden = !!cmp.view;
     const answers = compareAnswers(S, g);
     const key = [g.id, g.question, answers.length ? countSays(answers) : ''].join('|');
     if (key === cmp.key) return;
@@ -2311,7 +2314,6 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     x.addEventListener('click', () => endCompare(g));
     swap(ui.cmp, h('span.cv-cmplab', 'comparing: '), h('span.cv-cmpq', { title: g.question }, g.question),
       h('span.cv-cmpn.muted', ' · ' + (g.asides.length ? countSays(answers) : 'starting the others…')), h('span.cv-grow'), open, x);
-    ui.cmp.hidden = false;
   }
   // the person ends it: the grouping goes, the tabs and the sessions stay
   // (the strip's key is left as drawn, so renderCompareStrip sees a strip to clear)
@@ -2339,6 +2341,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       cols);
     cmp.view = { el, cols, n, stop, close, byKey };
     ui.main.appendChild(el);
+    ui.cmp.hidden = true;             // the strip, while the view says the same (renderCompareStrip)
     renderCompareView();
     if (byKey) close.focus();
   }
@@ -2348,6 +2351,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const back = refocus && !!V.el.contains(document.activeElement);
     V.el.remove();
     cmp.view = null; cmp.gid = null; cmp.cols.clear();
+    if (ui && cmp.key !== null) ui.cmp.hidden = false;   // the strip stays
     if (back) (V.byKey ? dockUi?.ta : ui?.cmp.querySelector('.cv-cmpopen') || dockUi?.ta)?.focus();
   }
   // one column per coder, patched in place: the reply's own streaming
