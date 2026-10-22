@@ -974,10 +974,15 @@ const social = createSocial({
   // the way Code's replies are read (codeLink.speak: stop() back, never over
   // a turn); and the microphone through the dictation lease, so a spoken
   // question goes to the game and never to the conversation.
-  // life (src/life.js): its words in the browser's own voice, not the
-  // presence's, and the orb stays still; and the way to kode, to connect y3kode
+  // life (src/life.js): its words in the presence's own voice, the way Code's
+  // replies are read (codeLink.speak: the orb speaks, stop() back), and never
+  // over a turn of the presence's own (busy) or a line of its autonomous mode
+  // (currentSpeak): null then, and the view keeps the line and asks again.
+  // One mind in two places (2026-10-21): the one living there is the
+  // presence, on the same sign-in, and what it lives goes into the presence's
+  // journal (/api/life/moment). And the way to kode, to connect y3kode.
   life: {
-    speak: (t) => { const sp = voice.speaker({}); sp.push(String(t || '')); sp.end(); return () => { try { sp.stop(); } catch { /* already quiet */ } }; },
+    speak: (t, o) => (busy || currentSpeak ? null : codeLink.speak(t, o)),
     openKode: () => { const n = $('nav-code'); if (n) { n.hidden = false; n.click(); } },
   },
   games: {
