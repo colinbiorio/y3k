@@ -66,7 +66,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let lastGame = 'chess';
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
   // life (src/life.js): lucid on your own computer, watched from here; its words
-  // in the browser's own voice when asked (main.js `life`)
+  // in the presence's own voice, and the way to kode (main.js `life`)
   const lifeView = createLifeView({ toast: toastOnce, ...(life || {}) });
   // y3k Code is loaded only when someone opens it: most visitors never will,
   // and none of it should weigh on the first paint.

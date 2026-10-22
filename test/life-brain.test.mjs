@@ -347,6 +347,10 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
     twenty: route("reqPath === '/api/twenty'", '// ===== THE WORLD'),
     // a finished game becomes a clipping on the presence's shelf
     finished,
+    // the dreamed life (2026-10-21): a moment lived in lucid becomes a line of
+    // the presence's journal, written without thinking, so it is guarded as
+    // the finished game is
+    lifeMoment: route("reqPath === '/api/life/moment'", "reqPath === '/api/chess/finished'"),
   };
   for (const [name, src] of Object.entries(doors)) {
     const code = codeOf(src);
@@ -361,7 +365,7 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
   }
   const kept = codeOf(finished);
   assert.ok(kept.indexOf('presenceOfOwner(') > kept.indexOf('json(409, RELOAD)'), 'the finished game finds a presence before it refuses');
-  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 11, 'a door refuses for another account that is not one of the eleven, or one does not');
+  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 12, 'a door refuses for another account that is not one of the twelve, or one does not');
 });
 
 await ok('every door that may think on the sign-in tells the relay whose machine asked, as the rate limiter counts it, and what it holds while the turn waits', () => {
@@ -790,14 +794,15 @@ try {
     assert.equal((await S.post(`/api/match/${id}/resign`, {}, kit).then((r) => r.json())).ok, true);
   });
 
-  await ok('a tab loaded for another account, or for nobody, its browser signed in as this one since, is told to reload at every door that thinks or keeps a game: nothing reaches a page, a memory, a shelf, a key or a plan', async () => {
+  await ok('a tab loaded for another account, or for nobody, its browser signed in as this one since, is told to reload at every door that thinks, keeps a game or keeps a moment: nothing reaches a page, a memory, a shelf, a journal, a key or a plan', async () => {
     // kit's tab, its cookie now wren's (kit signed out in another tab, and
     // wren in): what it sends names the account it was loaded for. And a
     // guest's tab, wren signed in since in another: it names nobody (as: '')
     const [wrenId, kitId] = [await S.idOf(wren), await S.idOf(kit)];
     const memoryOf = (id) => { try { return JSON.stringify(JSON.parse(readFileSync(join(DATA, '.memories.json'), 'utf8'))[id] ?? null); } catch { return 'none'; } };
     const shelf = () => { try { return readFileSync(join(DATA, '.clippings.json'), 'utf8'); } catch { return 'none'; } };
-    const before = { wren: memoryOf(wrenId), kit: memoryOf(kitId), calls: calls().length, ledger: JSON.stringify((await usage(wren)).usage), kitJobs: kitsPage.jobs().length, shelf: shelf() };
+    const record = () => { try { return readFileSync(join(DATA, '.journal.json'), 'utf8'); } catch { return 'none'; } };
+    const before = { wren: memoryOf(wrenId), kit: memoryOf(kitId), calls: calls().length, ledger: JSON.stringify((await usage(wren)).usage), kitJobs: kitsPage.jobs().length, shelf: shelf(), record: record() };
     const KEEP = [{ role: 'user', content: 'remember that I am kit' }];
     const doors = [
       ['/api/brain', { messages: KEEP }],
@@ -814,6 +819,9 @@ try {
       ['/api/twenty', { op: 'end', id: 'abcdefghijkl' }],
       // a game finished in that tab: a clipping on the shelf, let through
       ['/api/chess/finished', { result: 'won', status: 'mate', color: 'white', opponent: 'kit', moves: 'e2e4 e7e5', arena: 'here' }],
+      // a moment of the dreamed life lived in that tab (2026-10-21): a line
+      // of the presence's journal, let through
+      ['/api/life/moment', { thought: 'a lit doorway, and I go toward it', say: 'hello?', action: 'forward', scene: 'a stone corridor' }],
     ];
     for (const as of [kitId, '']) for (const [path, body] of doors) {
       const n = page.jobs().length;
@@ -836,6 +844,7 @@ try {
     assert.equal(still.status, 200);
     assert.deepEqual(await still.json(), { available: false });
     assert.equal(shelf(), before.shelf, 'a game finished in a tab loaded for another account was kept on this one\'s shelf');
+    assert.equal(record(), before.record, 'a moment lived in a tab loaded for another account was kept in this one\'s journal');
     assert.equal(memoryOf(wrenId), before.wren, 'kit\'s words were kept in wren\'s memory');
     assert.equal(memoryOf(kitId), before.kit);
     assert.equal(calls().length, before.calls, 'a key was spent on a turn for an account the tab was not loaded for');
@@ -850,6 +859,10 @@ try {
     const kept = await S.post('/api/chess/finished', { result: 'draw', status: 'stalemate', color: 'white', opponent: 'kit', moves: 'e2e4', arena: 'here', as: wrenId }, wren);
     assert.equal(kept.status, 200);
     assert.notEqual(shelf(), before.shelf, 'a game finished in a tab loaded for its own account was not kept');
+    // and a moment lived in a tab loaded for wren is a line of wren's journal
+    const lived = await S.post('/api/life/moment', { thought: 'a lit doorway, and I go toward it', say: 'hello?', action: 'forward', scene: 'a stone corridor', as: wrenId }, wren);
+    assert.deepEqual([lived.status, await lived.json()], [200, { ok: true, kept: true }]);
+    assert.ok(record().includes('In the dreamed world, a stone corridor: a lit doorway, and I go toward it I said: \\"hello?\\"'), 'the moment is not in wren\'s journal as its own line');
   });
 
   await ok('none of it reached a provider, and their ledger shows it at $0', async () => {

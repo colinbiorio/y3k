@@ -8,8 +8,10 @@
 //
 // THE LINES IT KEEPS
 //  - Local only, like everything y3kode does: lucid runs on this computer, the
-//    page asks this engine how the life is (life.state), and nothing about it
-//    goes to yearthreethousand.com.
+//    page asks this engine how the life is (life.state), and this engine sends
+//    nothing about it to yearthreethousand.com. (The page sends each moment's
+//    words to the presence's own journal there, never the picture: src/life.js,
+//    2026-10-21.)
 //  - Asked first, on this computer (consent 'life.run', a native dialog in the
 //    y3k app), once each time y3kode starts: a life thinks on the person's
 //    plan about once every few seconds while it runs, and dreams on this
