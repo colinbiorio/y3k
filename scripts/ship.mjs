@@ -121,8 +121,16 @@ async function main(argv) {
     console.log(`waiting for main as it is (${want.slice(0, 7)})`);
   } else if (/^\d+$/.test(arg || '')) {
     console.log(`merging #${arg}…`);
-    const r = spawnSync('gh', ['pr', 'merge', arg, '--merge'], { ...at, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    if (r.status !== 0) { console.error((r.stderr || r.stdout || '').trim()); process.exit(1); }
+    // GitHub answers "Base branch was modified" for a few seconds after a push
+    // while it works out whether the branch still merges: that is a wait, not a no
+    let r;
+    for (let tries = 0; ; tries++) {
+      r = spawnSync('gh', ['pr', 'merge', arg, '--merge'], { ...at, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const said = (r.stderr || r.stdout || '').trim();
+      if (r.status === 0 || tries >= 4 || !/Base branch was modified/i.test(said)) { if (r.status !== 0) { console.error(said); process.exit(1); } break; }
+      console.log('  GitHub is still working out the merge; asking again in 8 s');
+      spawnSync('sleep', ['8']);
+    }
     sh('git', ['fetch', '-q', 'origin', 'main'], at);
     want = sh('gh', ['pr', 'view', arg, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'], at);
     console.log(`merged as ${want.slice(0, 7)}`);

@@ -121,6 +121,11 @@ await ok('the tabs here: Safari and Chrome asked by name, counted when they answ
   assert.match(RELOAD_SCRIPTS('x.com').Safari, /set URL of t to \(URL of t\)/, 'Safari reloads by its own address, no Develop setting');
   assert.match(RELOAD_SCRIPTS('x.com')['Google Chrome'], /reload t/);
 });
+await ok('a merge GitHub is still working out is asked again, not given up on', () => {
+  const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');
+  assert.match(src, /Base branch was modified/i);
+  assert.match(src, /tries >= 4/);
+});
 await ok('times read as minutes and seconds', () => { assert.equal(fmt(0), '0:00'); assert.equal(fmt(130_000), '2:10'); });
 await ok('the script reads no .env and adds nothing to the site; it is npm run ship; README says so', () => {
   const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');

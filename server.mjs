@@ -72,6 +72,7 @@ import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCa
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange, etagOf } from './delivery.mjs';
 import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/media-rules.mjs';
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
+import * as lifePub from './life-publish.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, the walls of a profile, and replies. The blocked
@@ -298,6 +299,8 @@ const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_R
 // ago), and where the desktop app can be had, if the site knows (a release
 // page; null tells the page not to offer it).
 const CODE_DIR = join(ROOT, 'y3k-code');
+// A published life's pictures, by username and moment (life-publish.mjs).
+const LIFE_FRAME = /^\/life\/([^/]{1,64})\/(\d{1,9})\.jpg$/;
 // The version that tarball is, so a page can tell a y3kode that is behind it
 // (Settings → Brain's "Update needed", y3k-code/update.mjs).
 const ENGINE_VERSION = (() => { try { return JSON.parse(readFileSync(join(CODE_DIR, 'package.json'), 'utf8')).version || null; } catch { return null; } })();
@@ -1867,6 +1870,78 @@ const server = http.createServer(async (req, res) => {
         commit: COMMIT, since: SINCE });
     }
 
+    // A LIFE, PUBLISHED (life-publish.mjs; Colin, 2026-10-24: "if it's
+    // possible to make life viewable from web enable that as well"). The
+    // living process posts each moment with the account's key — a bearer, no
+    // cookie: a daemon has none — and the page reads the newest from
+    // anywhere; words typed on the page wait in the inbox until the life asks.
+    // Pictures leave by their own route, as what they are (nosniff), to the
+    // account, or to anyone by username once the account shares its life.
+    if (reqPath.startsWith('/api/life/') || LIFE_FRAME.test(reqPath)) {
+      const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+      if (reqPath === '/api/life/publish' && req.method === 'POST') {
+        const uid = lifePub.uidOf(bearer);
+        if (!uid) return json(401, { error: 'no such key' });
+        if (rateLimited(req, 'download')) return json(429, { error: 'slow down' });
+        let b;
+        try { b = await readJsonBody(req, 700 * 1024); } catch (e) { return json(e.statusCode === 413 ? 413 : 400, { error: e.statusCode === 413 ? 'the moment is too big' : 'bad json' }); }
+        const r = lifePub.publish(uid, b);
+        return json(r.ok ? 200 : 400, r);
+      }
+      if (reqPath === '/api/life/inbox' && req.method === 'GET') {
+        const uid = lifePub.uidOf(bearer);
+        if (!uid) return json(401, { error: 'no such key' });
+        if (rateLimited(req, 'download')) return json(429, { error: 'slow down' });
+        return json(200, { ok: true, lines: lifePub.takeInbox(uid) });
+      }
+      const user = sessionUser(req);
+      if (reqPath === '/api/life/key' && req.method === 'POST') {
+        if (!user) return json(401, { error: 'sign in' });
+        const key = lifePub.makeKey(user.id);
+        const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+        const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(localhost|127\.)/.test(host) ? 'http' : 'https');
+        return json(200, { ok: true, key, command: `.venv/bin/python live.py publish --to ${proto}://${host} --key ${key}` });
+      }
+      if (reqPath === '/api/life/share' && req.method === 'POST') {
+        if (!user) return json(401, { error: 'sign in' });
+        const b = await readJsonBody(req, 4000).catch(() => ({}));
+        return json(200, { ok: true, shared: lifePub.setShared(user.id, !!b.shared) });
+      }
+      if (reqPath === '/api/life/say' && req.method === 'POST') {
+        if (!user) return json(401, { error: 'sign in' });
+        if (rateLimited(req, 'download')) return json(429, { error: 'slow down' });
+        const b = await readJsonBody(req, 4000).catch(() => ({}));
+        return lifePub.say(user.id, user.username, b.text) ? json(200, { ok: true }) : json(400, { error: 'say something' });
+      }
+      if (reqPath === '/api/life/latest' && req.method === 'GET') {
+        const who = new URL(req.url, 'http://x').searchParams.get('user');
+        let uid, mine;
+        if (who) {
+          uid = idByUsername(String(who));
+          if (!uid || !lifePub.isShared(uid)) return json(404, { error: 'no life to watch here' });
+          mine = !!user && user.id === uid;
+        } else {
+          if (!user) return json(401, { error: 'sign in' });
+          uid = user.id; mine = true;
+        }
+        const name = usernameById(uid) || String(who || '');
+        const l = lifePub.latest(uid);
+        return json(200, { ok: true, user: name, mine, shared: lifePub.isShared(uid), key: mine ? lifePub.hasKey(uid) : undefined,
+          life: l ? { ...l, frameUrl: l.frameUrl ? `/life/${encodeURIComponent(name)}/${l.frameUrl}` : null } : null,
+          recent: l ? lifePub.recent(uid, 12) : [] });
+      }
+      const fm = LIFE_FRAME.exec(reqPath);
+      if (fm && req.method === 'GET') {
+        let name = ''; try { name = decodeURIComponent(fm[1]); } catch { name = ''; }
+        const uid = name ? idByUsername(name) : null;
+        if (!uid || !(lifePub.isShared(uid) || (user && user.id === uid))) return json(404, { error: 'not found' });
+        const buf = lifePub.frame(uid, fm[2]);
+        if (!buf) return json(404, { error: 'not found' });
+        return send(res, 200, buf, { 'content-type': 'image/jpeg', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'cache-control': 'private, max-age=31536000, immutable' });
+      }
+      return json(404, { error: 'not found' });
+    }
+
     // YOUR OWN BRAIN, THROUGH YOUR OWN PAGE (own-relay.mjs), for any signed-in
     // account: the page holds this stream open while it offers to think, and
     // answers each job. A job is only ever sent to, and only ever answered by,
@@ -2116,6 +2191,7 @@ const server = http.createServer(async (req, res) => {
       const orphanMedia = posts.forget(uid, pids);
       for (const id of orphanMedia) { try { media.deleteImage(id); } catch { /* already gone */ } }
       media.forgetOwner(uid);
+      lifePub.forget(uid);   // the published life, its key and pictures
       forgetMemory(uid, pids);
       journal.forget(pids);
       letters.forget(pids);

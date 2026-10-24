@@ -67,7 +67,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
   // life (src/life.js): lucid on your own computer, watched from here; its words
   // in the presence's own voice, and the way to kode (main.js `life`)
-  const lifeView = createLifeView({ toast: toastOnce, ...(life || {}) });
+  // `?life=<username>` watches someone's shared, published life (life.js):
+  // the page opens on it, and asks nothing of this computer
+  const lifeWatch = (() => { try { return new URL(location.href).searchParams.get('life') || ''; } catch { return ''; } })();
+  const lifeView = createLifeView({ toast: toastOnce, ...(life || {}), ...(lifeWatch ? { watch: lifeWatch } : {}) });
   // y3k Code is loaded only when someone opens it: most visitors never will,
   // and none of it should weigh on the first paint.
   let codeView = null;
@@ -1347,7 +1350,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // leaves): land on the chess screen, not the orb. Checked HERE because
     // this is the first moment home is actually real — a timeout at module
     // load raced the boot and could fire against a page still gated.
-    showView(wantsChessReturn() ? 'chess' : 'orb');
+    showView(wantsChessReturn() ? 'chess' : lifeWatch ? 'life' : 'orb');
     clearInterval(pollTimer);
     // keep the open panel's rings + counts fresh — while anyone can see them:
     // a hidden tab has nobody to show a count to, and its fetches and diffs

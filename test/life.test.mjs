@@ -13,7 +13,7 @@ import { PassThrough } from 'node:stream';
 import { lucidAt, lineFor, extraArgs, createLife, MOVES } from '../y3k-code/life.mjs';
 import { COMMANDS, validateCommand } from '../y3k-code/protocol.mjs';
 import { KINDS, describe } from '../y3k-code/consent.mjs';
-import { phaseOf, LIFE_ENGINE } from '../src/life.js';
+import { phaseOf, LIFE_ENGINE, sourceOf, agoText } from '../src/life.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -185,6 +185,26 @@ await ok('an old y3kode is offered its update here, not sent to kode (Colin, 202
   assert.match(life, /waitFor\(r\.version/, 'after the restart it waits for the new version');
   assert.match(life, /_blank', 'noopener,noreferrer'/, 'the app opens in its own tab, with no handle back');
   assert.equal(LIFE_ENGINE, '0.3.4');
+});
+
+await ok('the published life: which source the page shows, how old a moment reads, and the page\'s pins (Colin, 2026-10-24: "make life viewable from web")', () => {
+  assert.equal(sourceOf('living', { ok: true, life: { n: 1 } }), 'local', 'a life living here comes first');
+  assert.equal(sourceOf('resting', { ok: true, life: { n: 1 } }), 'web');
+  assert.equal(sourceOf('unpaired', { ok: true, life: { n: 1 } }), 'web', 'no engine needed to watch');
+  assert.equal(sourceOf('unpaired', { ok: true, life: null }), 'none');
+  assert.equal(sourceOf('resting', { ok: false, status: 401 }), 'none');
+  assert.equal(agoText(1000, 4000), '3s ago'); assert.equal(agoText(0, 90_000), '1 min ago'); assert.equal(agoText(0, 7200_000), '2 h ago'); assert.equal(agoText(0, 2 * 86400_000), '2 d ago');
+  const life = readFileSync(new URL('../src/life.js', import.meta.url), 'utf8');
+  assert.match(life, /\/api\/life\/latest\?user=\$\{encodeURIComponent\(watch\)\}/, 'someone else\'s by username, encoded');
+  assert.match(life, /if \(!watch\) poll\(\);/, 'watching someone else asks nothing of this computer');
+  assert.match(life, /\/api\/life\/key'/, 'the key is made from the page'); assert.match(life, /\/api\/life\/share'/); assert.match(life, /\/api\/life\/say'/);
+  assert.match(life, /lived through the door/, 'who was at the door is said');
+  assert.match(life, /function publishCard\(\)/); assert.match(life, /function webShell\(\)/);
+  assert.match(life, /if \(watch \|\| !pub\?\.ok \|\| !pub\.mine\) return '';/, 'the publish card is the owner\'s only');
+  const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
+  assert.match(social, /searchParams\.get\('life'\)/, '?life= is read once');
+  assert.match(social, /lifeWatch \? 'life' : 'orb'/, 'and the page opens on the life');
+  assert.match(readFileSync(new URL('../server.mjs', import.meta.url), 'utf8'), /lifePub\.isShared\(uid\)\)\) return json\(404/, 'a picture of an unshared life is nobody else\'s');
 });
 
 await ok('what the engine says becomes one of the view\'s states', () => {
