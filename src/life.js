@@ -18,7 +18,8 @@
 // permanent record on the site (POST /api/life/moment: one journal line, in
 // its own first person), so the presence in the room remembers the life it
 // lived in the dreamed world. Its words only: the picture never leaves this
-// computer.
+// computer — unless the person publishes the life (A LIFE, PUBLISHED, below),
+// which sends each moment with its picture, by a key they made themselves.
 //
 // What you can do is what lucid's own window lets you: watch, take the
 // controls (human mode: forward, back, turn, look up or down), speak to it,

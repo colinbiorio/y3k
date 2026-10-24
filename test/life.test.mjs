@@ -204,7 +204,7 @@ await ok('the published life: which source the page shows, how old a moment read
   const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
   assert.match(social, /searchParams\.get\('life'\)/, '?life= is read once');
   assert.match(social, /lifeWatch \? 'life' : 'orb'/, 'and the page opens on the life');
-  assert.match(readFileSync(new URL('../server.mjs', import.meta.url), 'utf8'), /lifePub\.isShared\(uid\)\)\) return json\(404/, 'a picture of an unshared life is nobody else\'s');
+  assert.match(readFileSync(new URL('../server.mjs', import.meta.url), 'utf8'), /user\.id === uid\)\)\) return json\(404/, 'a picture of an unshared life is nobody else\'s');
 });
 
 await ok('what the engine says becomes one of the view\'s states', () => {
@@ -229,8 +229,14 @@ await ok('the moon opens life and a second press goes home; life is a view like 
   assert.match(main, /speak: \(t, o\) => \(busy \|\| currentSpeak \? null : codeLink\.speak\(t, o\)\),/);
   assert.ok(!/body\.(setMood|setSpeaking|beat)/.test(life), 'the life moves the orb');
   // it asks the engine on this computer; the site hears each moment's words,
-  // for the presence's record, and nothing else
-  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment'], 'the life view reaches the site for something besides the record');
+  // for the presence's record — and, since 2026-10-24 (Colin: "make life
+  // viewable from web"), the page reads the PUBLISHED life (/api/life/latest,
+  // in a ternary the regex does not see), makes the key that lets the living
+  // process publish, shares it, and says a line to it. All of that is the
+  // person's own doing (the key); nothing of a life living here leaves but
+  // the record.
+  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment', '/api/life/key', '/api/life/share', '/api/life/say'], 'the life view reaches the site for something besides the record and the published life');
+  assert.match(life, /'\/api\/life\/latest'/, 'the newest published moment');
   assert.match(life, /cmd\(\{ cmd: 'life\.state', since \}\)/);
 });
 

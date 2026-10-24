@@ -237,6 +237,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-24** — **A life, published: viewable from the web.** Colin: "if
+  it's possible to make life viewable from web enable that as well". A life
+  lived on the person's computer (lucid) can post each moment to the site —
+  the picture, what it saw, thought and said, where it stands, who was at the
+  door — with a key the life page makes ("watch it from anywhere": `live.py
+  publish --to <site> --key <key>`), and the life page shows the newest
+  moment on any device, no engine, no download; words typed there wait in an
+  inbox until the life asks. Only the account sees its life until it shares
+  it; then anyone can watch at `?life=<username>`. `life-publish.mjs`,
+  `/api/life/*`, `/life/<user>/<n>.jpg` (nosniff), `test/life-publish.test.mjs`.
 - **2026-10-24** — **The life page offers the y3kode update itself.** Colin:
   "when i click life it says open kode but then i go to kode and there's no
   option to update or download whatever you need -- does it need to be a
