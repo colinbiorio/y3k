@@ -238,6 +238,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-24** — **The life page offers the y3kode update itself.** Colin:
+  "when i click life it says open kode but then i go to kode and there's no
+  option to update or download whatever you need -- does it need to be a
+  download?" Kode never offered updates, so the page's "open kode" led
+  nowhere. An old y3kode is asked whether it can update itself; if so the
+  life page runs the same update Settings → Brain runs and waits for the new
+  version. One too old, or a browser not connected, is shown where the app is
+  (it has y3kode inside) and the install line. Living a life on this computer
+  needs y3kode once; watching one from the web will not (the published life,
+  next).
 - **2026-10-24** — **Shipped, and on the screen.** Colin: "give yourself the
   ability to push changes to the website and reload lmao -- frictionless is
   the goal -- obviously only give that ability to me tho lmao". `npm run ship`

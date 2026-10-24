@@ -27,7 +27,18 @@
 // It rests by itself when no page has looked at it for ten minutes
 // (life.mjs), because each moment uses your Claude plan.
 
-import { engineCmd } from './own-brain.js';
+import { engineCmd, updateY3kode, waitForVersion, siteSetup } from './own-brain.js';
+
+// THE LIFE NEEDS y3kode 0.3.4 (y3k-code/life.mjs). Colin, 2026-10-24: "when i
+// click life it says open kode but then i go to kode and there's no option to
+// update or download whatever you need -- does it need to be a download?" Kode
+// never offered updates (that was Settings → Brain), so the page sent people
+// to a door with nothing behind it. Now the update is offered here: y3kode
+// fetches the newest version from this site and restarts on it, after asking
+// on the computer (y3k-code/update.mjs); a y3kode too old to update itself,
+// or none at all, is told where the app is (it has y3kode inside) and the one
+// line that installs the engine. Only living a life here needs any of it.
+export const LIFE_ENGINE = '0.3.4';
 import { whoseFields, reloaded } from './brain.js';
 
 const LIVE_MS = 700;     // how often a running life is asked how it is
@@ -114,8 +125,12 @@ export function createLines({ speak, schedule = setTimeout, unschedule = clearTi
   };
 }
 
-export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout, fetchFn = (...a) => fetch(...a) } = {}) {
+export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout, fetchFn = (...a) => fetch(...a),
+  update = updateY3kode, waitFor = waitForVersion, setup = siteSetup, openUrl = (u) => window.open(u, '_blank', 'noopener,noreferrer') } = {}) {
   let grid = null;
+  let engine = null;       // engine.hello, asked once a y3kode turns out to be old: { version, update }
+  let setupV = null;       // the site's setup: where the app is, the install line (own-brain.js siteSetup)
+  let updating = '';       // '' | 'asking' | 'restarting' while y3kode updates itself
   let timer = 0;
   let since = -1;          // the newest picture this page has (life.state since)
   let pic = '';            // that picture, as a data URL
@@ -152,7 +167,10 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     try { r = await cmd({ cmd: 'life.state', since }); } catch { r = { ok: false, code: 'offline' }; }
     if (!grid) return;
     st = r;
-    phase = phaseOf(r);
+    phase = updating ? 'old' : phaseOf(r);
+    // what to offer instead: an update, the app, the install line
+    if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (await setup({ fetchFn })) || {}; if (!grid) return; }
+    if (phase === 'old' && !engine) { const h = await cmd({ cmd: 'engine.hello' }); if (!grid) return; engine = h?.ok ? { version: h.version || '', update: h.update === true } : { version: '', update: false }; }
     if (r?.ok && typeof r.frame === 'string' && r.frame) { pic = 'data:image/jpeg;base64,' + r.frame; since = r.frameN | 0; }
     // a moment of a living life, and only then: a life at rest still shows
     // its last moment, which was kept and said when it was lived
@@ -266,10 +284,18 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     if (phase === 'checking') return `<p class="life-note">looking for the life on this computer…</p>`;
     if (phase === 'unpaired') return `<div class="life-card"><b>a life lives on your own computer</b>
       <p>lucid runs there, through y3kode, and this page watches it. Open kode once to connect y3kode in this browser, then come back.</p>
-      ${openKode ? '<button type="button" id="life-kode" class="create-go">open kode</button>' : ''}</div>`;
-    if (phase === 'old') return `<div class="life-card"><b>y3kode needs an update for this</b>
-      <p>life arrived in y3kode 0.3.4. Open kode and it will offer the update.</p>
-      ${openKode ? '<button type="button" id="life-kode" class="create-go">open kode</button>' : ''}</div>`;
+      <div class="life-row">${openKode ? '<button type="button" id="life-kode" class="create-go">open kode</button>' : ''}${appButton()}</div>${installLine()}</div>`;
+    if (phase === 'old') {
+      const has = engine?.version ? ` This computer has ${esc(engine.version)}.` : '';
+      if (updating) return `<div class="life-card"><b>updating y3kode</b>
+        <p>${updating === 'asking' ? 'y3kode is asking on your computer, then fetching the newest version from this site…' : 'y3kode is restarting on the new version…'}</p></div>`;
+      if (engine?.update) return `<div class="life-card"><b>y3kode needs an update for this</b>
+        <p>life arrived in y3kode ${LIFE_ENGINE}.${has} y3kode can fetch the newest version from this site and restart on it; it asks on your computer first.</p>
+        <div class="life-row"><button type="button" id="life-update" class="create-go">update y3kode</button>${appButton()}</div></div>`;
+      return `<div class="life-card"><b>y3kode needs an update for this</b>
+        <p>life arrived in y3kode ${LIFE_ENGINE}.${has} This one is too old to update itself: get the app (it has y3kode inside) or run the install line again in Terminal.</p>
+        <div class="life-row">${appButton()}</div>${installLine()}</div>`;
+    }
     if (phase === 'missing') return `<div class="life-card"><b>lucid is not on this computer yet</b>
       <p>y3kode looked for it in <code>${esc(st?.dir || '~/y3k-code/lucid')}</code>. lucid is the life itself: a dreamed world (SD-Turbo, about 2.5GB the first time) and Claude on your own sign-in. Its README says how to set it up.</p></div>`;
     if (phase === 'resting') {
@@ -315,9 +341,37 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       </div>`;
   }
 
+  // where the app is, if the site knows (the top bar's download glyph goes to the same place)
+  function appButton() {
+    const u = setupV?.appUrl || (Array.isArray(setupV?.builds) && setupV.builds.find((b) => /^https:/.test(b?.url || ''))?.url) || '';
+    return /^https:\/\/[^\s"'<>]+$/.test(u) ? `<button type="button" id="life-app" class="login-alt" data-url="${esc(u)}">get the app</button>` : '';
+  }
+  function installLine() {
+    return setupV?.command ? `<p class="life-note">or, in Terminal: <code>${esc(setupV.command)}</code></p>` : '';
+  }
+  async function doUpdate() {
+    if (updating) return;
+    updating = 'asking'; paint();
+    const r = await update({ cmd, fetchFn });
+    if (!grid) return;
+    if (r?.ok && r.restarting) {
+      updating = 'restarting'; paint();
+      const back = await waitFor(r.version, { cmd });
+      updating = ''; engine = null; since = -1;
+      if (!back) toast('y3kode did not come back yet; try again in a moment');
+    } else {
+      updating = '';
+      if (r?.ok && r.current) toast(`y3kode is already ${r.current}`);
+      else toast(r?.code === 'declined' ? 'not updated: the computer said no' : (r?.error || 'y3kode could not update'));
+    }
+    poll();
+  }
+
   function wire() {
     const redraw = () => { const body = $('#life-body'); if (body) body.dataset.phase = ''; paint(); };   // the controls, drawn again
     $('#life-kode')?.addEventListener('click', () => openKode?.());
+    $('#life-update')?.addEventListener('click', () => doUpdate());
+    $('#life-app')?.addEventListener('click', (e) => { const u = e.currentTarget?.dataset?.url; if (u) openUrl(u); });
     $('#life-begin')?.addEventListener('click', () => begin(false));
     $('#life-anew')?.addEventListener('click', () => begin(true));
     $('#life-mode')?.addEventListener('click', () => act({ do: 'mode', to: st?.moment?.mode === 'human' ? 'autonomous' : 'human' }));
