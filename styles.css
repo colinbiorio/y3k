@@ -4903,6 +4903,55 @@ body.in-code .home-panel-head { display: none; }
 .cv-taskmark { width: 7px; height: 7px; border-radius: 50%; background: #9be8a0; display: inline-block; }
 .cv-taskdone.st-error .cv-taskmark { background: #ff8a8a; }
 .cv-taskdone.st-stopped .cv-taskmark { background: #8b93a1; }
+/* THE ANSWERS SIDE BY SIDE (code-view.js renderCompareView, 2026-10-21).
+   Colin, 2026-10-19: "cross-model collaboration"; 2026-10-21: kode "can be
+   majorly improved". While a /compare is open and you are in one of its
+   sessions, a strip under the toolbar says "comparing: <question> · 3
+   answering"; its button opens the view over the transcript: one column per
+   coder, the one you asked first, each with its maker's mark and model, its
+   answer as it streams, a status line, and its tok/s and cost once known.
+   Columns scroll on their own; under 900px they stack. The glass is the
+   context panel's, and goes flat on the lighter graphics tiers as it does. */
+.cv-cmpstrip { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 8px 14px 0; padding: 4px 5px 4px 12px; border-radius: 12px; font-size: 0.82rem; color: #cfd4dc;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.07); }
+.cv-cmpstrip[hidden] { display: none; }
+.cv-cmplab { color: #8b93a1; flex: none; }
+.cv-cmpq { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e7e9ee; }
+.cv-cmpn { flex: none; white-space: nowrap; }
+.cv-cmpopen { flex: none; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.07); color: #fff; font-size: 0.78rem; cursor: pointer; }
+.cv-cmpopen:hover { background: rgba(255, 255, 255, 0.13); }
+.cv-cmpstrip .cv-iconbtn, .cv-cmphead .cv-iconbtn { width: 26px; height: 26px; }
+.cv-cmp { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; min-height: 0; color: #e7e9ee; font-size: 0.9rem; outline: none;
+  background: linear-gradient(180deg, rgba(24, 27, 34, 0.94), rgba(12, 14, 18, 0.97));
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  animation: cx-in 0.16s ease-out both; }
+:root[data-motion="less"] .cv-cmp { animation: none; }
+:root[data-gfx="smooth"] .cv-cmp, :root[data-gfx="low"] .cv-cmp { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
+.cv-cmphead { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 14px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.84rem; }
+.cv-cmphead .btn, .cv-cmpfoot .btn { height: 28px; padding: 0 12px; font-size: 0.78rem; flex: none; }
+.cv-cmpcols { flex: 1; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; padding: 10px 14px 14px; }
+.cv-cmpcol { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); }
+.cv-cmpcol.main { border-color: rgba(255, 255, 255, 0.16); }
+.cv-cmpcolhead { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.cv-cmpmark { display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none; }
+.cv-cmpmark .mk-svg { width: 18px; height: 18px; display: block; }
+.cv-cmpwho { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.cv-cmpname { font-weight: 600; font-size: 0.86rem; }
+.cv-cmpmodel { font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-cmpcolhead .ag-chip { margin-left: auto; flex: none; }
+.cv-cmpbody { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 14px; line-height: 1.55; font-size: 0.88rem;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.14) transparent; }
+.cv-cmpempty { font-style: italic; }
+.cv-cmpempty[hidden] { display: none; }
+.cv-cmpfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; padding: 7px 10px 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+.cv-cmpfoot .cv-live { flex: none; }
+.cv-cmpfoot .btn { margin-left: auto; }   /* a narrow column: the button takes the next line, right-aligned */
+.cv-cmpstate { white-space: nowrap; }
+.cv-cmpnums { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) {
+  .cv-cmpcols { display: flex; flex-direction: column; overflow-y: auto; }
+  .cv-cmpcol { flex: none; max-height: 60vh; }
+}
 /* THE TURN'S OWN LINE (code-view.js workLine, 2026-10-08): "Working 1:42 ·
    Editing hello.txt" over the composer while the coder works. Its light is
    the running light (.cv-live.run), so Smooth and less motion still it with

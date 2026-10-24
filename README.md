@@ -92,7 +92,9 @@ of its own, hosted by their account. The rails around the room are its places.
   orb reacts; the room runs behind a glass pane. Talk to the coder by typing or by voice (the
   microphone in the composer; shift-click for hands-free), plan with your
   presence first and hand it the prompt, or switch the composer to your
-  presence mid-session. The presence never drives the coder.
+  presence mid-session. `/compare <question>` asks every coding tool on the
+  computer at once and shows the answers side by side, one of them a press
+  away from being your next prompt. The presence never drives the coder.
 - **The portal** (`src/portal.js`) — a tree in unimat at the top bar's left
   end: a door to 4irden, the other world Colin keeps (the project's root;
   *airden* was the name before y3k).
@@ -150,6 +152,15 @@ Node host works. [`render.yaml`](render.yaml) is a Render blueprint: push,
 create a Blueprint from the repo, set the secrets in the dashboard. Health
 check at `/api/health`. The desktop app needs no release of its own — it opens
 the live site.
+
+To ship from this machine: `npm run ship` pushes main (or `npm run ship -- 39`
+merges PR #39) and waits until the site answers on that commit — `/api/health`
+says `commit` and `since` — then reloads every tab of the site open in Safari
+or Chrome here. The founder's own page reloads itself when the live commit
+changes, on any device (`src/ship.js`, a note at the foot of the page first);
+everyone else keeps the page they have, and nothing of this is an endpoint.
+Colin, 2026-10-24: "frictionless is the goal — obviously only give that
+ability to me".
 
 ### Test
 
@@ -227,6 +238,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-24** — **Shipped, and on the screen.** Colin: "give yourself the
+  ability to push changes to the website and reload lmao -- frictionless is
+  the goal -- obviously only give that ability to me tho lmao". `npm run ship`
+  (`scripts/ship.mjs`) pushes main or merges a PR, waits until `/api/health`
+  answers on that commit twice in a row, and reloads the site's tabs in Safari
+  and Chrome on this Mac. `/api/health` now says `commit` (Render's
+  `RENDER_GIT_COMMIT`, or git at boot) and `since`. The founder's page reloads
+  itself when the live commit changes (`src/ship.js`, every 20 s while
+  visible, never through a 502); nobody else's does. `test/ship.test.mjs`.
 - **2026-10-22** — **The sand plate.** Colin, the week his video on the
   Egyptians shaping the pyramids with cymatics passed 90k views in thirty
   hours: "go crazy. build us something amazing". A thirteenth room: a vast
@@ -292,6 +312,32 @@ build. Read the one for the part you are touching.
     the cheap class, the fold, the line, the page's wiring, and a walk on a
     scratch server; `test/life-brain.test.mjs` holds the door among those
     that refuse a stale tab (twelve now).
+- **2026-10-21** — **kode: `/compare`'s answers side by side, and one of them
+  as your next prompt.** Colin asked about "cross-model collaboration"
+  (2026-10-19) and said kode "can be majorly improved" (2026-10-21).
+  `/compare <question>` already asked every other coding tool on the
+  computer in plan mode, each in a tab of its own; there was no way to see
+  the answers together and no way to act on one. Now the question opens a
+  comparison (`state.js` `openCompare`): while you are in any of its
+  sessions a strip under the toolbar says "comparing: <question> · 3
+  answering", and its button, or `/compare` alone, opens a panel over the
+  transcript with one column per coder, the one you asked first, each with
+  its maker's mark and model, its answer as it streams (the transcript's own
+  markdown), a status line (starting, thinking, writing, waiting on you,
+  done, stopped, failed), and its tok/s and cost once its turn landed, the
+  tool's own numbers. Columns scroll on their own; on a narrow screen they
+  stack; Esc closes the panel and the strip stays. *Use this* puts that
+  answer in the composer of the session you asked from, under one line
+  (`Plan from Codex, from /compare:`) and a blank one, as a draft: it is
+  never sent — you read it, change it and send it yourself (CODE.md, line
+  1: the person drives the coder; neither the presence nor a second coder
+  does). *Stop the others* interrupts the second opinions still writing.
+  The comparison ends when you close it from the strip or every second
+  opinion's session has ended. `test/compare-view.test.mjs` runs the group's
+  life and the answers with no DOM, pins that *use this* writes the composer
+  and never calls `session.send`, and drives the screen under the stand-in
+  DOM.
+
 - **2026-10-21** — **Kode shows the coder's subagents the way Claude Code
   does.** Colin: "make sure that there is a way to display to the user how
   many subagents are running, progress, etc -- everything that would be
