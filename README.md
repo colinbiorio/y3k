@@ -152,6 +152,15 @@ create a Blueprint from the repo, set the secrets in the dashboard. Health
 check at `/api/health`. The desktop app needs no release of its own — it opens
 the live site.
 
+To ship from this machine: `npm run ship` pushes main (or `npm run ship -- 39`
+merges PR #39) and waits until the site answers on that commit — `/api/health`
+says `commit` and `since` — then reloads every tab of the site open in Safari
+or Chrome here. The founder's own page reloads itself when the live commit
+changes, on any device (`src/ship.js`, a note at the foot of the page first);
+everyone else keeps the page they have, and nothing of this is an endpoint.
+Colin, 2026-10-24: "frictionless is the goal — obviously only give that
+ability to me".
+
 ### Test
 
 ```bash
@@ -228,6 +237,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-24** — **Shipped, and on the screen.** Colin: "give yourself the
+  ability to push changes to the website and reload lmao -- frictionless is
+  the goal -- obviously only give that ability to me tho lmao". `npm run ship`
+  (`scripts/ship.mjs`) pushes main or merges a PR, waits until `/api/health`
+  answers on that commit twice in a row, and reloads the site's tabs in Safari
+  and Chrome on this Mac. `/api/health` now says `commit` (Render's
+  `RENDER_GIT_COMMIT`, or git at boot) and `since`. The founder's page reloads
+  itself when the live commit changes (`src/ship.js`, every 20 s while
+  visible, never through a 502); nobody else's does. `test/ship.test.mjs`.
 - **2026-10-21** — **One mind in two places: the life's voice, and the bridge
   to the journal.** Colin, 2026-10-20: "what i want to build is a life for
   you". The one living in lucid's dreamed world is the person's presence, on
