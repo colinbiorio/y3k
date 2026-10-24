@@ -1492,14 +1492,14 @@ void main() {
     // THE SAND. The band is as wide as the mode allows — a finer figure, finer
     // lines — and spreads when the plate is driven; its edge is grain, not a
     // line; and the sand is thin here and heaped there along the line.
-    float w = (0.10 / sqrt(k)) * (1.0 + 0.9 * agit);
+    float w = (0.10 / sqrt(k)) * (1.0 + 0.6 * agit);
     float grain = fbm(vec3(q * 48.0, 2.0), de > 0.07 ? 3 : 2);
     float pile = fbm(vec3(q * 2.6, 7.0), 2);
     float heap = 0.50 + 0.95 * pile;
     float edge = dist + (grain - 0.5) * w * (0.9 + 1.3 * agit);
     float u = clamp((w - edge) / (0.75 * w), 0.0, 1.0);
     // driven, the sand on the lines thins: what left them is in the air below
-    float sand = u * u * (3.0 - 2.0 * u) * heap * mix(0.25, 1.0, near) * (1.0 - 0.40 * agit);
+    float sand = u * u * (3.0 - 2.0 * u) * heap * mix(0.25, 1.0, near) * (1.0 - 0.35 * agit);
     // the ridge's slope, for the light: the band's own edge, along the figure's gradient
     float dSand = 6.0 * u * (1.0 - u) / (0.75 * w);
     vec2 slope = -dSand * sign(F.x) * (F.yz / grad) * 0.045 * heap;
@@ -1512,18 +1512,19 @@ void main() {
     float glance = pow(max(dot(reflect(d, vec3(0.0, 1.0, 0.0)), L), 0.0), 14.0);
     plate += vec3(0.16, 0.14, 0.12) * glance * (0.4 + 0.6 * brush);
     plate += haze * 0.8 * smoothstep(0.25, 0.0, de);
-    // the sand, lit: pale quartz, its lit flank catching the low light, the other in its own shadow
-    vec3 quartz = vec3(0.82, 0.74, 0.60) * (0.30 + 0.70 * lit) * (0.72 + 0.56 * grain);
+    // the sand, lit: pale quartz, its lit flank warm in the low light, the
+    // other in its own shadow with only the hall's cool dark on it
+    vec3 quartz = (vec3(0.21, 0.21, 0.24) + vec3(0.72, 0.63, 0.49) * lit) * (0.78 + 0.44 * grain);
     col = mix(plate, quartz, sand);
     // GRAINS IN THE AIR. Loose sand lies about off the lines; when the plate is
     // driven the grains jump and catch the light, re-rolled a dozen times a
     // second so they dance rather than slide. A ring throws its own crest up.
-    vec2 gq = q * 64.0;
+    vec2 gq = q * 52.0;
     vec2 gi = floor(gq);
     float gc = smoothstep(0.30, 0.12, length(fract(gq) - 0.5)) * near;
     float lying = step(0.965, hash13(vec3(gi, 3.0))) * gc * (1.0 - sand);
-    float jumping = step(1.0 - 0.30 * agit, hash13(vec3(gi, 11.0 + floor(t * 12.0)))) * gc * agit;
-    col += quartz * (lying * 0.35 + jumping * 1.1 + ring * 0.75 * near);
+    float jumping = step(1.0 - 0.40 * agit, hash13(vec3(gi, 11.0 + floor(t * 12.0)))) * gc * agit;
+    col += quartz * (lying * 0.35 + ring * 0.75 * near) + vec3(0.80, 0.72, 0.58) * jumping * 0.9;
     // a shoulder, as the moon has: a flank square to the light would bloom, and this is sand
     col = col / (1.0 + col * 0.45);
     col = mix(col, haze, smoothstep(0.05, 0.0, de));   // into the haze at the far edge
