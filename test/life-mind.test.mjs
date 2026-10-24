@@ -245,7 +245,9 @@ await ok('the view: a new thought of a living life is kept and, when asked, said
   // its autonomous mode
   assert.match(codeOf(MAIN), /life: \{\n\s+speak: \(t, o\) => \(busy \|\| currentSpeak \? null : codeLink\.speak\(t, o\)\),/);
   assert.match(MAIN, /speak\(text, \{ onEnd \} = \{\}\) \{\n\s+const t = String\(text \|\| ''\)\.trim\(\);\n\s+if \(!t \|\| busy\) \{ onEnd\?\.\(\); return \(\) => \{\}; \}/);
-  assert.match(MAIN, /const sp = voice\.speaker\(\{ \.\.\.settings\.speakWith\(settings\.getActive\(\)\), onLevel: \(v\) => body\.setAudioLevel\(v\), onEnd: finish \}\);/, 'Code\'s replies are no longer read in the presence\'s voice');
+  // (2026-10-22: every speaker hands the body the frequency beside the level
+  // — the sand plate's figure follows the note; test/rooms.test.mjs pins it)
+  assert.match(MAIN, /const sp = voice\.speaker\(\{ \.\.\.settings\.speakWith\(settings\.getActive\(\)\), onLevel: \(v, hz\) => body\.setAudioLevel\(v, hz\), onEnd: finish \}\);/, 'Code\'s replies are no longer read in the presence\'s voice');
   assert.match(read('src/social.js'), /const lifeView = createLifeView\(\{ toast: toastOnce, \.\.\.\(life \|\| \{\}\) \}\);/);
 });
 

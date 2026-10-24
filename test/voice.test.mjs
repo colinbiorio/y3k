@@ -367,7 +367,8 @@ console.log('\nthe voice, on your own key only:');
     AudioContext: class {
       constructor() { this.state = 'running'; this.currentTime = 0; this.destination = {}; }
       async decodeAudioData() { return { duration: 0.01 }; }
-      createAnalyser() { return { fftSize: 0, frequencyBinCount: 4, connect() {}, disconnect() {}, getByteTimeDomainData() {} }; }
+      // (2026-10-22: a meter reads the spectrum too, for the sand plate's note — voice.js getByteFrequencyData)
+      createAnalyser() { return { fftSize: 0, frequencyBinCount: 4, connect() {}, disconnect() {}, getByteTimeDomainData() {}, getByteFrequencyData() {} }; }
       createBufferSource() { const s = { connect() {}, stop() {}, start() { played.push(1); setTimeout(() => s.onended?.(), 0); } }; return s; }
     },
   };
