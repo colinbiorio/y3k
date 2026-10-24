@@ -11,6 +11,7 @@
 import './load-env.mjs';
 import * as hull from './hull.mjs'; // the boot sweep runs at import — before any store loads // MUST be first — populates process.env before auth.mjs reads it
 import http from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -273,6 +274,18 @@ const SITE_URL = (process.env.SITE_URL || '').trim();
 // app for everyone; Colin, 2026-10-11), 'founder' (narrowed again, to stage
 // something before it is everyone's), or 'off'. The site never talks to
 // anyone's engine either way; this only shows or hides the glyph and opens the doors.
+// THE COMMIT THIS SERVER RUNS. Render sets RENDER_GIT_COMMIT on every deploy;
+// off Render it is read from git once at boot, so a local server says which
+// checkout it is; neither is a secret. scripts/ship.mjs waits for the commit it
+// pushed to appear in /api/health, and the founder's own page reloads itself
+// when the one it was loaded on changes (src/ship.js). Colin, 2026-10-24: "give
+// yourself the ability to push changes to the website and reload...
+// frictionless is the goal -- obviously only give that ability to me tho".
+const COMMIT = (() => {
+  if (process.env.RENDER_GIT_COMMIT) return process.env.RENDER_GIT_COMMIT;
+  try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('.', import.meta.url)), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; } catch { return null; }
+})();
+const SINCE = new Date().toISOString();
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'all';
 const codeNoteCap = createNoteCap();
 const codeVoiceCap = createVoiceCap();
@@ -1849,7 +1862,9 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true, brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT,
         // this session has its own brain open (lifeBrain): the page stops
         // asking it for a key it does not need
-        ownBrain: !!ownFor(sessionUser(req)) });
+        ownBrain: !!ownFor(sessionUser(req)),
+        // which version is live, and since when (scripts/ship.mjs, src/ship.js)
+        commit: COMMIT, since: SINCE });
     }
 
     // YOUR OWN BRAIN, THROUGH YOUR OWN PAGE (own-relay.mjs), for any signed-in

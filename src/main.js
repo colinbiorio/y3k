@@ -17,6 +17,7 @@ import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } 
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSpeedReadout } from './speed.js';
+import { createVersionWatch, newVersionNote } from './ship.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
@@ -280,6 +281,10 @@ function enterApp() {
   // what they keep in it this visit was forgotten as a guest's at their next
   // sign-in (brain.js claimBrowser).
   if (account && loginEl?.classList.contains('gone')) claimBrowser(account);
+  // THE FOUNDER'S PAGE FOLLOWS THE DEPLOY (src/ship.js): when the live commit is
+  // no longer the one this page was loaded on, it reloads itself. The
+  // founder's account only; everyone else keeps the page they have.
+  if (account?.founder && !enterApp.ship) { enterApp.ship = createVersionWatch({ note: () => newVersionNote() }); enterApp.ship.start(); }
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
   return enterApp.now();
@@ -744,7 +749,7 @@ const voice = createVoice({
     if (d) { try { d.onState?.(on); } catch { /* Code's listener must never break the mic */ } return; }
     if (!on) onListenEnded();
   },
-  onLevel: (v) => body.setAudioLevel(v),
+  onLevel: (v, hz) => body.setAudioLevel(v, hz),
   onTranscript: ({ text, final }) => {
     // Code has the microphone: the words are its, and they go nowhere else.
     if (dictation) { try { dictation.onText({ text, final }); } catch { /* ditto */ } if (final) voice.stopListening(); return; }
@@ -763,6 +768,10 @@ const voice = createVoice({
   // less than nine.
   onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
 });
+// THE WORLDS MAY SOUND THROUGH THE VOICE (2026-10-22): the sand plate's note
+// when it is struck, through the voice's own context and only while that is
+// already running (voice.js ring). The body lends it on to the worlds.
+body.setWorldSound((o) => voice.ring(o));
 
 // Music plays whether or not the presence is awake — a person listening and an
 // AI thinking are separate concerns, and stopping the music because the presence
@@ -949,7 +958,7 @@ const codeLink = {
     let done = false;
     const finish = () => { if (done) return; done = true; body.setSpeaking(false); body.setAudioLevel(0); onEnd?.(); };
     body.setSpeaking(true);
-    const sp = voice.speaker({ ...settings.speakWith(settings.getActive()), onLevel: (v) => body.setAudioLevel(v), onEnd: finish });
+    const sp = voice.speaker({ ...settings.speakWith(settings.getActive()), onLevel: (v, hz) => body.setAudioLevel(v, hz), onEnd: finish });
     sp.push(t); sp.end();
     return () => { try { sp.stop(); } catch { /* already quiet */ } finish(); };
   },
@@ -1065,7 +1074,7 @@ const airden = createAirden({
     if (browserVoice(w) && !voice.ttsSupported) return null;
     return voice.speaker({ ...w, ...h,
       onStart: () => body.setSpeaking(true),
-      onLevel: (v) => body.setAudioLevel(v),
+      onLevel: (v, hz) => body.setAudioLevel(v, hz),
       onEnd: () => { body.setSpeaking(false); body.setAudioLevel(0); } });
   },
   show: (t) => showCaption(t, 'y3k'),
@@ -1165,7 +1174,7 @@ function speakLine(text) {
     const sp = voice.speaker({
       ...settings.speakWith(active),
       onStart: () => body.setSpeaking(true),
-      onLevel: (v) => body.setAudioLevel(v),
+      onLevel: (v, hz) => body.setAudioLevel(v, hz),
       onEnd: settle,
     });
     const cancel = () => { try { sp.stop(); } catch { /* ignore */ } settle(); };
@@ -1596,7 +1605,7 @@ async function runReply(call, onSettled) {
   const speaker = voice.speaker({
     ...settings.speakWith(active),
     onStart: () => { if (!stale()) body.setSpeaking(true); }, // baseline pulse; EL also drives amplitude via onLevel
-    onLevel: (v) => { if (!stale()) body.setAudioLevel(v); },
+    onLevel: (v, hz) => { if (!stale()) body.setAudioLevel(v, hz); },
     onEnd: finish,
   });
   replySpeaker = speaker;
