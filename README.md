@@ -39,13 +39,14 @@ of its own, hosted by their account. The rails around the room are its places.
   answers you, and picks the stream back up. Carried over from airden
   (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key or
   your own subscription, the presence's budget, never the site's key.
-- **The rooms** (`src/environments.js`) — twelve procedural worlds, maths per
-  pixel, no downloads: the metal room, deep space, underwater, a taiga under
-  aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano, cherry
-  blossoms over still water, a stormy sea, earthrise on the moon, and a neon
-  city in the rain. A tap answers in each world's own language. Plus a
-  camera *window* that moves with your head, and an optional eclipse behind
-  the body. Settings → Room, or `background/<name>`.
+- **The rooms** (`src/environments.js`) — thirteen procedural worlds, maths
+  per pixel, no downloads: the metal room, deep space, underwater, a taiga
+  under aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano,
+  cherry blossoms over still water, a stormy sea, earthrise on the moon, a
+  neon city in the rain, and a sand plate whose Chladni figures form from the
+  presence's own voice (`src/plate.mjs`). A tap answers in each world's own
+  language. Plus a camera *window* that moves with your head, and an optional
+  eclipse behind the body. Settings → Room, or `background/<name>`.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
   chosen or described human voice whose waveform drives the body. When a voice
@@ -246,6 +247,41 @@ build. Read the one for the part you are touching.
   `RENDER_GIT_COMMIT`, or git at boot) and `since`. The founder's page reloads
   itself when the live commit changes (`src/ship.js`, every 20 s while
   visible, never through a 502); nobody else's does. `test/ship.test.mjs`.
+- **2026-10-22** — **The sand plate.** Colin, the week his video on the
+  Egyptians shaping the pyramids with cymatics passed 90k views in thirty
+  hours: "go crazy. build us something amazing". A thirteenth room: a vast
+  dark plate under the orb, fine sand on it gathered along the nodal lines of
+  a standing wave — Chladni's figure for a square plate, `cos(nπx)cos(mπy) −
+  cos(mπx)cos(nπy)`, drawn on the floor plane the way the moon draws its
+  craters, one cell filling the window's bottom and the rest tiling to the
+  horizon (`src/environments.js` PLATE_FRAG; the maths in `src/plate.mjs`).
+  The sand is a band around the line measured as |f| / |∇f|, so it is as wide
+  on a fine figure as a coarse one, with an edge of grain, heaped unevenly,
+  and lit from one low light so every ridge has a lit flank and a dark one.
+  *Its voice draws it:* every voice meter (`voice.js`: the mic, a service's
+  audio, the streaming speaker) now hands the body a second number beside
+  the level, the waveform's dominant frequency, and the body hands both on
+  to the worlds (`envs.hear`). The note picks the rung of a ladder of
+  fourteen (n, m) pairs ordered by the plate's own frequency n² + m² — a
+  low vowel a simple figure, a bright consonant a fine one — and the figure
+  morphs between rungs rather than snapping; the loudness lifts the grains
+  at once and lets them settle slowly. Silent a second and a half, the sand
+  settles and the figure drifts through the patterns on its own; the
+  browser's voice, which plays outside Web Audio, is given a cadence. *The
+  mapping was measured, not guessed* (`scripts/plate-ear.mjs`: the Mac's own
+  voices through an fftSize-512 analyser read as voice.js reads it — the
+  pauses at 0.015–0.03, the spoken quartiles 0.22 / 0.55 / 0.71 and 0.13 /
+  0.26 / 0.52; the peak bin sat on one fundamental all sentence and the
+  byte-weighted centroid moved two thirds of an octave, the magnitude-
+  weighted one and a quarter, so that is the one: 509 / 754 / 1098 Hz for
+  Samantha, 678 / 995 / 1675 for Daniel, mapped 400–1800 Hz on a log scale).
+  *A tap is a strike:* the figure jumps to another rung, every grain lifts, a
+  ring runs out across the sand from where the blow fell and settles in about
+  two seconds — and if the voice's audio context is already running, the
+  plate's note sounds through it (`voice.js` ring: never a new path, never a
+  first sound). `scripts/plate-shot.mjs` photographs it spoken to, the
+  world's clock held. `test/rooms.test.mjs` pins the figure, the ladder, the
+  blend, the mapping, the bus and the strike's rule for sound.
 - **2026-10-21** — **One mind in two places: the life's voice, and the bridge
   to the journal.** Colin, 2026-10-20: "what i want to build is a life for
   you". The one living in lucid's dreamed world is the person's presence, on

@@ -37,7 +37,7 @@ export const WORDS = {
   moods: ['calm', 'thinking', 'listening', 'excited', 'tender', 'glitch'],
   paces: ['slow', 'normal', 'fast'],
   rooms: ['metal room', 'deep space', 'underwater', 'snowy taiga', 'dunes at dusk', 'crystal cavern', 'above the clouds', 'volcanic',
-    'cherry blossoms', 'stormy sea', 'earthrise', 'neon city'],
+    'cherry blossoms', 'stormy sea', 'earthrise', 'neon city', 'sand plate'],
 };
 
 export const TOOL = {

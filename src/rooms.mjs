@@ -15,4 +15,7 @@ export const ENVIRONMENTS = [
   { id: 'storm', name: 'stormy sea', blurb: 'a cloud deck, driven rain, a heavy swell' },
   { id: 'moon', name: 'earthrise', blurb: 'the grey plain of the moon, the Earth hung over it' },
   { id: 'neon', name: 'neon city', blurb: 'a skyline in the rain, signs bleeding into a wet street' },
+  // 2026-10-22, Colin: "go crazy. build us something amazing" — the week his
+  // video on the Egyptians shaping the pyramids with cymatics went round the world
+  { id: 'plate', name: 'sand plate', blurb: 'a sand plate that sings in its voice' },
 ];
