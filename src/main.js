@@ -17,6 +17,7 @@ import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } 
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSpeedReadout } from './speed.js';
+import { createVersionWatch, newVersionNote } from './ship.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
@@ -280,6 +281,10 @@ function enterApp() {
   // what they keep in it this visit was forgotten as a guest's at their next
   // sign-in (brain.js claimBrowser).
   if (account && loginEl?.classList.contains('gone')) claimBrowser(account);
+  // THE FOUNDER'S PAGE FOLLOWS THE DEPLOY (src/ship.js): when the live commit is
+  // no longer the one this page was loaded on, it reloads itself. The
+  // founder's account only; everyone else keeps the page they have.
+  if (account?.founder && !enterApp.ship) { enterApp.ship = createVersionWatch({ note: () => newVersionNote() }); enterApp.ship.start(); }
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
   return enterApp.now();
