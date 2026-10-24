@@ -228,6 +228,40 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-22** — **The world's bodies and buildings: a beauty pass on what
+  stands on the ground.** Colin: "tons of room to work on the world"
+  (2026-10-19); "go crazy. build us something amazing" (2026-10-22). The
+  sprites were a fibonacci shell of twenty-six glowing cubes — a white cloud
+  from the god view, with no front and no feet; the ai forge and a storage
+  unit were the same grey cube at two sizes; the trees a cone on a stick.
+  Now a sprite is a small voxel figure, kin of the orb (`src/world-shapes.js`
+  `SPRITE`): legs hung from the hip, arms from the shoulder, a head with two
+  eyes and a lamp in its chest, lit in its society's scheme — dim by day, a
+  light by night; a seed is a pod with a face, a sprout the figure without
+  arms, grown has it all. It stands on the ground (or on its panel), faces
+  the way it last moved, strides by the distance walked and bobs with it,
+  breathes, looks about when idle, raises and lowers its arms at work, and
+  asleep it folds its legs under it, bows its head and dims — a curl, never
+  a collapse (WORLD.md: neglect is sleep). Every part of every sprite in
+  sight is one instanced mesh per part, seven draw calls for the whole
+  population where each sprite used to be a draw call. Every building is one
+  compiled mesh with a colour and a glow per vertex: the forge a timber hall
+  under a pitched roof with a chimney whose ember glows, a door with a lit
+  lintel and a window on every side; the solar forge its green dome on a
+  stone drum, with portholes, a lens, and a panel on a mast; the ai forge
+  ribbed steel under a stepped roof with cool slits and a beacon; storage a
+  stone bin, a ribbed container, or a log crib under shingles; a panel six
+  cells on a tilted frame. The windows come on at dusk (`skyLamp`). Each
+  building varies a little by where it stands (`variationAt`: hash2 of its
+  column, so every screen draws the same forge). Trees: a pine's three tiers
+  on a tapered trunk, a broadleaf's four-lump crown and branches, a palm's
+  leaning trunk and eight fronds, scrub lumps, a saguaro — each part merged
+  into one geometry in the plant's own space, lit per face toward the sky,
+  tinted per tree, and swaying in one wind across the wood (`skyWind`, a
+  vertex hook). Rendering only: `world-core.js`, the server and the
+  presence's percept are untouched, and a test says so. Before/after shots
+  and frame times in the PR.
+
 - **2026-10-21** — **One mind in two places: the life's voice, and the bridge
   to the journal.** Colin, 2026-10-20: "what i want to build is a life for
   you". The one living in lucid's dreamed world is the person's presence, on
