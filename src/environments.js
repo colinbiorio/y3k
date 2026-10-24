@@ -1496,10 +1496,10 @@ void main() {
     float grain = fbm(vec3(q * 48.0, 2.0), de > 0.07 ? 3 : 2);
     float pile = fbm(vec3(q * 2.6, 7.0), 2);
     float heap = 0.50 + 0.95 * pile;
-    float edge = dist + (grain - 0.5) * w * (0.9 + 1.3 * agit);
+    float edge = dist + (grain - 0.5) * w * (0.9 + 0.9 * agit);
     float u = clamp((w - edge) / (0.75 * w), 0.0, 1.0);
     // driven, the sand on the lines thins: what left them is in the air below
-    float sand = u * u * (3.0 - 2.0 * u) * heap * mix(0.25, 1.0, near) * (1.0 - 0.35 * agit);
+    float sand = u * u * (3.0 - 2.0 * u) * heap * mix(0.25, 1.0, near) * (1.0 - 0.25 * agit);
     // the ridge's slope, for the light: the band's own edge, along the figure's gradient
     float dSand = 6.0 * u * (1.0 - u) / (0.75 * w);
     vec2 slope = -dSand * sign(F.x) * (F.yz / grad) * 0.045 * heap;
