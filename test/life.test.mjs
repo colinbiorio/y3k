@@ -240,6 +240,50 @@ await ok('the moon opens life and a second press goes home; life is a view like 
   assert.match(life, /cmd\(\{ cmd: 'life\.state', since \}\)/);
 });
 
+// THE PAGE, RUN (2026-10-25). Every pin above reads the source; none ran it, and
+// a name that did not exist (`hear`, gone with the voice bridge) threw in paint()
+// on every poll, so the life tab was an empty panel on the live site (Colin:
+// "when i click on life from web nothing shows up just grey screen"). The view
+// opens under a stand-in DOM, with y3kode unreachable and the site saying 401,
+// and must draw its card without throwing.
+await ok('the view opens and draws, with no engine here and no published life, without throwing', async () => {
+  const { installDom } = await import('./fakes/mini-dom.mjs');
+  installDom();
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  globalThis.location = { origin: 'https://yearthreethousand.com', href: 'https://yearthreethousand.com/' };
+  const thrown = [];
+  const { createLifeView } = await import('../src/life.js');
+  const grid = document.createElement('div');
+  document.body.appendChild(grid);
+  const view = createLifeView({
+    toast: () => {}, speak: null, openKode: () => {},
+    cmd: async (c) => (c.cmd === 'life.state' ? { ok: false, code: 'unpaired', error: 'y3kode is not connected in this browser.' } : { ok: false, code: 'unpaired' }),
+    fetchFn: async () => ({ ok: false, status: 401, json: async () => ({ error: 'sign in' }) }),
+    setup: async () => ({}),
+    schedule: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), unschedule: clearTimeout,
+  });
+  // what the view's own polling throws arrives as an unhandled rejection: caught
+  // for the length of this test only, then the handlers come off again
+  const catchIt = (e) => thrown.push(e);
+  process.on('uncaughtException', catchIt); process.on('unhandledRejection', catchIt);
+  try {
+    try { view.open(grid); } catch (e) { thrown.push(e); }
+    // the stand-in DOM does not parse innerHTML: the skeleton render() wrote is
+    // built here by hand, with the ids paint() looks for, so paint runs whole
+    assert.match(String(grid.innerHTML), /life-root/, 'render wrote the skeleton');
+    const mk = (tag, id, cls) => { const el = document.createElement(tag); if (id) el.setAttribute('id', id); if (cls) el.className = cls; el.dataset = {}; return el; };
+    const stage = mk('div', null, 'life-stage'); stage.appendChild(mk('img', 'life-frame', 'life-frame')); stage.appendChild(mk('div', 'life-veil', 'life-veil')); stage.appendChild(mk('div', 'life-status', 'life-status'));
+    const body = mk('div', 'life-body', 'life-body');
+    grid.appendChild(stage); grid.appendChild(body);
+    for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 5));
+    view.close();
+    assert.deepEqual(thrown.map((e) => String(e?.stack || e).split('\n').slice(0, 2).join(' ')), [], 'nothing thrown while it polled');
+    assert.match(String(body.innerHTML), /a life lives on your own computer/, 'the card for a browser with no y3kode is drawn');
+    assert.match(String(body.innerHTML), /open kode/, 'with the way in');
+  } finally { process.off('uncaughtException', catchIt); process.off('unhandledRejection', catchIt); }
+});
+
 // THE REAL THING, when it is here: lucid's scripted brain and placeholder
 // dreamer in a scratch life (no model, no plan, no real life touched), through
 // the bridge exactly as y3kode runs it.
