@@ -5501,6 +5501,9 @@ body.in-code .home-panel-head { display: none; }
   #back-to-home { min-height: 44px; }
   .chat-upload { width: 32px; height: 32px; position: relative; }
   .chat-upload::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+  /* the download glyph: 44px of reach up and down and out to the right, none
+     to the left, where the name's last letter is its own to spin */
+  .home-download::before { content: ''; position: absolute; inset: -8px -14px -8px 0; }
   .x { position: relative; }
   .x::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; }
   .win-lights { gap: 30px; padding: 0 7px; }
