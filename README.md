@@ -246,6 +246,22 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **The life, as one picture.** Colin: "life has too much
+  going on. everything about y3k should be as simple, beautiful, and
+  consistent as possible. the chat bar can be reused… keep the chat bar as
+  the way to interact with the brain throughout the entire site. when you
+  enter life, the only buttons you should have are for the ai to wake up or
+  go to sleep. the rendered projection of its own mind should be full
+  screen." The life view is now the whole screen, like the world: the
+  dreamed picture crossfading from moment to moment and drifting slowly, its
+  thought and its words written over it, one thin line for where it stands,
+  and two buttons — **wake up** / **go to sleep**. The chat bar talks to it
+  (a line typed there is said to it; it answers in its own voice). The
+  controls, the pad, the pace, the forms and the toggles are gone from the
+  page (lucid's own window keeps them). "go to sleep" also reaches a life
+  lived on the computer by another hand (y3kode 0.3.7 tells it through its
+  door), and the site tells the life when someone is watching, so a life
+  alone slows and a watched one does not.
 - **2026-10-25** — **The life tab draws again.** Colin: "when i click on life
   from web nothing shows up just grey screen". A name that no longer existed
   (`hear`, gone with the voice bridge) threw in the page's paint on every

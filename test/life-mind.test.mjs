@@ -220,7 +220,10 @@ await ok('its lines: in order, one at a time; a line begun is finished; while th
 
 await ok('the view: a new thought of a living life is kept and, when asked, said, and its words are said; a resting life\'s last moment is neither; the record goes as a door that writes without thinking is sent to, and a stale tab reloads', () => {
   const code = codeOf(LIFE);
-  assert.match(code, /const m = phase === 'living' \? r\?\.moment \|\| null : null;\n\s+if \(m\) \{\n\s+const \{ keep, said \} = newIn\(m, seen\);\n\s+if \(keep\) \{ record\(m\); if \(sayAloud && thoughtsAloud\) lines\?\.say\(m\.thought\); \}\n\s+if \(said && sayAloud\) lines\?\.say\(said\);\n\s+\}/);
+  // 2026-10-25: the page's toggles are gone with its controls (one picture, two
+  // buttons; Colin: "life has too much going on"): its words are always said,
+  // its thoughts never
+  assert.match(code, /const m = phase === 'living' \? r\?\.moment \|\| null : null;\n\s+if \(m\) \{\n\s+const \{ keep, said \} = newIn\(m, seen\);\n\s+if \(keep\) record\(m\);\n\s+if \(said\) lines\?\.say\(said\);\n\s+\}/);
   assert.match(code, /if \(!bridge\) return;/);
   assert.match(code, /fetchFn\('\/api\/life\/moment', \{ method: 'POST', headers: \{ 'content-type': 'application\/json' \}, body: JSON\.stringify\(\{ \.\.\.whoseFields\(\), \.\.\.momentBody\(m\) \}\) \}\)/);
   assert.match(code, /if \(reloaded\(r\)\) return;\n\s+if \(res\.status === 401 \|\| res\.status === 400\) bridge = false;/);
@@ -231,11 +234,8 @@ await ok('the view: a new thought of a living life is kept and, when asked, said
   assert.ok(!/seen\.thought = ''|seen = \{/.test(code.replace(/const seen = \{ thought: '', say: '' \};/, '')), 'seen is reset somewhere');
   // the toggles: its words on unless turned off, its thoughts off unless
   // turned on (and only with the words); the words turned off stop the line
-  assert.match(code, /let sayAloud = \(\(\) => \{ try \{ return localStorage\.getItem\(SAY_KEY\) !== '0'; \} catch \{ return true; \} \}\)\(\);/);
-  assert.match(code, /let thoughtsAloud = \(\(\) => \{ try \{ return localStorage\.getItem\(THOUGHTS_KEY\) === '1'; \} catch \{ return false; \} \}\)\(\);/);
-  assert.match(code, /sayAloud = !sayAloud;\n\s+try \{ if \(sayAloud\) localStorage\.removeItem\(SAY_KEY\); else localStorage\.setItem\(SAY_KEY, '0'\); \} catch \{[^}]*\}\n\s+if \(!sayAloud\) lines\?\.hush\(\);/);
-  assert.match(LIFE, /id="life-words" class="usage\$\{sayAloud \? ' on' : ''\}"><b>speak its words<\/b>/);
-  assert.match(LIFE, /id="life-thoughts" class="usage\$\{sayAloud && thoughtsAloud \? ' on' : ''\}"\$\{sayAloud \? '' : ' disabled'\}><b>its thoughts too<\/b>/);
+
+
   assert.ok(!/VOICE_KEY|life-hear|hear it/.test(LIFE), 'the old browser-voice toggle is still there');
   // the lines live with the view: made when it opens, closed when it closes
   assert.match(code, /lines = speak \? createLines\(\{ speak, schedule, unschedule \}\) : null;/);

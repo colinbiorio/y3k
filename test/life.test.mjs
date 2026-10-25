@@ -178,9 +178,9 @@ await ok('an old y3kode is offered its update here, not sent to kode (Colin, 202
   const life = readFileSync(new URL('../src/life.js', import.meta.url), 'utf8');
   assert.match(life, /import \{ engineCmd, updateY3kode, waitForVersion, siteSetup \} from '\.\/own-brain\.js'/, 'the same update Settings → Brain runs');
   assert.doesNotMatch(life, /Open kode and it will offer the update/, 'kode never offered one');
-  assert.match(life, /id="life-update"/, 'the button is on the life page');
+  assert.match(life, /btn\('update y3kode', 'create-go', \(\) => doUpdate\(\)\)/, 'the button is on the life page');
   assert.match(life, /cmd: 'engine\.hello'/, 'it asks y3kode whether it can update itself before offering');
-  assert.match(life, /if \(engine\?\.update\) return/, 'offered only to a y3kode that can');
+  assert.match(life, /else if \(engine\?\.update\) \{/, 'offered only to a y3kode that can');
   assert.match(life, /get the app/, 'else the app, which has y3kode inside');
   assert.match(life, /waitFor\(r\.version/, 'after the restart it waits for the new version');
   assert.match(life, /_blank', 'noopener,noreferrer'/, 'the app opens in its own tab, with no handle back');
@@ -199,8 +199,9 @@ await ok('the published life: which source the page shows, how old a moment read
   assert.match(life, /if \(!watch\) poll\(\);/, 'watching someone else asks nothing of this computer');
   assert.match(life, /\/api\/life\/key'/, 'the key is made from the page'); assert.match(life, /\/api\/life\/share'/); assert.match(life, /\/api\/life\/say'/);
   assert.match(life, /lived through the door/, 'who was at the door is said');
-  assert.match(life, /function publishCard\(\)/); assert.match(life, /function webShell\(\)/);
-  assert.match(life, /if \(watch \|\| !pub\?\.ok \|\| !pub\.mine\) return '';/, 'the publish card is the owner\'s only');
+  assert.match(life, /function card\(source\)/, 'one card, only when something stands in the way');
+  assert.match(life, /el\.share\.hidden = !\(mine && pub\.life\);/, 'sharing is the owner\'s only, one small word');
+  assert.match(life, /return \{ open, close, setWatch, hear \};/, 'the chat bar reaches it through hear');
   const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
   assert.match(social, /searchParams\.get\('life'\)/, '?life= is read once');
   assert.match(social, /lifeWatch \? 'life' : 'orb'/, 'and the page opens on the life');
@@ -235,7 +236,7 @@ await ok('the moon opens life and a second press goes home; life is a view like 
   // process publish, shares it, and says a line to it. All of that is the
   // person's own doing (the key); nothing of a life living here leaves but
   // the record.
-  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment', '/api/life/key', '/api/life/share', '/api/life/say', '/api/life/key']   /* 2026-10-25: begin makes the key itself (one click) */, 'the life view reaches the site for something besides the record and the published life');
+  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment', '/api/life/share', '/api/life/say', '/api/life/key']   /* 2026-10-25: wake makes the key itself (one click) */, 'the life view reaches the site for something besides the record and the published life');
   assert.match(life, /'\/api\/life\/latest'/, 'the newest published moment');
   assert.match(life, /cmd\(\{ cmd: 'life\.state', since \}\)/);
 });
@@ -246,42 +247,64 @@ await ok('the moon opens life and a second press goes home; life is a view like 
 // "when i click on life from web nothing shows up just grey screen"). The view
 // opens under a stand-in DOM, with y3kode unreachable and the site saying 401,
 // and must draw its card without throwing.
-await ok('the view opens and draws, with no engine here and no published life, without throwing', async () => {
-  const { installDom } = await import('./fakes/mini-dom.mjs');
+await ok('the view opens as a stage on the body and draws, with no engine here and no published life, without throwing', async () => {
+  const { installDom, serialize } = await import('./fakes/mini-dom.mjs');
   installDom();
   const store = new Map();
   globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
   globalThis.location = { origin: 'https://yearthreethousand.com', href: 'https://yearthreethousand.com/' };
-  const thrown = [];
   const { createLifeView } = await import('../src/life.js');
-  const grid = document.createElement('div');
-  document.body.appendChild(grid);
-  const view = createLifeView({
-    toast: () => {}, speak: null, openKode: () => {},
-    cmd: async (c) => (c.cmd === 'life.state' ? { ok: false, code: 'unpaired', error: 'y3kode is not connected in this browser.' } : { ok: false, code: 'unpaired' }),
-    fetchFn: async () => ({ ok: false, status: 401, json: async () => ({ error: 'sign in' }) }),
-    setup: async () => ({}),
-    schedule: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), unschedule: clearTimeout,
-  });
-  // what the view's own polling throws arrives as an unhandled rejection: caught
-  // for the length of this test only, then the handlers come off again
+  const thrown = [];
   const catchIt = (e) => thrown.push(e);
   process.on('uncaughtException', catchIt); process.on('unhandledRejection', catchIt);
   try {
-    try { view.open(grid); } catch (e) { thrown.push(e); }
-    // the stand-in DOM does not parse innerHTML: the skeleton render() wrote is
-    // built here by hand, with the ids paint() looks for, so paint runs whole
-    assert.match(String(grid.innerHTML), /life-root/, 'render wrote the skeleton');
-    const mk = (tag, id, cls) => { const el = document.createElement(tag); if (id) el.setAttribute('id', id); if (cls) el.className = cls; el.dataset = {}; return el; };
-    const stage = mk('div', null, 'life-stage'); stage.appendChild(mk('img', 'life-frame', 'life-frame')); stage.appendChild(mk('div', 'life-veil', 'life-veil')); stage.appendChild(mk('div', 'life-status', 'life-status'));
-    const body = mk('div', 'life-body', 'life-body');
-    grid.appendChild(stage); grid.appendChild(body);
+    const view = createLifeView({
+      toast: () => {}, speak: null, openKode: () => {},
+      cmd: async (c) => ({ ok: false, code: 'unpaired', error: 'y3kode is not connected in this browser.' }),
+      fetchFn: async () => ({ ok: false, status: 401, json: async () => ({ error: 'sign in' }) }),
+      setup: async () => ({}),
+      schedule: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), unschedule: clearTimeout,
+    });
+    try { view.open(); } catch (e) { thrown.push(e); }
     for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 5));
-    view.close();
     assert.deepEqual(thrown.map((e) => String(e?.stack || e).split('\n').slice(0, 2).join(' ')), [], 'nothing thrown while it polled');
-    assert.match(String(body.innerHTML), /a life lives on your own computer/, 'the card for a browser with no y3kode is drawn');
-    assert.match(String(body.innerHTML), /open kode/, 'with the way in');
+    const root = document.body.querySelector('.life-root');
+    assert.ok(root, 'the stage is on the body, the whole screen');
+    const html = serialize(root);
+    assert.match(html, /a life lives on your own computer/, 'the card for a browser with no y3kode');
+    assert.match(html, /open kode/, 'with the way in');
+    assert.equal(view.hear('hello'), false, 'nothing here can hear: the chat bar talks to the presence instead');
+    view.close();
+    assert.ok(!document.body.querySelector('.life-root'), 'closed, the stage is gone');
   } finally { process.off('uncaughtException', catchIt); process.off('unhandledRejection', catchIt); }
+});
+
+await ok('a published life of your own, awake: the picture, its thought and words, one line, and the chat bar reaches it', async () => {
+  const { serialize } = await import('./fakes/mini-dom.mjs');
+  const { createLifeView } = await import('../src/life.js');
+  const posts = [];
+  const life = { n: 2551, at: Date.now() - 20_000, thought: 'Sixty-two moments, and it holds.', say: 'The rain is back.', place: 'The lantern colonnade', who: 'claude', frameUrl: '/life/y3klay/002551.jpg' };
+  const said = [];
+  const view = createLifeView({
+    toast: () => {}, speak: (t) => { said.push(t); return undefined; }, openKode: () => {},
+    cmd: async () => ({ ok: false, code: 'unpaired' }),
+    fetchFn: async (url, opts) => { if (opts?.method === 'POST') { posts.push([url, JSON.parse(opts.body)]); return { ok: true, json: async () => ({ ok: true }) }; } return { ok: true, json: async () => ({ ok: true, user: 'y3klay', mine: true, shared: false, key: true, life, recent: [] }) }; },
+    setup: async () => ({}), schedule: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), unschedule: clearTimeout,
+  });
+  view.open();
+  for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 5));
+  const root = document.body.querySelector('.life-root');
+  const html = serialize(root);
+  assert.match(html, /Sixty-two moments, and it holds\./, 'its thought, over the picture');
+  assert.match(html, /“The rain is back\.”/, 'its words');
+  assert.match(html, /moment 2551 · The lantern colonnade · living on its own/, 'one line');
+  assert.match(html, /only you can see it/, 'sharing, one small word');
+  assert.ok(!/a life lives on your own computer/.test(html), 'no card over a life that is showing');
+  assert.deepEqual(said, ['The rain is back.'], 'its words are said once, in the presence\'s voice');
+  assert.equal(view.hear('hello in there'), true, 'the chat bar reaches it');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(posts, [['/api/life/say', { text: 'hello in there' }]]);
+  view.close();
 });
 
 // THE REAL THING, when it is here: lucid's scripted brain and placeholder

@@ -21,9 +21,14 @@
 // computer — unless the person publishes the life (A LIFE, PUBLISHED, below),
 // which sends each moment with its picture, by a key they made themselves.
 //
-// What you can do is what lucid's own window lets you: watch, take the
-// controls (human mode: forward, back, turn, look up or down), speak to it,
-// slow it or quicken it, and let it rest. It answers in its own words.
+// What you can do here is wake it and let it sleep, and talk to it through
+// the chat bar, which is how the whole site talks to the brain (Colin,
+// 2026-10-25: "life has too much going on… the chat bar can be reused… when
+// you enter life, the only buttons you should have are for the ai to wake up
+// or go to sleep. the rendered projection of its own mind should be full
+// screen… fluid, dream-like"). The picture fills the screen and crossfades
+// from moment to moment; its thought and its words are written over it; one
+// thin line says where it stands. Lucid's own window keeps the controls. It answers in its own words.
 //
 // It rests by itself when no page has looked at it for ten minutes
 // (life.mjs), because each moment uses your Claude plan.
@@ -176,16 +181,19 @@ export function createLines({ speak, schedule = setTimeout, unschedule = clearTi
   };
 }
 
+export const FRESH_MS = 3 * 60 * 1000;   // a published moment this young is a life awake (alone, it lives a moment a minute)
+export const fresh = (life, now = Date.now()) => !!life && now - Number(life.at || 0) < FRESH_MS;
+
 export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout, fetchFn = (...a) => fetch(...a),
   update = updateY3kode, waitFor = waitForVersion, setup = siteSetup, openUrl = (u) => window.open(u, '_blank', 'noopener,noreferrer'),
-  watch: watch0 = null, pubEvery = PUB_LIVE_MS } = {}) {
+  watch: watch0 = null, pubEvery = PUB_LIVE_MS, doc = typeof document === 'undefined' ? null : document } = {}) {
   let watch = watch0;
-  let grid = null;
+  let root = null;         // the stage, on the body while the view is open (the whole screen, like the world)
+  let el = {};             // its parts, by name
   let pub = null;          // /api/life/latest: the published life (own, or `watch`'s)
   let pubTimer = 0;
-  let pubCmd = '';         // the line to run, shown once a key is made
   let sharing = false;
-  let engine = null;       // engine.hello, asked once a y3kode turns out to be old: { version, update }
+  let engine = null;       // engine.hello, once y3kode is reachable: { version, update }
   let setupV = null;       // the site's setup: where the app is, the install line (own-brain.js siteSetup)
   let updating = '';       // '' | 'asking' | 'restarting' while y3kode updates itself
   let timer = 0;
@@ -193,64 +201,56 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   let pic = '';            // that picture, as a data URL
   let st = null;           // the last life.state answer
   let phase = 'checking';
-  let starting = false;
+  let starting = false, stopping = false;
   const seen = { thought: '', say: '' };   // what has been kept and said: across openings (newIn)
-  let lines = null;        // its lines being said, while the view is open
+  let lines = null;        // its words being said, while the view is open
   let bridge = true;       // moments go to the record, until the site says there is nobody, or no presence, to remember for
-  let sayAloud = (() => { try { return localStorage.getItem(SAY_KEY) !== '0'; } catch { return true; } })();
-  let thoughtsAloud = (() => { try { return localStorage.getItem(THOUGHTS_KEY) === '1'; } catch { return false; } })();
+  let shown = '', face = 0;   // the picture on the stage, and which of its two layers holds it
 
-  const $ = (sel) => grid?.querySelector(sel);
+  const h = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const btn = (label, cls, fn) => { const b = h('button', cls, label); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  const setText = (n, t) => { if (n && n.textContent !== t) n.textContent = t; };
 
-  function open(g) {
-    grid = g;
-    since = -1; pic = ''; st = null; phase = watch ? 'none' : 'checking'; bridge = true; pub = null; pubCmd = '';
+  function open() {
+    if (root) close();
+    since = -1; pic = ''; shown = ''; face = 0; st = null; phase = watch ? 'none' : 'checking'; bridge = true;
+    pub = null; engine = null; setupV = null; updating = ''; starting = false; stopping = false;
     lines = speak ? createLines({ speak, schedule, unschedule }) : null;
     render();
-    document.addEventListener('keydown', onKey);
     if (!watch) poll();   // someone else's life is only ever the published one
     pollPub();
   }
   function close() {
-    grid = null;
     unschedule(timer); timer = 0;
     unschedule(pubTimer); pubTimer = 0;
-    document.removeEventListener('keydown', onKey);
     lines?.close(); lines = null;
+    root?.remove(); root = null; el = {};
   }
 
   async function poll() {
     unschedule(timer); timer = 0;
-    if (!grid) return;
+    if (!root) return;
     let r;
     try { r = await cmd({ cmd: 'life.state', since }); } catch { r = { ok: false, code: 'offline' }; }
-    if (!grid) return;
+    if (!root) return;
     st = r;
     phase = updating ? 'old' : phaseOf(r);
     // what to offer instead: an update, the app, the install line
-    if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (await setup({ fetchFn })) || {}; if (!grid) return; }
-    if ((phase === 'old' || phase === 'resting' || phase === 'living') && !engine) { const h = await cmd({ cmd: 'engine.hello' }); if (!grid) return; engine = h?.ok ? { version: h.version || '', update: h.update === true } : { version: '', update: false }; }
+    if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (await setup({ fetchFn })) || {}; if (!root) return; }
+    if ((phase === 'old' || phase === 'resting' || phase === 'living') && !engine) { const hh = await cmd({ cmd: 'engine.hello' }); if (!root) return; engine = hh?.ok ? { version: hh.version || '', update: hh.update === true } : { version: '', update: false }; }
     if (r?.ok && typeof r.frame === 'string' && r.frame) { pic = 'data:image/jpeg;base64,' + r.frame; since = r.frameN | 0; }
     // a moment of a living life, and only then: a life at rest still shows
     // its last moment, which was kept and said when it was lived
     const m = phase === 'living' ? r?.moment || null : null;
     if (m) {
       const { keep, said } = newIn(m, seen);
-      if (keep) { record(m); if (sayAloud && thoughtsAloud) lines?.say(m.thought); }
-      if (said && sayAloud) lines?.say(said);
+      if (keep) record(m);
+      if (said) lines?.say(said);
     }
     paint();
     timer = schedule(poll, phase === 'living' ? LIVE_MS : IDLE_MS);
   }
 
-  // THE BRIDGE: one line of the presence's journal per moment, from this
-  // page, sent as a door that writes without thinking is sent to
-  // (whoseFields: whose page this is, and no key, as /api/chess/finished); a
-  // tab loaded for another account is told to reload, and does (brain.js
-  // reloaded). The site keeps at most one line in twenty seconds and folds
-  // the rest ({ kept: false }): the page sends every moment and lets it
-  // choose. Nobody signed in here, or no presence: nothing more is sent until
-  // the view is opened again. The site unreachable: this moment goes unkept.
   async function record(m) {
     if (!bridge) return;
     let res, r = null;
@@ -264,42 +264,47 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
 
   async function pollPub() {
     unschedule(pubTimer); pubTimer = 0;
-    if (!grid) return;
+    if (!root) return;
     let r;
     try {
       const x = await fetchFn(watch ? `/api/life/latest?user=${encodeURIComponent(watch)}` : '/api/life/latest', { cache: 'no-store' });
       r = x.ok ? await x.json() : { ok: false, status: x.status };
     } catch { r = { ok: false, status: 0 }; }
-    if (!grid) return;
+    if (!root) return;
     pub = r;
+    // its words from afar are said here too, once each, when the published life is what is shown
+    if (sourceOf(phase, pub) === 'web' && r?.life) { const { said } = newIn({ n: r.life.n, thought: r.life.thought || '', say: r.life.say || '' }, seen); if (said) lines?.say(said); }
     paint();
-    pubTimer = schedule(pollPub, r?.life ? pubEvery : PUB_IDLE_MS);
-  }
-  async function makeKey() {
-    const x = await fetchFn('/api/life/key', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
-    const j = x?.ok ? await x.json() : null;
-    if (!j?.key) return toast('the site did not make a key');
-    pubCmd = j.command; if (pub) pub.key = true;
-    paint();
+    pubTimer = schedule(pollPub, r?.life && fresh(r.life) ? pubEvery : PUB_IDLE_MS);
   }
   async function share(on) {
-    sharing = true;
+    sharing = true; paint();
     const x = await fetchFn('/api/life/share', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ shared: !!on }) }).catch(() => null);
     sharing = false;
-    if (x?.ok && pub) { pub.shared = !!on; paint(); }
-    else toast('the site did not change that');
+    if (x?.ok && pub) pub.shared = !!on; else toast('the site did not change that');
+    paint();
   }
   async function sayWeb(text) {
     const x = await fetchFn('/api/life/say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }).catch(() => null);
-    toast(x?.ok ? 'it will hear you at its next moment' : 'it did not hear that');
+    if (!x?.ok) toast('it did not hear that');
   }
-
   async function act(c) {
     const r = await cmd({ cmd: 'life.do', ...c });
     if (!r?.ok) toast(r?.error || 'the life did not hear that');
     poll();
   }
-  async function begin(fresh) {
+  // THE CHAT BAR IS HOW YOU TALK TO IT (main.js sendChat → social.lifeHear):
+  // living here, the line goes to it through y3kode; published and awake,
+  // through the site's inbox; otherwise the line is not the life's, and the
+  // chat bar talks to the presence as everywhere else. → whether it was taken
+  function hear(text) {
+    const t = String(text || '').trim();
+    if (!t || !root) return false;
+    if (phase === 'living') { act({ do: 'say', text: t }); return true; }
+    if (pub?.ok && pub.mine && pub.life && fresh(pub.life)) { sayWeb(t); return true; }
+    return false;
+  }
+  async function wake(anew) {
     if (starting) return;
     const ok = await consent(LIFE_CONSENT);
     if (!ok) return;
@@ -313,202 +318,134 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
         if (j?.key) { publish = { to: location.origin, key: j.key }; if (pub) pub.key = true; }
       } catch { /* it still lives here; it is just not published */ }
     }
-    const r = await cmd({ cmd: 'life.start', fresh: !!fresh, ...(publish ? { publish } : {}) });
+    const r = await cmd({ cmd: 'life.start', fresh: !!anew, ...(publish ? { publish } : {}) });
     starting = false;
     if (!r?.ok) toast(r?.code === 'declined' ? 'not started: the computer said no' : (r?.error || 'the life could not start'));
     since = -1;
     poll();
   }
-  async function rest() {
-    await cmd({ cmd: 'life.stop' });
-    poll();
+  async function sleep() {
+    if (stopping) return;
+    stopping = true; paint();
+    const r = await cmd({ cmd: 'life.stop' });
+    stopping = false;
+    if (!r?.ok) toast(r?.error || 'it did not hear that');
+    since = -1;
+    poll(); pollPub();
   }
 
-  function onKey(e) {
-    if (!grid || phase !== 'living' || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.target?.closest?.('input, textarea, select')) return;
-    const k = e.key.toLowerCase();
-    const human = st?.moment?.mode === 'human';
-    if (human && KEYS[k]) { e.preventDefault(); act({ do: 'move', move: KEYS[k] }); }
-    else if (k === ' ') { e.preventDefault(); act({ do: 'mode', to: human ? 'autonomous' : 'human' }); }
-    else if (k === 'enter') { e.preventDefault(); $('#life-say')?.focus(); }
-    else if (k === '-') act({ do: 'pace', delta: 1 });
-    else if (k === '=' || k === '+') act({ do: 'pace', delta: -1 });
-  }
-
-  // ---- drawing ------------------------------------------------------------------
-  // The skeleton once (render), then only what changed (paint), so the line
-  // being typed to it keeps its focus and a phone its keyboard.
+  // ---- the stage -------------------------------------------------------------
+  // Built of elements, not markup, so it runs under the tests' stand-in DOM.
   function render() {
-    if (!grid) return;
-    grid.innerHTML = `<div class="life-root">
-      <div class="life-stage"><img id="life-frame" class="life-frame" alt="the world as it is dreamed now" hidden />
-        <div id="life-veil" class="life-veil"></div>
-        <div id="life-status" class="life-status"></div></div>
-      <div id="life-body" class="life-body"></div>
-    </div>`;
+    root = h('div', 'life-root');
+    root.setAttribute('role', 'region'); root.setAttribute('aria-label', 'life');
+    el.a = h('img', 'life-frame'); el.b = h('img', 'life-frame'); el.a.alt = ''; el.b.alt = ''; el.a.hidden = el.b.hidden = true;
+    el.veil = h('div', 'life-veil');
+    el.words = h('div', 'life-words'); el.thought = h('p', 'life-thought'); el.said = h('p', 'life-said'); el.words.append(el.thought, el.said);
+    el.line = h('div', 'life-line'); el.status = h('span', 'life-status');
+    el.share = btn('', 'life-share', () => share(!pub?.shared)); el.share.hidden = true;
+    el.line.append(el.status, el.share);
+    el.acts = h('div', 'life-acts');
+    el.wake = btn('wake up', 'create-go life-wake', () => wake(false));
+    el.sleep = btn('go to sleep', 'login-alt life-sleep', () => sleep());
+    el.acts.append(el.wake, el.sleep);
+    el.card = h('div', 'life-card'); el.card.hidden = true;
+    root.append(el.a, el.b, el.veil, el.words, el.line, el.acts, el.card);
+    doc.body.appendChild(root);
+  }
+
+  // the next picture fades in over the last: two layers, the newer on top
+  function showPicture(url) {
+    if (!root) return;
+    if (!url) { el.a.hidden = el.b.hidden = true; el.a.classList.remove('on'); el.b.classList.remove('on'); shown = ''; return; }
+    if (url === shown) return;
+    const next = face ? el.a : el.b, prev = face ? el.b : el.a;
+    shown = url; face = face ? 0 : 1;
+    next.hidden = false;
+    next.onload = () => { next.classList.add('on'); prev.classList.remove('on'); };
+    next.src = url;
   }
 
   function paint() {
-    if (!grid) return;
+    if (!root) return;
     const source = sourceOf(phase, pub);
     const web = source === 'web' ? pub.life : null;
-    const shown = source === 'web' ? (web.frameUrl || '') : pic;
-    const img = $('#life-frame');
-    if (img && shown && img.getAttribute('src') !== shown) img.src = shown;
-    if (img) img.hidden = !shown;
-    // with no picture to show and nothing being dreamed, the empty square
-    // steps aside so the card (and its begin) comes first
-    const stage = $('.life-stage');
-    if (stage) stage.hidden = !shown && phase !== 'living';
     const m = st?.moment || null;
-    const status = $('#life-status');
-    if (status) status.textContent = phase === 'living' && m
-      ? [`moment ${m.n ?? 0}`, m.mode === 'human' ? 'you have the controls' : 'living on its own', m.busy ? (m.status || 'thinking') : (m.status === 'awake' ? '' : m.status)].filter(Boolean).join(' · ')
-      : web ? [`moment ${web.n ?? 0}`, web.place || '', web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : 'living on its own', `published ${agoText(web.at)}`].filter(Boolean).join(' · ')
-      : '';
-    const veil = $('#life-veil');
-    if (veil) veil.textContent = !shown ? (phase === 'living' ? 'dreaming the first moment…' : '') : '';
-    const body = $('#life-body');
-    if (!body) return;
-    const want = [source, phase, phase === 'living' ? (m?.mode || '') : '', source === 'web' ? (pub.mine ? 'mine' : 'theirs') : '', starting ? 'starting' : '',
-      pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', engine?.version || ''].join('|');
-    if (body.dataset.phase !== want) { body.dataset.phase = want; body.innerHTML = source === 'web' ? webShell() : shell(); wire(); }
-    if (source === 'web') {
-      const set = (sel, t) => { const el = $(sel); if (el && el.textContent !== t) el.textContent = t; };
-      set('#life-thought', web.thought || '');
-      set('#life-said', web.say ? `“${web.say}”` : '');
-      set('#life-intent', web.intention ? `holding: ${web.intention}` : '');
-      set('#life-sees', web.sees || '');
-      const sb = $('#life-share'); if (sb) sb.disabled = sharing;
-      const go = $('#life-begin'); if (go) go.disabled = starting;
-      const again = $('#life-anew'); if (again) again.disabled = starting;
-      return;
-    }
-    if (phase === 'living') {
-      const set = (sel, t) => { const el = $(sel); if (el && el.textContent !== t) el.textContent = t; };
-      set('#life-thought', m?.thought || '');
-      set('#life-said', m?.say ? `“${m.say}”` : '');
-      set('#life-intent', m?.intention ? `holding: ${m.intention}` : '');
-      set('#life-pace', st?.moment?.pace ? `a moment lasts ${Math.round(st.moment.pace)}s at least` : '');
-      const err = $('#life-err'); if (err) { err.textContent = m?.error || ''; err.hidden = !m?.error; }
-    }
-    const go = $('#life-begin'); if (go) go.disabled = starting;
-    const again = $('#life-anew'); if (again) again.disabled = starting;
+    showPicture(source === 'web' ? (web.frameUrl || '') : pic);
+    const thought = web ? web.thought : m?.thought;
+    const said = web ? web.say : (phase === 'living' ? m?.say : '');
+    setText(el.thought, thought || '');
+    setText(el.said, said ? `“${said}”` : '');
+    el.words.hidden = !(thought || said);
+    // one thin line: where it stands, and that it lives
+    let line = '';
+    if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, m.place || '', m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
+    else if (web) line = [`moment ${web.n ?? 0}`, web.place || '', web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : fresh(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
+    else if (phase === 'resting' && m) line = `asleep · moment ${m.n ?? 0}${m.place ? ' · ' + m.place : ''}`;
+    else if (phase === 'living') line = 'dreaming the first moment…';
+    setText(el.status, line);
+    el.line.hidden = !line;
+    // sharing, for the owner of a published life: one small word, not a button of its own
+    const mine = !!pub?.ok && !!pub.mine && !watch;
+    el.share.hidden = !(mine && pub.life);
+    setText(el.share, pub?.shared ? 'shared with everyone' : 'only you can see it');
+    el.share.disabled = sharing;
+    // THE TWO BUTTONS. Wake when it sleeps and y3kode is here to wake it; sleep
+    // when it lives here, or when a published life of yours is awake on this
+    // computer under another hand (lucid --live) and y3kode is here to tell it.
+    const here = !watch && (phase === 'living' || phase === 'resting');
+    const awakeAfar = mine && fresh(pub.life);
+    const canSleep = here && (phase === 'living' || awakeAfar);
+    const canWake = here && phase === 'resting' && !awakeAfar;
+    el.wake.hidden = !canWake; el.sleep.hidden = !canSleep;
+    el.acts.hidden = !(canWake || canSleep);
+    el.wake.disabled = starting; setText(el.wake, starting ? 'waking…' : 'wake up');
+    el.sleep.disabled = stopping; setText(el.sleep, stopping ? 'going to sleep…' : 'go to sleep');
+    card(source);
   }
 
-  // the published life: what it saw, thought and said, where it stands; a line to it if it is yours
-  function webShell() {
-    const mine = !!pub?.mine;
-    const name = pub?.user ? esc(pub.user) : '';
-    return `<p id="life-sees" class="life-note"></p>
-      <p id="life-thought" class="life-thought"></p>
-      <p id="life-said" class="life-said"></p>
-      <p id="life-intent" class="life-intent"></p>
-      <p class="life-note">${mine ? 'your life, lived on your own computer and published here' : `${name}'s life, lived on their computer and shared here`}: this page shows its newest moment.</p>
-      ${mine && phase === 'resting' ? `<div class="life-row"><button type="button" id="life-begin" class="create-go">${st?.ended ? 'wake it' : 'begin'}</button><button type="button" id="life-anew" class="login-alt">begin a new life</button></div>` + updateRow() : ''}
-      ${mine ? `<form id="life-web-speak" class="life-speak" autocomplete="off">
-          <label class="field"><input id="life-web-say" type="text" maxlength="500" placeholder="say something to it…" aria-label="say something to it" /></label>
-          <button type="submit" class="create-go">say</button>
-        </form>
-        <div class="life-row life-small">
-          <button type="button" id="life-share" class="usage${pub?.shared ? ' on' : ''}"><b>${pub?.shared ? 'shared with everyone' : 'only you can see it'}</b><span>${pub?.shared ? `anyone can watch at ?life=${name}` : 'share it, and anyone can watch'}</span></button>
-        </div>` : ''}`;
+  // what stands between here and the life, only when something does
+  function card(source) {
+    const c = el.card;
+    for (const n of [...c.childNodes]) n.remove();
+    let show = true;
+    const note = (t) => c.append(h('p', 'life-note', t));
+    if (phase === 'checking') note('looking for the life on this computer…');
+    else if (phase === 'none') { c.append(h('b', null, watch ? `${watch} is not sharing a life here` : 'no life here')); if (watch) note('Nothing is published for that name, or it is not shared.'); }
+    else if (phase === 'unpaired' && source !== 'web') {
+      c.append(h('b', null, 'a life lives on your own computer'));
+      note('lucid runs there, through y3kode, and this page watches it. Open kode once to connect y3kode in this browser, then come back.');
+      if (openKode) c.append(btn('open kode', 'create-go', () => openKode()));
+      appButton(c);
+    } else if (phase === 'old') {
+      const has = engine?.version ? ` This computer has ${engine.version}.` : '';
+      if (updating) { c.append(h('b', null, 'updating y3kode')); note(updating === 'asking' ? 'y3kode is asking on your computer, then fetching the newest version from this site…' : 'y3kode is restarting on the new version…'); }
+      else if (engine?.update) { c.append(h('b', null, 'y3kode needs an update for this')); note(`life arrived in y3kode ${LIFE_ENGINE}.${has} y3kode can fetch the newest version from this site and restart on it; it asks on your computer first.`); c.append(btn('update y3kode', 'create-go', () => doUpdate())); appButton(c); }
+      else { c.append(h('b', null, 'y3kode needs an update for this')); note(`life arrived in y3kode ${LIFE_ENGINE}.${has} This one is too old to update itself: get the app (it has y3kode inside) or run the install line again in Terminal.`); appButton(c); installLine(c); }
+    } else if (phase === 'missing' && source !== 'web') {
+      c.append(h('b', null, 'lucid is not on this computer yet'));
+      note(`y3kode looked for it in ${st?.dir || '~/y3k-code/lucid'}. lucid is the life itself: a dreamed world (SD-Turbo, about 2.5GB the first time) and Claude on your own sign-in. Its README says how to set it up.`);
+    } else if (phase === 'resting' && engine?.version && !versionAtLeast(engine.version, LIFE_PUBLISH_ENGINE) && !pub?.life && !updating) {
+      // a y3kode from before the life published itself: the update, offered once, before it wakes
+      c.append(h('b', null, `y3kode ${engine.version} can run the life, but not publish it`));
+      note(`From y3kode ${LIFE_PUBLISH_ENGINE} a life begun here is watched from any device by itself.`);
+      if (engine.update) c.append(btn('update y3kode', 'create-go', () => doUpdate())); else appButton(c);
+    } else show = false;
+    c.hidden = !show;
   }
-  // a y3kode from before the life published itself: the update, offered here
-  function updateRow() {
-    if (!engine?.version || versionAtLeast(engine.version, LIFE_PUBLISH_ENGINE)) return '';
-    return `<div class="life-card life-update"><b>y3kode ${esc(engine.version)} can run the life, but not publish it</b>
-      <p>From y3kode ${LIFE_PUBLISH_ENGINE} a life begun here is watched from any device by itself. ${engine.update ? 'y3kode can fetch the newest version from this site and restart on it; it asks on your computer first.' : 'Get the app (it has y3kode inside) or run the install line again in Terminal.'}</p>
-      <div class="life-row">${engine.update ? '<button type="button" id="life-update" class="create-go">update y3kode</button>' : appButton()}</div></div>`;
-  }
-  // under the cards for a life that is not living here: how to watch it from anywhere
-  function publishCard() {
-    if (watch || !pub?.ok || !pub.mine) return '';
-    const cmd = pubCmd ? `<p class="life-note">on the computer that lives it, in its lucid folder:</p><pre class="life-log">${esc(pubCmd)}</pre>` : '';
-    const has = pub.key && !pubCmd ? '<p class="life-note">a key was made before; a new one retires it.</p>' : '';
-    return `<div class="life-card life-publish"><b>watch it from anywhere</b>
-      <p>A life lived on your computer can publish each moment here — the picture, what it thought and said — and this page shows it on any device, no engine needed. Make a key, run the line on that computer, and leave it running.</p>
-      ${has}${cmd}
-      <div class="life-row"><button type="button" id="life-pub-key" class="login-alt">${pub.key || pubCmd ? 'make a new key' : 'make a key'}</button></div></div>`;
-  }
-  function shell() {
-    const m = st?.moment || null;
-    if (phase === 'checking') return `<p class="life-note">looking for the life on this computer…</p>`;
-    if (phase === 'unpaired') return publishCard() + `<div class="life-card"><b>a life lives on your own computer</b>
-      <p>lucid runs there, through y3kode, and this page watches it. Open kode once to connect y3kode in this browser, then come back.</p>
-      <div class="life-row">${openKode ? '<button type="button" id="life-kode" class="create-go">open kode</button>' : ''}${appButton()}</div>${installLine()}</div>`;
-    if (phase === 'old') {
-      const has = engine?.version ? ` This computer has ${esc(engine.version)}.` : '';
-      const card = publishCard();
-      if (updating) return `<div class="life-card"><b>updating y3kode</b>
-        <p>${updating === 'asking' ? 'y3kode is asking on your computer, then fetching the newest version from this site…' : 'y3kode is restarting on the new version…'}</p></div>`;
-      if (engine?.update) return card + `<div class="life-card"><b>y3kode needs an update for this</b>
-        <p>life arrived in y3kode ${LIFE_ENGINE}.${has} y3kode can fetch the newest version from this site and restart on it; it asks on your computer first.</p>
-        <div class="life-row"><button type="button" id="life-update" class="create-go">update y3kode</button>${appButton()}</div></div>`;
-      return card + `<div class="life-card"><b>y3kode needs an update for this</b>
-        <p>life arrived in y3kode ${LIFE_ENGINE}.${has} This one is too old to update itself: get the app (it has y3kode inside) or run the install line again in Terminal.</p>
-        <div class="life-row">${appButton()}</div>${installLine()}</div>`;
-    }
-    if (phase === 'none') return `<div class="life-card"><b>${watch ? esc(watch) + ' is not sharing a life here' : 'no life here'}</b>${watch ? '<p>Nothing is published for that name, or it is not shared.</p>' : ''}</div>`;
-    if (phase === 'missing') return publishCard() + `<div class="life-card"><b>lucid is not on this computer yet</b>
-      <p>y3kode looked for it in <code>${esc(st?.dir || '~/y3k-code/lucid')}</code>. lucid is the life itself: a dreamed world (SD-Turbo, about 2.5GB the first time) and Claude on your own sign-in. Its README says how to set it up.</p></div>`;
-    if (phase === 'resting') {
-      const why = st?.ended?.why ? `<p class="life-note">${esc(st.ended.why)}</p>` : '';
-      // lucid's own last lines, only when it stopped on its own with an error
-      const log = st?.log?.length && st?.ended?.code ? `<pre class="life-log">${esc(st.log.slice(-6).join('\n'))}</pre>` : '';
-      return updateRow() + publishCard() + `<div class="life-card"><b>${pic ? 'it is resting' : 'a life in a dreamed world'}</b>
-        <p>Your presence, on your own Claude sign-in, looks at a picture dreamed on this computer, thinks, and chooses what to do; the next picture is dreamed from that. You can watch, take the controls, or speak to it. What it lives there goes into its journal, so it remembers. Each moment uses your Claude plan, and it rests on its own when nobody is watching.</p>
-        ${why}${log}
-        <div class="life-row"><button type="button" id="life-begin" class="create-go">${pic || st?.ended ? 'wake it' : 'begin'}</button>
-        <button type="button" id="life-anew" class="login-alt">begin a new life</button></div></div>`;
-    }
-    const human = m?.mode === 'human';
-    return `<p id="life-thought" class="life-thought"></p>
-      <p id="life-said" class="life-said"></p>
-      <p id="life-intent" class="life-intent"></p>
-      <p id="life-err" class="life-err" hidden></p>
-      <div class="life-controls">
-        <div class="life-row">
-          <button type="button" id="life-mode" class="usage${human ? ' on' : ''}"><b>${human ? 'you have the controls' : 'it is living on its own'}</b><span>${human ? 'space gives them back' : 'space takes the controls'}</span></button>
-          <button type="button" id="life-words" class="usage${sayAloud ? ' on' : ''}"><b>speak its words</b><span>${sayAloud ? 'what it says, in your presence’s voice' : 'its words stay written'}</span></button>
-          <button type="button" id="life-thoughts" class="usage${sayAloud && thoughtsAloud ? ' on' : ''}"${sayAloud ? '' : ' disabled'}><b>its thoughts too</b><span>${thoughtsAloud ? 'the inner monologue, aloud' : 'kept to the page: it is a lot of words'}</span></button>
-        </div>
-        ${human ? `<div class="life-pad" role="group" aria-label="move">
-          <button type="button" data-move="up" title="look up (q)">look up</button>
-          <button type="button" data-move="forward" title="forward (w)">forward</button>
-          <button type="button" data-move="down" title="look down (e)">look down</button>
-          <button type="button" data-move="left" title="turn left (a)">left</button>
-          <button type="button" data-move="stay" title="stay (x)">stay</button>
-          <button type="button" data-move="right" title="turn right (d)">right</button>
-          <button type="button" data-move="back" class="life-pad-back" title="step back (s)">back</button>
-        </div>` : ''}
-        <form id="life-speak" class="life-speak" autocomplete="off">
-          <label class="field"><input id="life-say" type="text" maxlength="500" placeholder="say something to it…" aria-label="say something to it" /></label>
-          <button type="submit" class="create-go">say</button>
-        </form>
-        <div class="life-row life-small">
-          <button type="button" id="life-slower" class="login-alt">slower</button>
-          <span id="life-pace" class="life-note"></span>
-          <button type="button" id="life-faster" class="login-alt">faster</button>
-          <button type="button" id="life-rest" class="login-alt">let it rest</button>
-        </div>
-      </div>`;
-  }
-
   // where the app is, if the site knows (the top bar's download glyph goes to the same place)
-  function appButton() {
+  function appButton(c) {
     const u = setupV?.appUrl || (Array.isArray(setupV?.builds) && setupV.builds.find((b) => /^https:/.test(b?.url || ''))?.url) || '';
-    return /^https:\/\/[^\s"'<>]+$/.test(u) ? `<button type="button" id="life-app" class="login-alt" data-url="${esc(u)}">get the app</button>` : '';
+    if (/^https:\/\/[^\s"'<>]+$/.test(u)) c.append(btn('get the app', 'login-alt', () => openUrl(u)));
   }
-  function installLine() {
-    return setupV?.command ? `<p class="life-note">or, in Terminal: <code>${esc(setupV.command)}</code></p>` : '';
+  function installLine(c) {
+    if (setupV?.command) { const p = h('p', 'life-note', 'or, in Terminal: '); p.append(h('code', null, setupV.command)); c.append(p); }
   }
   async function doUpdate() {
     if (updating) return;
     updating = 'asking'; paint();
     const r = await update({ cmd, fetchFn });
-    if (!grid) return;
+    if (!root) return;
     if (r?.ok && r.restarting) {
       updating = 'restarting'; paint();
       const back = await waitFor(r.version, { cmd });
@@ -522,54 +459,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     poll();
   }
 
-  function wire() {
-    const redraw = () => { const body = $('#life-body'); if (body) body.dataset.phase = ''; paint(); };   // the controls, drawn again
-    $('#life-kode')?.addEventListener('click', () => openKode?.());
-    $('#life-update')?.addEventListener('click', () => doUpdate());
-    $('#life-pub-key')?.addEventListener('click', () => makeKey());
-    $('#life-share')?.addEventListener('click', () => share(!pub?.shared));
-    $('#life-web-speak')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const inp = $('#life-web-say');
-      const text = String(inp?.value || '').trim();
-      if (!text) return;
-      inp.value = '';
-      sayWeb(text);
-    });
-    $('#life-app')?.addEventListener('click', (e) => { const u = e.currentTarget?.dataset?.url; if (u) openUrl(u); });
-    $('#life-begin')?.addEventListener('click', () => begin(false));
-    $('#life-anew')?.addEventListener('click', () => begin(true));
-    $('#life-mode')?.addEventListener('click', () => act({ do: 'mode', to: st?.moment?.mode === 'human' ? 'autonomous' : 'human' }));
-    // its words, aloud, on unless turned off here; turned off, the line being
-    // said stops too: quiet was asked for
-    $('#life-words')?.addEventListener('click', () => {
-      sayAloud = !sayAloud;
-      try { if (sayAloud) localStorage.removeItem(SAY_KEY); else localStorage.setItem(SAY_KEY, '0'); } catch { /* private window */ }
-      if (!sayAloud) lines?.hush();
-      redraw();
-    });
-    // its inner monologue too, off unless turned on here: it is a lot of
-    // words. Turned off, a thought already being said is finished, not cut.
-    $('#life-thoughts')?.addEventListener('click', () => {
-      thoughtsAloud = !thoughtsAloud;
-      try { if (thoughtsAloud) localStorage.setItem(THOUGHTS_KEY, '1'); else localStorage.removeItem(THOUGHTS_KEY); } catch { /* private window */ }
-      redraw();
-    });
-    for (const b of grid?.querySelectorAll('[data-move]') || []) b.addEventListener('click', () => act({ do: 'move', move: b.dataset.move }));
-    $('#life-speak')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const inp = $('#life-say');
-      const text = String(inp?.value || '').trim();
-      if (!text) return;
-      inp.value = '';
-      act({ do: 'say', text });
-    });
-    $('#life-slower')?.addEventListener('click', () => act({ do: 'pace', delta: 1 }));
-    $('#life-faster')?.addEventListener('click', () => act({ do: 'pace', delta: -1 }));
-    $('#life-rest')?.addEventListener('click', () => rest());
-  }
-
   // `?life=<username>`: someone else's shared life, watched (main.js)
   const setWatch = (name) => { watch = typeof name === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(name) ? name : null; };
-  return { open, close, setWatch };
+  return { open, close, setWatch, hear };
 }

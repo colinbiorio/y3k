@@ -30,7 +30,7 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.6';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.7';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -615,7 +615,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'life.start': async (c) => life.start(c),
     'life.state': async (c) => life.state(c),
     'life.do': async (c) => life.act(c),
-    'life.stop': async () => life.stop(),
+    'life.stop': async () => life.stop('you let it rest', { door: true }),   // the page's ask: it may reach a life another hand lives here (life.mjs)
     // what a turn has said so far (done: the turn is over or never was)
     'brain.partial': async ({ tag }) => (partials.has(tag) ? { ok: true, text: partials.get(tag), done: false } : { ok: true, text: '', done: true }),
     'engine.update': async (c) => updater.run(c),

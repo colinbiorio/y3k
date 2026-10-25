@@ -1962,6 +1962,14 @@ function sendChat() {
   // to be fixed, with the image beside it: wiping it lost what was typed.
   const k = text ? runKommand(text) : null;
   if (k) { if (k.ok) chatInput.value = ''; collapseTyping(); return; }
+  // IN THE LIFE, THE CHAT BAR TALKS TO THE LIFE (Colin, 2026-10-25: "keep the
+  // chat bar as the way to interact with the brain throughout the entire
+  // site"): the one living in the dreamed world is the presence, so a line
+  // typed here is said to it there, and it answers in its own voice, as a
+  // moment. A life that cannot hear (none here, none published and awake)
+  // leaves the line to the presence, as everywhere else. After the kommands:
+  // a kommand is a kommand in the life too, and is never said to it.
+  if (text && document.body?.classList?.contains?.('in-life') && social.lifeHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
