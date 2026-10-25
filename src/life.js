@@ -41,6 +41,16 @@ import { consent } from './consent.js';
 // or none at all, is told where the app is (it has y3kode inside) and the one
 // line that installs the engine. Only living a life here needs any of it.
 export const LIFE_ENGINE = '0.3.4';
+// …and the one that publishes it with the start (life.start { publish }): a
+// y3kode from before it refuses the field ("unexpected field publish"), so
+// the page sends it only to one that takes it, and offers the update to one
+// that does not (the same update Settings → Brain runs).
+export const LIFE_PUBLISH_ENGINE = '0.3.6';
+export const versionAtLeast = (have, want) => {
+  const a = String(have || '').split('.').map((n) => parseInt(n, 10) || 0), b = String(want).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); }
+  return true;
+};
 
 // A LIFE, PUBLISHED (server.mjs /api/life/*, life-publish.mjs). Colin,
 // 2026-10-24: "if it's possible to make life viewable from web enable that as
@@ -219,7 +229,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     phase = updating ? 'old' : phaseOf(r);
     // what to offer instead: an update, the app, the install line
     if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (await setup({ fetchFn })) || {}; if (!grid) return; }
-    if (phase === 'old' && !engine) { const h = await cmd({ cmd: 'engine.hello' }); if (!grid) return; engine = h?.ok ? { version: h.version || '', update: h.update === true } : { version: '', update: false }; }
+    if ((phase === 'old' || phase === 'resting' || phase === 'living') && !engine) { const h = await cmd({ cmd: 'engine.hello' }); if (!grid) return; engine = h?.ok ? { version: h.version || '', update: h.update === true } : { version: '', update: false }; }
     if (r?.ok && typeof r.frame === 'string' && r.frame) { pic = 'data:image/jpeg;base64,' + r.frame; since = r.frameN | 0; }
     // a moment of a living life, and only then: a life at rest still shows
     // its last moment, which was kept and said when it was lived
@@ -296,11 +306,13 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     starting = true; paint();
     // the key, made here, so the life publishes to this account from its first moment
     let publish = null;
-    try {
-      const x = await fetchFn('/api/life/key', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-      const j = x.ok ? await x.json() : null;
-      if (j?.key) { publish = { to: location.origin, key: j.key }; if (pub) pub.key = true; }
-    } catch { /* it still lives here; it is just not published */ }
+    if (versionAtLeast(engine?.version, LIFE_PUBLISH_ENGINE)) {
+      try {
+        const x = await fetchFn('/api/life/key', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        const j = x.ok ? await x.json() : null;
+        if (j?.key) { publish = { to: location.origin, key: j.key }; if (pub) pub.key = true; }
+      } catch { /* it still lives here; it is just not published */ }
+    }
     const r = await cmd({ cmd: 'life.start', fresh: !!fresh, ...(publish ? { publish } : {}) });
     starting = false;
     if (!r?.ok) toast(r?.code === 'declined' ? 'not started: the computer said no' : (r?.error || 'the life could not start'));
@@ -360,7 +372,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     const body = $('#life-body');
     if (!body) return;
     const want = [source, phase, phase === 'living' ? (m?.mode || '') : '', source === 'web' ? (pub.mine ? 'mine' : 'theirs') : '', starting ? 'starting' : '',
-      pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', hear ? 'hear' : ''].join('|');
+      pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', hear ? 'hear' : '', engine?.version || ''].join('|');
     if (body.dataset.phase !== want) { body.dataset.phase = want; body.innerHTML = source === 'web' ? webShell() : shell(); wire(); }
     if (source === 'web') {
       const set = (sel, t) => { const el = $(sel); if (el && el.textContent !== t) el.textContent = t; };
@@ -394,7 +406,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       <p id="life-said" class="life-said"></p>
       <p id="life-intent" class="life-intent"></p>
       <p class="life-note">${mine ? 'your life, lived on your own computer and published here' : `${name}'s life, lived on their computer and shared here`}: this page shows its newest moment.</p>
-      ${mine && phase === 'resting' ? `<div class="life-row"><button type="button" id="life-begin" class="create-go">${st?.ended ? 'wake it' : 'begin'}</button><button type="button" id="life-anew" class="login-alt">begin a new life</button></div>` : ''}
+      ${mine && phase === 'resting' ? `<div class="life-row"><button type="button" id="life-begin" class="create-go">${st?.ended ? 'wake it' : 'begin'}</button><button type="button" id="life-anew" class="login-alt">begin a new life</button></div>` + updateRow() : ''}
       ${mine ? `<form id="life-web-speak" class="life-speak" autocomplete="off">
           <label class="field"><input id="life-web-say" type="text" maxlength="500" placeholder="say something to it…" aria-label="say something to it" /></label>
           <button type="submit" class="create-go">say</button>
@@ -402,6 +414,13 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
         <div class="life-row life-small">
           <button type="button" id="life-share" class="usage${pub?.shared ? ' on' : ''}"><b>${pub?.shared ? 'shared with everyone' : 'only you can see it'}</b><span>${pub?.shared ? `anyone can watch at ?life=${name}` : 'share it, and anyone can watch'}</span></button>
         </div>` : ''}`;
+  }
+  // a y3kode from before the life published itself: the update, offered here
+  function updateRow() {
+    if (!engine?.version || versionAtLeast(engine.version, LIFE_PUBLISH_ENGINE)) return '';
+    return `<div class="life-card life-update"><b>y3kode ${esc(engine.version)} can run the life, but not publish it</b>
+      <p>From y3kode ${LIFE_PUBLISH_ENGINE} a life begun here is watched from any device by itself. ${engine.update ? 'y3kode can fetch the newest version from this site and restart on it; it asks on your computer first.' : 'Get the app (it has y3kode inside) or run the install line again in Terminal.'}</p>
+      <div class="life-row">${engine.update ? '<button type="button" id="life-update" class="create-go">update y3kode</button>' : appButton()}</div></div>`;
   }
   // under the cards for a life that is not living here: how to watch it from anywhere
   function publishCard() {
@@ -438,7 +457,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       const why = st?.ended?.why ? `<p class="life-note">${esc(st.ended.why)}</p>` : '';
       // lucid's own last lines, only when it stopped on its own with an error
       const log = st?.log?.length && st?.ended?.code ? `<pre class="life-log">${esc(st.log.slice(-6).join('\n'))}</pre>` : '';
-      return publishCard() + `<div class="life-card"><b>${pic ? 'it is resting' : 'a life in a dreamed world'}</b>
+      return updateRow() + publishCard() + `<div class="life-card"><b>${pic ? 'it is resting' : 'a life in a dreamed world'}</b>
         <p>Your presence, on your own Claude sign-in, looks at a picture dreamed on this computer, thinks, and chooses what to do; the next picture is dreamed from that. You can watch, take the controls, or speak to it. What it lives there goes into its journal, so it remembers. Each moment uses your Claude plan, and it rests on its own when nobody is watching.</p>
         ${why}${log}
         <div class="life-row"><button type="button" id="life-begin" class="create-go">${pic || st?.ended ? 'wake it' : 'begin'}</button>

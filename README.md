@@ -258,6 +258,8 @@ build. Read the one for the part you are touching.
   plan's limit when that is why Claude Code did not answer (y3kode says
   `limit`, with when it resets; the page remembers y3kode's last refusal and
   says so instead of "did not answer"). y3kode 0.3.6.
+  A y3kode from before 0.3.6 refuses the new field, so the page sends it only
+  to one that takes it and offers that update on the life page itself.
 - **2026-10-25** — **The app, right of the name.** Colin, 2026-10-24: "can
   you add a 'y3k' logo -- the same one used for the browser tab, as a download
   app glyph titled 'download' directly right of the yearthreethousand logo,
