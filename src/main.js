@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice, browserVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
+import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, ownFailedLine, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd, siteSetup } from './own-brain.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
@@ -1116,7 +1116,7 @@ const airden = createAirden({
     // the same line a reply would have said for the same reason (brain.js),
     // and with none named, the same as a reply's too: on the person's own plan
     // it is Claude Code that did not answer, not a provider in Settings → Brain
-    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || (onOwnPlan() ? OWN_FAILED : PROVIDER_FAILED), 'y3k');
+    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || (onOwnPlan() ? ownFailedLine() : PROVIDER_FAILED), 'y3k');
     else if (why === 'silent') showCaption('(nothing came to me just now — I will be quiet for a while.)', 'y3k');
     // 'reload' says nothing: the page is reloading as whoever is here now
     if (why !== 'room') { currentMood = 'calm'; body.setMood('calm'); setMoodTag('calm'); }

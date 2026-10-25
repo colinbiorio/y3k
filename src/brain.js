@@ -9,7 +9,7 @@
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
 import { PROVIDER_NAMES, modelName } from './models.js';
 import { BRAIN_BODY_MAX } from './media-rules.mjs';
-import { ownDeclined, ownChoice, ownChoiceFor } from './own-brain.js';
+import { ownDeclined, ownChoice, ownChoiceFor, recentOwnFailure } from './own-brain.js';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -266,6 +266,14 @@ export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not a
 // not a fault: the plan's own usage limit, which is the only limit on a turn
 // there (2026-10-12) and is waited out like anyone's.
 export const OWN_FAILED = 'Claude Code on your computer did not answer. If your Claude plan has reached its usage limit, your presence answers again when it resets. Settings → Brain shows where Claude Code stands.';
+// …and when y3kode said it was the plan's limit (2026-10-25: Colin, "it keeps
+// saying 'claude code on your computer did not answer' even though you're
+// answering"): the limit, with when it resets, and nothing about this computer
+export const ownLimitLine = (resets) => `Your Claude plan has reached its usage limit${resets ? ` (resets ${resets})` : ''}. Your presence answers again when it resets; nothing is wrong on this computer.`;
+export function ownFailedLine(recent = recentOwnFailure()) {
+  if (recent?.code === 'limit') return ownLimitLine(recent.resets);
+  return OWN_FAILED;
+}
 // …and when an attached picture, with the conversation it rides beside, is
 // more than a turn can carry (respondStream)
 export const PICTURE_TOO_LARGE = 'That picture is too large to send with this conversation. Try a smaller one.';
@@ -344,7 +352,7 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 // The notice itself: captioned, off the air, carrying its reason (`why`) so the
 // room can act on it (main.js gives the words back when nothing was sent).
 function notice(why, provider) {
-  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownHere() ? OWN_FAILED : noBrain());
+  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownHere() ? ownFailedLine() : noBrain());
   return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(known(why) ? { why } : {}) };
 }
 function unanswered(why, provider) {
