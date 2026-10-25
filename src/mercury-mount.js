@@ -371,7 +371,8 @@ export function mountAppMercury() {
   // 44px boxes on every touch screen: the text box floated alone in a bar too
   // wide for it. The gate now mirrors the stylesheet's own rules for when
   // #chat is visible (body.gated / .viewing / .panel-open hide it; .in-chess
-  // and .in-world keep it through a panel).
+  // and .in-world keep it through a panel; .in-life too, 2026-10-25: the life
+  // is the whole screen like the world, and the chat bar talks to it).
   //
   // THE FALSE EDGE IS HELD FOR THE FADE. The classes flip in one frame; #chat
   // goes over 0.4s (its own transition). Clearing the glyph canvases on the
@@ -383,7 +384,7 @@ export function mountAppMercury() {
   const chatShown = () => {
     const b = document.body.classList;
     const shown = b.contains('in-home') && !b.contains('gated') && !b.contains('viewing')
-      && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world')
+      && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world') || b.contains('in-life')
         // y3kode keeps the chat bar only while the bottom bar is open (2026-10-20)
         || (b.contains('in-code') && !b.contains('nav-collapsed-bottom')));
     if (shown) { hideAt = 0; return true; }

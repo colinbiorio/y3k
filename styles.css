@@ -2455,7 +2455,7 @@ body:not(.nav-collapsed-bottom) .chat-menu::before { visibility: hidden; }
    keep it). Delayed by the bar's own 0.4s fade. The think-glow behind the bar
    holds still meanwhile: a blurred rainbow turning at opacity 0 is a filter
    re-run every frame for nobody. */
-body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-world) .chat-menu::before {
+body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-world):not(.in-life) .chat-menu::before {
   visibility: hidden; transition: opacity 0.3s ease, visibility 0s linear 0.4s; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
