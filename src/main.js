@@ -1525,8 +1525,28 @@ createStepNotice(gfx, {
 });
 
 let captionTimer = 0;
+// THE CAPTION STAYS CLEAR OF THE CHAT BAR (Colin, 2026-10-25: "nothing
+// overlaps"). Its bottom was a constant, 108px, and on a phone or a tall
+// bottom bar the bar's air mark and fold button reach above that, so a long
+// answer was drawn under them in chess, twenty questions and the life. Now
+// the caption is told where the bar's highest thing begins (the bar, its air
+// mark, its fold button), measured when a caption shows and when the window
+// changes, and the stylesheet keeps it above that (--caption-clear).
+function clearCaption() {
+  let top = Infinity;
+  for (const id of ['chat', 'chat-air', 'nav-collapse-bottom']) {
+    const el = document.getElementById(id);
+    const r = el?.getBoundingClientRect?.();
+    if (r && r.height > 0 && el.offsetParent !== null && r.top < top) top = r.top;
+  }
+  if (Number.isFinite(top)) document.documentElement.style.setProperty('--caption-clear', `${Math.round(top)}px`);
+  else document.documentElement.style.removeProperty('--caption-clear');
+}
+window.addEventListener('resize', clearCaption);
+
 function showCaption(text, who) {
   if (who === 'you') beforeYou?.();
+  clearCaption();
   if (document.body.classList.contains('in-home')) { history.push(who, text); lastRing = { who, text: String(text || '').trim() }; }
   const el = $('caption');
   el.innerHTML = who === 'you' ? `<span class="you">you</span>${escapeHtml(text)}` : escapeHtml(text);

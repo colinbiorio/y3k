@@ -200,7 +200,8 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .caption {
   position: fixed;
   left: 50%;
-  bottom: 108px;
+  /* above the chat bar's highest thing (main.js clearCaption: --caption-clear), never under 108px */
+  bottom: max(108px, calc(100% - var(--caption-clear, 100%) + 12px));
   transform: translateX(-50%);
   max-width: min(720px, 86vw);
   text-align: center;
