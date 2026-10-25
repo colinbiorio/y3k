@@ -137,6 +137,11 @@ const SKY_U = {
   // the water's ripples: x, z = where the window stands on the planet (wrapped
   // to the ripples' own period, so a recentre never moves a wave), w = time
   waterAt: { value: new THREE.Vector3() }, waterGlint: { value: new THREE.Color(0) },
+  // THE LAMPS AND THE WIND (2026-10-22). skyLamp: how far up every window,
+  // ember and beacon on the ground is turned — a floor by day, full by night
+  // (lightSky). skyWind: the clock, wrapped (x), the sway's size in blocks
+  // (y) and the way it leans (z, w); the plants' vertex stage reads it.
+  skyLamp: { value: 0.3 }, skyWind: { value: new THREE.Vector4(0, 0.05, 1, 0.6) },
 };
 // The eye-to-vertex ray in world space, from the view-space position three
 // already computed (a row vector times the view matrix is the inverse
@@ -202,12 +207,46 @@ const WATER_GLSL = `
 		gl_FragColor.a = mix( gl_FragColor.a, 1.0, fres );
 	}
 `;
+// THE HOOK'S OTHER THREE FORMS (2026-10-22), each its own program:
+//   glow — a sprite's parts. The instance colour is the part's LIGHT, not its
+//          paint: three multiplies the diffuse by it (color_fragment), which
+//          would paint a dark shell black; here that line is dropped and the
+//          colour scales the emissive instead, so one material draws every
+//          sprite of every society, each lit in its own scheme, each as
+//          bright as its own breath says.
+//   lamp — a building. A `glow` colour per vertex (world-shapes.js compile),
+//          added to the emissive scaled by skyLamp: the windows come on at
+//          dusk, and the night grade spares them like any glow (SKY_FOG).
+//   sway — a plant. A `sway` size per vertex (geoFor: nothing at the root,
+//          most at the crown), moved by the wind in the vertex stage, in
+//          WORLD directions: the instance's own turn is undone (a row vector
+//          times the matrix is its transpose, over its scale squared) so one
+//          wind crosses the wood instead of each tree shaking its own way.
+//          The phase is the tree's place, so no two sway in step.
+const GLOW_FRAG = '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;';
+const LAMP_VERT_PARS = '#include <color_pars_vertex>\nattribute vec3 glow;\nvarying vec3 vGlow;';
+const LAMP_VERT = '#include <color_vertex>\n\tvGlow = glow;';
+const LAMP_FRAG_PARS = '#include <color_pars_fragment>\nvarying vec3 vGlow;\nuniform float skyLamp;';
+const LAMP_FRAG = '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vGlow * skyLamp;';
+const SWAY_VERT_PARS = '#include <color_pars_vertex>\nattribute float sway;\nuniform vec4 skyWind;';
+const SWAY_VERT = `#include <begin_vertex>
+#ifdef USE_INSTANCING
+	{
+		float ph = instanceMatrix[3][0] * 0.35 + instanceMatrix[3][2] * 0.55;
+		float gust = sin( skyWind.x + ph ) + 0.4 * sin( skyWind.x * 2.7 + ph * 1.3 );
+		vec3 w = vec3( skyWind.z * gust, 0.0, skyWind.w * gust + 0.3 * sin( skyWind.x * 0.8 + ph * 0.7 ) ) * ( skyWind.y * sway );
+		mat3 im = mat3( instanceMatrix );
+		transformed += ( w * im ) / dot( im[0], im[0] );
+	}
+#endif`;
 // THE HOOK. Every material the world draws with fog gets the sky's fog (and
 // the water its reflection too). One program per material type: the key is
-// the same for all of them, and so is the code.
-function skyFogged(mat, water = false) {
+// the same for all of them, and so is the code. `how`: true for the water,
+// or { glow } | { lamp } | { sway } for the forms above.
+function skyFogged(mat, how = false) {
   if (!mat?.isMaterial || mat.userData.skyFog) return mat;
   mat.userData.skyFog = true;
+  const water = how === true, glow = !!how?.glow, lamp = !!how?.lamp, sway = !!how?.sway;
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, SKY_U);
     sh.vertexShader = sh.vertexShader
@@ -215,8 +254,14 @@ function skyFogged(mat, water = false) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <fog_pars_fragment>', SKY_FRAG_PARS + (water ? SKY_GLSL + 'uniform vec3 waterAt;\nuniform vec3 waterGlint;\n' : ''))
       .replace('#include <fog_fragment>', (water ? WATER_GLSL : '') + SKY_FOG);
+    if (glow) sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', '').replace('#include <emissivemap_fragment>', GLOW_FRAG);
+    if (lamp) {
+      sh.vertexShader = sh.vertexShader.replace('#include <color_pars_vertex>', LAMP_VERT_PARS).replace('#include <color_vertex>', LAMP_VERT);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <color_pars_fragment>', LAMP_FRAG_PARS).replace('#include <emissivemap_fragment>', LAMP_FRAG);
+    }
+    if (sway) sh.vertexShader = sh.vertexShader.replace('#include <color_pars_vertex>', SWAY_VERT_PARS).replace('#include <begin_vertex>', SWAY_VERT);
   };
-  mat.customProgramCacheKey = () => (water ? 'sky-water' : 'sky-fog');
+  mat.customProgramCacheKey = () => (water ? 'sky-water' : glow ? 'sky-glow' : lamp ? 'sky-lamp' : sway ? 'sky-sway' : 'sky-fog');
   return mat;
 }
 // THE DOME. Drawn last of the opaque things and on the far plane (z = w, as
@@ -261,7 +306,7 @@ const SCHEME_GLOW = {
 import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
 import { sidePlaces } from './world-side.js';
-import { shapeFor, personFor, posePerson, PERSON_EYE } from './world-shapes.js';
+import { shapeFor, personFor, posePerson, PERSON_EYE, SPRITE, SPRITE_STRIDE, PANEL_TOP } from './world-shapes.js';
 import { createBuildWindow } from './world-build.js';
 import { createChestWindow } from './world-chest.js';
 import { createTasksWindow } from './world-tasks.js';
@@ -366,11 +411,16 @@ export function createWorldView({ getAccount, toast, play }) {
   const matCache = new Map();  // key → material, for the page's lifetime
   // Everything cached here is drawn in the world, so it fogs toward the sky
   // (skyFogged) — the plants, the animals, the left things, the built things.
-  const cachedMat = (key, make) => {
+  // `how` is the hook's form (skyFogged): nothing for most, { sway } for a
+  // plant, { lamp } for a building.
+  const cachedMat = (key, make, how) => {
     let m = matCache.get(key);
-    if (!m) { m = skyFogged(make()); matCache.set(key, m); }
+    if (!m) { m = skyFogged(make(), how); matCache.set(key, m); }
     return m;
   };
+  // the one material every compiled building is drawn with (world-shapes.js):
+  // its colours per vertex, and the glow per vertex that skyLamp turns up at dusk
+  const lampMat = () => cachedMat('lamp', () => new THREE.MeshLambertMaterial({ vertexColors: true }), { lamp: true });
   // A shape drawn by world-shapes (a forge, a person) arrives with fresh
   // materials of its own; each is swapped for the page's copy of the same
   // look. The fresh one never reached the GPU, so disposing it costs nothing.
@@ -381,6 +431,9 @@ export function createWorldView({ getAccount, toast, play }) {
       const m = o.isMesh && o.material;
       if (!m) return;
       if (Array.isArray(m)) { m.forEach((x) => skyFogged(x)); return; }
+      // a compiled building (world-shapes.js): its colours and its glow ride
+      // on its vertices, and the one lamp material draws every one of them
+      if (o.userData.lit || m.vertexColors) { if (m !== lampMat()) { o.material = lampMat(); m.dispose(); } return; }
       if (!m.isMeshLambertMaterial || m.map) { skyFogged(m); return; }
       const key = `lam|${m.color.getHex()}|${m.emissive.getHex()}|${m.emissiveIntensity}|${m.transparent ? m.opacity : 1}`;
       const kept = cachedMat(key, () => m);
@@ -936,7 +989,8 @@ export function createWorldView({ getAccount, toast, play }) {
     const was = riding;
     riding = next;
     if (next && !was) { lookYaw = azimuth + Math.PI; lookPitch = 0.05; }   // keep the view continuous on the way in
-    for (const bm of bodyMeshes) bm.mesh.visible = !(riding && riding.how === 'eye' && bm.society.mine && bm.index === riding.i);
+    // the ridden sprite is hidden by the frame itself (poseSprites writes it at
+    // scale zero while you are inside it): there is no mesh of its own to hide
     const b = rootEl?.querySelector('#world-ride');
     if (b) { b.textContent = !riding ? 'ride' : riding.how === 'eye' ? 'step back' : 'step off'; b.classList.toggle('on', !!riding); }
     // the ground window may need to move to the rider at once
@@ -1122,15 +1176,15 @@ export function createWorldView({ getAccount, toast, play }) {
   // through the water, and a trench leans most of the way to this teal
   const groundM4 = new THREE.Matrix4(), groundColor = new THREE.Color(), groundDrift = new THREE.Color(), SEA_FLOOR = new THREE.Color(0x123b48);
 
-  // Bodies: voxel MINI-ORBS — a fibonacci shell of tiny glowing cubes,
-  // seeded per body, rotating slowly and breathing. The orb's child,
-  // pixelated, in the world's own material.
+  // ---- WHAT STANDS ON THE GROUND -------------------------------------------
   // Left things: a small glowing octahedron in the maker's scheme — visible
   // from a distance, legible up close through the percept and the rail.
   // The home ground, as Colin described it: a wooden forge, a small green dome,
   // a small steel building, crates, and the panels the sprites charge on. These
   // are the first things here that a society MADE rather than found, so they
-  // are drawn as objects with shape rather than as glow.
+  // are drawn as objects with shape rather than as glow. Each is ONE compiled
+  // mesh now (world-shapes.js, 2026-10-22): a roof, a door, windows the lamp
+  // material lights at dusk — one draw call a building, however many pieces.
   function rebuildBuilt() {
     for (const m of builtMeshes) dropGroup(m.mesh);
     builtMeshes = [];
@@ -1224,39 +1278,44 @@ export function createWorldView({ getAccount, toast, play }) {
       // one instanced mesh per PART per species+stage: a tree is a trunk and a
       // crown, and drawing it as a single cone was drawing a shape, not a tree
       for (const part of form) {
-        const geo = geoFor(part);
+        const geo = geoFor(key, part);
         const tint = part.c === 'leaf' ? meta.color : part.c;
         // LEAVES CATCH THE LIGHT. The species' colours are the server's
         // (flora.js) and stay exactly as they are there; drawn, a leaf leans a
         // tenth toward sunlit green and a tenth brighter, so a pine wood under
         // the new light reads as a living wood and not as teal-black cones on
-        // sage grass (2026-10-19). Bark is drawn as it is.
+        // sage grass (2026-10-19). Bark is drawn as it is. The material takes
+        // the per-face shade geoFor bakes (a crown's top in the sky's light,
+        // its underside in its own shade) and sways (skyFogged's sway form).
         const mesh = new THREE.InstancedMesh(
           geo,
           cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({
+            vertexColors: true,
             color: part.c === 'leaf' ? new THREE.Color(tint).lerp(LEAF_LIT, 0.1).multiplyScalar(1.1) : new THREE.Color(tint),
-          })),
+          }), { sway: true }),
           list.length,
         );
-        const m4 = S.m4, pos = S.v1, q = S.q1, e = S.eu, sc = S.v2;
+        const m4 = S.m4, pos = S.v1, q = S.q1, e = S.eu, sc = S.v2, col = plantTint;
         list.forEach((p, i) => {
           const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
           const base = Math.max(gh, SEA_LEVEL);
           // a seeded turn and a little variation in size, so a wood is trees
-          // rather than one tree stamped four hundred times
+          // rather than one tree stamped four hundred times — and no two the
+          // same green: each leans a little yellow or blue, light or dark
           const r = hash2(p.x, p.z, 61);
           const r2 = hash2(p.x, p.z, 62);
+          const r3 = hash2(p.x, p.z, 63);
           const g = grow * (0.82 + r2 * 0.36);
-          e.set(part.flip ? Math.PI : 0, r * Math.PI * 2, 0);
+          e.set(0, r * Math.PI * 2, 0);
           q.setFromEuler(e);
           sc.set(g, g, g);
-          pos.set(
-            wdelta(center.x, p.x) + (part.dx || 0) * g,
-            base + part.y * g,
-            wdelta(center.z, p.z) + (part.dz || 0) * g,
-          );
+          // the whole plant is drawn in its own space, from the ground up: a
+          // part carries its height inside its geometry (geoFor), so one
+          // matrix places every part of a tree and the wind can read it
+          pos.set(wdelta(center.x, p.x), base, wdelta(center.z, p.z));
           m4.compose(pos, q, sc);
           mesh.setMatrixAt(i, m4);
+          mesh.setColorAt(i, col.setRGB(0.9 + r3 * 0.2, 0.92 + hash2(p.x, p.z, 64) * 0.16, 0.9 + (1 - r3) * 0.18));
         });
         mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
@@ -1265,42 +1324,109 @@ export function createWorldView({ getAccount, toast, play }) {
       }
     }
   }
+  const plantTint = new THREE.Color();
 
   // Trunks and crowns, in the world's own blocky idiom but with the parts a
   // real plant actually has. Heights are for a grown one; everything scales.
   // 'leaf' takes the species colour from the server; anything else is bark.
+  //   A part is a list of PIECES merged into one geometry (geoFor), each
+  // placed in the plant's own space with the ground at y = 0 — so a pine's
+  // three tiers, a broadleaf's four crown lumps, a palm's eight fronds are one
+  // draw call for the whole wood (2026-10-22; Colin: "tons of room to work on
+  // the world", and the trees were a cone on a stick). A piece is turned
+  // about x, then y, then z, then placed — so a frond droops about its own
+  // stem before it is spread round the crown.
+  //   pine       a tapered trunk and three tiers of needles, the lowest a third
+  //              of the way up — the bare trunk is most of what says conifer
+  //   broadleaf  a trunk, two branches, and a crown of four lumps, the way a
+  //              real crown is several masses and not one ball
+  //   palm       a leaning trunk in six segments, eight drooping fronds, and a
+  //              few nuts under them — the savanna coast and the rainforest
+  //   scrub      a stub of hard wood under three small lumps
+  //   cactus     a saguaro: a column with an arm on each side, each an elbow
   const BARK = 0x584231, DRYBARK = 0x4d4033;
   const LEAF_LIT = new THREE.Color(0x9fb05a);   // where a drawn leaf leans (rebuildPlants)
   const FORMS = {
-    moss:      [{ g: 'box', w: 0.52, h: 0.1, y: 0.05, c: 'leaf' }],
-    grass:     [{ g: 'box', w: 0.13, h: 0.36, y: 0.18, c: 'leaf' },
-                { g: 'box', w: 0.09, h: 0.26, y: 0.13, c: 'leaf', dx: 0.15, dz: 0.11 }],
-    scrub:     [{ g: 'cyl', w: 0.08, h: 0.36, y: 0.18, c: DRYBARK },
-                { g: 'crown', w: 0.44, h: 0.5, y: 0.58, c: 'leaf' }],
-    cactus:    [{ g: 'cyl', w: 0.16, h: 1.1, y: 0.55, c: 'leaf' },
-                { g: 'cyl', w: 0.09, h: 0.42, y: 0.78, c: 'leaf', dx: 0.23 }],
-    // a conifer carries its crown high: the lowest branches start about a third
-    // of the way up, and the bare trunk under them is most of what says "tree"
-    pine:      [{ g: 'cyl', w: 0.15, h: 2.6, y: 1.3, c: BARK },
-                { g: 'cone', w: 0.8, h: 1.7, y: 2.0, c: 'leaf' },
-                { g: 'cone', w: 0.52, h: 1.3, y: 3.0, c: 'leaf' }],
-    broadleaf: [{ g: 'cyl', w: 0.19, h: 2.3, y: 1.15, c: BARK },
-                { g: 'crown', w: 1.3, h: 1.45, y: 2.85, c: 'leaf' },
-                { g: 'crown', w: 0.8, h: 0.9, y: 2.2, c: 'leaf', dx: 0.55 }],
-    palm:      [{ g: 'cyl', w: 0.12, h: 3.0, y: 1.5, c: BARK },
-                { g: 'cone', w: 1.05, h: 0.55, y: 3.05, c: 'leaf', flip: true }],
+    moss:      [{ c: 'leaf', pieces: [{ g: 'box', w: 0.52, h: 0.1, y: 0.05 }] }],
+    grass:     [{ c: 'leaf', pieces: [{ g: 'box', w: 0.13, h: 0.36, y: 0.18 }, { g: 'box', w: 0.09, h: 0.26, x: 0.15, y: 0.13, z: 0.11 }] }],
+    scrub:     [{ c: DRYBARK, pieces: [{ g: 'cyl', w: 0.08, h: 0.36, y: 0.18 }] },
+                { c: 'leaf', pieces: [{ g: 'lump', w: 0.34, y: 0.62 }, { g: 'lump', w: 0.26, x: 0.27, y: 0.5, z: 0.1 }, { g: 'lump', w: 0.24, x: -0.21, y: 0.55, z: -0.18 }] }],
+    cactus:    [{ c: 'leaf', pieces: [{ g: 'cyl', w: 0.16, h: 1.1, y: 0.55, n: 7, taper: 0.85 },
+                                      { g: 'cyl', w: 0.09, h: 0.3, x: 0.3, y: 0.55, rz: Math.PI / 2 }, { g: 'cyl', w: 0.09, h: 0.45, x: 0.4, y: 0.75, taper: 0.85 },
+                                      { g: 'cyl', w: 0.08, h: 0.26, x: -0.26, y: 0.72, rz: Math.PI / 2 }, { g: 'cyl', w: 0.08, h: 0.36, x: -0.35, y: 0.88, taper: 0.85 }] }],
+    pine:      [{ c: BARK, pieces: [{ g: 'cyl', w: 0.15, h: 2.6, y: 1.3, taper: 0.55 }] },
+                { c: 'leaf', pieces: [{ g: 'cone', w: 0.92, h: 1.3, y: 1.45 }, { g: 'cone', w: 0.66, h: 1.15, y: 2.25 }, { g: 'cone', w: 0.4, h: 1.0, y: 2.95 }] }],
+    broadleaf: [{ c: BARK, pieces: [{ g: 'cyl', w: 0.2, h: 2.3, y: 1.15, taper: 0.7 },
+                                    { g: 'cyl', w: 0.08, h: 0.9, x: 0.3, y: 2.25, rz: -0.7 }, { g: 'cyl', w: 0.07, h: 0.8, x: -0.25, y: 2.35, z: -0.1, rx: 0.3, rz: 0.75 }] },
+                { c: 'leaf', pieces: [{ g: 'lump', w: 0.95, y: 2.95 }, { g: 'lump', w: 0.72, x: 0.62, y: 2.55, z: 0.2 }, { g: 'lump', w: 0.66, x: -0.58, y: 2.65, z: -0.3 }, { g: 'lump', w: 0.56, x: 0.1, y: 3.55, z: 0.12 }] }],
+    palm:      [{ c: BARK, pieces: [...Array(6).keys()].map((i) => ({ g: 'cyl', w: 0.13 - i * 0.008, h: 0.56, x: 0.02 * i * i, y: 0.28 + i * 0.54, rz: -0.045 * i, taper: 0.9 }))
+                  .concat([{ g: 'box', w: 0.15, h: 0.15, x: 0.42, y: 3.18, z: 0.1, shade: 0.55 }, { g: 'box', w: 0.14, h: 0.14, x: 0.6, y: 3.2, z: -0.08, shade: 0.55 }, { g: 'box', w: 0.13, h: 0.13, x: 0.52, y: 3.14, z: -0.14, shade: 0.55 }]) },
+                // narrow, curved, each twisted a little about its own rib so the
+                // light catches them differently: at 0.26 wide and straight they
+                // were planks from close up (seen 2026-10-24)
+                { c: 'leaf', pieces: [...Array(8).keys()].map((i) => ({ g: 'frond', w: 0.19, h: 1.25, x: 0.5, y: 3.35, ry: (i / 8) * Math.PI * 2 + 0.3, rx: 0.38 + (i % 2) * 0.2, twist: (i % 3 - 1) * 0.45 })) }],
   };
+  // One geometry per species part: its pieces merged, flat-shaded, with a
+  // per-vertex shade (a leaf's faces toward the sky brighter, its underside
+  // darker; bark barely) and a per-vertex SWAY — nothing at the root, most at
+  // the tip (height over the species' height, to the power of 1.6, in
+  // blocks), less for wood. The wind reads it (SWAY_VERT).
   const geoCache = new Map();
-  function geoFor(part) {
-    const key = `${part.g}|${part.w}|${part.h}`;
-    if (geoCache.has(key)) return geoCache.get(key);
-    const g = part.g === 'cone' ? new THREE.ConeGeometry(part.w, part.h, 6)
-      : part.g === 'cyl' ? new THREE.CylinderGeometry(part.w * 0.78, part.w, part.h, 6)
-        : part.g === 'crown' ? new THREE.SphereGeometry(part.w, 8, 6)
-          : new THREE.BoxGeometry(part.w, part.h, part.w);
-    if (part.g === 'crown') g.scale(1, part.h / part.w, 1);   // crowns are wider than tall
-    geoCache.set(key, g);
+  function frondGeo(w, len, twist = 0) {
+    const g = new THREE.BoxGeometry(w, 0.04, len).toNonIndexed();
+    g.translate(0, 0, len / 2);                  // it grows from its stem
+    const P = g.attributes.position.array;
+    for (let i = 0; i < P.length; i += 3) {
+      const f = P[i + 2] / len;                  // 0 at the stem, 1 at the tip
+      P[i] *= 1 - 0.75 * f;                      // tapers
+      P[i + 1] -= 0.5 * f * f;                   // and droops
+    }
+    if (twist) g.rotateZ(twist);                 // about its own rib, before it is hung
     return g;
+  }
+  function geoFor(key, part) {
+    const ck = `${key}|${FORMS[key].indexOf(part)}`;
+    if (geoCache.has(ck)) return geoCache.get(ck);
+    const H = SPECIES_H[key] || 1, leaf = part.c === 'leaf';
+    const geos = [];
+    for (const pc of part.pieces) {
+      let g;
+      if (pc.g === 'cone') g = new THREE.ConeGeometry(pc.w, pc.h, 6);
+      else if (pc.g === 'cyl') g = new THREE.CylinderGeometry(pc.w * (pc.taper ?? 0.78), pc.w, pc.h, pc.n || 6);
+      else if (pc.g === 'lump') g = new THREE.DodecahedronGeometry(pc.w, 0);
+      else if (pc.g === 'frond') g = frondGeo(pc.w, pc.h, pc.twist);
+      else g = new THREE.BoxGeometry(pc.w, pc.h, pc.d || pc.w);
+      if (g.index) g = g.toNonIndexed();
+      if (pc.rx) g.rotateX(pc.rx);
+      if (pc.ry) g.rotateY(pc.ry);
+      if (pc.rz) g.rotateZ(pc.rz);
+      g.translate(pc.x || 0, pc.y || 0, pc.z || 0);
+      g.computeVertexNormals();                  // flat: every face has its own vertices
+      geos.push([g, pc.shade || 1]);
+    }
+    const n = geos.reduce((a, [g]) => a + g.attributes.position.count, 0);
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), sw = new Float32Array(n);
+    let o = 0;
+    for (const [g, pshade] of geos) {
+      const P = g.attributes.position.array, N = g.attributes.normal.array, k = g.attributes.position.count;
+      pos.set(P, o * 3); nor.set(N, o * 3);
+      for (let i = 0; i < k; i++) {
+        const up = N[i * 3 + 1] * 0.5 + 0.5, y = P[i * 3 + 1];
+        const shade = (leaf ? 0.74 + 0.34 * up : 0.92 + 0.08 * up) * pshade;
+        const j = (o + i) * 3;
+        col[j] = col[j + 1] = col[j + 2] = shade;
+        sw[o + i] = Math.pow(Math.max(0, y) / H, 1.6) * H * (leaf ? 1 : 0.6);
+      }
+      o += k;
+      g.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('sway', new THREE.BufferAttribute(sw, 1));
+    geoCache.set(ck, geo);
+    return geo;
   }
 
   // heights mirror src/flora.js; the client draws, the server decides
@@ -1441,7 +1567,6 @@ export function createWorldView({ getAccount, toast, play }) {
     }
   }
 
-  const VOX_PER_BODY = 26;
   // THE PEOPLE. Their own list and their own meshes — never bodyMeshes, which
   // rebuildBodies tears down whenever the sprite fingerprint moves. A person is
   // rebuilt only when the set of people changes; their POSITION is read from the
@@ -1463,21 +1588,45 @@ export function createWorldView({ getAccount, toast, play }) {
     }
   }
 
-  // Each body breathes its own glow (frame() writes its emissiveIntensity), so
-  // each has a material of its own — drawn from a pool that only grows, and
-  // never disposed, so a rebuilt society compiles nothing. The shells come in
-  // three sizes and share three geometries.
-  const bodyMatPool = [];
-  const bodyGeos = new Map();
+  // ---- THE BODIES (2026-10-22) -----------------------------------------------
+  // Bodies: VOXEL FIGURES, kin of the orb. The form is world-shapes.js SPRITE
+  // (a seed is a pod with a face; a sprout the figure without arms, smaller;
+  // grown has it all). Drawn the way the animals are: ONE instanced mesh per
+  // PART across every sprite of every society in sight — seven draw calls for
+  // the whole population, where each sprite used to be a draw call of its own
+  // — and posed in place every frame (poseSprites). One material for all of
+  // them: the instance colour is each part's light (skyFogged's glow form),
+  // so the eyes and the chest lamp burn in the society's scheme, the shell is
+  // tinted by it faintly, and a sleeper dims without a material of its own.
+  // Geometries come in as many shapes as the forms have parts and are kept
+  // for the page; a mesh is only an instance buffer, rebuilt when the roster
+  // changes. The way each sprite faces survives the rebuild (faceMemory), so
+  // a sprite sent on a job does not snap round.
+  const SPRITE_SHELL = SPRITE.shell;
+  const spriteMat = skyFogged(new THREE.MeshLambertMaterial({ color: SPRITE_SHELL, emissive: 0xffffff, emissiveIntensity: 1 }), { glow: true });
+  const bodyGeos = new Map();     // part key → geometry (a hanging part's origin is its joint)
+  let bodyParts = new Map();      // part key → { mesh, part, n }
+  const faceMemory = new Map();   // `handle|id` → the way it last faced
+  const partKey = (p) => `${p.k}|${p.w}|${p.h}|${p.d}|${p.hang ? 1 : 0}`;
+  function bodyGeo(p) {
+    const k = partKey(p);
+    let g = bodyGeos.get(k);
+    if (!g) {
+      g = new THREE.BoxGeometry(p.w, p.h, p.d);
+      if (p.hang) g.translate(0, -p.h / 2, 0);   // it hangs from its joint, like a person's limb
+      bodyGeos.set(k, g);
+    }
+    return g;
+  }
   function rebuildBodies() {
-    for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.dispose(); }
-    bodyMeshes = [];
-    let used = 0;
+    for (const rec of bodyParts.values()) { scene.remove(rec.mesh); rec.mesh.dispose(); }
+    bodyParts = new Map();
+    bodyMeshes = [];   // one record per sprite: who, which, its form, and its pose's memory
     const societies = [
       ...(state.me ? [{ ...state.me, mine: true, awake: true }] : []),
       ...(state.near || []).map((n) => ({ ...n, mine: false })),
     ];
-    const golden = Math.PI * (3 - Math.sqrt(5));
+    const counts = new Map();   // sprites per part, so each mesh is made once at its size
     for (const soc of societies) {
       const glow = SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust;
       for (let i = 0; i < (soc.bodies || []).length; i++) {
@@ -1489,32 +1638,118 @@ export function createWorldView({ getAccount, toast, play }) {
         // a few old records happened to carry a stored stage, which is why it
         // looked as if it worked for some of them and not others.
         const stage = stageOf(body.born, now());
-        const shellR = stage === 'grown' ? 0.62 : stage === 'sprout' ? 0.48 : 0.36;
-        const vox = 0.14 + shellR * 0.16;
-        let geo = bodyGeos.get(vox);
-        if (!geo) bodyGeos.set(vox, (geo = new THREE.BoxGeometry(vox, vox, vox)));
-        const mat = bodyMatPool[used] || (bodyMatPool[used] = skyFogged(new THREE.MeshLambertMaterial({ color: 0x181b20 })));
-        used += 1;
-        mat.emissive.setHex(glow);
-        mat.emissiveIntensity = soc.awake ? 0.9 : 0.2;
-        const mesh = new THREE.InstancedMesh(geo, mat, VOX_PER_BODY);
-        const m4 = S.m4.identity();
-        for (let v = 0; v < VOX_PER_BODY; v++) {
-          const y = 1 - (v / (VOX_PER_BODY - 1)) * 2;
-          const rad = Math.sqrt(1 - y * y);
-          const th = golden * v + (body.seed % 100) * 0.063; // each body's shell is its own
-          const jit = 0.86 + (((body.seed + v * 37) % 13) / 13) * 0.3;
-          m4.setPosition(Math.cos(th) * rad * shellR * jit, y * shellR * jit, Math.sin(th) * rad * shellR * jit);
-          mesh.setMatrixAt(v, m4);
-        }
-        mesh.instanceMatrix.needsUpdate = true;
-        scene.add(mesh);
-        mesh.visible = !(riding && riding.how === 'eye' && soc.mine && i === riding.i);   // you are inside it
-        // a body stands on its shadow — except on the smooth tiers, where the
-        // depth pass is a still and a moving body's shadow would lag and jump
-        if (SHADOWS && !lite) mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-        bodyMeshes.push({ mesh, society: soc, index: i, spin: 0.25 + ((body.seed % 7) / 7) * 0.3 });
+        const form = SPRITE.forms[stage] || SPRITE.forms.grown;
+        const key = `${soc.handle}|${body.id}`;
+        for (const p of form) counts.set(partKey(p), (counts.get(partKey(p)) || 0) + 1);
+        bodyMeshes.push({
+          society: soc, index: i, body, stage, form, glow, key, slots: [],
+          headY: form.find((p) => p.k === 'head')?.y ?? 0,
+          face: faceMemory.get(key) ?? hash2(body.seed || 0, 5, 11) * Math.PI * 2,   // each stands its own way at first
+          walked: 0, lastX: null, lastZ: null, lastT: 0,
+        });
       }
+    }
+    for (const rec of bodyMeshes) {
+      for (const p of rec.form) {
+        const k = partKey(p);
+        let pm = bodyParts.get(k);
+        if (!pm) {
+          const mesh = new THREE.InstancedMesh(bodyGeo(p), spriteMat, counts.get(k));
+          mesh.frustumCulled = false;      // positions live in the instance matrices
+          // a body stands on its shadow — except on the smooth tiers, where the
+          // depth pass is a still and a moving body's shadow would lag and jump
+          mesh.castShadow = SHADOWS && !lite;
+          scene.add(mesh);
+          pm = { mesh, part: p, n: 0 };
+          bodyParts.set(k, pm);
+        }
+        rec.slots.push({ pm, slot: pm.n++, p });
+      }
+    }
+  }
+
+  // THE POSE, every frame: where each sprite is (bodyPositions, the same pure
+  // function the server trusts), which way it faces (the way it last moved),
+  // its gait (a function of the distance it walked, like a person's), its
+  // breath, and its light. Asleep (drowsing) it folds its legs under it, bows
+  // its head, hugs its arms in and dims — a curl, never a collapse: WORLD.md,
+  // "neglect is sleep, not suffering". On its panel it stands a panel higher.
+  // Working, its arms rise and fall. Idle and awake, it looks about. The
+  // ridden sprite, seen from inside, is written at scale zero: there is no
+  // mesh of its own to hide, and the rule holds through any rebuild because
+  // it is applied every frame.
+  const spriteGlow = new THREE.Color();
+  function poseSprites(t) {
+    const parent = S.parent, local = S.local, m4 = S.m4;
+    const pPos = S.v1, pQ = S.q1, pS = S.v2, lPos = S.v3, lQ = S.q2, lS = S.v4, eu = S.eu;
+    const night = (lampNow - 0.3) / 0.7;
+    for (const sp of bodyMeshes) {
+      const list = positions.get(sp.society.mine ? 'me' : sp.society.handle);
+      const p = list?.[sp.index];
+      if (!p) continue;
+      const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
+      const base = Math.max(gh, SEA_LEVEL) + (p.charge ? PANEL_TOP : 0);
+      // the way it moved since the last frame is the way it faces, and the
+      // distance it moved is its stride; a jump (a job begun, a window
+      // recentred) is neither
+      let moving = false;
+      if (sp.lastX !== null) {
+        const dx = wdelta(sp.lastX, p.x), dz = wdelta(sp.lastZ, p.z), step = Math.hypot(dx, dz);
+        const dt = Math.max(1, t - sp.lastT) / 1000;
+        if (step / dt > 0.12 && step < 4) {
+          moving = true;
+          sp.walked += step;
+          let d = Math.atan2(dx, dz) - sp.face;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          sp.face += d * Math.min(1, dt * 8);
+          faceMemory.set(sp.key, sp.face);
+        }
+      }
+      sp.lastX = p.x; sp.lastZ = p.z; sp.lastT = t;
+      const asleep = !!p.drowsing, working = !!p.working;
+      const hidden = riding && riding.how === 'eye' && sp.society.mine && sp.index === riding.i;
+      const ph = ((sp.walked % SPRITE_STRIDE) / SPRITE_STRIDE) * Math.PI * 2;
+      const bob = moving ? Math.abs(Math.sin(ph)) * 0.035 : 0;
+      const breathe = 1 + Math.sin(t / 1000 * (asleep ? 0.6 : 1.5) + sp.index * 2.1) * (asleep ? 0.012 : 0.02);
+      const scale = hidden ? 0 : SPRITE.scale[sp.stage] * breathe;
+      pPos.set(wdelta(center.x, p.x), base, wdelta(center.z, p.z));
+      eu.set(0, sp.face, 0); pQ.setFromEuler(eu); pS.setScalar(scale);
+      parent.compose(pPos, pQ, pS);
+      // the light: the lamp and the eyes in the scheme, brighter by night and
+      // with each breath; a sleeper's is a coal; the shell takes a twelfth of
+      // it. DIM, as asked ("a dim light in their chest at night"): at 0.55 +
+      // 0.55 and a tenth on the shell, the night's exposure (2.2) bloomed a
+      // stardust sprite into the white cloud it used to be (seen 2026-10-24).
+      const lit = asleep ? 0.12 : (0.3 + 0.4 * night) * (0.9 + 0.1 * Math.sin(t / 1000 * 2.2 + sp.index));
+      const idle = !asleep && !moving && !working ? Math.sin(t / 1000 * 0.35 + sp.index * 1.7) * 0.5 : 0;
+      const headRx = asleep ? 0.45 : 0;
+      for (const { pm, slot, p: part } of sp.slots) {
+        const glowPart = part.k === 'eye' || part.k === 'lamp';
+        // a pod has no legs: it hops along instead of bobbing
+        let rx = 0, ry = 0, x = part.x || 0, y = part.y + (part.k === 'pod' ? bob * 2 : bob), z = part.z || 0;
+        if (part.hang) {
+          if (asleep) rx = part.arm ? 0.9 : 1.45;                                                   // folded, hugged
+          else if (working && part.arm) rx = -0.6 + Math.sin(t / 1000 * 7 + (part.swing || 0)) * 0.6;   // the arms rise and fall
+          else if (moving) rx = Math.sin(ph + (part.swing || 0)) * (part.arm ? 0.45 : 0.65);
+        } else if (part.head) {
+          // the head and its eyes turn together, about the head's own middle
+          rx = headRx; ry = idle;
+          const hy = y - (sp.headY + bob), cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
+          const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+          x = x1; y = sp.headY + bob + (hy * cx - z1 * sx); z = hy * sx + z1 * cx;
+        }
+        if (asleep && part.k !== 'pod') y -= SPRITE.curl;
+        lPos.set(x, y, z);
+        eu.set(rx, ry, 0); lQ.setFromEuler(eu);
+        local.compose(lPos, lQ, lS);
+        m4.multiplyMatrices(parent, local);
+        pm.mesh.setMatrixAt(slot, m4);
+        pm.mesh.setColorAt(slot, spriteGlow.setHex(sp.glow).multiplyScalar(glowPart ? lit * (part.k === 'eye' ? 0.8 : 1) : lit * 0.08));
+      }
+    }
+    for (const pm of bodyParts.values()) {
+      pm.mesh.instanceMatrix.needsUpdate = true;
+      if (pm.mesh.instanceColor) pm.mesh.instanceColor.needsUpdate = true;
     }
   }
 
@@ -1616,6 +1851,7 @@ export function createWorldView({ getAccount, toast, play }) {
   const rippleWrap = (v) => ((v % RIPPLE) + RIPPLE) % RIPPLE;
   const skyColor = new THREE.Color(), sunDir = new THREE.Vector3(0, 1, 0), moonDir = new THREE.Vector3(0, -1, 0);
   const starSeen = new Map();
+  let lampNow = 0.3;   // the lamps' level this frame (lightSky); the sprites' pose reads it too
   function lightSky(a, t) {
     if (!sky) return null;
     let dl = daylightAt(a.x, t);
@@ -1727,6 +1963,15 @@ export function createWorldView({ getAccount, toast, play }) {
         st.mesh.scale.setScalar(sc);
       }
     }
+    // THE LAMPS come on as the sun goes: every window, ember and beacon on the
+    // ground (skyFogged's lamp form) and the sprites' chest lights read the
+    // same level — a floor by day, so a forge's fire is never out, full by
+    // the time the stars are
+    lampNow = 0.3 + 0.7 * smooth01((0.08 - e) / 0.22);
+    U.skyLamp.value = lampNow;
+    // THE WIND: the clock, wrapped like the water's (every frequency in
+    // SWAY_VERT is a multiple of a tenth); a steady lean with a slow gust in it
+    U.skyWind.value.set(rippleWrap(t / 1000), 0.045 + 0.02 * Math.sin(t / 1000 * 0.13), 1, 0.6);
     return dl;
   }
 
@@ -1833,30 +2078,18 @@ export function createWorldView({ getAccount, toast, play }) {
       if (mx || mz) pm.mesh.rotation.y = Math.atan2(mx, mz);
       posePerson(pm.parts, walked, at.moving);
     }
-    for (const bm of bodyMeshes) {
-      const list = positions.get(bm.society.mine ? 'me' : bm.society.handle);
-      const p = list?.[bm.index];
-      if (!p) continue;
-      const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
-      // positions are global; the scene is centered on the window
-      bm.mesh.position.set(wdelta(center.x, p.x), Math.max(gh, SEA_LEVEL) + 1.0, wdelta(center.z, p.z));
-      const slow = p.drowsing ? 0.18 : 1;
-      bm.mesh.rotation.y = t / 1000 * bm.spin * slow;
-      bm.mesh.rotation.x = Math.sin(t / 1000 * 0.3 * slow + bm.index) * 0.2;
-      const breathe = 0.88 + Math.sin(t / 1000 * (p.drowsing ? 0.5 : 1.6) + bm.index * 2.1) * 0.12;
-      bm.mesh.scale.setScalar(breathe);
-      bm.mesh.material.emissiveIntensity = (bm.society.awake ? 0.9 : 0.2) * breathe;
-    }
+    poseSprites(t);
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
     const wpc = walkingPos(t);
     const rp = wpc || ridingPos(t);
     if (rp) {
-      // EYE LEVEL. The sprite's own position, at the height its mesh rides
-      // (ground + 1.0) plus the little that makes it a head and not a hub.
+      // EYE LEVEL. The sprite's own position, at the height of its head
+      // (SPRITE.eye, scaled to its stage — a seed's is near the ground), a
+      // panel higher when it stands on its panel; a person's is PERSON_EYE.
       const gh = columnAt(Math.round(rp.x), Math.round(rp.z)).h;
-      // a person's head is higher than an orb's hub
       const ex = wdelta(center.x, rp.x), ez = wdelta(center.z, rp.z);
-      const ey = Math.max(gh, SEA_LEVEL) + (wpc ? PERSON_EYE : 1.45);
+      const spriteEye = rp.stage === 'seed' ? 0.2 : SPRITE.eye * (SPRITE.scale[rp.stage] || 1);
+      const ey = Math.max(gh, SEA_LEVEL) + (wpc ? PERSON_EYE : spriteEye + (rp.charge ? PANEL_TOP : 0));
       const fx = Math.cos(lookYaw) * Math.cos(lookPitch), fz = Math.sin(lookYaw) * Math.cos(lookPitch), fy = Math.sin(lookPitch);
       if ((wpc ? walking.how : riding.how) === 'eye') {
         camera.position.set(ex, ey, ez);
@@ -1959,8 +2192,8 @@ export function createWorldView({ getAccount, toast, play }) {
   // Lead mode: click the ground, the society walks there — 2 blocks a second,
   // everyone watching sees the same walk from the same clock.
   // Tap a sprite and its name floats above it. Picked by projecting each body
-  // to the screen rather than raycasting its cubes — the bodies are instanced
-  // meshes of 26 little boxes each, and their centers are what a finger means.
+  // to the screen rather than raycasting its boxes — the bodies are instanced
+  // parts, a few boxes each, and their centers are what a finger means.
   // Where a sprite is on screen, computed from where it IS rather than from
   // where its mesh currently sits. Meshes are rebuilt on every poll and only
   // repositioned on the next animation frame, so reading their transforms means
@@ -2409,7 +2642,7 @@ export function createWorldView({ getAccount, toast, play }) {
     for (const g of animGeoCache.values()) g.dispose();
     animGeoCache.clear();
     faunaMeshes.clear();
-    matCache.clear(); bodyMatPool.length = 0; starMatPool.length = 0; bodyGeos.clear();
+    matCache.clear(); starMatPool.length = 0; bodyGeos.clear(); bodyParts = new Map();
     artGeo = null; starGeo = null;
     visitHooks = null; warmed = false; starting = false;
   }
@@ -2610,7 +2843,8 @@ export function createWorldView({ getAccount, toast, play }) {
       sizeW = sizeH = 0;
     }
     if (scene) {
-      for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.dispose(); }
+      for (const rec of bodyParts.values()) { scene.remove(rec.mesh); rec.mesh.dispose(); }
+      bodyParts = new Map();
       for (const m of plantMeshes) { scene.remove(m.mesh); m.mesh.dispose(); }
       for (const m of builtMeshes) dropGroup(m.mesh);
       for (const p of peopleMeshes) dropGroup(p.mesh);

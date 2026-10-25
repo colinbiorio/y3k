@@ -248,7 +248,7 @@ await ok('the view: a new thought of a living life is kept and, when asked, said
   // (2026-10-22: every speaker hands the body the frequency beside the level
   // — the sand plate's figure follows the note; test/rooms.test.mjs pins it)
   assert.match(MAIN, /const sp = voice\.speaker\(\{ \.\.\.settings\.speakWith\(settings\.getActive\(\)\), onLevel: \(v, hz\) => body\.setAudioLevel\(v, hz\), onEnd: finish \}\);/, 'Code\'s replies are no longer read in the presence\'s voice');
-  assert.match(read('src/social.js'), /const lifeView = createLifeView\(\{ toast: toastOnce, \.\.\.\(life \|\| \{\}\) \}\);/);
+  assert.match(read('src/social.js'), /const lifeView = createLifeView\(\{ toast: toastOnce, \.\.\.\(life \|\| \{\}\), \.\.\.\(lifeWatch \? \{ watch: lifeWatch \} : \{\}\) \}\);/   /* 2026-10-24: ?life=<username> watches a shared, published life */);
 });
 
 // --- the server ----------------------------------------------------------------

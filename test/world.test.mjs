@@ -283,7 +283,7 @@ ok('the frame loop cannot go silent after its first exception', () => {
 });
 
 ok('the ground is noise, not a plaid, and has faces', () => {
-  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('  // ---- WHAT STANDS ON THE GROUND'));
   assert.ok(!/% 13\)/.test(ground), '(wx*7919 + wz*104729) % 13 is a regular 13-step diagonal ramp — 7919 ≡ 2, 104729 ≡ 1 (mod 13)');
   assert.ok(/hash2\(wx, wz, 91\)/.test(ground), 'the per-column shade must be seeded noise');
   assert.ok(/vertexColors: true/.test(ground) && /geo\.setAttribute\('color'/.test(ground), 'a cliff must have lit tops and shaded sides');
@@ -322,7 +322,7 @@ ok('the renderer and its programs outlive a visit; the context goes only with th
 });
 
 ok('a walk rewrites the ground in place and compiles nothing', () => {
-  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('  // ---- WHAT STANDS ON THE GROUND'));
   assert.ok(/if \(!ground\) \{/.test(ground), 'the ground mesh must be made once');
   assert.ok(!/ground\.material\.dispose\(\)/.test(ground), 'disposing the ground\'s material on a recenter recompiles its program mid-walk');
   assert.ok(/ground\.boundingSphere = null/.test(ground), 'rewritten instances keep stale bounds — the frustum test and the tap\'s raycast trust them');
@@ -382,10 +382,16 @@ ok('the ground window follows the rider', () => {
   assert.ok(/const rp = ridingPos\(\);\s*\n\s*if \(rp\) return \{ x: rp\.x, z: rp\.z/.test(ca), 'centerAnchor must return the ridden sprite\'s position');
 });
 
-ok('you are inside it: the ridden mesh hides, and a rebuild keeps it hidden', () => {
-  assert.ok(/bm\.mesh\.visible = !\(riding && riding\.how === 'eye'/.test(wview), 'setRide must hide the ridden mesh');
-  assert.ok(/mesh\.visible = !\(riding && riding\.how === 'eye' && soc\.mine && i === riding\.i\)/.test(wview),
-    'rebuildBodies would bring the ridden mesh back into view');
+ok('you are inside it: the ridden sprite is hidden by the frame, and a rebuild cannot bring it back', () => {
+  // 2026-10-22: a sprite is no longer a mesh of its own (one instanced mesh
+  // per PART draws every sprite), so there is no mesh.visible to write. The
+  // pose writes the ridden one at scale zero EVERY frame — which is also why
+  // a rebuild cannot undo it: the rule is stored on nothing a rebuild
+  // replaces. setRide must not reach for a per-sprite mesh any more.
+  const pose = wview.slice(wview.indexOf('  function poseSprites(t) {'), wview.indexOf('  // Asks the shared pacer'));
+  assert.ok(/const hidden = riding && riding\.how === 'eye' && sp\.society\.mine && sp\.index === riding\.i;/.test(pose), 'the frame must know which sprite is ridden');
+  assert.ok(/const scale = hidden \? 0 : SPRITE\.scale\[sp\.stage\] \* breathe;/.test(pose), 'the ridden sprite must be written at scale zero');
+  assert.ok(!/bm\.mesh\.visible/.test(wview), 'setRide still toggles a per-sprite mesh that no longer exists');
 });
 
 ok('drag and keys look around while riding; the walk stays the sprite\'s own', () => {
@@ -505,7 +511,9 @@ ok('everything that stands casts, and the ground receives; phones skip the pass'
   assert.ok(/if \(SHADOWS\) g\.traverse\(\(o\) => \{ if \(o\.isMesh\) \{ o\.castShadow = true; o\.receiveShadow = true; \} \}\)/.test(wview), 'built things must cast and receive');
   // bodies cast — except on the smooth tiers, whose depth pass is a still that
   // a moving body's shadow would lag behind and jump to
-  assert.ok(/if \(SHADOWS && !lite\) mesh\.traverse\(\(o\) => \{ if \(o\.isMesh\) o\.castShadow = true; \}\)/.test(wview), 'bodies must cast');
+  // (2026-10-22: the bodies are instanced part meshes, one per part for every
+  // sprite, so the flag is written on the mesh rather than traversed to)
+  assert.ok(/mesh\.castShadow = SHADOWS && !lite;/.test(wview.slice(wview.indexOf('  function rebuildBodies()'), wview.indexOf('  function poseSprites'))), 'bodies must cast');
   assert.ok(/mesh\.castShadow = SHADOWS; mesh\.receiveShadow = SHADOWS;/.test(wview), 'plants must cast and receive');
   assert.ok(/const SHADOWS = !\(matchMedia\('\(pointer: coarse\)'\)\.matches/.test(wview), 'the depth pass must be gated off on touch devices');
 });
@@ -545,8 +553,12 @@ ok('every world material fogs toward the same skyAt the dome draws', () => {
   // every place a world material is made goes through the hook
   assert.ok(/const mat = skyFogged\(new THREE\.MeshLambertMaterial\(\{ vertexColors: true \}\)\);/.test(wview), 'the ground');
   assert.ok(/skyFogged\(new THREE\.MeshLambertMaterial\(\{ color: 0x1c4152, transparent: true, opacity: 0\.72 \}\), true\)/.test(wview), 'the water');
-  assert.ok(/if \(!m\) \{ m = skyFogged\(make\(\)\); matCache\.set\(key, m\); \}/.test(wview), 'the cache: plants, animals, left things, built things');
-  assert.ok(/bodyMatPool\[used\] = skyFogged\(new THREE\.MeshLambertMaterial/.test(wview), 'the bodies');
+  // (2026-10-22: the cache takes the hook's form too — a plant's sway, a
+  // building's lamp — so those materials are cached and kept like the rest)
+  assert.ok(/if \(!m\) \{ m = skyFogged\(make\(\), how\); matCache\.set\(key, m\); \}/.test(wview), 'the cache: plants, animals, left things, built things');
+  // (2026-10-22: one material for every sprite of every society — the instance
+  // colour is each part's light — so there is no pool to draw from)
+  assert.ok(/const spriteMat = skyFogged\(new THREE\.MeshLambertMaterial\(\{ color: SPRITE_SHELL, emissive: 0xffffff, emissiveIntensity: 1 \}\), \{ glow: true \}\);/.test(wview), 'the bodies');
   assert.ok(/if \(!m\.isMeshLambertMaterial \|\| m\.map\) \{ skyFogged\(m\); return; \}/.test(wview), 'a shape\'s material that the cache does not take');
 });
 
@@ -558,7 +570,12 @@ ok('the hook\'s footholds are in the vendored three', () => {
   const three = readFileSync(join(ROOT, 'src/vendor/three@0.160.0/build/three.module.min.js'), 'utf8');
   for (const s of ['#include <fog_fragment>', '#include <fog_vertex>', '#include <fog_pars_vertex>', '#include <fog_pars_fragment>',
     '#define LAMBERT', 'vec3 totalEmissiveRadiance = emissive;', 'vec4 mvPosition = vec4( transformed, 1.0 );',
-    'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );', 'gl_FragColor = linearToOutputTexel( gl_FragColor );', 'vec3 dithering( vec3 color )']) {
+    'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );', 'gl_FragColor = linearToOutputTexel( gl_FragColor );', 'vec3 dithering( vec3 color )',
+    // the glow, lamp and sway forms (2026-10-22): the chunks they replace, the
+    // instance colour the glow reads, and three's own rule that an instance
+    // colour defines USE_COLOR in the fragment stage (or vColor would not exist there)
+    '#include <emissivemap_fragment>', '#include <color_pars_vertex>', '#include <color_vertex>', '#include <color_pars_fragment>',
+    '#include <color_fragment>', '#include <begin_vertex>', 'vColor.xyz *= instanceColor.xyz', 'n.vertexColors||n.instancingColor?"#define USE_COLOR"']) {
     assert.ok(three.includes(s), `three no longer has "${s}"`);
   }
   assert.ok(/"three": "\/src\/vendor\/three@0\.160\.0\/build\/three\.module\.min\.js"/.test(readFileSync(join(ROOT, 'index.html'), 'utf8')), 'the page loads a different three than the one checked here');
@@ -593,7 +610,7 @@ ok('the sky pass leaves daylightAt, the clock and the server alone', () => {
 });
 
 ok('the ground\'s colour is the same on every screen: seeded, wrap-safe, never random', () => {
-  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('  // ---- WHAT STANDS ON THE GROUND'));
   assert.ok(/vnoise\(wx, wz, 32, 7101\) \* 0\.7 \+ vnoise\(wx, wz, 8, 7102\) \* 0\.3/.test(ground), 'the patchwork must be seeded noise of the column\'s own coordinates');
   const { WORLD_SIZE } = coreMod;
   assert.ok(WORLD_SIZE % 32 === 0 && WORLD_SIZE % 8 === 0, 'a vnoise scale that does not divide the planet seams at the wrap');
@@ -2905,6 +2922,121 @@ ok('the three notes of 2026-09-19: the logo, the layers, the shadow', () => {
   assert.ok(/\.hand-skel \{ position: absolute;[^}]*pointer-events: none;/.test(css), 'the skeleton canvas can intercept clicks on the camera bar');
   assert.ok(/#hand-cursors \{[^}]*pointer-events: none;/.test(css), 'the cursor layer sits at 9500 and can intercept every click in the app');
   assert.ok(!/mix-blend-mode:/.test(css.slice(css.indexOf('.hand-dot {'), css.indexOf('.hand-dot {') + 900)), 'the cursors blend again — five backdrop reads a frame over a bloom composer');
+});
+
+
+// --- bodies and buildings (2026-10-22) ------------------------------------------
+// Colin: "tons of room to work on the world" (2026-10-19); "go crazy. build us
+// something amazing" (2026-10-22). The sprites were white voxel clouds, the
+// buildings grey and brown boxes, the trees a cone on a stick. These pin what
+// would break silently: the instancing (a sprite must never become a draw
+// call of its own again), the seeded variation (every screen the same forge),
+// and the line between the drawing and the world the server and the presence
+// read.
+console.log('\nbodies and buildings:');
+const THREE = await import(join(ROOT, 'src/vendor/three@0.160.0/build/three.module.min.js'));
+
+ok('every sprite is drawn from one instanced mesh per part — never a mesh per sprite', () => {
+  const rb = wview.slice(wview.indexOf('  function rebuildBodies()'), wview.indexOf('  function poseSprites(t) {'));
+  assert.ok(/new THREE\.InstancedMesh\(bodyGeo\(p\), spriteMat, counts\.get\(k\)\)/.test(rb), 'a part\'s mesh must be instanced over every sprite that has the part');
+  assert.ok(/counts\.set\(partKey\(p\), \(counts\.get\(partKey\(p\)\) \|\| 0\) \+ 1\)/.test(rb), 'the count must be taken first, so each mesh is made once at its size');
+  assert.ok(!/VOX_PER_BODY/.test(wview) && !/new THREE\.InstancedMesh\(geo, mat, VOX/.test(wview), 'the per-sprite shell is back');
+  assert.ok(!/bodyMatPool/.test(wview), 'a material per body is back');
+  const pose = wview.slice(wview.indexOf('  function poseSprites(t) {'), wview.indexOf('  // Asks the shared pacer'));
+  assert.ok(/pm\.mesh\.setMatrixAt\(slot, m4\)/.test(pose) && /pm\.mesh\.setColorAt\(slot, spriteGlow\.setHex\(sp\.glow\)/.test(pose), 'the pose must write each part\'s matrix and light into its slot');
+  assert.ok(/pm\.mesh\.instanceMatrix\.needsUpdate = true;/.test(pose), 'the buffers must be marked once a frame');
+  assert.ok(/poseSprites\(t\);/.test(wview.slice(wview.indexOf('  function frame() {'))), 'the frame must pose the sprites');
+  assert.ok(!/new THREE\.(Matrix4|Vector3|Quaternion|Euler|Color)\(/.test(pose), 'the pose allocates per frame — the scratch objects exist for this');
+  // asleep is a curl, never anything else: the legs fold, the head bows, the light dims
+  assert.ok(/if \(asleep\) rx = part\.arm \? 0\.9 : 1\.45;/.test(pose) && /const headRx = asleep \? 0\.45 : 0;/.test(pose) && /const lit = asleep \? 0\.12 :/.test(pose), 'a sleeper must curl and dim');
+});
+
+ok('the figure grows: a seed is a pod with a face, a sprout has no arms, grown has everything', () => {
+  const { SPRITE } = shapesMod;
+  const f = SPRITE.forms;
+  assert.ok(f.seed.length < f.sprout.length && f.sprout.length < f.grown.length, 'the stages must add voxels');
+  for (const stage of ['seed', 'sprout', 'grown']) {
+    assert.equal(f[stage].filter((p) => p.k === 'eye').length, 2, `${stage} has a face`);
+    assert.equal(f[stage].filter((p) => p.k === 'lamp').length, 1, `${stage} has a light in its chest`);
+  }
+  assert.equal(f.grown.filter((p) => p.k === 'leg' && p.hang).length, 2, 'two legs, hung from the hip');
+  assert.equal(f.grown.filter((p) => p.arm && p.hang).length, 2, 'two arms, hung from the shoulder');
+  assert.equal(f.sprout.filter((p) => p.arm).length, 0, 'a sprout has no arms yet');
+  // the legs are antiphase and each arm swings opposite its own leg
+  const [lL, lR] = f.grown.filter((p) => p.k === 'leg'), [aL, aR] = f.grown.filter((p) => p.arm);
+  assert.ok(Math.abs(Math.abs(lL.swing - lR.swing) - Math.PI) < 1e-9 && aL.swing === lR.swing && aR.swing === lL.swing, 'the gait is a walk');
+  assert.ok(SPRITE.eye > 0.8 && SPRITE.eye < SPRITE.height.grown, 'the ride eye is in the head, below its top');
+  assert.ok(SPRITE.curl > 0 && SPRITE.curl <= 0.3, 'a sleeper curls, it does not collapse');
+});
+
+ok('a building is one mesh, lit per vertex, seeded from where it stands, the same on every screen', () => {
+  const { shapeFor, variationAt } = shapesMod;
+  const kinds = [['forge', {}], ['solarforge', {}], ['aiforge', {}], ['storage', { of: 'stone' }], ['storage', { of: 'metal' }], ['storage', { of: 'wood' }],
+    ['panel', { free: true }], ['panel', { free: false }], ['vehicle', { of: 'cart' }], ['vehicle', { of: 'rover' }], ['sprite', {}]];
+  for (const [kind, b] of kinds) {
+    const g = shapeFor(THREE, kind, { x: 1591, z: 3640, ...b });
+    assert.equal(g.children.length, 1, `${kind} ${b.of || ''} is one mesh (one draw call)`);
+    const m = g.children[0];
+    assert.ok(m.userData.lit && m.material.vertexColors, `${kind} carries its colours per vertex and asks for the lamp material`);
+    assert.ok(m.geometry.attributes.color && m.geometry.attributes.glow && m.geometry.attributes.normal, `${kind} has colour, glow and normals`);
+    assert.ok(!Array.from(m.geometry.attributes.position.array).some(Number.isNaN), `${kind} has no NaN`);
+  }
+  for (const kind of ['forge', 'solarforge', 'aiforge']) {
+    const glow = shapeFor(THREE, kind, { x: 1, z: 2 }).children[0].geometry.attributes.glow.array;
+    assert.ok(Array.from(glow).some((v) => v > 0), `${kind} has a light on it for the night`);
+  }
+  assert.ok(Array.from(shapeFor(THREE, 'panel', { x: 1, z: 2, free: true }).children[0].geometry.attributes.glow.array).some((v) => v > 0.1), 'an empty panel waits with a glow');
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const at = (x, z) => shapeFor(THREE, 'forge', { x, z }).children[0].geometry.attributes.position.array;
+  assert.ok(same(at(1591, 3640), at(1591, 3640)), 'the same column draws the same forge on every screen');
+  assert.ok(!same(at(1591, 3640), at(1592, 3640)), 'the next column draws a different one');
+  assert.equal(variationAt(1591, 3640, 1), variationAt(1591, 3640, 1));
+  assert.ok(variationAt(1591, 3640, 1) >= 0 && variationAt(1591, 3640, 1) < 1);
+  assert.equal(variationAt(undefined, undefined, 1), 0.5, 'the preview, with no column, gets the middle of every range');
+  assert.ok(!/Math\.random/.test(readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8')), 'no per-viewer randomness in a shape');
+});
+
+ok('the glow, the lamp and the sway are three forms of the one hook, each its own program', () => {
+  assert.ok(/const GLOW_FRAG = '#include <emissivemap_fragment>\\n\\ttotalEmissiveRadiance \*= vColor\.rgb;';/.test(wview), 'the instance colour must scale the emissive');
+  assert.ok(/if \(glow\) sh\.fragmentShader = sh\.fragmentShader\.replace\('#include <color_fragment>', ''\)/.test(wview), 'and must NOT paint the diffuse (a dark shell times a colour is black)');
+  assert.ok(/const LAMP_FRAG = '#include <emissivemap_fragment>\\n\\ttotalEmissiveRadiance \+= vGlow \* skyLamp;';/.test(wview), 'a building\'s glow is per vertex, scaled by the lamps\' level');
+  assert.ok(/attribute float sway;\\nuniform vec4 skyWind;/.test(wview) && /transformed \+= \( w \* im \) \/ dot\( im\[0\], im\[0\] \);/.test(wview), 'the sway must move the vertex in world directions, the instance\'s turn undone');
+  assert.ok(/water \? 'sky-water' : glow \? 'sky-glow' : lamp \? 'sky-lamp' : sway \? 'sky-sway' : 'sky-fog'/.test(wview), 'each form must be its own program');
+  assert.ok(/skyLamp: \{ value: 0\.3 \}, skyWind: \{ value: new THREE\.Vector4\(0, 0\.05, 1, 0\.6\) \}/.test(wview), 'the lamp and the wind are shared uniform objects');
+  const ls = wview.slice(wview.indexOf('  function lightSky(a, t) {'), wview.indexOf('  function aimSky() {'));
+  assert.ok(/lampNow = 0\.3 \+ 0\.7 \* smooth01\(\(0\.08 - e\) \/ 0\.22\);\s*\n\s*U\.skyLamp\.value = lampNow;/.test(ls), 'the lamps must come on with the dusk, from a floor by day');
+  assert.ok(/U\.skyWind\.value\.set\(rippleWrap\(t \/ 1000\)/.test(ls), 'the wind\'s clock must be wrapped — a float cannot hold the epoch');
+  // a plant material takes the sway form, a building the lamp form
+  assert.ok(/cachedMat\('plant\|' \+ tint, \(\) => new THREE\.MeshLambertMaterial\(\{\s*\n\s*vertexColors: true,/.test(wview) && /\}\), \{ sway: true \}\),/.test(wview), 'the plants must sway');
+  assert.ok(/const lampMat = \(\) => cachedMat\('lamp', \(\) => new THREE\.MeshLambertMaterial\(\{ vertexColors: true \}\), \{ lamp: true \}\);/.test(wview), 'the buildings must be lit');
+  assert.ok(/if \(o\.userData\.lit \|\| m\.vertexColors\) \{ if \(m !== lampMat\(\)\) \{ o\.material = lampMat\(\); m\.dispose\(\); \} return; \}/.test(wview), 'shareMats must hand a compiled building the lamp material');
+});
+
+ok('the trees are parts in the plant\'s own space, with a sway that is nothing at the root', () => {
+  const plants = wview.slice(wview.indexOf('  function rebuildPlants()'), wview.indexOf('  // heights mirror src/flora.js'));
+  assert.ok(/pos\.set\(wdelta\(center\.x, p\.x\), base, wdelta\(center\.z, p\.z\)\);/.test(plants), 'one matrix must place every part of a tree (its height is in its geometry)');
+  assert.ok(/sw\[o \+ i\] = Math\.pow\(Math\.max\(0, y\) \/ H, 1\.6\) \* H \* \(leaf \? 1 : 0\.6\);/.test(plants), 'the sway must grow with height, from nothing at the ground');
+  assert.ok(/const shade = \(leaf \? 0\.74 \+ 0\.34 \* up : 0\.92 \+ 0\.08 \* up\) \* pshade;/.test(plants), 'a leaf\'s faces toward the sky must be lit, its underside shaded');
+  assert.ok(/mesh\.setColorAt\(i, col\.setRGB\(0\.9 \+ r3 \* 0\.2/.test(plants) && /const r3 = hash2\(p\.x, p\.z, 63\);/.test(plants), 'each tree\'s tint must be seeded from its column');
+  for (const sp of ['pine', 'broadleaf', 'palm']) assert.ok(new RegExp(`^    ${sp}: `, 'm').test(plants), `${sp} has a form`);
+  assert.ok(/pieces: \[\.\.\.Array\(8\)\.keys\(\)\]\.map\(\(i\) => \(\{ g: 'frond'/.test(plants), 'a palm has eight fronds');
+  assert.ok(/\{ g: 'cone', w: 0\.92, h: 1\.3, y: 1\.45 \}, \{ g: 'cone', w: 0\.66, h: 1\.15, y: 2\.25 \}, \{ g: 'cone', w: 0\.4, h: 1\.0, y: 2\.95 \}/.test(plants), 'a pine has three tiers');
+  assert.ok(/if \(pc\.rx\) g\.rotateX\(pc\.rx\);\s*\n\s*if \(pc\.ry\) g\.rotateY\(pc\.ry\);\s*\n\s*if \(pc\.rz\) g\.rotateZ\(pc\.rz\);\s*\n\s*g\.translate\(/.test(plants), 'a piece turns about x, then y, then z, then is placed — a frond droops about its own stem');
+});
+
+ok('the pass is drawing only: nothing the server or the presence reads has moved', () => {
+  const core = readFileSync(join(ROOT, 'src/world-core.js'), 'utf8');
+  for (const line of [
+    "return days >= 7 ? 'grown' : days >= 2 ? 'sprout' : 'seed';",
+    'const drift = awake ? 1 : 0.12; // a drowsing body barely stirs',
+    'return { id: b.id, stage, x: wrap(b.panel.x), z: wrap(b.panel.z), drowsing: !awake, working: false, charge: true };',
+    'export const HOME_RADIUS = 14;',
+  ]) assert.ok(core.includes(line), `world-core.js changed: ${line}`);
+  assert.ok(!/SPRITE|shapeFor|PANEL_TOP|three/.test(core), 'world-core.js knows nothing of drawing');
+  assert.ok(/^import \{ hash2 \} from '\.\/world-core\.js';$/m.test(readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8')), 'the shapes take only the seeded hash from the core');
+  for (const f of ['world.mjs', 'server.mjs', 'world-verbs.mjs', 'src/perceive.js']) {
+    assert.ok(!/shapeFor|skyLamp|poseSprites|world-shapes/.test(readFileSync(join(ROOT, f), 'utf8')), `${f} reaches into the drawing`);
+  }
 });
 
 console.log(`\n${passed} checks passed.`);

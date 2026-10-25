@@ -19,7 +19,17 @@
 // the reload is of this machine's browsers, and nothing is added to the site
 // that anyone could call. Nothing is read from .env.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// THE REPO IS THE ONE THIS SCRIPT LIVES IN, wherever it is called from. It
+// used to be whatever git repo the shell stood in: called by its full path
+// from another project's folder it would have merged and pushed THERE. That
+// matters because the one way to run it without a hand on every merge is by
+// its full path, from anywhere (a permission rule names the command, not the
+// folder; Colin, 2026-10-25: "please ensure that in the future, you are able
+// to merge yourself").
+export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const SITE = process.env.Y3K_SITE || 'https://yearthreethousand.com';
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
@@ -112,7 +122,7 @@ export function reloadTabs(host = new URL(SITE).host, run = (args) => spawnSync(
 
 async function main(argv) {
   const arg = argv[0];
-  const root = sh('git', ['rev-parse', '--show-toplevel']);
+  const root = sh('git', ['rev-parse', '--show-toplevel'], { cwd: REPO });
   const at = { cwd: root };
   let want;
   if (arg === '--watch') {
@@ -121,8 +131,16 @@ async function main(argv) {
     console.log(`waiting for main as it is (${want.slice(0, 7)})`);
   } else if (/^\d+$/.test(arg || '')) {
     console.log(`merging #${arg}…`);
-    const r = spawnSync('gh', ['pr', 'merge', arg, '--merge'], { ...at, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    if (r.status !== 0) { console.error((r.stderr || r.stdout || '').trim()); process.exit(1); }
+    // GitHub answers "Base branch was modified" for a few seconds after a push
+    // while it works out whether the branch still merges: that is a wait, not a no
+    let r;
+    for (let tries = 0; ; tries++) {
+      r = spawnSync('gh', ['pr', 'merge', arg, '--merge'], { ...at, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const said = (r.stderr || r.stdout || '').trim();
+      if (r.status === 0 || tries >= 4 || !/Base branch was modified/i.test(said)) { if (r.status !== 0) { console.error(said); process.exit(1); } break; }
+      console.log('  GitHub is still working out the merge; asking again in 8 s');
+      spawnSync('sleep', ['8']);
+    }
     sh('git', ['fetch', '-q', 'origin', 'main'], at);
     want = sh('gh', ['pr', 'view', arg, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'], at);
     console.log(`merged as ${want.slice(0, 7)}`);
