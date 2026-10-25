@@ -33,6 +33,7 @@ import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
 import { shrinkPicture } from './picture.js';
+import { hasFiles, dropTarget } from './kode-drop.js';
 import { createScore } from './score.js';
 // ?perf's meter starts itself as this import evaluates (before the liquid's
 // bake and the orb's build below); inert without ?perf.
@@ -2190,13 +2191,29 @@ $('chat-upload').addEventListener('click', () => $('chat-file').click());
 $('chat-file').addEventListener('change', () => { readImageFile($('chat-file').files[0]); $('chat-file').value = ''; });
 $('chat-thumb').addEventListener('click', clearChatImage);
 // Drag a file in from anywhere → reveal the chat + highlight, drop to attach.
-const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
-window.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); chatEl.classList.add('open', 'drag'); });
+// EXCEPT IN KODE (Colin, 2026-10-25: "i can't drag photos into y3kode because
+// they go to chat instead -- make sure that when you're draggin a photo into
+// y3kode, the photo gets added to the coding conversation unless it's
+// explicitly dropped in the chat bar"). While kode is open only a drop on the
+// chat bar itself is the chat's; anywhere else is kode's, which takes it into
+// the composer (code-view.js onDrop) — so here the chat bar is not lit for it,
+// and the picture is not read. Where it goes is one function, both sides'
+// (src/kode-drop.js dropTarget). Every pass is still prevented, wherever it
+// is going: one that is not lets the browser open the file over the page.
+const dropTo = (e) => dropTarget(e, { inCode: document.body.classList.contains('in-code') });
+const unlightChat = () => { chatEl.classList.remove('drag'); if (!chatImageB64) chatEl.classList.remove('open'); };
+window.addEventListener('dragover', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  if (dropTo(e) === 'kode') { unlightChat(); return; }
+  chatEl.classList.add('open', 'drag');
+});
 // Left the window without dropping → drop the reveal too (unless an image is attached).
-window.addEventListener('dragleave', (e) => { if (e.relatedTarget) return; chatEl.classList.remove('drag'); if (!chatImageB64) chatEl.classList.remove('open'); });
+window.addEventListener('dragleave', (e) => { if (e.relatedTarget) return; unlightChat(); });
 window.addEventListener('drop', (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
+  if (dropTo(e) === 'kode') { unlightChat(); return; }   // the coder's (code-view.js onDrop)
   chatEl.classList.remove('drag');
   readImageFile(e.dataTransfer.files[0]); // setChatImage re-adds .open for a valid image
   if (!chatImageB64) chatEl.classList.remove('open');

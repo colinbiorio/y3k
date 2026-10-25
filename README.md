@@ -92,7 +92,10 @@ of its own, hosted by their account. The rails around the room are its places.
   orb reacts; the room runs behind a glass pane. Talk to the coder by typing or by voice (the
   microphone in the composer; shift-click for hands-free), plan with your
   presence first and hand it the prompt, or switch the composer to your
-  presence mid-session. `/compare <question>` asks every coding tool on the
+  presence mid-session. Paste a picture into the composer, or drop one
+  anywhere on kode but the chat bar, and it goes with your next message to
+  the coder (`src/kode-drop.js`); dropped on the chat bar, it goes to your
+  presence. `/compare <question>` asks every coding tool on the
   computer at once and shows the answers side by side, one of them a press
   away from being your next prompt. The presence never drives the coder.
 - **The portal** (`src/portal.js`) — a tree in unimat at the top bar's left
@@ -243,6 +246,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **A picture dropped in kode goes to the coder.** Colin:
+  "i can't drag photos into y3kode because they go to chat instead -- make
+  sure that when you're draggin a photo into y3kode, the photo gets added to
+  the coding conversation unless it's explicitly dropped in the chat bar".
+  The window's drop (`src/main.js`) read every file into the chat, wherever it
+  was let go. Now, while kode is open, only a drop on the chat bar itself
+  (`#chat`) is the chat's; anywhere else it joins the composer's next message
+  the way a pasted picture always has (a thumbnail over the box, removable
+  until it is sent) and goes with that message to y3kode on this computer,
+  which hands it to the coder (Claude Code, Codex, Gemini CLI and OpenCode
+  all take pictures, `y3k-code/adapters/*.mjs`), never to the site. Where a
+  drop goes is one pure function both sides ask (`src/kode-drop.js`
+  `dropTarget`). While a picture is over the room, the composer it would join
+  is lit in the chat bar's own drag light; over the chat bar, the chat bar is.
+  With no conversation open it waits for the first message, as a prompt in the
+  box does, and the folders say so; a session that has ended takes none, and
+  the pointer says no. A picture the coders cannot take as it is (a HEIC, or
+  past Anthropic's 5MB of base64) is redrawn to fit, as the chat's are
+  (`src/picture.js`), where it was refused over 5MB of file, and one between
+  3.75 and 5MB was sent on past Anthropic's limit. `test/kode-drop.test.mjs`.
 - **2026-10-25** — **The life in one click, and what you agree to.** Colin:
   "an easy one-click start and stop… copying and pasting keys is not
   user-friendly. in any situation where you want to ensure user safety, just

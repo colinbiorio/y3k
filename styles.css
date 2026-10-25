@@ -5387,6 +5387,19 @@ body.in-code .home-panel-head { display: none; }
   box-shadow: var(--lg-lip), var(--lg-drop), 0 0 0 4px rgba(255, 158, 207, 0.04);
   --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.75), rgba(255, 158, 207, 0.22) 28%, rgba(143, 123, 255, 0.08) 58%, rgba(200, 180, 255, 0.45)); }
 .cv-composer > .cv-orbit { z-index: 2; }
+/* A PICTURE OVER kode (Colin, 2026-10-25: "make sure that when you're
+   draggin a photo into y3kode, the photo gets added to the coding
+   conversation unless it's explicitly dropped in the chat bar"). What it
+   would join is lit, in the chat bar's own drag light (#chat.drag): the
+   composer while a conversation is on screen, the home while it would wait
+   for the first message (code-view.js onDragOver). Nothing is lit where it
+   would not be taken: the planning card's composer, on the home, talks to the
+   presence, so only the dock's is. */
+.code-root.cv-dropping .cv-dock .cv-composer { background: linear-gradient(rgba(203, 211, 221, 0.12), rgba(203, 211, 221, 0.12)), var(--lg-2);
+  box-shadow: var(--lg-lip), var(--lg-drop), 0 0 0 4px rgba(205, 213, 223, 0.12), 0 0 26px rgba(205, 213, 223, 0.2);
+  --lg-rim: linear-gradient(rgba(205, 213, 223, 0.75), rgba(205, 213, 223, 0.75)); }
+.code-root.cv-dropping .cv-home { box-shadow: inset 0 0 0 2px rgba(205, 213, 223, 0.6), inset 0 0 40px rgba(205, 213, 223, 0.1); background: rgba(203, 211, 221, 0.05); border-radius: 18px; }
+.cv-waitpics > .cv-attach { flex: none; width: auto; margin: 0; }
 
 /* send and stop: beads of glass — clear with a white arrow, red to stop */
 .cv-pane .cv-send { position: relative; width: 38px; height: 38px; color: #fff;
