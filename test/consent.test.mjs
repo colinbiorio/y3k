@@ -142,6 +142,16 @@ await ok('the page says the limit, with the reset, and never blames this compute
   assert.ok(!/computer did not answer/.test(ownLimitLine('9pm')));
   assert.equal(ownFailedLine({ code: 'failed', at: Date.now() }), OWN_FAILED);
   assert.equal(ownFailedLine(null), OWN_FAILED);
+  // 2026-10-25, Colin with the plan at 16%: "the thing is i'm not at a usage limit" — each thing y3kode can say, in its own words
+  assert.match(ownFailedLine({ code: 'unpaired', at: Date.now() }), /no longer connected to y3kode/);
+  assert.match(ownFailedLine({ code: 'offline', at: Date.now() }), /y3kode is not running/);
+  assert.match(ownFailedLine({ code: 'signed-out', at: Date.now() }), /signed out/);
+  assert.match(ownFailedLine({ code: 'not-installed', at: Date.now() }), /not installed/);
+  assert.match(ownFailedLine({ code: 'busy', at: Date.now() }), /as much as it can at once/);
+  const said = ownFailedLine({ code: 'refused', error: 'error: unknown option \'--safe-mode\'\n', at: Date.now() });
+  assert.match(said, /it said: “error: unknown option '--safe-mode'”/, 'Claude Code\'s own words, when there are any');
+  assert.equal(ownFailedLine({ code: 'refused', error: 'x'.repeat(400), at: Date.now() }).includes('x'.repeat(160) + '…'), true, 'clipped');
+  assert.equal(ownFailedLine({ code: 'refused', error: '', at: Date.now() }), OWN_FAILED);
   const own = read('src/own-brain.js');
   assert.match(own, /if \(!r\?\.ok\) lastOwnFailure = \{ code: r\?\.code \|\| 'failed'/, 'remembered where the job is answered');
   assert.match(read('src/main.js'), /onOwnPlan\(\) \? ownFailedLine\(\) : PROVIDER_FAILED/);

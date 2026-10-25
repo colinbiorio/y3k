@@ -246,6 +246,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **The chat says what y3kode said.** Colin, with his plan at
+  16%: "the thing is i'm not at a usage limit". When a turn on your own
+  sign-in fails, the line now names what y3kode answered: a tab no longer
+  connected to y3kode (open kode once), y3kode not running, Claude Code
+  signed out or not installed, busy, the plan's limit with its reset — or
+  Claude Code's own words, clipped. The general line is kept only when
+  nothing was said (`src/brain.js` `ownFailedLine`, `OWN_LINES`).
 - **2026-10-25** — **A picture dropped in kode goes to the coder.** Colin:
   "i can't drag photos into y3kode because they go to chat instead -- make
   sure that when you're draggin a photo into y3kode, the photo gets added to
