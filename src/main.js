@@ -13,9 +13,11 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd, siteSetup } from './own-brain.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
+import { wireDownloadGlyph } from './download-glyph.js';
+import { detectPlatform } from './code/platform.js';
 import { createSpeedReadout } from './speed.js';
 import { createVersionWatch, newVersionNote } from './ship.js';
 import { createSocial } from './social.js';
@@ -271,6 +273,13 @@ function showThinking() {
   modelMark.set(thinking({ own, key }));   // a guest on a key of their own sees it too
 }
 for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
+
+// THE APP, RIGHT OF THE NAME (download-glyph.js; Colin, 2026-10-24: "a
+// download app glyph titled 'download' directly right of the
+// yearthreethousand logo"): a press opens the desktop app for this computer,
+// from the setup the y3kode screen already reads and the computer it already
+// works out; a drag only turns it. Poured in mercury-mount.js.
+wireDownloadGlyph({ el: $('home-download'), setup: () => siteSetup(), platform: () => detectPlatform() });
 
 function enterApp() {
   // next time the card opens on sign in; and a guest's arrival card goes, for

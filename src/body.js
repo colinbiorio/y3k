@@ -4041,7 +4041,9 @@ export function createBody(container) {
       occ.visible = on;
       if (!on) return;
       if (!cv) {
-        cv = brandEl.querySelector('canvas.mercury-blob');
+        // its OWN canvas (2026-10-24): the download glyph inside the name has
+        // one too, earlier in the document, and is not the name
+        cv = brandEl.querySelector(':scope > canvas.mercury-blob');
         if (!cv) { occ.visible = false; on = false; document.body.classList.remove('brand-in-room'); return; }
       }
       // THE TEXTURE IS REBUILT WHENEVER THE CANVAS CHANGES SIZE. three r160

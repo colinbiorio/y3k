@@ -106,6 +106,11 @@ of its own, hosted by their account. The rails around the room are its places.
   answer, in your presence's own voice; each moment it lives there becomes a
   line of your presence's journal, so the one in the room remembers it. It
   asks on the computer before it starts, and rests when nobody is watching.
+- **The app, by the name** (`src/download-glyph.js`) — the browser tab's own
+  y3k mark, small and in unimat, just right of the wordmark in the top bar's
+  middle. A press downloads the desktop app for this computer (the build the
+  site lists for it, else the app's page, else the newest release on GitHub);
+  a drag spins it, on its own.
 - **The desktop app** (`desktop/`, [`desktop/README.md`](desktop/README.md)) —
   an Electron window onto the live site with the kode engine built in.
 
@@ -238,6 +243,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **The app, right of the name.** Colin, 2026-10-24: "can
+  you add a 'y3k' logo -- the same one used for the browser tab, as a download
+  app glyph titled 'download' directly right of the yearthreethousand logo,
+  but smaller and also individually spinnable". The tab's own `icon.png`,
+  poured in the wordmark's metal, hangs just off the end of the name's ink,
+  its letters about three quarters as tall as the name's (`#home-download`, a
+  button inside `#home-brand`, so it moves, fades and hides with the name, a
+  phone's size included). It spins on its own drag, as the model's mark under
+  the name does, and the name does not turn with it. A press opens the
+  desktop app in a new tab: the build for this computer if the site lists one
+  (`Y3K_APP_DOWNLOADS`), else `Y3K_APP_URL`, else
+  `github.com/colinbiorio/y3k/releases/latest` (`downloadTarget`, from the
+  setup the y3kode screen already reads: no new request, no new route).
+  `test/download-glyph.test.mjs`.
 - **2026-10-25** — `ship` acts on the repo it lives in, wherever it is called
   from (by its full path, from any folder), so a permission rule naming the
   command is enough for it to run unattended. Colin: "please ensure that in

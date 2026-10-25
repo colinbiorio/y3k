@@ -659,6 +659,37 @@ export function mountAppMercury() {
       // it responsive, but nothing ever re-read it, so it alone stayed full size
       // while the rail shrank around it.
       if (brandH && brandH.setSize) scalable.push({ h: brandH, base: brandBase });
+      // THE APP, RIGHT OF THE NAME (Colin, 2026-10-24: "a download app glyph
+      // titled 'download' directly right of the yearthreethousand logo, but
+      // smaller and also individually spinnable"; src/download-glyph.js): the
+      // tab's own icon.png, poured in the name's metal and turned as the same
+      // plaque, but its own mount on its own button, so a turn of one is never
+      // a turn of the other (download-glyph.js keeps its press from the name).
+      // It draws while the name draws and holds still where the name holds
+      // still. It scales on the NAME's base, so the step that pours the name
+      // smaller pours it smaller by the same share, and --brand-k carries that
+      // share to the stylesheet, which moves it in with the name's ink.
+      const dl = document.getElementById('home-download');
+      const dlImg = document.getElementById('home-download-img');
+      if (brandH && dl && dlImg) {
+        const dlBase = dl.clientHeight || brandBase * 0.42;
+        const dlH = mount(dl, {
+          imageEl: dlImg, size: dlBase,
+          // its strokes are bolder than the cursive's, so less body and a
+          // rim between the name's and the model mark's
+          thicken: 1.6, rim: 0.012, flowSpeed: 0.12, viscosity: 3, ss: 2,
+          still: coarse, visibleWhen: brandShown,
+          // no spinRoom: a mark taller than it is wide stays inside the
+          // square canvas however it turns
+          interactive: true, spin3D: true, bevel: 1.5, slabDepth: 0.3, seed: 13.7,
+        });
+        if (dlH && dlH.setSize) {
+          scalable.push({ base: brandBase, h: { setSize: (px) => {
+            dlH.setSize(dlBase * px / brandBase);
+            brand.style.setProperty('--brand-k', (px / brandBase).toFixed(4));
+          } } });
+        }
+      }
     }
     // WHAT IS THINKING, under the house's name (model-mark.js): the maker's
     // mark and the model's name, each its own pour and its own spin, in the
