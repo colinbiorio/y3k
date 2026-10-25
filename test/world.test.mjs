@@ -2003,7 +2003,9 @@ ok('the orb passes in front of the floating name', () => {
   assert.ok(/blending: THREE\.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: false/.test(bodySrc), 'the chrome is no longer added on top');
   assert.ok(/if \(!\(holeT <= 10\.5\)\) return false;/.test(bodySrc), 'the room would draw the mark while it is still in the bar (under the glass)');
   assert.ok(/const DEPTH = 2\.4;/.test(bodySrc), 'the plane is not held in front of the room surfaces');
-  assert.ok(/body\.brand-in-room #home-brand canvas\.mercury-blob \{ opacity: 0; transition: none; \}/.test(css), 'the DOM mark does not step aside for the room');
+  // (2026-10-24: its own canvas only, `>`: the download glyph inside the name
+  // pours on a canvas of its own, which the room does not draw)
+  assert.ok(/body\.brand-in-room #home-brand > canvas\.mercury-blob \{ opacity: 0; transition: none; \}/.test(css), 'the DOM mark does not step aside for the room');
 });
 
 ok('the mark is confined to the bar while the bar is open', () => {

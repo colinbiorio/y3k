@@ -2158,8 +2158,10 @@ body {
    mark (body.js, brandLayer) so the orb can pass in front of it. The DOM
    canvas goes invisible at that instant — the same pixels, moved house, so
    there is nothing to see in the swap — while the element stays for the
-   hand: the spin and the hover still land here. No transition, on purpose. */
-body.brand-in-room #home-brand canvas.mercury-blob { opacity: 0; transition: none; }
+   hand: the spin and the hover still land here. No transition, on purpose.
+   Its OWN canvas only (2026-10-24): the download glyph inside it is poured
+   on a canvas of its own and is not drawn by the room. */
+body.brand-in-room #home-brand > canvas.mercury-blob { opacity: 0; transition: none; }
 .home-brand:active { cursor: grabbing; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { pointer-events: none; }
 .home-brand-img { height: 100%; width: auto; display: block; }
@@ -2167,6 +2169,32 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
+/* THE APP, RIGHT OF THE NAME (src/download-glyph.js; Colin, 2026-10-24: "a
+   download app glyph titled 'download' directly right of the
+   yearthreethousand logo, but smaller and also individually spinnable"). The
+   tab's own icon.png in the name's metal. A CHILD of the name, so every rule
+   above that moves, fades, hides or confines the name does the same to it:
+   its opacity and its pointer-events are the name's (nothing here sets
+   either, so they are inherited), and on a phone it scales with the name's
+   own box. It hangs off the name's INK, not its box: cursive.png's letters end
+   78.96% of the way across and are centred 47% down, and icon.png's start
+   30.7% into its own box (measured, alpha over 20). Its box is 45% of the
+   name's, which makes its ink about three quarters as tall as the name's, and
+   the inks stand 0.09 of the name's height apart. --brand-k is the share of its box
+   the name is poured at (mercury-mount.js writes it when a resize pours the
+   name smaller; unset, 1), so the two stay together. */
+.home-download { position: absolute; z-index: 1; margin: 0; padding: 0; border: none; background: none;
+  --dl-k: var(--brand-k, 1);
+  --dl-h: calc(var(--brand-h) * 0.45 * var(--dl-k));
+  height: var(--dl-h); width: calc(var(--dl-h) * 485 / 746);
+  left: calc(var(--brand-h) * 2048 / 699 * (0.5 + 0.2896 * var(--dl-k)) + var(--brand-h) * 0.09 * var(--dl-k) - var(--dl-h) * 485 / 746 * 0.307);
+  top: calc(var(--brand-h) * (0.5 - 0.03 * var(--dl-k))); translate: 0 -50%;
+  cursor: pointer; }
+.home-download:active { cursor: grabbing; }
+.home-download:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; border-radius: 4px; }
+.home-download-img { width: 100%; height: 100%; display: block; }
+/* as the name's png: in liquid mode only the shape source, never painted */
+body.merc-sdf .home-download-img { visibility: hidden; }
 /* WHAT IS THINKING, under the house's name (src/model-mark.js): the maker's
    mark, then the model's name, each its own metal and its own spin. It hangs
    under whichever is lower, the name (its own line through --hole-t) or the
