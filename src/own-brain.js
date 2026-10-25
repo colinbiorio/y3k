@@ -135,6 +135,13 @@ export async function heardModels(provider = 'claude', { cmd = engineCmd } = {})
 
 // One command to y3kode on this computer: the desktop app's bridge, or the
 // companion this browser is paired with. → its answer, or { ok: false, code }.
+// The last time y3kode could not think for a turn (own-brain answer): its code
+// and, for the plan's limit, when it resets. A turn that fails within a minute
+// of it is said as that (brain.js ownFailedLine).
+let lastOwnFailure = null;
+export const recentOwnFailure = (ms = 60000, now = Date.now) => (lastOwnFailure && now() - lastOwnFailure.at <= ms ? lastOwnFailure : null);
+export const noteOwnFailure = (f) => { lastOwnFailure = f ? { at: Date.now(), ...f } : null; };   // tests
+
 export async function engineCmd(obj, { win = globalThis.window, pairing = savedPairing, fetchFn = globalThis.fetch } = {}) {
   try {
     if (win?.y3kCode?.cmd) return await win.y3kCode.cmd(obj);
@@ -386,6 +393,9 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
       if (stopped) return;
       // speed: how fast it wrote, as y3kode timed it (0.3.3+; the site checks it)
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null, ...(r.speed ? { speed: r.speed } : {}) } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
+      // what y3kode last said when it could not think, for the page's own line
+      // (brain.js ownFailedLine): the site hears only that the turn failed
+      if (!r?.ok) lastOwnFailure = { code: r?.code || 'failed', error: String(r?.error || ''), resets: r?.resets || '', at: Date.now() };
       // not awaited: what the turn says of y3kode is acted on now, not after
       // a refused answer has been tried again for a minute
       if (wanted) answer(s, job.id, body);

@@ -29,6 +29,7 @@
 // (life.mjs), because each moment uses your Claude plan.
 
 import { engineCmd, updateY3kode, waitForVersion, siteSetup } from './own-brain.js';
+import { consent } from './consent.js';
 
 // THE LIFE NEEDS y3kode 0.3.4 (y3k-code/life.mjs). Colin, 2026-10-24: "when i
 // click life it says open kode but then i go to kode and there's no option to
@@ -52,6 +53,20 @@ export const LIFE_ENGINE = '0.3.4';
 // a phone, another computer, a browser with no y3kode. `?life=<username>`
 // watches someone else's, if they share it.
 export const PUB_LIVE_MS = 5000, PUB_IDLE_MS = 20000;
+
+// ONE CLICK (Colin, 2026-10-25: "an easy one-click start and stop… copying and
+// pasting keys is not user-friendly"). "begin" says what it does and asks once
+// (consent.js: always / just this time / cancel; the terms carry the same
+// field), then makes the account's publishing key itself and hands it to
+// y3kode with the start, so the life it starts here is watched from anywhere
+// with nobody copying anything. "let it rest" stops it.
+export const LIFE_CONSENT = {
+  kind: 'life.run',
+  title: 'Begin a life on this computer?',
+  note: 'This starts lucid here, through y3kode: it dreams a world on this computer and thinks on your own Claude sign-in, so each moment spends a little of your Claude plan. '
+    + 'Its moments — the pictures, what it thinks and says — are kept under your account on yearthreethousand so you can watch from any device; nobody else sees them unless you share. '
+    + 'It rests by itself when nobody has watched for ten minutes, and "let it rest" stops it any time.',
+};
 /** Which life the page shows: the one living here, the published one, or neither. */
 export function sourceOf(phase, pub) {
   if (phase === 'living') return 'local';
@@ -276,8 +291,17 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   }
   async function begin(fresh) {
     if (starting) return;
+    const ok = await consent(LIFE_CONSENT);
+    if (!ok) return;
     starting = true; paint();
-    const r = await cmd({ cmd: 'life.start', fresh: !!fresh });
+    // the key, made here, so the life publishes to this account from its first moment
+    let publish = null;
+    try {
+      const x = await fetchFn('/api/life/key', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const j = x.ok ? await x.json() : null;
+      if (j?.key) { publish = { to: location.origin, key: j.key }; if (pub) pub.key = true; }
+    } catch { /* it still lives here; it is just not published */ }
+    const r = await cmd({ cmd: 'life.start', fresh: !!fresh, ...(publish ? { publish } : {}) });
     starting = false;
     if (!r?.ok) toast(r?.code === 'declined' ? 'not started: the computer said no' : (r?.error || 'the life could not start'));
     since = -1;
@@ -335,7 +359,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     if (veil) veil.textContent = !shown ? (phase === 'living' ? 'dreaming the first moment…' : '') : '';
     const body = $('#life-body');
     if (!body) return;
-    const want = [source, phase, phase === 'living' ? (m?.mode || '') : '', source === 'web' ? (pub.mine ? 'mine' : 'theirs') : '',
+    const want = [source, phase, phase === 'living' ? (m?.mode || '') : '', source === 'web' ? (pub.mine ? 'mine' : 'theirs') : '', starting ? 'starting' : '',
       pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', hear ? 'hear' : ''].join('|');
     if (body.dataset.phase !== want) { body.dataset.phase = want; body.innerHTML = source === 'web' ? webShell() : shell(); wire(); }
     if (source === 'web') {
@@ -345,6 +369,8 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       set('#life-intent', web.intention ? `holding: ${web.intention}` : '');
       set('#life-sees', web.sees || '');
       const sb = $('#life-share'); if (sb) sb.disabled = sharing;
+      const go = $('#life-begin'); if (go) go.disabled = starting;
+      const again = $('#life-anew'); if (again) again.disabled = starting;
       return;
     }
     if (phase === 'living') {
@@ -368,6 +394,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       <p id="life-said" class="life-said"></p>
       <p id="life-intent" class="life-intent"></p>
       <p class="life-note">${mine ? 'your life, lived on your own computer and published here' : `${name}'s life, lived on their computer and shared here`}: this page shows its newest moment.</p>
+      ${mine && phase === 'resting' ? `<div class="life-row"><button type="button" id="life-begin" class="create-go">${st?.ended ? 'wake it' : 'begin'}</button><button type="button" id="life-anew" class="login-alt">begin a new life</button></div>` : ''}
       ${mine ? `<form id="life-web-speak" class="life-speak" autocomplete="off">
           <label class="field"><input id="life-web-say" type="text" maxlength="500" placeholder="say something to it…" aria-label="say something to it" /></label>
           <button type="submit" class="create-go">say</button>

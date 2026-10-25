@@ -439,7 +439,7 @@ await ok('main.js gives the words back when the site could not be reached; airde
   assert.match(main, /why: result\?\.why \|\| null/, 'the turn does not carry its reason back to handle()');
   // with no reason named, the line a reply would say too: Claude Code on the
   // person's own plan, never "your AI provider in Settings → Brain"
-  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| \(onOwnPlan\(\) \? OWN_FAILED : PROVIDER_FAILED\), 'y3k'\);/);
+  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| \(onOwnPlan\(\) \? ownFailedLine\(\) : PROVIDER_FAILED\), 'y3k'\);/   /* 2026-10-25: the plan's limit named, when y3kode said so (brain.js ownFailedLine) */);
   assert.match(main, /import \{[^}]*\bonOwnPlan\b[^}]*\bPROVIDER_FAILED, OWN_FAILED\b[^}]*\} from '\.\/brain\.js';/, 'main.js does not have the lines it says');
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.equal((tend.match(/else if \(REFUSED\.has\(r\?\.why\)\) \{ showCaption\(whyLine\(r\.why, r\.provider\), 'y3k'\); stopAlive\(\); \}/g) || []).length, 2);
