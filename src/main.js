@@ -1969,7 +1969,7 @@ function sendChat() {
   // moment. A life that cannot hear (none here, none published and awake)
   // leaves the line to the presence, as everywhere else. After the kommands:
   // a kommand is a kommand in the life too, and is never said to it.
-  if (text && document.body.classList.contains('in-life') && social.lifeHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }
+  if (text && document.body?.classList?.contains?.('in-life') && social.lifeHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
