@@ -301,6 +301,8 @@ const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_R
 const CODE_DIR = join(ROOT, 'y3k-code');
 // A published life's pictures, by username and moment (life-publish.mjs).
 const LIFE_FRAME = /^\/life\/([^/]{1,64})\/(\d{1,9})\.jpg$/;
+// …and its doors, named: /api/life/moment (the presence's record, below) is not one of them
+const LIFE_PUB_PATHS = new Set(['/api/life/publish', '/api/life/inbox', '/api/life/key', '/api/life/share', '/api/life/say', '/api/life/latest']);
 // The version that tarball is, so a page can tell a y3kode that is behind it
 // (Settings → Brain's "Update needed", y3k-code/update.mjs).
 const ENGINE_VERSION = (() => { try { return JSON.parse(readFileSync(join(CODE_DIR, 'package.json'), 'utf8')).version || null; } catch { return null; } })();
@@ -1877,7 +1879,7 @@ const server = http.createServer(async (req, res) => {
     // anywhere; words typed on the page wait in the inbox until the life asks.
     // Pictures leave by their own route, as what they are (nosniff), to the
     // account, or to anyone by username once the account shares its life.
-    if (reqPath.startsWith('/api/life/') || LIFE_FRAME.test(reqPath)) {
+    if (LIFE_PUB_PATHS.has(reqPath) || LIFE_FRAME.test(reqPath)) {
       const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
       if (reqPath === '/api/life/publish' && req.method === 'POST') {
         const uid = lifePub.uidOf(bearer);
@@ -1939,7 +1941,7 @@ const server = http.createServer(async (req, res) => {
         if (!buf) return json(404, { error: 'not found' });
         return send(res, 200, buf, { 'content-type': 'image/jpeg', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'cache-control': 'private, max-age=31536000, immutable' });
       }
-      return json(404, { error: 'not found' });
+      return json(405, { error: 'not like that' });   // a named door, the wrong method
     }
 
     // YOUR OWN BRAIN, THROUGH YOUR OWN PAGE (own-relay.mjs), for any signed-in

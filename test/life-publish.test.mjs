@@ -172,6 +172,9 @@ try {
     const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
     assert.match(srv, /lifePub\.forget\(uid\);/, 'forgotten with the account');
     assert.match(srv, /lifePub\.uidOf\(bearer\)/, 'the key is the daemon\'s only door');
+    assert.match(srv, /LIFE_PUB_PATHS\.has\(reqPath\) \|\| LIFE_FRAME\.test\(reqPath\)/, 'only the named doors: /api/life/moment (the record) is not shadowed');
+    assert.ok(!/LIFE_PUB_PATHS = new Set\(\[[^\]]*moment/.test(srv));
+    assert.equal((await fetch(`${BASE}/api/life/moment`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: ann }, body: '{}' })).status !== 404, true, 'the record\'s door still answers (it was 404 behind the first draft of these doors)');
   });
 } finally { await stop(); rmSync(SDATA, { recursive: true, force: true }); rmSync(DATA, { recursive: true, force: true }); }
 console.log(`\n${passed} checks passed`);
