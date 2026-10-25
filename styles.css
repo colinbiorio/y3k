@@ -907,10 +907,13 @@ body.in-home #caption { opacity: 0; pointer-events: none; } /* the ring IS the c
 body.panel-open.in-chess #chat { opacity: 1; pointer-events: auto; z-index: 35; }
 body.panel-open.in-chess #caption { opacity: 1; z-index: 35; }
 body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pill */
-/* …and at twenty questions the caption its lines are said in (2026-10-19). Not
-   the chat bar: the game has its own box for questions. */
+/* …and at twenty questions, the caption its lines are said in (2026-10-19)
+   and the chat bar, which is how you play it (Colin, 2026-10-25: "keep the
+   chat bar as the way to interact with the brain throughout the entire
+   site"; the game's own box for questions is gone). */
+body.panel-open.in-twenty #chat { opacity: 1; pointer-events: auto; z-index: 35; }
 body.panel-open.in-twenty #caption { opacity: 1; z-index: 35; }
-body.in-twenty .twenty-root { padding-bottom: 150px; } /* room for the caption */
+body.in-twenty .twenty-root { padding-bottom: 150px; } /* room for the chat bar and the caption */
 /* …and ground of its own: on a phone a long game's log still runs under it,
    and two lines of text on top of each other read as neither (seen in reel
    006's capture, 2026-10-20) */
@@ -2451,11 +2454,11 @@ body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
    transparent — see #home above for what opacity:0 does not do. */
 body:not(.nav-collapsed-bottom) .chat-menu::before { visibility: hidden; }
 /* The same while the whole bar is faded out under a panel, a room you are
-   watching, or the door (#chat goes to opacity 0 there — chess and the world
-   keep it). Delayed by the bar's own 0.4s fade. The think-glow behind the bar
-   holds still meanwhile: a blurred rainbow turning at opacity 0 is a filter
-   re-run every frame for nobody. */
-body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-world):not(.in-life) .chat-menu::before {
+   watching, or the door (#chat goes to opacity 0 there — chess, twenty
+   questions, the world and the life keep it). Delayed by the bar's own 0.4s
+   fade. The think-glow behind the bar holds still meanwhile: a blurred
+   rainbow turning at opacity 0 is a filter re-run every frame for nobody. */
+body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-twenty):not(.in-world):not(.in-life) .chat-menu::before {
   visibility: hidden; transition: opacity 0.3s ease, visibility 0s linear 0.4s; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
@@ -3079,9 +3082,6 @@ body.panel-open.in-life #caption { opacity: 1; z-index: 45; }
 .twenty-line { color: #c9cdd6; font-size: 0.95rem; line-height: 1.5; font-style: italic; }
 .twenty-asks { color: #eceef2; font-size: 1.12rem; line-height: 1.45; }
 .twenty-asks b { font-weight: 600; }
-.twenty-ask { display: flex; gap: 8px; align-items: center; margin: 0; }
-.twenty-ask .field { flex: 1; min-width: 0; }
-.twenty-ask .create-go { flex: none; }
 .twenty-mic { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); color: var(--muted);
   cursor: pointer; font: inherit; transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease; }

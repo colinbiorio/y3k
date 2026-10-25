@@ -59,7 +59,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // Twenty questions (src/twenty.js, 2026-10-19), the games glyph's second
   // game. Its game, too, outlives a wander. Its lines go to the caption and
   // the body beats as a reply's do; the mood, the voice and the microphone
-  // are main.js's (`games`), the same hands the conversation uses.
+  // are main.js's (`games`), the same hands the conversation uses; and what
+  // you type to it comes from the chat bar (twentyHear, below, 2026-10-25).
   const twenty = createTwenty({ getAccount, toast: toastOnce, caption: (t, w) => showCaption(t, w), beat: (name, n) => body.beat(name, n), ...(games || {}) });
   // Which game the games glyph opens: the one chosen last on this visit,
   // chess until another is. A chess invitation still opens chess.
@@ -104,8 +105,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('panel-open', v !== 'orb');
     // chess keeps the home chat bar (and the caption it answers in) on screen
     document.body.classList.toggle('in-chess', v === 'chess');
-    // twenty questions keeps the caption its lines are said in (not the chat
-    // bar: the game has its own box for questions)
+    // twenty questions keeps the chat bar too, which is how it is played
+    // (2026-10-25: its own box for questions is gone; main.js sendChat →
+    // twentyHear), and the caption its lines are said in
     document.body.classList.toggle('in-twenty', v === 'twenty');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
@@ -1575,5 +1577,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   const codeBusy = () => !!codeView?.busy();
-  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), twentyHear: (t) => twenty.hear(t), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }

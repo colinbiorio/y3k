@@ -1970,6 +1970,14 @@ function sendChat() {
   // leaves the line to the presence, as everywhere else. After the kommands:
   // a kommand is a kommand in the life too, and is never said to it.
   if (text && document.body?.classList?.contains?.('in-life') && social.lifeHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }
+  // AT TWENTY QUESTIONS THE CHAT BAR IS HOW YOU PLAY (Colin, 2026-10-25, the
+  // same message: "don't introduce a separate field for how they talk with the
+  // ai"; the game's own box for questions is gone). While a game is on, a line
+  // typed here is the game's by its own rules (src/twenty.js hear): your
+  // question when it thinks of the thing, your answer when you do. A line
+  // that is not the game's (no game on, or one that answers nothing) is the
+  // presence's, as everywhere else. After the kommands, as in the life.
+  if (text && document.body?.classList?.contains?.('in-twenty') && social.twentyHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
