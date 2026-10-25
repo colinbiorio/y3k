@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decide, createVersionWatch, EVERY_MS } from '../src/ship.js';
-import { judge, waitLive, reloadTabs, RELOAD_SCRIPTS, fmt, SITE } from '../scripts/ship.mjs';
+import { judge, waitLive, reloadTabs, RELOAD_SCRIPTS, fmt, SITE, REPO } from '../scripts/ship.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -126,7 +126,14 @@ await ok('a merge GitHub is still working out is asked again, not given up on', 
   assert.match(src, /Base branch was modified/i);
   assert.match(src, /tries >= 4/);
 });
+await ok('the repo is the one the script lives in, wherever it is called from (2026-10-25: so it can run by its full path, from anywhere)', () => {
+  const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');
+  assert.match(src, /export const REPO = join\(dirname\(fileURLToPath\(import\.meta\.url\)\), '\.\.'\);/);
+  assert.match(src, /rev-parse', '--show-toplevel'\], \{ cwd: REPO \}/);
+  assert.ok(!/rev-parse', '--show-toplevel'\]\)/.test(src), 'never the shell\'s own folder');
+});
 await ok('times read as minutes and seconds', () => { assert.equal(fmt(0), '0:00'); assert.equal(fmt(130_000), '2:10'); });
+await ok('REPO is this repo', () => assert.equal(readFileSync(join(REPO, 'package.json'), 'utf8').includes('"ship": "node scripts/ship.mjs"'), true));
 await ok('the script reads no .env and adds nothing to the site; it is npm run ship; README says so', () => {
   const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');
   assert.doesNotMatch(src, /load-env|'\.env'|readFile|FOUNDER_PASSWORD|ANTHROPIC/, 'no .env, no file read, no secret');

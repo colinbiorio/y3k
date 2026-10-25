@@ -238,6 +238,10 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — `ship` acts on the repo it lives in, wherever it is called
+  from (by its full path, from any folder), so a permission rule naming the
+  command is enough for it to run unattended. Colin: "please ensure that in
+  the future, you are able to merge yourself".
 - **2026-10-24** — **A life, published: viewable from the web.** Colin: "if
   it's possible to make life viewable from web enable that as well". A life
   lived on the person's computer (lucid) can post each moment to the site —
