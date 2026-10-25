@@ -372,7 +372,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     const body = $('#life-body');
     if (!body) return;
     const want = [source, phase, phase === 'living' ? (m?.mode || '') : '', source === 'web' ? (pub.mine ? 'mine' : 'theirs') : '', starting ? 'starting' : '',
-      pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', hear ? 'hear' : '', engine?.version || ''].join('|');
+      pubCmd ? 'cmd' : '', pub?.shared ? 'shared' : '', pub?.key ? 'key' : '', engine?.version || ''].join('|');
     if (body.dataset.phase !== want) { body.dataset.phase = want; body.innerHTML = source === 'web' ? webShell() : shell(); wire(); }
     if (source === 'web') {
       const set = (sel, t) => { const el = $(sel); if (el && el.textContent !== t) el.textContent = t; };

@@ -246,6 +246,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **The life tab draws again.** Colin: "when i click on life
+  from web nothing shows up just grey screen". A name that no longer existed
+  (`hear`, gone with the voice bridge) threw in the page's paint on every
+  poll, so the panel stayed empty; no test had ever run the view, only read
+  it. Now one does (`test/life.test.mjs`, under the tests' stand-in DOM,
+  which learned `#id` selectors for it), and it fails on exactly that bug.
 - **2026-10-25** — **The chat says what y3kode said.** Colin, with his plan at
   16%: "the thing is i'm not at a usage limit". When a turn on your own
   sign-in fails, the line now names what y3kode answered: a tab no longer

@@ -128,14 +128,16 @@ for (const k of ['value', 'checked', 'disabled', 'hidden', 'open', 'type', 'plac
 // --- selectors: `a.b > c.d e`, with :scope --------------------------------------
 function parseCompound(s) {
   if (s === ':scope') return { scope: true };
-  const m = /^([a-z0-9*]*)((?:\.[\w-]+)*)((?:\[[\w-]+\])*)$/i.exec(s);
+  // tag, #id (2026-10-25: the life view finds every part of itself by id), classes, [attrs]
+  const m = /^([a-z0-9*]*)(#[\w-]+)?((?:\.[\w-]+)*)((?:\[[\w-]+\])*)$/i.exec(s);
   if (!m) throw new Error('mini-dom: unsupported selector ' + s);
-  return { tag: m[1] && m[1] !== '*' ? m[1].toUpperCase() : null, classes: m[2] ? m[2].slice(1).split('.') : [], attrs: m[3] ? m[3].slice(1, -1).split('][') : [] };
+  return { tag: m[1] && m[1] !== '*' ? m[1].toUpperCase() : null, id: m[2] ? m[2].slice(1) : null, classes: m[3] ? m[3].slice(1).split('.') : [], attrs: m[4] ? m[4].slice(1, -1).split('][') : [] };
 }
 function compound(c, el, scope) {
   if (el.nodeType !== 1) return false;
   if (c.scope) return el === scope;
   if (c.tag && el.tagName !== c.tag) return false;
+  if (c.id && el.id !== c.id) return false;
   if (!c.attrs.every((a) => el.attrs.has(a))) return false;
   const cls = el.className.split(/\s+/);
   return c.classes.every((k) => cls.includes(k));
