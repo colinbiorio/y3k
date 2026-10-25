@@ -186,8 +186,12 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
     return true;
   }
 
-  function stop(why = 'you let it rest') {
-    if (!running()) return { ok: true, running: false, ...(stopThroughTheDoor(why) ? { door: true } : {}) };
+  // `door`: the page asked (life.stop), so a life this engine did not start may
+  // be told too. Never on the engine's own shutdown (dispose), and never when
+  // this engine was pointed at another life (Y3K_LUCID_ARGS --life): the
+  // first time this ran, a test suite's exit put the real life to sleep.
+  function stop(why = 'you let it rest', { door = false } = {}) {
+    if (!running()) return { ok: true, running: false, ...(door && !extraArgs(env).includes('--life') && stopThroughTheDoor(why) ? { door: true } : {}) };
     ended = { code: null, why };
     // asked first, the way lucid's window is closed; forced only if it has not
     // gone a few seconds later (a dream mid-step finishes; the life is saved

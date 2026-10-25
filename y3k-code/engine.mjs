@@ -615,7 +615,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'life.start': async (c) => life.start(c),
     'life.state': async (c) => life.state(c),
     'life.do': async (c) => life.act(c),
-    'life.stop': async () => life.stop(),
+    'life.stop': async () => life.stop('you let it rest', { door: true }),   // the page's ask: it may reach a life another hand lives here (life.mjs)
     // what a turn has said so far (done: the turn is over or never was)
     'brain.partial': async ({ tag }) => (partials.has(tag) ? { ok: true, text: partials.get(tag), done: false } : { ok: true, text: '', done: true }),
     'engine.update': async (c) => updater.run(c),

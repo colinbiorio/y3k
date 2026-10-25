@@ -114,6 +114,25 @@ await ok('versions compare as numbers, by part', async () => {
   assert.equal(versionAtLeast('0.3.6', '0.3.6'), true); assert.equal(versionAtLeast('0.3.10', '0.3.6'), true); assert.equal(versionAtLeast('0.4.0', '0.3.6'), true);
   assert.equal(versionAtLeast('0.3.5', '0.3.6'), false); assert.equal(versionAtLeast('', '0.3.6'), false); assert.equal(versionAtLeast(null, '0.3.6'), false);
 });
+await ok('go to sleep reaches a life another hand lives on this computer only when the page asks, never on the engine\'s own shutdown', async () => {
+  const src = read('y3k-code/life.mjs');
+  assert.match(src, /function stop\(why = 'you let it rest', \{ door = false \} = \{\}\)/);
+  assert.match(src, /door && !extraArgs\(env\)\.includes\('--life'\) && stopThroughTheDoor\(why\)/, 'only when asked, and only for the life this engine is pointed at');
+  assert.match(src, /function dispose\(\) \{ clear\(watch\); stop\('y3kode stopped'\); \}/, 'shutdown stops only its own child');
+  assert.match(read('y3k-code/engine.mjs'), /life\.stop\('you let it rest', \{ door: true \}\)/, 'the page\'s life.stop is the ask');
+  // the real thing: a lock held by a live process, told through the door only when asked
+  const { mkdirSync, writeFileSync, readFileSync: rf, existsSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'y3k-door-'));
+  mkdirSync(join(dir, 'life'), { recursive: true }); mkdirSync(join(dir, '.venv', 'bin'), { recursive: true }); writeFileSync(join(dir, '.venv', 'bin', 'python'), ''); writeFileSync(join(dir, 'lucid.py'), '');
+  writeFileSync(join(dir, 'life', 'lock'), String(process.pid));   // a live pid: this one
+  const life = createLife({ ask: async () => true, env: { Y3K_LUCID: dir }, spawn: () => { throw new Error('not spawned'); }, every: () => ({}), clear: () => {} });
+  life.dispose();
+  assert.ok(!existsSync(join(dir, 'life', 'door.json')), 'shutdown wrote nothing to the door');
+  const r = life.stop('you let it rest', { door: true });
+  assert.deepEqual(r, { ok: true, running: false, door: true });
+  assert.equal(JSON.parse(rf(join(dir, 'life', 'door.json'), 'utf8')).who, 'stop');
+  rmSync(dir, { recursive: true, force: true });
+});
 await ok('the terms carry the field, and the engine is 0.3.7', () => {
   const legal = read('legal.html');
   assert.match(legal, /id="terms-life"/);
