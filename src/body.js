@@ -2217,7 +2217,11 @@ export function createBody(container) {
   // only ever called after createBody has finished, so everything it names exists).
   // camera: so a tap that lands somewhere (a strike, a passing train) lands
   // where this window can see it.
-  const envs = createEnvironments({ scene, renderer, camera, getOrb: () => rig, roomObjects: [room, edges], warm: (g) => warmObject(g) });
+  // sound: a world's own sound (the sand plate's note when it is struck),
+  // through whatever main.js lends it (setWorldSound: the voice's own path,
+  // and only when that is already open); nothing lent, nothing heard.
+  let worldSound = null;
+  const envs = createEnvironments({ scene, renderer, camera, getOrb: () => rig, roomObjects: [room, edges], warm: (g) => warmObject(g), sound: (o) => worldSound && worldSound(o) });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
   if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer, camera };
@@ -2284,6 +2288,7 @@ export function createBody(container) {
     storm: [0.03, 0.04, 0.05],     // a grey day, nearly gone
     moon: [0.07, 0.07, 0.07],      // sunlit regolith, no colour of its own
     neon: [0.08, 0.03, 0.09],      // the signs
+    plate: [0.07, 0.065, 0.055],   // one low light off pale sand
   };
   function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room', eclipse = false } = {}) {
     eclipseDisc.visible = Boolean(eclipse);   // THE ECLIPSE, by choice (see its declaration)
@@ -2549,7 +2554,8 @@ export function createBody(container) {
     // Panels are a fact of the METAL room; every other world answers a tap in
     // its own language (environments.js: a meteor, bubbles, an aurora surge,
     // the evening walking on, a vein flare, a swelling dawn, an eruption, a
-    // gust of petals, a strike, a puff of moon dust, a passing train).
+    // gust of petals, a strike, a puff of moon dust, a passing train, a blow
+    // that rings the sand plate).
     if (lastEnv !== 'room') { envs.tap(); return; }
     const rect = el.getBoundingClientRect();
     _ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
@@ -4766,10 +4772,17 @@ export function createBody(container) {
       // the tide it set going is part of what it wears (worn.mjs keeps it)
       this.setLiquid({ material: w.material ?? 0.6, gravity: w.gravity ?? 0.6, tide: w.tide || null }, { ms: 0 });
     },
-    // 0..1 — live energy from the mic while listening.
-    setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },
-    // While the voice talks, pulse the surface even without an analyser.
-    setSpeaking(on) { speakingBoost = on ? 0.35 : 0; },
+    // 0..1 — live energy from the mic while listening, or from the voice
+    // while it speaks; hz is the voice's dominant frequency when a meter
+    // measured one (voice.js), 0 otherwise. Both go on to the worlds: the
+    // sand plate's figure follows the note and its grains the level.
+    setAudioLevel(v, hz = 0) { audioTarget = Math.max(0, Math.min(1, v)); envs.hear({ level: audioTarget, hz }); },
+    // While the voice talks, pulse the surface even without an analyser
+    // (and tell the worlds: the plate is given a cadence to move to).
+    setSpeaking(on) { speakingBoost = on ? 0.35 : 0; envs.hear({ speaking: !!on }); },
+    // What a world may sound through (see createEnvironments' sound). main.js
+    // lends the voice's ring; nothing lent, the worlds are silent.
+    setWorldSound(fn) { worldSound = typeof fn === 'function' ? fn : null; },
     setAutoRotate(on) { idleEnabled = on; },
 
     // THE BODY'S SIZE, as a multiplier. 1 is whatever the mood says; the hands

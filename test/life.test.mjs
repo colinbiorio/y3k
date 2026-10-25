@@ -13,7 +13,7 @@ import { PassThrough } from 'node:stream';
 import { lucidAt, lineFor, extraArgs, createLife, MOVES } from '../y3k-code/life.mjs';
 import { COMMANDS, validateCommand } from '../y3k-code/protocol.mjs';
 import { KINDS, describe } from '../y3k-code/consent.mjs';
-import { phaseOf } from '../src/life.js';
+import { phaseOf, LIFE_ENGINE } from '../src/life.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -173,6 +173,19 @@ await ok('one language: the engine knows life.*, asks with its own words, and th
 });
 
 console.log('\nthe page (src/life.js, social.js, main.js):');
+
+await ok('an old y3kode is offered its update here, not sent to kode (Colin, 2026-10-24: "no option to update or download")', () => {
+  const life = readFileSync(new URL('../src/life.js', import.meta.url), 'utf8');
+  assert.match(life, /import \{ engineCmd, updateY3kode, waitForVersion, siteSetup \} from '\.\/own-brain\.js'/, 'the same update Settings → Brain runs');
+  assert.doesNotMatch(life, /Open kode and it will offer the update/, 'kode never offered one');
+  assert.match(life, /id="life-update"/, 'the button is on the life page');
+  assert.match(life, /cmd: 'engine\.hello'/, 'it asks y3kode whether it can update itself before offering');
+  assert.match(life, /if \(engine\?\.update\) return/, 'offered only to a y3kode that can');
+  assert.match(life, /get the app/, 'else the app, which has y3kode inside');
+  assert.match(life, /waitFor\(r\.version/, 'after the restart it waits for the new version');
+  assert.match(life, /_blank', 'noopener,noreferrer'/, 'the app opens in its own tab, with no handle back');
+  assert.equal(LIFE_ENGINE, '0.3.4');
+});
 
 await ok('what the engine says becomes one of the view\'s states', () => {
   assert.equal(phaseOf({ ok: false, code: 'unpaired' }), 'unpaired');

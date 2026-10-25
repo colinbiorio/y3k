@@ -5,6 +5,8 @@
 //          the ElevenLabs proxy and drives the body from the actual waveform via
 //          an AnalyserNode. speak() is the free browser-TTS fallback.
 
+import { dominantHz } from './plate.mjs';   // what the sand plate hears: the voice's dominant frequency (2026-10-22)
+
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 // A visitor's voice keys live only in this browser, one per service, sent as a
@@ -136,14 +138,21 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     meterSrc.connect(meterAnalyser); // read-only: never connected to destination
     return true;
   }
+  // EVERY METER HANDS TWO NUMBERS ON (2026-10-22): the level it always did,
+  // and the voice's dominant frequency from the same analyser's spectrum
+  // (plate.mjs dominantHz), so the sand plate can follow the note as well as
+  // the loudness. The level is untouched — the body's feel is calibrated on it.
   function startMeter() {
     if (rafId || !meterAnalyser) return;
     const buf = new Uint8Array(meterAnalyser.frequencyBinCount);
+    const spec = new Uint8Array(meterAnalyser.frequencyBinCount);
+    const binHz = getCtx().sampleRate / meterAnalyser.fftSize;
     const tick = () => {
       meterAnalyser.getByteTimeDomainData(buf);
       let sum = 0;
       for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-      onLevel?.(Math.min(Math.sqrt(sum / buf.length) * 3.2, 1));
+      meterAnalyser.getByteFrequencyData(spec);
+      onLevel?.(Math.min(Math.sqrt(sum / buf.length) * 3.2, 1), dominantHz(spec, binHz));
       rafId = requestAnimationFrame(tick);
     };
     tick();
@@ -237,12 +246,15 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
       analyser.connect(ctx.destination);
 
       const arr = new Uint8Array(analyser.frequencyBinCount);
+      const spec = new Uint8Array(analyser.frequencyBinCount);
+      const binHz = ctx.sampleRate / analyser.fftSize;
       let raf = 0;
       const tick = () => {
         analyser.getByteTimeDomainData(arr);
         let sum = 0;
         for (let i = 0; i < arr.length; i++) { const v = (arr[i] - 128) / 128; sum += v * v; }
-        onLvl?.(Math.min(Math.sqrt(sum / arr.length) * 3.4, 1));
+        analyser.getByteFrequencyData(spec);
+        onLvl?.(Math.min(Math.sqrt(sum / arr.length) * 3.4, 1), dominantHz(spec, binHz));
         raf = requestAnimationFrame(tick);
       };
 
@@ -304,11 +316,14 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
 
     function meterLoop() {
       const arr = new Uint8Array(analyser.frequencyBinCount);
+      const spec = new Uint8Array(analyser.frequencyBinCount);
+      const binHz = ctx.sampleRate / analyser.fftSize;
       const tick = () => {
         analyser.getByteTimeDomainData(arr);
         let s = 0;
         for (let i = 0; i < arr.length; i++) { const v = (arr[i] - 128) / 128; s += v * v; }
-        onLvl?.(Math.min(Math.sqrt(s / arr.length) * 3.4, 1));
+        analyser.getByteFrequencyData(spec);
+        onLvl?.(Math.min(Math.sqrt(s / arr.length) * 3.4, 1), dominantHz(spec, binHz));
         raf = requestAnimationFrame(tick);
       };
       tick();
@@ -398,6 +413,36 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     };
   }
 
+  // THE PLATE'S NOTE (2026-10-22). A strike on the sand plate (environments.js
+  // makeStrike) rings through the voice's own context — the one path the
+  // person has already heard the presence on — and only while that context
+  // is running: a context never unlocked by a gesture, or never made because
+  // nothing has spoken, stays silent. Never a second path, never a first
+  // sound: no audio the person did not switch on. A plate's partials are not
+  // harmonic, so the second rings near 2.76 times the first and dies sooner.
+  function ring({ hz = 440, seconds = 1.5, gain = 0.10 } = {}) {
+    if (!audioCtx || audioCtx.state !== 'running') return false;
+    const ctx = audioCtx, t0 = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(gain, t0 + 0.006);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + seconds);
+    out.connect(ctx.destination);
+    for (const [k, g, life] of [[1, 1, seconds], [2.76, 0.35, seconds * 0.45], [5.4, 0.12, seconds * 0.25]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = Math.max(40, Math.min(8000, hz * k));
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(g, t0);
+      og.gain.exponentialRampToValueAtTime(0.0001, t0 + life);
+      o.connect(og).connect(out);
+      o.start(t0);
+      o.stop(t0 + seconds + 0.05);
+    }
+    setTimeout(() => { try { out.disconnect(); } catch { /* gone already */ } }, (seconds + 0.2) * 1000);
+    return true;
+  }
+
   return {
     sttSupported,
     ttsSupported: 'speechSynthesis' in window,
@@ -409,5 +454,6 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     speak,
     speakAudio,
     speaker,
+    ring,   // a world's sound through the voice's own path, when that is open
   };
 }
