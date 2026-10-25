@@ -24,6 +24,8 @@ import {
 } from './transport.js';
 import { createOnboard, authOf, needsSetup } from './onboard.js';
 import { createVoicer, forVoice, getRank, setRank, RANK_NAMES, RANK_LINES, mask } from './voice.js';
+import { hasFiles, dropTarget, fitsAsIs, KODE_B64_MAX } from '../kode-drop.js';
+import { shrinkPicture } from '../picture.js';
 
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
 const EFFORT_LABEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
@@ -493,6 +495,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('y3k:chat', onChat);
     window.addEventListener('y3k:code-mic', onMicAsk);     // a hand held on the composer (reach.js → main.js)
+    // a picture let go anywhere in the room but the chat bar is the coder's (onDrop)
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('drop', onDrop);
     ui.scroll.addEventListener('scroll', () => { ui.scroll.classList.toggle('scrolled', ui.scroll.scrollTop > 4); });
     pairFromLink();
     renderChrome();
@@ -510,6 +516,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
     window.removeEventListener('y3k:code-mic', onMicAsk);
+    window.removeEventListener('dragover', onDragOver);
+    window.removeEventListener('dragleave', onDragLeave);
+    window.removeEventListener('drop', onDrop);
     lastReact = null;
     leave(root);
     root = null; ui = null;
@@ -1655,7 +1664,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       ['Esc', 'stop it · decline · close a menu'],
       ['⌘. or Ctrl+.', 'stop it'],
       ['Enter, nothing typed', 'allow what it asks'],
-      ['paste', 'an image'],
+      ['paste or drop', 'an image'],
       canHear ? ['microphone', 'say one thing'] : null,
       canHear ? ['shift-click it', 'hands-free, replies read aloud'] : null,
       ['?', 'this list'],
@@ -1898,8 +1907,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       () => noteCard(s) || noteBackCard(s));
     arrange(d.strip, [d.work.el, d.todos.el, d.agents.el, d.card.el]);
 
-    keyed(d.chips, attachments.length ? 'a' + attachVer : null, () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att', h('img', { src: a.url, alt: '' }),
-      h('button', { type: 'button', title: 'Remove', onclick: () => { attachments.splice(i, 1); attachVer++; renderDock(); } }, icon('close'))))));
+    keyed(d.chips, attachments.length ? 'a' + attachVer : null, attachChips);
 
     // the composer. At its edge, who answers: the maker's mark and the model
     // (it codes, and moves the orb) — pressed, a small orb: the presence alone.
@@ -2138,17 +2146,81 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return b;
   }
 
-  function addImage(file) {
+  // A PICTURE JOINS THE NEXT MESSAGE (pasted, picked, or dropped): as it is
+  // when every coder reads it and it is under Anthropic's 5MB of base64
+  // (src/kode-drop.js fitsAsIs), else redrawn to fit first, as the chat's
+  // pictures are (src/picture.js), so a phone's photo or a big screenshot is
+  // not turned away (2026-10-25: it was refused over 5MB of file, and one
+  // between 3.75 and 5MB was sent on past Anthropic's limit). Four at most,
+  // counted again as each lands: several dropped at once all pass the first
+  // count.
+  async function addImage(file) {
     if (attachments.length >= 4) { toast('four images at most'); return; }
-    if (file.size > 5 * 1024 * 1024) { toast('that image is over 5 MB'); return; }
+    let pic = file;
+    if (!fitsAsIs(file)) {
+      if (file.size > 25 * 1024 * 1024) { toast('that image is too large to read (25 MB at most)'); return; }
+      pic = await shrinkPicture(file, { side: 1568, maxBytes: Math.floor((KODE_B64_MAX * 3) / 4) });
+      if (!pic) { toast('that image could not be read or made small enough — try a PNG or JPEG'); return; }
+    }
     const reader = new FileReader();
     reader.onload = () => {
+      if (attachments.length >= 4) { toast('four images at most'); return; }
       const url = String(reader.result);
-      attachments.push({ url, mediaType: file.type, data: url.split(',')[1] });
+      attachments.push({ url, mediaType: pic.type, data: url.split(',')[1] });
       attachVer++;
       renderDock();
+      redrawHome();
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(pic);
+  }
+  // the pictures going with the next message, each removable until it is sent
+  const attachChips = () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att', h('img', { src: a.url, alt: '' }),
+    h('button', { type: 'button', title: 'Remove', onclick: () => { attachments.splice(i, 1); attachVer++; renderDock(); redrawHome(); } }, icon('close')))));
+
+  // A PICTURE DROPPED ON KODE. Colin, 2026-10-25: "make sure that when you're
+  // draggin a photo into y3kode, the photo gets added to the coding
+  // conversation unless it's explicitly dropped in the chat bar". Let go
+  // anywhere in the room but the chat bar (src/kode-drop.js dropTarget, which
+  // main.js asks too and steps aside), it joins the composer's next message
+  // as a pasted one does: a thumbnail over the box, removable until it is
+  // sent, carried to y3kode on this computer with the words (session.send's
+  // attachments) and to nothing else. With no conversation on screen yet it
+  // waits for the first, as a prompt in the box does; a session that has ended
+  // (or an old one being read) takes none, as its image button does not.
+  // While a picture is over the room, what it would join is lit (.cv-dropping)
+  // — and nothing is lit, and the pointer says no, where it would not be taken.
+  const dropHere = (e) => hasFiles(e) && dropTarget(e, { inCode: document.body.classList.contains('in-code') }) === 'kode';
+  // 'take' (a conversation on screen) · 'wait' (none yet) · 'shut' (ended, or an old one)
+  function dropWay() {
+    const s = currentSession();
+    if (!s) return 'wait';
+    return s.state === 'ended' || viewingSid ? 'shut' : 'take';
+  }
+  const dragLight = (on) => root?.classList.toggle('cv-dropping', !!on);
+  function onDragOver(e) {
+    if (!dropHere(e)) { dragLight(false); return; }
+    e.preventDefault();
+    const way = dropWay();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = way === 'shut' ? 'none' : 'copy';
+    dragLight(way !== 'shut');
+  }
+  function onDragLeave(e) { if (!e.relatedTarget) dragLight(false); }
+  function onDrop(e) {
+    dragLight(false);
+    if (!dropHere(e)) return;
+    e.preventDefault();
+    takeDropped([...(e.dataTransfer?.files || [])]);
+  }
+  function takeDropped(files) {
+    const way = dropWay();
+    if (way === 'shut') { toast('this session has ended — continue it to give the coder a picture'); return; }
+    const pics = files.filter((f) => /^image\//.test(f.type || ''));
+    if (!pics.length) { toast('only pictures go to the coder'); return; }
+    for (const f of pics) addImage(f);
+    const it = pics.length === 1 ? 'the picture' : 'the pictures', comp = companion();
+    if (way === 'wait') toast(`${it} will go with your first message to the coder`);
+    else if (talkTo === 'orion' && comp) toast(`${it} will go with your next message to the coder, not to ${comp.name}`);
+    else dockUi?.ta.focus({ preventScroll: true });
   }
 
   async function send(s, ta) {
@@ -2527,7 +2599,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.dock.hidden = true;
     const down = isDown();
     const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
-      plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, companion()?.name || '',
+      plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, attachments.length ? attachVer : 0, companion()?.name || '',
       home.full ? runningSessions().map((x) => `${x.sid}:${x.state}:${x.waiting}:${x.title}`).join() : '',
       JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
     if (sig === homeSig && homeFor === ui.homeEl && ui.homeEl.firstChild) return;
@@ -2676,6 +2748,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       gate,
       planCard(),
       draft.trim() ? h('div.cv-note', icon('send'), ' A prompt is waiting in the message box for the coder.') : null,
+      // pictures with no conversation on screen (dropped here, or left in the box): they go with the next one's first message
+      attachments.length ? h('div.cv-note.cv-waitpics', attachChips(), h('span', attachments.length === 1
+        ? 'A picture is waiting to go with your first message to the coder.'
+        : `${attachments.length} pictures are waiting to go with your first message to the coder.`)) : null,
       cont ? h('div.ob-controw', cont) : null,
       noneReady ? h('div.cv-note.warn', 'No coding tool is on this computer yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
       h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('span.cv-sel', 'with ', glassSelect(provider))),
