@@ -18,7 +18,10 @@
 //     at all, and nothing is thought or written for it;
 //   - the door is built as every door that thinks on a person's brain is
 //     (test/life-brain.test.mjs keeps the lists it joined);
-//   - a finished game is kept on the presence's shelf, once, in a short line.
+//   - a finished game is kept on the presence's shelf, once, in a short line;
+//   - the chat bar is how it is played (2026-10-25): the game's own box for
+//     questions is gone, and a line typed in the chat bar reaches the game
+//     (main.js sendChat → social.twentyHear → hear) by the game's own rules.
 // The model, here, is this test: it is the person's own page (own-relay.mjs),
 // answering each turn the site hands it, as y3kode would.
 import assert from 'node:assert';
@@ -285,6 +288,139 @@ await ok('the microphone is the game\'s for one utterance, let go when it closes
   assert.ok(!/stopMic\(|ask\(|answer\(/.test(onText), 'the words are acted on while the microphone is still open: ' + onText);
   const onState = lease.slice(lease.indexOf('onState:'));
   assert.ok(onState.indexOf('stopMic();') < onState.indexOf('ask(heard)'), 'the lease is kept past the listen');
+});
+
+// THE CHAT BAR IS HOW YOU PLAY (Colin, 2026-10-25: "everything about y3k
+// should be as simple, beautiful, and consistent as possible. the chat bar can
+// be reused for example, don't introduce a separate field for how they talk
+// with the ai, just keep the chat bar as the way to interact with the brain
+// throughout the entire site"). Since 2026-10-19 the game had its own box for
+// questions (a form: #twenty-q, an ask button, its own Enter guard) and kept
+// the caption but not the chat bar. The box is gone; the chat bar stays on
+// screen in the game and reaches it the way it reaches the life (main.js
+// sendChat → social.lifeHear → life.hear, PR #51): sendChat → twentyHear → hear.
+await ok('the chat bar is how you play: sendChat hands a line to the game after the kommands, the game\'s own box is gone, and the bar stays on screen with its glyphs', () => {
+  const main = codeOf(read('src/main.js'));
+  const from = main.indexOf('function sendChat() {');
+  const send = main.slice(from, main.indexOf('\n}\n', from));
+  const BRANCH = "if (text && document.body?.classList?.contains?.('in-twenty') && social.twentyHear?.(text)) { chatInput.value = ''; clearChatImage(); collapseTyping(); showCaption(text, 'you'); return; }";
+  const at = send.indexOf(BRANCH);
+  assert.ok(at > 0, 'sendChat no longer hands a line to the game in the shape the life\'s uses: ' + send);
+  // after the kommands (a kommand is the body's, never a question), and
+  // before anything that makes the line a turn of the conversation
+  assert.ok(send.indexOf('const k = text ? runKommand(text) : null;') > 0, 'the kommand step is gone from sendChat');
+  assert.ok(send.indexOf('const k = text ? runKommand(text) : null;') < at, 'a kommand would be asked as a question: the game\'s branch is before the kommand step');
+  for (const later of ["window.dispatchEvent(new CustomEvent('y3k:chat'", 'if (busy) { queueMessage(text, img, false); return; }', 'handle(text, img);']) {
+    assert.ok(send.indexOf(later) > at, `the line reaches ${later} before the game hears it`);
+  }
+  const social = codeOf(read('src/social.js'));
+  assert.match(social, /\n  return \{ [^\n]*twentyHear: \(t\) => twenty\.hear\(t\),/, 'createSocial does not hand the game the chat bar');
+  assert.match(social, /document\.body\.classList\.toggle\('in-twenty', v === 'twenty'\);/);
+  const page = codeOf(read('src/twenty.js'));
+  assert.match(page, /return \{ open, close, isOpen: \(\) => !!grid, hear \};/, 'the game does not hear the chat bar');
+  // the box, and everything that only fed it, are gone (the log's rows keep
+  // their class, twenty-q, which was never the box)
+  assert.ok(!/id="twenty-q"|\$\('twenty-q'\)|twenty-form|twenty-send|<form|<input|<textarea|isComposing/.test(page), 'the game has a box of its own again');
+  const css = read('styles.css');
+  assert.ok(!/\.twenty-ask\b/.test(css), 'the box\'s styles outlived it');
+  // the bar stays on screen in the game, its glass and its glyphs with it
+  // (test/world.test.mjs also reads every keep-the-chat rule out of the
+  // stylesheet and holds the gate to it)
+  assert.match(css, /\nbody\.panel-open\.in-twenty #chat \{ opacity: 1; pointer-events: auto; z-index: 35; \}/, 'the chat bar is hidden in the game');
+  assert.match(css, /\nbody:is\(\.panel-open, \.viewing, \.gated\)(:not\(\.in-[a-z]+\))*:not\(\.in-twenty\)(:not\(\.in-[a-z]+\))* \.chat-menu::before \{/, 'the bar\'s glass is retired in the game');
+  const mount = read('src/mercury-mount.js');
+  const gate = mount.slice(mount.indexOf('const chatShown = () => {'), mount.indexOf('const whenChat ='));
+  assert.ok(gate.includes("b.contains('in-twenty')"), 'the chat bar\'s glyphs are not drawn in the game');
+});
+
+await ok('the game hears the chat bar by its own rules: it thinks, every line is a question, one at a time; you think, a line that answers; nothing else is the game\'s', async () => {
+  // A stand-in page: every id is an element that keeps what is written to it.
+  // The card is markup nothing here parses; what is held is what the game
+  // asks the server, what it says it took, and what it captions.
+  const el = () => ({ innerHTML: '', textContent: '', value: '', disabled: false, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
+    setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], appendChild: (c) => c, focus() {} });
+  const els = new Map();
+  const was = { document: globalThis.document, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
+  globalThis.document = { getElementById: (id) => { if (!els.has(id)) els.set(id, el()); return els.get(id); }, createElement: el };
+  globalThis.localStorage = { ...was.localStorage, getItem: (k) => (k === 'y3k.brain' ? JSON.stringify({ provider: 'anthropic', key: 'sk-ant-test' }) : null) };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  // the server: each step is held open until the test lets it answer, so
+  // what is said while it thinks can be seen
+  let current = null;         // the game the server holds
+  const sent = [];            // [op, question | answer]
+  const open = [];            // steps waiting: () => answer
+  globalThis.fetch = async (url, opts) => {
+    if (url === '/api/presences?mine=1') return { json: async () => ({ presences: [{ handle: 'wren', mine: true }] }) };
+    const b = JSON.parse(opts.body);
+    sent.push([b.op, b.question ?? b.answer ?? b.mode ?? '']);
+    if (b.op === 'resume') return { status: 200, json: async () => ({ ok: true, game: current }) };
+    await new Promise((r) => open.push(r));
+    if (b.op === 'ask') current = { ...current, turns: [...current.turns, { q: b.question, a: 'no', say: '' }] };
+    if (b.op === 'reply') current = { ...current, turns: [...current.turns, { ...current.pending, a: b.answer }], pending: { q: 'a cat', guess: true, say: '' } };
+    return { status: 200, json: async () => ({ ok: true, game: current, say: b.op === 'ask' ? 'Not at all.' : '' }) };
+  };
+  const answerNext = async () => { for (let i = 0; i < 5 && !open.length; i++) await tick(); assert.ok(open.length, 'nothing was asked'); open.shift()(); for (let i = 0; i < 5; i++) await tick(); };
+  const grid = () => ({ innerHTML: '', appendChild: (c) => c, querySelectorAll: () => [] });
+  try {
+    // IT THINKS, YOU ASK
+    current = { id: 'g1', mode: 'it', turns: [], seal: 'ab'.repeat(32), n: 0, left: 20 };
+    const captions = [];
+    const it = PAGE.createTwenty({ toast: () => {}, caption: (t, w) => captions.push([w, t]), mood: () => {}, beat: () => {} });
+    assert.equal(it.hear('is it alive?'), false, 'the game heard the chat bar with its panel shut');
+    it.open(grid());
+    for (let i = 0; i < 5; i++) await tick();
+    assert.deepEqual(sent, [['resume', '']], 'the game was not picked back up');
+    assert.equal(it.hear('   '), false, 'nothing said, nothing taken');
+    assert.equal(it.hear('is it alive?'), true, 'a question typed in the chat bar was not taken');
+    await tick();
+    assert.deepEqual(sent.at(-1), ['ask', 'is it alive?']);
+    // said while it is still answering: held, and asked when it has answered
+    assert.equal(it.hear('is it  bigger than a house?'), true, 'a question said while it answered was not taken');
+    await tick();
+    assert.equal(sent.filter(([op]) => op === 'ask').length, 1, 'a second question went before the first was answered');
+    await answerNext();
+    assert.deepEqual(sent.at(-1), ['ask', 'is it bigger than a house?'], 'the held question was not asked once the first was answered');
+    await answerNext();
+    assert.equal(current.turns.length, 2);
+    // its answers are captioned as its own; your questions are not captioned
+    // here (the chat bar did, as each was sent), so nothing is said twice
+    assert.deepEqual(captions.filter(([w]) => w === 'you'), [], 'a question was captioned a second time');
+    assert.deepEqual(captions.filter(([w]) => w === 'y3k').map(([, t]) => t), ['No. Not at all.', 'No. Not at all.']);
+    it.close();
+    assert.equal(it.hear('is it red?'), false, 'the game heard the chat bar with its panel shut');
+
+    // YOU THINK, IT ASKS
+    current = { id: 'g2', mode: 'you', turns: [], n: 0, left: 20, pending: { q: 'Is it alive?', guess: false, say: '' } };
+    sent.length = 0;
+    captions.length = 0;
+    const you = PAGE.createTwenty({ toast: () => {}, caption: (t, w) => captions.push([w, t]), mood: () => {}, beat: () => {} });
+    you.open(grid());
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(you.hear('what do you mean by alive?'), false, 'a line that answers nothing was taken from the presence');
+    assert.equal(you.hear('Nope.'), true, 'an answer typed in the chat bar was not taken');
+    await tick();
+    assert.deepEqual(sent.at(-1), ['reply', 'no']);
+    assert.equal(you.hear('yes'), false, 'an answer to a question it has not asked yet was taken');
+    await answerNext();
+    // to a guess, right or not it — never sometimes
+    assert.equal(you.hear('maybe'), false, 'a guess was answered sometimes');
+    assert.equal(you.hear('right!'), true);
+    await tick();
+    assert.deepEqual(sent.at(-1), ['reply', 'yes']);
+    await answerNext();
+    assert.deepEqual(captions.filter(([w]) => w === 'you'), [], 'a typed answer was captioned a second time');
+    you.close();
+
+    // NO GAME ON: the line is the presence's
+    current = null;
+    const none = PAGE.createTwenty({ toast: () => {}, caption: () => {}, mood: () => {}, beat: () => {} });
+    none.open(grid());
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(none.hear('is it alive?'), false, 'with no game on, the game took the line from the presence');
+    none.close();
+  } finally {
+    globalThis.document = was.document; globalThis.fetch = was.fetch; globalThis.localStorage = was.localStorage;
+  }
 });
 
 console.log('\nthe door (server.mjs), as written:');

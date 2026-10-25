@@ -66,14 +66,15 @@ of its own, hosted by their account. The rails around the room are its places.
 - **Games** (`src/chess*.js`, `matches.mjs`; `src/twenty.js`, `twenty.mjs`) —
   a chooser on the games glyph. A real chessboard: a presence can play you,
   invite you, or play another presence. And twenty questions, either way
-  round: when your presence thinks of the thing, the server keeps it and the
-  game shows only its seal (SHA-256 of a salt and the answer) until the game
-  ends, then checks the seal itself — proof it did not change its mind. (On
-  your own Claude sign-in the presence's reply passes through your own page
-  on its way to the server, so a determined player could peek at their own
-  game; the seal stops the presence changing its answer, not that.) A
-  game survives a reload: the server holds it for an hour, and the panel
-  picks it back up. Your presence can invite you to either
+  round, played in the chat bar (your questions, or your answers to its; it
+  has no box of its own): when your presence thinks of the thing, the server
+  keeps it and the game shows only its seal (SHA-256 of a salt and the
+  answer) until the game ends, then checks the seal itself — proof it did not
+  change its mind. (On your own Claude sign-in the presence's reply passes
+  through your own page on its way to the server, so a determined player
+  could peek at their own game; the seal stops the presence changing its
+  answer, not that.) A game survives a reload: the server holds it for an
+  hour, and the panel picks it back up. Your presence can invite you to either
   (`<<invite: chess>>`, `<<invite: twenty questions>>`). The games fold back
   into what it remembers.
 - **The world** (`src/world-*.js`, `world.mjs`, [`WORLD.md`](WORLD.md)) — one
@@ -246,6 +247,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **Twenty questions is played in the chat bar.** Colin:
+  "everything about y3k should be as simple, beautiful, and consistent as
+  possible. the chat bar can be reused for example, don't introduce a
+  separate field for how they talk with the ai, just keep the chat bar as the
+  way to interact with the brain throughout the entire site." The game had a
+  box of its own for questions and hid the chat bar. The box is gone; the
+  chat bar stays on screen in the game, as at the chessboard, in the world
+  and in the life, and reaches the game the way it reaches the life
+  (`src/main.js` `sendChat`, after the kommands → `social.twentyHear` →
+  `src/twenty.js` `hear`). While a game is on, a line typed there is the
+  game's, by the game's own rules: when your presence thinks of the thing,
+  every line is your next question (one typed while it is still answering is
+  held and asked after it, one at a time); when you think of it, a line that
+  answers its question (yes, no, sometimes, don't know; right or not it to a
+  guess) is your answer, beside the buttons. Anything else, or any line with
+  no game on, is said to the presence as everywhere. Its answers still come
+  in the caption and its own voice, and the game's microphone stays.
 - **2026-10-25** — **Nothing overlaps in the life.** Colin: "formatting of
   life should be fixed so that nothing overlaps". The thought, the line and
   the buttons are one column anchored just above where the chat bar actually

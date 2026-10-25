@@ -4,13 +4,14 @@
 // best at. Two ways round:
 //   IT THINKS, YOU ASK  it chooses a thing on the server (twenty.mjs), which
 //                       shows this page only a seal of it before the first
-//                       question; you ask, by typing or by voice, and it
-//                       answers yes, no, sometimes or don't know. When the
+//                       question; you ask in the chat bar or by voice, and
+//                       it answers yes, no, sometimes or don't know. When the
 //                       game ends the secret and its salt come here, and THIS
 //                       PAGE hashes them (twenty-seal.js) and says whether the
 //                       seal matches: proof it did not change its mind.
-//   YOU THINK, IT ASKS  it asks, you answer with the buttons (or by voice),
-//                       it guesses when it is ready, you say right or not.
+//   YOU THINK, IT ASKS  it asks, you answer with the buttons (or by voice, or
+//                       in the chat bar), it guesses when it is ready, you
+//                       say right or not.
 // The server is asked only through /api/twenty, on the owner's own key or own
 // sign-in like chess (keyFields), and a finished game joins what the presence
 // keeps the way chess does (a clipping on its shelf, written by the server).
@@ -20,6 +21,13 @@
 // quieter one on a no), through the same mood the conversation sets. All of
 // that is main.js's, handed in (social.js passes it on): this file draws a
 // panel and asks the server, and nothing else.
+//
+// What you say reaches it through the chat bar (Colin, 2026-10-25: "don't
+// introduce a separate field for how they talk with the ai, just keep the chat
+// bar as the way to interact with the brain throughout the entire site"). The
+// game had a box of its own for questions; it is gone, and a line typed in the
+// chat bar comes here as one comes to the life: main.js sendChat →
+// social.twentyHear → hear(), below.
 
 import { canLive, keyFields, whoseFields, noBrain, reloaded, whyLine } from './brain.js';
 import { checkSeal } from './twenty-seal.js';
@@ -75,6 +83,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   let opening = '';         // its first line, when it thinks of the thing
   let thinking = false;
   let asked = '';           // the question waiting for its answer (it thinks)
+  const held = [];          // questions said in the chat bar while it answered the last, asked in turn
   let sealed = 'checking';  // the seal, at the end: true | false | null (cannot check here) | 'checking'
   let presenceHandle = null;
   let mic = null;           // { handlers, release } while the microphone is the game's
@@ -115,6 +124,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   // elsewhere goes to the panel, not the orb, so nothing would let it go).
   function close() {
     grid = null;
+    held.length = 0;   // (asked while you are elsewhere, the orb would think for an answer nobody shows it)
     stopMic();
     if (calmTimer || thinking) hold('calm');
   }
@@ -178,7 +188,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   // The game is not on the server any more (an hour passed, the site
   // restarted, or a newer game took its place): back to the start, saying so.
   function gone() {
-    game = null; phase = 'setup'; thinking = false; asked = '';
+    game = null; phase = 'setup'; thinking = false; asked = ''; held.length = 0;
     hold('calm');
     toast?.('that game is gone — the site no longer holds it. start another?');
     render();
@@ -187,31 +197,33 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   async function begin() {
     if (thinking) return;
     if (!canLive()) { toast?.(noBrain(PLAY_WITH)); return; }
-    thinking = true; game = null; opening = ''; asked = '';
+    thinking = true; game = null; opening = ''; asked = ''; held.length = 0;
     phase = 'live';
     hold('thinking');
     render();
     const r = await call({ op: 'start', mode });
     thinking = false;
-    if (!r) { phase = 'setup'; hold('calm'); render(); return; }
+    if (!r) { phase = 'setup'; held.length = 0; hold('calm'); render(); return; }
     game = r.game;
     if (game.mode === 'it') {
       opening = r.say || '';
       render();
       react('tender', 'draw', 4, opening);
-      $('twenty-q')?.focus();
+      askHeld();
     } else {
       render();
       askedAloud(game.pending);
     }
   }
 
-  // It thinks: you ask.
+  // It thinks: you ask. Your question is in the caption already, said where
+  // you said it: the chat bar captions a line as it is sent (main.js
+  // sendChat), the microphone what it hears as it hears it (listen, below).
   async function ask(text) {
     const q = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     const g = game;
     if (!q || thinking || !g || g.over || g.mode !== 'it') return;
-    if (!canLive()) { toast?.(noBrain(PLAY_WITH)); return; }
+    if (!canLive()) { held.length = 0; toast?.(noBrain(PLAY_WITH)); return; }
     stopMic();   // a question typed while it listened: the microphone must not hear the answer said
     thinking = true; asked = q;
     hold('thinking');
@@ -220,21 +232,25 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     thinking = false; asked = '';
     // a newer game began, or this one was given up, while it thought
     if (game !== g || game.over) { paint(); return; }
-    if (!r) { hold('calm'); paint(); return; }
+    // (a step that failed lets the held questions go too: the toast says why)
+    if (!r) { held.length = 0; hold('calm'); paint(); return; }
     game = r.game;
-    const el = $('twenty-q');
-    if (el) el.value = '';
     const last = game.turns[game.turns.length - 1];
-    caption?.(q, 'you');
     if (game.over) { finish(spokenAnswer(last?.a, r.say)); return; }
     paint();
     const [m, b, n] = FEEL[last.a] || FEEL.unknown;
     react(m, b, n, spokenAnswer(last.a, r.say));
-    $('twenty-q')?.focus();
+    askHeld();
+  }
+  // One question at a time, as ever: the next one said in the chat bar while
+  // it answered, now that it has — and only while the game is on screen.
+  function askHeld() {
+    if (held.length && grid) ask(held.shift());
   }
 
   // You think: you answer its question, or say whether its guess is right.
-  async function answer(a) {
+  // `captioned`: the answer was typed in the chat bar, which has said it.
+  async function answer(a, captioned = false) {
     const g = game;
     if (thinking || !g || g.over || g.mode !== 'you' || !g.pending || !WORD[a]) return;
     stopMic();   // (as in ask: it is about to speak)
@@ -255,7 +271,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     // your answer, then its next question, in the caption (and the
     // conversation's ring) — only once it has asked: a step that failed, or
     // the answer that ended the game, would leave your word there alone
-    caption?.(said, 'you');
+    if (!captioned) caption?.(said, 'you');
     askedAloud(game.pending, r.say);
   }
   // Its question (or guess) said aloud, and in the caption.
@@ -263,6 +279,33 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     if (!p) return;
     const q = p.guess ? `Is it ${p.q}?` : p.q;
     react(p.guess ? 'excited' : 'speaking', p.guess ? 'swell' : '', 4, [line, q].filter(Boolean).join(' '));
+  }
+
+  // THE CHAT BAR IS HOW YOU PLAY (main.js sendChat → social.twentyHear). While
+  // a game is on, a line typed there is the game's, by the game's own rules:
+  // when it thinks of the thing, every line is your next question (a line
+  // said while it is still answering, or still choosing, is held and asked
+  // when it is done: one question at a time, as ever); when you think of it,
+  // a line that answers the question on screen is your answer, read the way a
+  // spoken one is (heardAnswer: yes, no, sometimes, don't know; right or not
+  // it to a guess). Anything else (no game on, the game over, a line that
+  // answers nothing) is not the game's, and the chat bar talks to the
+  // presence as everywhere else. → whether it was taken
+  function hear(text) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!t || !grid || phase !== 'live') return false;
+    const g = game;
+    if ((g ? g.mode : mode) === 'it') {
+      if (g?.over) return false;
+      if (thinking || !g) { held.push(t); return true; }
+      ask(t);
+      return true;
+    }
+    const p = g?.pending;
+    const a = p && !thinking && !g.over ? heardAnswer(t, !!p.guess) : '';
+    if (!a) return false;
+    answer(a, true);
+    return true;
   }
 
   async function stop() {
@@ -281,6 +324,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     stopMic();
     phase = 'done';
     thinking = false;
+    held.length = 0;
     sealed = game?.mode === 'it' ? 'checking' : null;
     render();
     const o = game?.over || {};
@@ -313,7 +357,9 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
       onText: ({ text, final }) => {
         if (mic?.handlers !== handlers) return;
         const t = String(text || '').trim();
-        if (game?.mode === 'it') { const el = $('twenty-q'); if (el) el.value = t; }
+        // your question, as it is heard, in the caption (as the chat bar's own
+        // voice says its words): the box it used to be written in is gone
+        if (game?.mode === 'it' && t) caption?.(t, 'you');
         if (final && t) heard = t;
       },
       // The listen is over: the lease is let go HERE, when the microphone has
@@ -350,9 +396,10 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   }
 
   // ---- drawing ------------------------------------------------------------------
-  // The card is built once for each phase and patched while a game runs, so
-  // the question box keeps its focus (and a phone its keyboard) between
-  // questions.
+  // The card is built once for each phase and patched while a game runs.
+  // There is nothing to type into here: you type in the chat bar, which is
+  // main.js's and outside the card, so no repaint can take its focus (or a
+  // phone's keyboard) between questions.
   const canHear = () => !!dictate && canDictate?.() !== false;
   const seal8 = (g) => esc(String(g?.seal || '').slice(0, 8));
   const rowHtml = (t) => (game?.mode === 'you'
@@ -400,14 +447,11 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
           : g ? `<span class="twenty-seal" title="sha-256 of what it chose and a random salt, fixed before your first question; opened and checked here at the end">sealed · <code>${seal8(g)}</code></span>` : ''}
       </div>
       <div class="twenty-now" id="twenty-now" aria-live="polite"></div>`;
-    const hear = canHear() ? `<button type="button" id="twenty-mic" class="twenty-mic" aria-pressed="false" aria-label="${you ? 'answer by voice' : 'ask by voice'}" title="${you ? 'answer by voice' : 'ask by voice'}">${MIC_SVG}</button>` : '';
+    const byVoice = canHear() ? `<button type="button" id="twenty-mic" class="twenty-mic" aria-pressed="false" aria-label="${you ? 'answer by voice' : 'ask by voice'}" title="${you ? 'answer by voice' : 'ask by voice'}">${MIC_SVG}</button>` : '';
+    // you ask in the chat bar (hear(), above); the microphone is the other way
     const input = you
-      ? `<div class="twenty-answers" id="twenty-answers"></div>${hear ? `<div class="twenty-hear">${hear}<span>or answer by voice</span></div>` : ''}`
-      : `<form id="twenty-form" class="twenty-ask" autocomplete="off">
-          <label class="field"><input id="twenty-q" type="text" maxlength="200" placeholder="ask a yes-or-no question…" enterkeyhint="send" aria-label="your question" /></label>
-          ${hear}
-          <button type="submit" id="twenty-send" class="create-go">ask</button>
-        </form>`;
+      ? `<div class="twenty-answers" id="twenty-answers"></div>${byVoice ? `<div class="twenty-hear">${byVoice}<span>or answer by voice</span></div>` : ''}`
+      : (byVoice ? `<div class="twenty-hear">${byVoice}<span>or ask by voice</span></div>` : '');
     return `${head}${input}
       <ol class="twenty-log" id="twenty-log"></ol>
       <button type="button" id="twenty-stop" class="login-alt">${you ? 'stop the game' : 'give up — show me what it was'}</button>`;
@@ -449,8 +493,6 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
         ? `<p class="twenty-you">${esc(asked)}</p><p class="chess-turn shimmer">${esc(it())} is thinking…</p>`
         : last ? `<p class="twenty-you">${esc(last.q)}</p><p class="twenty-big ${esc(last.a)}">${esc(WORD[last.a] || last.a)}</p>${last.say ? `<p class="twenty-line">${esc(last.say)}</p>` : ''}`
           : `<p class="twenty-line">${opening ? esc(opening) : `${esc(it())} has chosen. ask your first question.`}</p>`;
-      const send = $('twenty-send');
-      if (send) send.disabled = thinking;
     }
     const log = $('twenty-log');
     if (log) log.innerHTML = logHtml(false);
@@ -510,10 +552,6 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
       });
     }
     $('twenty-go')?.addEventListener('click', begin);
-    $('twenty-form')?.addEventListener('submit', (e) => { e.preventDefault(); ask($('twenty-q')?.value); });
-    // an input method's Enter picks a candidate; it does not ask (main.js's
-    // chat input keeps the same rule)
-    $('twenty-q')?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) e.preventDefault(); });
     $('twenty-answers')?.addEventListener('click', (e) => {
       const b = e.target.closest('button[data-a]');
       if (b && !b.disabled) answer(b.dataset.a);
@@ -523,5 +561,5 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     $('twenty-again')?.addEventListener('click', () => { game = null; phase = 'setup'; render(); });
   }
 
-  return { open, close, isOpen: () => !!grid };
+  return { open, close, isOpen: () => !!grid, hear };
 }
