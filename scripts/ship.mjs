@@ -19,7 +19,17 @@
 // the reload is of this machine's browsers, and nothing is added to the site
 // that anyone could call. Nothing is read from .env.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// THE REPO IS THE ONE THIS SCRIPT LIVES IN, wherever it is called from. It
+// used to be whatever git repo the shell stood in: called by its full path
+// from another project's folder it would have merged and pushed THERE. That
+// matters because the one way to run it without a hand on every merge is by
+// its full path, from anywhere (a permission rule names the command, not the
+// folder; Colin, 2026-10-25: "please ensure that in the future, you are able
+// to merge yourself").
+export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const SITE = process.env.Y3K_SITE || 'https://yearthreethousand.com';
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
@@ -112,7 +122,7 @@ export function reloadTabs(host = new URL(SITE).host, run = (args) => spawnSync(
 
 async function main(argv) {
   const arg = argv[0];
-  const root = sh('git', ['rev-parse', '--show-toplevel']);
+  const root = sh('git', ['rev-parse', '--show-toplevel'], { cwd: REPO });
   const at = { cwd: root };
   let want;
   if (arg === '--watch') {

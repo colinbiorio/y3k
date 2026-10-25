@@ -238,6 +238,10 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — `ship` acts on the repo it lives in, wherever it is called
+  from (by its full path, from any folder), so a permission rule naming the
+  command is enough for it to run unattended. Colin: "please ensure that in
+  the future, you are able to merge yourself".
 - **2026-10-24** — **The life page offers the y3kode update itself.** Colin:
   "when i click life it says open kode but then i go to kode and there's no
   option to update or download whatever you need -- does it need to be a
