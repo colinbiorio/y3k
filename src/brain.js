@@ -270,8 +270,26 @@ export const OWN_FAILED = 'Claude Code on your computer did not answer. If your 
 // saying 'claude code on your computer did not answer' even though you're
 // answering"): the limit, with when it resets, and nothing about this computer
 export const ownLimitLine = (resets) => `Your Claude plan has reached its usage limit${resets ? ` (resets ${resets})` : ''}. Your presence answers again when it resets; nothing is wrong on this computer.`;
+// …and the other things y3kode can say, each in its own words (Colin,
+// 2026-10-25, with the plan at 16%: "the thing is i'm not at a usage limit"):
+// the tab's pairing gone (the engine restarted when it updated, and this tab
+// still holds the old token), the engine not running, Claude Code signed out
+// or not installed, and anything else with Claude Code's own words, so the
+// line is the diagnosis and not a guess.
+export const OWN_LINES = {
+  unpaired: 'This browser is no longer connected to y3kode (it restarted, or this tab was paired before). Open kode once in this browser to connect it again; your presence answers right after.',
+  offline: 'y3kode is not running on this computer. Open the y3k app, or set it up from kode, and your presence answers again.',
+  'signed-out': 'Claude Code is signed out on this computer: run `claude` in a terminal, then /login, and your presence answers again.',
+  'not-installed': 'Claude Code is not installed on this computer. Settings → Brain can install it.',
+  'needs-key': 'Claude Code on this computer is set to use a key it does not have. Settings → Brain shows where it stands.',
+  busy: 'Claude Code on your computer is already thinking as much as it can at once; a moment, and ask again.',
+};
 export function ownFailedLine(recent = recentOwnFailure()) {
-  if (recent?.code === 'limit') return ownLimitLine(recent.resets);
+  if (!recent) return OWN_FAILED;
+  if (recent.code === 'limit') return ownLimitLine(recent.resets);
+  if (OWN_LINES[recent.code]) return OWN_LINES[recent.code];
+  const said = String(recent.error || '').replace(/\s+/g, ' ').trim();
+  if (said) return `Claude Code on your computer did not answer; it said: “${said.slice(0, 160)}${said.length > 160 ? '…' : ''}”. Settings → Brain shows where Claude Code stands.`;
   return OWN_FAILED;
 }
 // …and when an attached picture, with the conversation it rides beside, is
