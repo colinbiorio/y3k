@@ -144,6 +144,7 @@ export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input,
 // image block, so the presence sees the person it is talking to on this path
 // too; before, the bridge carried text only and the orb had to say the camera
 // was not reaching it. A frame that is not plausible base64 JPEG, PNG, GIF or WebP is dropped.
+export const LIMIT_HIT = /hit your (?:session|weekly|usage|daily|monthly) limit|usage limit (?:reached|exceeded)|rate.?limit/i;
 export const MAX_IMAGE = 3 * 1024 * 1024;
 // the media type from the first bytes, as server.mjs sniffMediaType does
 const KINDS = [['/9j/', 'image/jpeg'], ['iVBORw0KGgo', 'image/png'], ['R0lGOD', 'image/gif'], ['UklGR', 'image/webp']];
@@ -174,6 +175,15 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
     if (!res || res.is_error || r.code !== 0) {
       const why = said || r.stderr || `exit ${r.code}`;
       if (AUTH_FAIL.test(why)) return { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer: run `claude`, then /login.' };
+      // THE PLAN'S LIMIT, NAMED (2026-10-25). Claude Code says "You've hit your
+      // session limit · resets 9pm (America/New_York)" (or weekly, or usage);
+      // the page used to show the general line for it, which told the person
+      // to check this computer. Now the limit is its own code, with when it
+      // resets if the words say.
+      if (LIMIT_HIT.test(why)) {
+        const resets = String(why).match(/resets?\s+([^\n.]+?)(?:[.\n]|$)/i)?.[1]?.trim() || '';
+        return { ok: false, code: 'limit', error: String(why).slice(0, 400), ...(resets ? { resets } : {}) };
+      }
       return { ok: false, code: r.code === null || r.code === -1 ? 'failed' : 'refused', error: String(why).slice(0, 400) };
     }
     const u = res.usage || {};

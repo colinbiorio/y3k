@@ -25,7 +25,7 @@
 //  - What reaches it is what lucid's window allows: the mode, a move, a line
 //    spoken to it, the pace, stop.
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnChild, stopChild, ndjson } from './proc.mjs';
@@ -98,7 +98,21 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
     return { ok: true, installed: where.installed, running: running(), dir: where.dir, ...(ended && !running() ? { ended } : {}) };
   }
 
-  async function start({ fresh = false } = {}) {
+  // Where the life publishes (lucid's life/publish.json): the site the page came
+  // from, with the key the site made for the account. Only https, or a local
+  // server; only a key of the site's shape. Nothing else is ever written there.
+  function publishFile(where, publish) {
+    const file = join(where.dir, 'life', 'publish.json');
+    const to = typeof publish?.to === 'string' ? publish.to.replace(/\/+$/, '') : '';
+    const key = typeof publish?.key === 'string' ? publish.key : '';
+    const okTo = /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(to) || /^http:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(to);
+    if (!okTo || !/^y3kl_[0-9a-f]{48}$/.test(key)) return false;
+    mkdirSync(join(where.dir, 'life'), { recursive: true });
+    writeFileSync(file, JSON.stringify({ to, key }));
+    return true;
+  }
+
+  async function start({ fresh = false, publish = null } = {}) {
     const where = at();
     if (!where.installed) return { ok: false, code: 'not-installed', error: `lucid is not on this computer (looked in ${where.dir}).`, dir: where.dir };
     if (running()) { lastSeen = now(); return { ok: true, running: true }; }
@@ -109,10 +123,12 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
     }
     if (running()) return { ok: true, running: true };   // two pages asked at once
     hello = null; moment = null; frame = null; log = []; ended = null;
+    let published = false;
+    if (publish) { try { published = publishFile(where, publish); } catch { published = false; } }
     const args = [where.script, '--serve', ...extraArgs(env), ...(fresh ? ['--new'] : [])];
     child = spawn(where.python, args, { cwd: where.dir, env: claudeEnv(env, { auth: 'subscription' }) });
     lastSeen = now();
-    audit?.write('life.start', { dir: where.dir, fresh: !!fresh });
+    audit?.write('life.start', { dir: where.dir, fresh: !!fresh, published });
     const me = child;
     ndjson(me.stdout, (v) => {
       if (me !== child || !v || typeof v !== 'object') return;

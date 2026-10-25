@@ -235,7 +235,7 @@ await ok('the moon opens life and a second press goes home; life is a view like 
   // process publish, shares it, and says a line to it. All of that is the
   // person's own doing (the key); nothing of a life living here leaves but
   // the record.
-  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment', '/api/life/key', '/api/life/share', '/api/life/say'], 'the life view reaches the site for something besides the record and the published life');
+  assert.deepEqual([...life.matchAll(/fetch\w*\('([^']+)'/g)].map((x) => x[1]), ['/api/life/moment', '/api/life/key', '/api/life/share', '/api/life/say', '/api/life/key']   /* 2026-10-25: begin makes the key itself (one click) */, 'the life view reaches the site for something besides the record and the published life');
   assert.match(life, /'\/api\/life\/latest'/, 'the newest published moment');
   assert.match(life, /cmd\(\{ cmd: 'life\.state', since \}\)/);
 });

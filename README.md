@@ -266,6 +266,23 @@ build. Read the one for the part you are touching.
   past Anthropic's 5MB of base64) is redrawn to fit, as the chat's are
   (`src/picture.js`), where it was refused over 5MB of file, and one between
   3.75 and 5MB was sent on past Anthropic's limit. `test/kode-drop.test.mjs`.
+- **2026-10-25** — **The life in one click, and what you agree to.** Colin:
+  "an easy one-click start and stop… copying and pasting keys is not
+  user-friendly. in any situation where you want to ensure user safety, just
+  add a note that explains what they are agreeing to by pushing the button,
+  and then offer the 'always allow' 'allow just this time' or 'cancel'
+  options, and add a corresponding field to TOS." `src/consent.js` is that
+  dialog, for every such moment (remembered per kind in this browser). The
+  life page's "begin" shows it, then makes the account's publishing key
+  itself and hands it to y3kode with the start (`life.start { publish }`,
+  y3kode 0.3.6 writes lucid's `life/publish.json`), so the life started here
+  is watched from anywhere with nothing copied; "let it rest" stops it. The
+  terms carry the field (`legal.html#terms-life`). And the chat names the
+  plan's limit when that is why Claude Code did not answer (y3kode says
+  `limit`, with when it resets; the page remembers y3kode's last refusal and
+  says so instead of "did not answer"). y3kode 0.3.6.
+  A y3kode from before 0.3.6 refuses the new field, so the page sends it only
+  to one that takes it and offers that update on the life page itself.
 - **2026-10-25** — **The app, right of the name.** Colin, 2026-10-24: "can
   you add a 'y3k' logo -- the same one used for the browser tab, as a download
   app glyph titled 'download' directly right of the yearthreethousand logo,

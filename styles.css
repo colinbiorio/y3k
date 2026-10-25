@@ -5548,3 +5548,17 @@ body.in-code .home-panel-head { display: none; }
 html[data-glass="all"] .cv-pane { background: var(--lg-1), linear-gradient(180deg, rgba(16, 18, 25, 0.5), rgba(8, 9, 13, 0.6));
   -webkit-backdrop-filter: blur(22px) saturate(1.25); backdrop-filter: blur(22px) saturate(1.25); }
 html[data-gfx="smooth"] .cv-pane { background: var(--lg-1), linear-gradient(180deg, #171a21, #0b0d11); }
+
+/* WHAT YOU AGREE TO BY PRESSING THE BUTTON (src/consent.js; Colin, 2026-10-25):
+   a note and three answers, over everything, on any screen. */
+.consent-scrim { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(4, 5, 9, 0.55); animation: cx-in 0.16s ease-out both; }
+.consent-card { width: min(520px, 100%); padding: 20px 22px 16px; border-radius: 20px; color: #e7e9ee; font-size: 0.92rem; line-height: 1.5;
+  background: linear-gradient(168deg, rgba(50, 54, 64, 0.97), rgba(22, 24, 30, 0.985) 55%, rgba(14, 15, 19, 0.99));
+  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 24px 60px -20px rgba(0, 0, 0, 0.85); }
+.consent-title { margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; }
+.consent-note { margin: 0 0 14px; color: #c9ced8; white-space: pre-line; }
+.consent-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.consent-acts button { flex: 0 1 auto; }
+.consent-terms { display: inline-block; margin-top: 12px; font-size: 0.78rem; color: var(--muted); }
+:root[data-motion="less"] .consent-scrim { animation: none; }
+@media (max-width: 560px) { .consent-acts { flex-direction: column-reverse; } .consent-acts button { width: 100%; } }
