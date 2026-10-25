@@ -224,6 +224,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     unschedule(timer); timer = 0;
     unschedule(pubTimer); pubTimer = 0;
     lines?.close(); lines = null;
+    globalThis.window?.removeEventListener?.('resize', measure);
     root?.remove(); root = null; el = {};
   }
 
@@ -350,8 +351,31 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     el.sleep = btn('go to sleep', 'login-alt life-sleep', () => sleep());
     el.acts.append(el.wake, el.sleep);
     el.card = h('div', 'life-card'); el.card.hidden = true;
-    root.append(el.a, el.b, el.veil, el.words, el.line, el.acts, el.card);
+    // one column above the chat bar: the words, the line, the buttons. Anchored
+    // to where the chat bar actually is (measure), not to the frame's edge: on
+    // a wide, short window the bar sits far above it, and the words went under
+    // the bar (Colin, 2026-10-25: "nothing overlaps").
+    el.under = h('div', 'life-under');
+    el.under.append(el.words, el.line, el.acts);
+    root.append(el.a, el.b, el.veil, el.under, el.card);
     doc.body.appendChild(root);
+    measure();
+    globalThis.window?.addEventListener?.('resize', measure);
+  }
+  // where the chat bar begins, as a length the stylesheet anchors the column
+  // to: the bar itself, and what stands above it in the bottom bar's region
+  // (the air mark, the bar's fold button, a caption being said), whichever is
+  // highest, so nothing of the life is drawn under any of them
+  function measure() {
+    if (!root) return;
+    let top = Infinity;
+    for (const id of ['chat', 'chat-air', 'nav-collapse-bottom', 'caption']) {
+      const el = doc.getElementById?.(id);
+      const r = el?.getBoundingClientRect?.();
+      if (r && r.height > 0 && r.top < top) top = r.top;
+    }
+    if (!Number.isFinite(top)) top = (globalThis.innerHeight || 900) - 120;
+    root.style?.setProperty?.('--life-chat-top', `${Math.round(top)}px`);
   }
 
   // the next picture fades in over the last: two layers, the newer on top
@@ -368,6 +392,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
 
   function paint() {
     if (!root) return;
+    measure();
     const source = sourceOf(phase, pub);
     const web = source === 'web' ? pub.life : null;
     const m = st?.moment || null;
@@ -379,9 +404,10 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     el.words.hidden = !(thought || said);
     // one thin line: where it stands, and that it lives
     let line = '';
-    if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, m.place || '', m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
-    else if (web) line = [`moment ${web.n ?? 0}`, web.place || '', web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : fresh(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
-    else if (phase === 'resting' && m) line = `asleep · moment ${m.n ?? 0}${m.place ? ' · ' + m.place : ''}`;
+    const placeOf = (p) => { const t = String(p || '').trim(); return t.length > 44 ? t.slice(0, 43).trimEnd() + '…' : t; };
+    if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, placeOf(m.place), m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
+    else if (web) line = [`moment ${web.n ?? 0}`, placeOf(web.place), web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : fresh(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
+    else if (phase === 'resting' && m) line = `asleep · moment ${m.n ?? 0}${m.place ? ' · ' + placeOf(m.place) : ''}`;
     else if (phase === 'living') line = 'dreaming the first moment…';
     setText(el.status, line);
     el.line.hidden = !line;

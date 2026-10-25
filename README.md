@@ -246,6 +246,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **Nothing overlaps in the life.** Colin: "formatting of
+  life should be fixed so that nothing overlaps". The thought, the line and
+  the buttons are one column anchored just above where the chat bar actually
+  begins — the bar, its air mark, its fold button, a caption being said,
+  whichever is highest, measured on every paint and resize — not the frame's
+  edge, which on a wide, short window sat far below the bar. The thought is
+  at most three lines; a long place name is clipped on the line.
 - **2026-10-25** — **The life, as one picture.** Colin: "life has too much
   going on. everything about y3k should be as simple, beautiful, and
   consistent as possible. the chat bar can be reused… keep the chat bar as

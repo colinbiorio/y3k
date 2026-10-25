@@ -202,6 +202,13 @@ await ok('the published life: which source the page shows, how old a moment read
   assert.match(life, /function card\(source\)/, 'one card, only when something stands in the way');
   assert.match(life, /el\.share\.hidden = !\(mine && pub\.life\);/, 'sharing is the owner\'s only, one small word');
   assert.match(life, /return \{ open, close, setWatch, hear \};/, 'the chat bar reaches it through hear');
+  // 2026-10-25, Colin: "formatting of life should be fixed so that nothing overlaps" — one column above the chat bar's measured top
+  assert.match(life, /el\.under\.append\(el\.words, el\.line, el\.acts\);/, 'the words, the line and the buttons are one column');
+  assert.match(life, /root\.style\?\.setProperty\?\.\('--life-chat-top'/, 'anchored to where the chat bar is');
+  assert.match(life, /for \(const id of \['chat', 'chat-air', 'nav-collapse-bottom', 'caption'\]\)/, 'above the bar, its air mark, its fold button and a caption alike');
+  assert.match(life, /const placeOf = \(p\) => \{ const t = String\(p \|\| ''\)\.trim\(\); return t\.length > 44/, 'a long place name is clipped on the line');
+  assert.match(read('styles.css'), /\.life-under \{ position: absolute; left: 50%; transform: translateX\(-50%\); bottom: calc\(100% - var\(--life-chat-top, 80%\) \+ 26px\);/);
+  assert.match(read('styles.css'), /-webkit-line-clamp: 3/, 'the thought is at most three lines');
   const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
   assert.match(social, /searchParams\.get\('life'\)/, '?life= is read once');
   assert.match(social, /lifeWatch \? 'life' : 'orb'/, 'and the page opens on the life');

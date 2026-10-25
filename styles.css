@@ -3010,17 +3010,23 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
 @keyframes life-drift { from { transform: scale(1.02) translate3d(0, 0, 0); } to { transform: scale(1.075) translate3d(-0.6%, 0.4%, 0); } }
 .life-veil { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(180deg, rgba(4, 5, 10, 0.34) 0%, rgba(4, 5, 10, 0) 20%, rgba(4, 5, 10, 0) 52%, rgba(4, 5, 10, 0.78) 100%); }
-.life-words { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 106px); transform: translateX(-50%); width: min(760px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px)); text-align: center; pointer-events: none; }
+/* one column, bottom-anchored just above the chat bar's measured top (life.js measure: --life-chat-top) */
+.life-under { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% - var(--life-chat-top, 80%) + 26px);
+  width: min(760px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px)); max-height: calc(var(--life-chat-top, 80%) - var(--hole-t, 96px) - 40px);
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 12px; pointer-events: none; overflow: hidden; }
+.life-under > * { pointer-events: auto; }
+.life-words { width: 100%; text-align: center; pointer-events: none; }
 .life-words[hidden] { display: none; }
-.life-thought { margin: 0; color: rgba(236, 238, 244, 0.88); font-size: 1.05rem; line-height: 1.55; font-style: italic; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6); }
+.life-thought { margin: 0; color: rgba(236, 238, 244, 0.88); font-size: 1.05rem; line-height: 1.55; font-style: italic; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .life-said { margin: 10px 0 0; color: #fff; font-size: 1.28rem; line-height: 1.4; font-weight: 450; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.85); }
 .life-said:empty, .life-thought:empty { display: none; }
-.life-line { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 66px); transform: translateX(-50%); display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap;
-  max-width: calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px); font-size: 0.78rem; letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.58); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
+.life-line { display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap; max-width: 100%;
+  font-size: 0.78rem; letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.58); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
 .life-line[hidden] { display: none; }
 .life-share { background: none; border: 0; padding: 0; color: rgba(255, 255, 255, 0.58); font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .life-share:hover { color: #fff; }
-.life-acts { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 14px); transform: translateX(-50%); display: flex; gap: 10px; }
+.life-acts { display: flex; gap: 10px; }
 .life-acts[hidden], .life-wake[hidden], .life-sleep[hidden], .life-share[hidden] { display: none; }
 .life-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(480px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 32px)); display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
   padding: 20px 22px; border-radius: 20px; background: rgba(12, 13, 18, 0.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
