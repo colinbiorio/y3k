@@ -121,6 +121,11 @@ await ok('the tabs here: Safari and Chrome asked by name, counted when they answ
   assert.match(RELOAD_SCRIPTS('x.com').Safari, /set URL of t to \(URL of t\)/, 'Safari reloads by its own address, no Develop setting');
   assert.match(RELOAD_SCRIPTS('x.com')['Google Chrome'], /reload t/);
 });
+await ok('a merge GitHub is still working out is asked again, not given up on', () => {
+  const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');
+  assert.match(src, /Base branch was modified/i);
+  assert.match(src, /tries >= 4/);
+});
 await ok('the repo is the one the script lives in, wherever it is called from (2026-10-25: so it can run by its full path, from anywhere)', () => {
   const src = readFileSync(join(ROOT, 'scripts/ship.mjs'), 'utf8');
   assert.match(src, /export const REPO = join\(dirname\(fileURLToPath\(import\.meta\.url\)\), '\.\.'\);/);
