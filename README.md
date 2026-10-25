@@ -247,6 +247,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-25** — **The caption stays clear of the chat bar.** Its bottom
+  was a constant, and on a phone or a tall bottom bar the bar's air mark and
+  fold button reached above it, so a long answer sat under them in chess,
+  twenty questions and the life. The caption is now told where the bar's
+  highest thing begins, measured when it shows and when the window changes,
+  and keeps above it (Colin: "nothing overlaps").
 - **2026-10-25** — **Twenty questions is played in the chat bar.** Colin:
   "everything about y3k should be as simple, beautiful, and consistent as
   possible. the chat bar can be reused for example, don't introduce a
