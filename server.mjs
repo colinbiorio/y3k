@@ -1894,7 +1894,7 @@ const server = http.createServer(async (req, res) => {
         const uid = lifePub.uidOf(bearer);
         if (!uid) return json(401, { error: 'no such key' });
         if (rateLimited(req, 'download')) return json(429, { error: 'slow down' });
-        return json(200, { ok: true, lines: lifePub.takeInbox(uid) });
+        return json(200, { ok: true, lines: lifePub.takeInbox(uid), watched: lifePub.watched(uid) });   // watched: the page showed it lately
       }
       const user = sessionUser(req);
       if (reqPath === '/api/life/key' && req.method === 'POST') {
@@ -1927,6 +1927,7 @@ const server = http.createServer(async (req, res) => {
           uid = user.id; mine = true;
         }
         const name = usernameById(uid) || String(who || '');
+        lifePub.touchWatched(uid);
         const l = lifePub.latest(uid);
         return json(200, { ok: true, user: name, mine, shared: lifePub.isShared(uid), key: mine ? lifePub.hasKey(uid) : undefined,
           life: l ? { ...l, frameUrl: l.frameUrl ? `/life/${encodeURIComponent(name)}/${l.frameUrl}` : null } : null,

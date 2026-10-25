@@ -64,9 +64,9 @@ await ok('begin says what it does first, makes the key itself and hands it to y3
   assert.match(life, /spends a little of your Claude plan/, 'the note says what it costs');
   assert.match(life, /nobody else sees them unless you share/, 'and who sees it');
   assert.match(life, /fetchFn\('\/api\/life\/key', \{ method: 'POST'/, 'the key, made here');
-  assert.match(life, /cmd\(\{ cmd: 'life\.start', fresh: !!fresh, \.\.\.\(publish \? \{ publish \} : \{\}\) \}\)/, 'handed to y3kode');
+  assert.match(life, /cmd\(\{ cmd: 'life\.start', fresh: !!anew, \.\.\.\(publish \? \{ publish \} : \{\}\) \}\)/, 'handed to y3kode');
   assert.match(life, /if \(versionAtLeast\(engine\?\.version, LIFE_PUBLISH_ENGINE\)\) \{/, 'only to a y3kode that takes the field (an older one refuses it: unexpected field publish)');
-  assert.match(life, /function updateRow\(\)/, 'an older y3kode is offered the update here');
+  assert.match(life, /can run the life, but not publish it/, 'an older y3kode is offered the update here');
   assert.match(life, /publish = \{ to: location\.origin, key: j\.key \}/, 'to this site');
   assert.match(life, /cmd\(\{ cmd: 'life\.stop' \}\)/);
   assert.ok(!/prompt\(|copy the key/i.test(life), 'nothing to copy');
@@ -114,14 +114,14 @@ await ok('versions compare as numbers, by part', async () => {
   assert.equal(versionAtLeast('0.3.6', '0.3.6'), true); assert.equal(versionAtLeast('0.3.10', '0.3.6'), true); assert.equal(versionAtLeast('0.4.0', '0.3.6'), true);
   assert.equal(versionAtLeast('0.3.5', '0.3.6'), false); assert.equal(versionAtLeast('', '0.3.6'), false); assert.equal(versionAtLeast(null, '0.3.6'), false);
 });
-await ok('the terms carry the field, and the engine is 0.3.6', () => {
+await ok('the terms carry the field, and the engine is 0.3.7', () => {
   const legal = read('legal.html');
   assert.match(legal, /id="terms-life"/);
   assert.match(legal, /A life, if you begin one\./);
   assert.match(legal, /allow it once or always; pressing it is agreeing to this/);
   assert.match(legal, /<h2 id="terms">7\. Terms of use<\/h2>/);
-  assert.equal(VERSION, '0.3.6');
-  assert.equal(JSON.parse(read('y3k-code/package.json')).version, '0.3.6');
+  assert.equal(VERSION, '0.3.7');
+  assert.equal(JSON.parse(read('y3k-code/package.json')).version, '0.3.7');
 });
 
 console.log('\nthe plan\'s limit, named (y3k-code/brain.mjs, src/brain.js):');

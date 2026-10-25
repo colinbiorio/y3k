@@ -2994,43 +2994,51 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
    large as the panel allows, in the house's rounded glass, with what it is
    doing on a chip over its corner; under it, its thought, what it says aloud,
    what it holds, and the controls lucid's own window has. */
-.life-root { grid-column: 1 / -1; width: 100%; padding: 0 14px 40px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
-.life-stage { position: relative; width: min(100%, 560px, calc(100vh - var(--hole-t) - var(--hole-b) - 300px)); min-width: min(100%, 300px);
-  aspect-ratio: 1; border-radius: 22px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #1a1d26, #0b0c11 70%);
-  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.26), 0 30px 70px -30px rgba(0, 0, 0, 0.85); }
-.life-stage[hidden] { display: none; }
-.life-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; image-rendering: auto; }
+/* ===== Life: the projection of its own mind, the whole screen ==============
+   Colin, 2026-10-25: "when you enter life, the only buttons you should have
+   are for the ai to wake up or go to sleep. the rendered projection of its own
+   mind should be full screen. we aim to have a fluid, dream-like or even
+   waking simulation-style life." The stage is on <body> (life.js render), like
+   the world's root, z 31; the picture crossfades between moments and drifts
+   slowly; its thought and words are written over it; one thin line; the chat
+   bar stays, and talks to it. */
+.life-root { position: fixed; inset: 0; z-index: 31; background: #04050a; overflow: hidden; }
+.life-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity 1.8s ease;
+  transform-origin: 50% 50%; animation: life-drift 54s ease-in-out infinite alternate; }
+.life-frame.on { opacity: 1; }
 .life-frame[hidden] { display: none; }
-.life-veil { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 0.9rem; font-style: italic; }
-.life-veil:empty { display: none; }
-.life-status { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 6px 11px; border-radius: 999px;
-  font: 500 0.72rem ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.02em; color: #e8ecf4;
-  background: rgba(10, 12, 17, 0.72); box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.22); }
-.life-status:empty { display: none; }
-.life-body { width: min(100%, 560px); display: flex; flex-direction: column; gap: 10px; }
-.life-thought { margin: 0; color: #c9ced8; font-size: 0.98rem; line-height: 1.55; font-style: italic; }
-.life-said { margin: 0; color: #f2f4f8; font-size: 1.2rem; line-height: 1.4; font-weight: 450; }
-.life-intent { margin: 0; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.01em; }
-.life-err { margin: 0; color: #e8c98a; font-size: 0.82rem; }
-:is(.life-thought, .life-said, .life-intent):empty { display: none; }
-.life-controls { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-.life-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.life-row .usage { flex: 1 1 200px; }
-.life-small { justify-content: center; gap: 12px; }
-.life-small .login-alt { font-size: 0.8rem; }
-.life-note { margin: 0; color: var(--muted); font-size: 0.8rem; }
-.life-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.life-pad button { padding: 9px 6px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
-  color: #d6dbe3; font: inherit; font-size: 0.82rem; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
-.life-pad button:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(205, 213, 223, 0.3); }
-.life-pad .life-pad-back { grid-column: 2; }
-.life-speak { display: flex; gap: 8px; align-items: center; margin: 0; }
-.life-speak .field { flex: 1; min-width: 0; }
-.life-speak .create-go { flex: none; }
-.life-card { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border-radius: 20px; background: rgba(255, 255, 255, 0.035);
-  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.2); color: #b8bfc9; font-size: 0.92rem; line-height: 1.55; }
+@keyframes life-drift { from { transform: scale(1.02) translate3d(0, 0, 0); } to { transform: scale(1.075) translate3d(-0.6%, 0.4%, 0); } }
+.life-veil { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(4, 5, 10, 0.34) 0%, rgba(4, 5, 10, 0) 20%, rgba(4, 5, 10, 0) 52%, rgba(4, 5, 10, 0.78) 100%); }
+.life-words { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 106px); transform: translateX(-50%); width: min(760px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px)); text-align: center; pointer-events: none; }
+.life-words[hidden] { display: none; }
+.life-thought { margin: 0; color: rgba(236, 238, 244, 0.88); font-size: 1.05rem; line-height: 1.55; font-style: italic; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6); }
+.life-said { margin: 10px 0 0; color: #fff; font-size: 1.28rem; line-height: 1.4; font-weight: 450; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.85); }
+.life-said:empty, .life-thought:empty { display: none; }
+.life-line { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 66px); transform: translateX(-50%); display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap;
+  max-width: calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px); font-size: 0.78rem; letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.58); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
+.life-line[hidden] { display: none; }
+.life-share { background: none; border: 0; padding: 0; color: rgba(255, 255, 255, 0.58); font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.life-share:hover { color: #fff; }
+.life-acts { position: absolute; left: 50%; bottom: calc(var(--hole-b, 90px) + 14px); transform: translateX(-50%); display: flex; gap: 10px; }
+.life-acts[hidden], .life-wake[hidden], .life-sleep[hidden], .life-share[hidden] { display: none; }
+.life-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(480px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 32px)); display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+  padding: 20px 22px; border-radius: 20px; background: rgba(12, 13, 18, 0.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08); color: #d8dce4; font-size: 0.92rem; line-height: 1.5; }
+.life-card[hidden] { display: none; }
 .life-card b { color: #eceef2; font-weight: 550; font-size: 1rem; }
 .life-card p { margin: 0; }
+.life-note { margin: 0; color: var(--muted); font-size: 0.84rem; }
+/* fullscreen: the panel chrome steps aside, the conversation stays (as the world) */
+body.in-home.panel-open.in-life:not(.gated) #home { visibility: hidden; }
+body.in-life .home-panel-head { display: none; }
+body.panel-open.in-life #chat { opacity: 1; pointer-events: auto; z-index: 45; }
+body.panel-open.in-life #caption { opacity: 1; z-index: 45; }
+@media (max-width: 560px) {
+  .life-thought { font-size: 0.96rem; } .life-said { font-size: 1.12rem; }
+  .life-card { padding: 16px 18px; }
+}
+:root[data-motion="less"] .life-frame { animation: none; transition: none; }
 .life-card .create-go { align-self: flex-start; }
 .life-log { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, 0.35); color: #aab1bb;
   font: 0.72rem/1.45 ui-monospace, 'SF Mono', Menlo, monospace; white-space: pre-wrap; max-height: 9em; overflow: auto; }

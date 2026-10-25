@@ -168,6 +168,13 @@ export function takeInbox(uid) {
   return text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).slice(-KEEP.inbox);
 }
 
+// Whether the site is showing this life to someone, lately: a signal for the
+// living process (it slows to a moment a minute while nobody looks), carried
+// in the inbox's answer. In memory: it is not a record.
+const watchedAt = new Map();
+export function touchWatched(uid) { uid = safeUid(uid); if (uid) watchedAt.set(uid, Date.now()); }
+export function watched(uid, within = 60_000, now = Date.now()) { uid = safeUid(uid); return !!uid && now - (watchedAt.get(uid) || 0) < within; }
+
 /** An account closed: its life, its key, everything. */
 export function forget(uid) {
   uid = safeUid(uid); if (!uid) return;

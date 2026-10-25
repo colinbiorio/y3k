@@ -1575,5 +1575,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   const codeBusy = () => !!codeView?.busy();
-  return { enterHome, leaveHome, showView, codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }

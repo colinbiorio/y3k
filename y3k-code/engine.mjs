@@ -30,7 +30,7 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.6';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.7';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)

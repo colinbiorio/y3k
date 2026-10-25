@@ -25,7 +25,7 @@
 //  - What reaches it is what lucid's window allows: the mode, a move, a line
 //    spoken to it, the pace, stop.
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnChild, stopChild, ndjson } from './proc.mjs';
@@ -172,8 +172,22 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
     return { ok: true };
   }
 
+  // a life lived by another process on this computer (lucid --live, the door,
+  // which holds life/lock with its pid): told to stop the way its own hand
+  // would, through life/door.json; nothing is killed
+  function stopThroughTheDoor(why) {
+    const where = at();
+    let pid = 0;
+    try { pid = parseInt(readFileSync(join(where.dir, 'life', 'lock'), 'utf8'), 10); } catch { return false; }
+    if (!pid) return false;
+    try { process.kill(pid, 0); } catch { return false; }   // a stale lock is nobody
+    try { writeFileSync(join(where.dir, 'life', 'door.json'), JSON.stringify({ who: 'stop', since: Date.now() / 1000, by: 'y3kode', why })); } catch { return false; }
+    audit?.write('life.stop', { why, door: true });
+    return true;
+  }
+
   function stop(why = 'you let it rest') {
-    if (!running()) return { ok: true, running: false };
+    if (!running()) return { ok: true, running: false, ...(stopThroughTheDoor(why) ? { door: true } : {}) };
     ended = { code: null, why };
     // asked first, the way lucid's window is closed; forced only if it has not
     // gone a few seconds later (a dream mid-step finishes; the life is saved
