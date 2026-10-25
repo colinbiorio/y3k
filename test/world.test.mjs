@@ -2862,6 +2862,15 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   assert.ok(/body\.chat-typing #chat \{[^}]*width: auto;/.test(css), 'typing mode no longer overrides the phone width (its own full-bleed rules depend on it)');
 });
 
+await ok('the caption stays clear of the chat bar\'s highest thing, measured (2026-10-25, Colin: "nothing overlaps")', () => {
+  const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+  assert.match(main, /function clearCaption\(\) \{/);
+  assert.match(main, /for \(const id of \['chat', 'chat-air', 'nav-collapse-bottom'\]\)/, 'the bar, its air mark, its fold button');
+  assert.match(main, /window\.addEventListener\('resize', clearCaption\);/);
+  assert.match(main, /function showCaption\(text, who\) \{\n  if \(who === 'you'\) beforeYou\?\.\(\);\n  clearCaption\(\);/, 'measured when a caption shows');
+  assert.match(readFileSync(join(ROOT, 'styles.css'), 'utf8'), /bottom: max\(108px, calc\(100% - var\(--caption-clear, 100%\) \+ 12px\)\);/, 'never under 108px, above the bar when it is higher');
+});
+
 ok('the three notes of 2026-09-19: the logo, the layers, the shadow', () => {
   const hist = readFileSync(join(ROOT, 'src/history.js'), 'utf8');
   const bodySrc = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
