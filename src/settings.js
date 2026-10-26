@@ -71,6 +71,18 @@ function pickDefaultModel(prov, models, free) {
   if (prov === 'openrouter') return ids.find((id) => id === 'openai/gpt-4o-mini') || ids.find((id) => /claude.*sonnet/.test(id)) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
+// WHAT A FREE MODEL ALLOWS, said where the model is chosen (2026-10-26):
+// OpenRouter's free models answer a number of requests a day (50 until the
+// account has bought credits, then 1,000), and the site says how many are
+// left today when OpenRouter says so (server.mjs listModels `daily`)
+function freeNote(model, d) {
+  if (!isFreeModel(model)) return '';
+  const daily = d?.daily;
+  if (daily && Number.isFinite(daily.limit)) {
+    return ` A free model: ${daily.limit} requests a day${Number.isFinite(daily.remaining) ? `, ${daily.remaining} left today` : ''}.`;
+  }
+  return ' A free model: it answers a limited number of requests a day (50 until you add credits on OpenRouter).';
+}
 // The voice services Settings → Voice offers (voice-providers.mjs on the
 // server knows how to ask each). Each speaks only on the person's own key: the
 // site has no voice account of its own (2026-10-12).
@@ -1578,18 +1590,6 @@ function kommandPane() {
     // does one that comes back to find another provider shown: the menu says
     // what is in use, and a key never goes into use behind it.
     let brainSeq = 0;
-    // WHAT A FREE MODEL ALLOWS, said where the model is chosen: OpenRouter's
-    // free models answer a number of requests a day (50 until the account
-    // has bought credits, then 1,000), and the site says how many are left
-    // today when OpenRouter says so (server.mjs listModels `daily`)
-    function freeNote(prov, model, d) {
-      if (prov !== 'openrouter' || !isFreeModel(model)) return '';
-      const daily = d?.daily;
-      if (daily && Number.isFinite(daily.limit)) {
-        return ` A free model: ${daily.limit} requests a day${Number.isFinite(daily.remaining) ? `, ${daily.remaining} left today` : ''}.`;
-      }
-      return ' A free model: it answers a limited number of requests a day (50 until you add credits on OpenRouter).';
-    }
     async function applyKey(raw, preferModel) {
       const seq = ++brainSeq;
       const key = raw.trim();
@@ -1618,7 +1618,8 @@ function kommandPane() {
         modelsSeq += 1;   // the live list wins over a catalog still on its way
         const want = preferModel || prefModel(prov);
         fillModels(d.models, (want && d.models.some((m) => m.id === want)) ? want : pickDefaultModel(prov, d.models, d.free));
-        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).` + freeNote(prov, modelSel.value, d);
+        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).`
+          + (prov === 'openrouter' ? freeNote(modelSel.value, d) : '');
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
         if (seq !== brainSeq || $('brain-provider').value !== prov) return;

@@ -10,6 +10,9 @@ const search = location.search;
 // the code is single-use: it leaves the address bar (and the history) before anything else
 try { history.replaceState(null, '', location.pathname); } catch { /* an old browser: the code expires in ten minutes anyway */ }
 
+// in the small window, "back" closes it: the tab that asked is right behind it
+back.addEventListener('click', (e) => { if (window.opener) { e.preventDefault(); window.close(); } });
+
 finishReturn({ search }).then((r) => {
   if (!r.ok) { line.textContent = r.line; back.hidden = false; return; }
   if (r.popup) {

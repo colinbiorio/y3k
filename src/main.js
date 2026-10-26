@@ -2100,8 +2100,9 @@ function showWake() {   // → true when the card is on the screen
   if (line) line.textContent = `${account ? 'Your presence has' : 'y3k has'} nothing to think with yet. Connect OpenRouter and it wakes: one click, and its free models cost nothing.`;
   card.hidden = false;
   // one message on the screen, not two: the card says what is missing and
-  // offers the way; the line it answers stays in the conversation's history
-  // (the caption's own words name the other ways in, and Settings → Brain has them)
+  // offers the way, so the caption goes now, and the line a turn said is
+  // taken out of the conversation column by handle() (history.dropLast); its
+  // words name the other ways in, and Settings → Brain has them
   $('caption')?.classList.remove('show');
   document.addEventListener('click', onGlyphWake, true);
   wakeFlow.prepare();   // the window opens inside the press (openrouter.js)
@@ -2128,11 +2129,17 @@ function woke({ model, models = [], free } = {}) {
   const name = modelName(model, models);
   const freeWord = free !== false && /:free$/.test(model) && !/\bfree\b/i.test(name) ? ' (free)' : '';   // OpenRouter's own names say "(free)"
   const line = `${account ? 'Your presence thinks' : 'y3k thinks'} on OpenRouter now, with ${name}${freeWord}. Say something.`;
-  if (account && room?.mode === 'host' && !busy) {
-    showCaption(line, 'y3k');
-    openingDone = false;
-    setTimeout(() => openingMoment(), 1200);   // the line is read first, then it speaks
-  } else showCaption(line, 'y3k');
+  showCaption(line, 'y3k');
+  if (!account) return;
+  // the line is read first, then it speaks; a key taken at the door (the
+  // whole page went to OpenRouter and came back) lands before the home has
+  // opened its room, so it waits for the room, a little, and not for ever
+  let tries = 0;
+  const speak = () => {
+    if (room?.mode === 'host' && !busy) { openingDone = false; openingMoment(); return; }
+    if (++tries < 10) setTimeout(speak, 800);
+  };
+  setTimeout(speak, 1200);
 }
 
 // --- A guest's arrival: one real thing, next to them -------------------------
