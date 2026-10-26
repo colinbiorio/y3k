@@ -247,6 +247,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-26** — **One sentence on the life's screen.** Colin: "there
+  should only be one sentence of text printed to the screen -- hide any text
+  that is carried over from previous screens for now -- also give a way to
+  hide text". The life shows its spoken words if it spoke, else the first
+  sentence of its thought (the rest stays in the journal and its voice); the
+  home's caption no longer shows in the life (that paragraph was the chat's
+  last answer, and it also pushed the words to the top of the screen); a tap
+  on the picture hides the words and brings them back. "go to sleep" on a
+  life lived on this computer by another hand needs y3kode 0.3.7 (the door);
+  on an older one the page says so and offers the update, and after a real
+  stop the buttons flip at once (lucid also publishes one last "asleep"
+  moment when put down).
 - **2026-10-25** — **The caption stays clear of the chat bar.** Its bottom
   was a constant, and on a phone or a tall bottom bar the bar's air mark and
   fold button reached above it, so a long answer sat under them in chess,

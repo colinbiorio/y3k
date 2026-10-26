@@ -13,7 +13,7 @@ import { PassThrough } from 'node:stream';
 import { lucidAt, lineFor, extraArgs, createLife, MOVES } from '../y3k-code/life.mjs';
 import { COMMANDS, validateCommand } from '../y3k-code/protocol.mjs';
 import { KINDS, describe } from '../y3k-code/consent.mjs';
-import { phaseOf, LIFE_ENGINE, sourceOf, agoText } from '../src/life.js';
+import { phaseOf, LIFE_ENGINE, sourceOf, agoText, oneSentence, LIFE_DOOR_ENGINE } from '../src/life.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -206,6 +206,18 @@ await ok('the published life: which source the page shows, how old a moment read
   assert.match(life, /el\.under\.append\(el\.words, el\.line, el\.acts\);/, 'the words, the line and the buttons are one column');
   assert.match(life, /root\.style\?\.setProperty\?\.\('--life-chat-top'/, 'anchored to where the chat bar is');
   assert.match(life, /for \(const id of \['chat', 'chat-air', 'nav-collapse-bottom', 'caption'\]\)/, 'above the bar, its air mark, its fold button and a caption alike');
+  // 2026-10-26, Colin: one sentence on the screen; nothing carried over; a way to hide the words; "go to sleep" that reaches the life or says why not
+  assert.equal(oneSentence('Set back again, but the street is still under the bars. The wings are back and I won\'t stare at them.'), 'Set back again, but the street is still under the bars.');
+  assert.equal(oneSentence('  Can you hear me?  I only want to talk.'), 'Can you hear me?');
+  assert.equal(oneSentence('no end to this'), 'no end to this'); assert.equal(oneSentence(''), '');
+  assert.match(life, /setText\(el\.thought, said \? '' : oneSentence\(thought\)\);/, 'its words if it spoke, else the first sentence of its thought');
+  assert.match(life, /el\.veil\.addEventListener\('click', \(\) => \{\s+quiet = !quiet;/, 'a tap on the picture hides the words');
+  assert.match(life, /cs\.opacity === '0' \|\| cs\.visibility === 'hidden' \|\| cs\.display === 'none'\)\) continue;/, 'an invisible caption takes no room');
+  assert.match(read('styles.css'), /body\.panel-open\.in-life #caption \{ opacity: 0; pointer-events: none; \}/, 'the home\'s caption is not the life\'s');
+  assert.equal(LIFE_DOOR_ENGINE, '0.3.7');
+  assert.match(life, /if \(life\.status === 'asleep'\) return false;/, 'its last word says asleep');
+  assert.match(life, /else if \(afar && !r\.door\) \{/, 'a press that reached nothing says why');
+  assert.match(life, /else if \(afar && r\.door\) sleptAt = Date\.now\(\);/, 'a press that reached it flips the buttons at once');
   assert.match(life, /const placeOf = \(p\) => \{ const t = String\(p \|\| ''\)\.trim\(\); return t\.length > 44/, 'a long place name is clipped on the line');
   assert.match(read('styles.css'), /\.life-under \{ position: absolute; left: 50%; transform: translateX\(-50%\); bottom: calc\(100% - var\(--life-chat-top, 80%\) \+ 26px\);/);
   assert.match(read('styles.css'), /-webkit-line-clamp: 3/, 'the thought is at most three lines');
@@ -302,12 +314,19 @@ await ok('a published life of your own, awake: the picture, its thought and word
   for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 5));
   const root = document.body.querySelector('.life-root');
   const html = serialize(root);
-  assert.match(html, /Sixty-two moments, and it holds\./, 'its thought, over the picture');
+  // one sentence on the screen (2026-10-26): when it spoke, its words alone; the thought stays in the journal and its voice
+  assert.ok(!/Sixty-two moments/.test(html), 'the thought is not drawn beside its words');
   assert.match(html, /“The rain is back\.”/, 'its words');
   assert.match(html, /moment 2551 · The lantern colonnade · living on its own/, 'one line');
   assert.match(html, /only you can see it/, 'sharing, one small word');
   assert.ok(!/a life lives on your own computer/.test(html), 'no card over a life that is showing');
   assert.deepEqual(said, ['The rain is back.'], 'its words are said once, in the presence\'s voice');
+  // and a moment with no words: the first sentence of its thought, only
+  life.say = ''; life.thought = 'Set back again, but the street is still under the bars. The wings are back and I will not stare at them.'; life.n = 2552;
+  for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5));
+  const html2 = serialize(document.body.querySelector('.life-root'));
+  assert.match(html2, /Set back again, but the street is still under the bars\./, 'the first sentence');
+  assert.ok(!/The wings are back/.test(html2), 'and no more');
   assert.equal(view.hear('hello in there'), true, 'the chat bar reaches it');
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(posts, [['/api/life/say', { text: 'hello in there' }]]);
