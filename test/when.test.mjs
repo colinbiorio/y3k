@@ -61,6 +61,10 @@ ok('how long ago, in as few characters as carry it', () => {
   assert.equal(ago(3 * 3600000), '3h ago');
   assert.equal(ago(2 * 86400000), '2d ago');
   assert.match(ago(90 * 86400000), /months ago/);
+  // one month is singular (the arrival card said "1 months ago", 2026-10-26)
+  assert.equal(ago(33 * 86400000), '1 month ago');
+  assert.equal(ago(44 * 86400000), '1 month ago');
+  assert.equal(ago(46 * 86400000), '2 months ago');
   assert.match(ago(800 * 86400000), /years ago/);
   assert.equal(gap(1000, 3 * 3600000 + 1000), '3h ago');
 });
@@ -200,11 +204,14 @@ ok('an absent time is absent everywhere it is stored', () => {
   const brain = await import('../src/brain.js');
   const r = await brain.respond('yo');
   ok('no AI provider: the reply says so, naming both ways in, off the air, and the line is not kept as answered', () => {
-    assert.equal(r.speech, 'To talk with y3k, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
+    assert.equal(r.speech, 'To talk with y3k, connect OpenRouter in one click (its free models cost nothing), add your own API key, or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
     assert.equal(r.speech, brain.NO_PROVIDER);
     assert.ok(/your own API key/.test(r.speech) && /Claude Code/.test(r.speech) && /Settings → Brain/.test(r.speech), 'a way in is not named');
+    assert.ok(/OpenRouter in one click/.test(r.speech), 'the one-click key (2026-10-26) is not named');
     assert.ok(!/—/.test(r.speech));
     assert.ok(r.local && r.notice, 'marked so it never goes on air');
+    // …and marked for the room to offer the one click beside it (main.js showWake)
+    assert.equal(r.nobrain, true, 'the room is not told to offer the one-click key');
     assert.ok(!/function localReply|calm: \["I'm here/.test(readFileSync(join(ROOT, 'src/brain.js'), 'utf8')), 'the canned lines are gone');
   });
   const said = [];
@@ -212,6 +219,7 @@ ok('an absent time is absent everywhere it is stored', () => {
   ok('…and arriving says it too, not a stray thought in the orb\'s voice', () => {
     assert.deepEqual(said, [brain.NO_PROVIDER]);
     assert.ok(o.seeded && o.notice);
+    assert.equal(o.nobrain, true, 'arriving with nothing chosen does not offer the one click');
   });
   // NOT IN THOSE WORDS TO EVERYONE (2026-10-12). That was the only line: a
   // guest was told to choose Claude Code, which a guest is not offered, and
@@ -220,11 +228,12 @@ ok('an absent time is absent everywhere it is stored', () => {
   brain.claimBrowser(null);   // a guest at the door
   const [g, gHeard] = await lines();
   ok('a guest is told to sign in for their own Claude plan, not to choose Claude Code they are not offered', () => {
-    assert.equal(g.speech, 'To talk with y3k, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
+    assert.equal(g.speech, 'To talk with y3k, connect OpenRouter in one click (its free models cost nothing) or add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
     assert.equal(g.speech, brain.NO_PROVIDER_GUEST);
     assert.deepEqual(gHeard, [brain.NO_PROVIDER_GUEST], 'arriving says the account\'s line to a guest');
     assert.ok(!/choose Claude Code/.test(g.speech) && /sign in/.test(g.speech) && /your own API key/.test(g.speech));
     assert.ok(g.local && g.notice && !/—/.test(g.speech));
+    assert.equal(g.nobrain, true, 'a guest with nothing to think on is not offered the one click');
   });
   brain.claimBrowser({ id: 'acct-a' });
   globalThis.localStorage = { getItem: (k) => (k === 'y3k.ownBrain' ? JSON.stringify({ provider: 'claude' }) : k === 'y3k.owner' ? 'acct-a' : null), setItem() {}, removeItem() {} };
@@ -331,11 +340,13 @@ ok('an absent time is absent everywhere it is stored', () => {
   acct = { id: 'acct-late' };
   globalThis.localStorage = { getItem: (k) => (k === 'y3k.ownBrain' ? JSON.stringify({ provider: 'claude' }) : null), setItem() {}, removeItem() {} };
   lines.own = brain.noBrain('For your presence to dance');
+  lines.ownChosen = brain.nothingChosen();
   globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
   ok('the line for nothing to think on names what it was for, and is picked by who is here and what they chose', () => {
-    assert.equal(lines.account, 'For your presence to dance, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
-    assert.equal(lines.guest, 'For your presence to dance, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
+    assert.equal(lines.account, 'For your presence to dance, connect OpenRouter in one click (its free models cost nothing), add your own API key, or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
+    assert.equal(lines.guest, 'For your presence to dance, connect OpenRouter in one click (its free models cost nothing) or add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
     assert.equal(lines.own, brain.OWN_UNREACHED, 'someone who chose Claude Code is told to choose it');
+    assert.equal(lines.ownChosen, false, 'someone who chose Claude Code is offered another brain instead of what theirs needs');
     assert.equal(brain.noBrain(), brain.NO_PROVIDER, 'the conversation\'s own line changed');
   });
 

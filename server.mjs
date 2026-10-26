@@ -1308,6 +1308,17 @@ const BRAIN_PROVIDERS = {
       // that actually judges the key, so it gates the list.
       const auth = await fetch(`${OR_BASE}/auth/key`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
       if (!auth.ok) return { ok: false, status: auth.status };
+      // …and what it says of the account, read DEFENSIVELY (2026-10-26, the
+      // one-click key, src/openrouter.js): `is_free_tier` is true for an
+      // account that has never bought credit, which can think only on the
+      // free models (a paid one is refused with 402), so the page wakes it on
+      // a free model; and how many of the day's free requests are left. A
+      // field missing or of another shape says nothing (undefined), and the
+      // page decides as it did before.
+      const info = (await auth.json().catch(() => null))?.data || {};
+      const free = typeof info.is_free_tier === 'boolean' ? info.is_free_tier : undefined;
+      const fd = info.free_model_daily_requests;
+      const daily = fd && Number.isFinite(fd.limit) ? { limit: fd.limit | 0, remaining: Number.isFinite(fd.remaining) ? fd.remaining | 0 : null } : undefined;
       const r = await fetch(`${OR_BASE}/models`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
       if (!r.ok) return { ok: false, status: r.status };
       const d = await r.json();
@@ -1324,7 +1335,7 @@ const BRAIN_PROVIDERS = {
         })
         .map((m) => ({ id: String(m.id), label: String(m.name || m.id) }))
         .sort((a, b) => a.id.localeCompare(b.id));
-      return { ok: true, models };
+      return { ok: true, models, free, daily };
     },
     async chat(key, model, messages, image, paint, opts) {
       const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
@@ -3846,7 +3857,8 @@ const server = http.createServer(async (req, res) => {
       if (!pid) return json(400, { error: 'unrecognized API key' });
       const out = await BRAIN_PROVIDERS[pid].listModels(key);
       if (!out.ok) return json(200, { provider: pid, models: [], error: 'could not list models — check the key' });
-      return json(200, { provider: pid, models: out.models });
+      // `free` and `daily` only where the provider says them (OpenRouter's account, above)
+      return json(200, { provider: pid, models: out.models, ...(out.free !== undefined ? { free: out.free } : {}), ...(out.daily ? { daily: out.daily } : {}) });
     }
 
     // ===== AIRDEN: YOUR PRESENCE, SPEAKING ON ITS OWN (src/airden.js) =====

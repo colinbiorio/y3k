@@ -55,7 +55,7 @@ const MAX_FAILS = 3;
 // The provider's reasons that asking again cannot change (server.mjs
 // upstreamRefused): it stops at once and says which. Rate, busy and a dead
 // connection are waited out and asked again, up to MAX_FAILS.
-const FINAL = new Set(['key', 'credit', 'model']);
+const FINAL = new Set(['key', 'credit', 'daily', 'model']);   // 'daily': OpenRouter's free models, out until midnight UTC
 // …and the reasons a turn on the person's own plan was not taken that are
 // not failures at all (brain.js OWN_WHYS): their presence already thinking as
 // much as it can at once, or the site holding all it holds just now.

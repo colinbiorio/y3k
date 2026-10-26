@@ -113,7 +113,26 @@ await ok('nothing to name: a success, a person\'s own sign-in (own-relay.mjs), a
   assert.equal(upstreamWhy(null), null);
   for (const s of ['aborted', 'not-installed', 'spawn', 'gone', 'no-page', 'upstream', undefined]) assert.equal(upstreamWhy(fail(s, '')), null, String(s));
   // every word it can say is one the page has a line for
-  assert.deepEqual(UPSTREAM_WHYS, ['key', 'credit', 'rate', 'model', 'busy', 'unreachable']);
+  assert.deepEqual(UPSTREAM_WHYS, ['key', 'credit', 'rate', 'daily', 'model', 'busy', 'unreachable']);
+});
+
+await ok('OpenRouter\'s free models, out for the day, are neither a rate to wait out nor credit (2026-10-26, the one-click key)', () => {
+  // the words OpenRouter answers with, as 429 or 402, plain or in its envelope
+  const day = 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day';
+  assert.equal(upstreamWhy(fail(429, day)), 'daily');
+  assert.equal(upstreamWhy(fail(402, day)), 'daily');
+  assert.equal(upstreamWhy(fail('429', `{"error":{"message":"${day}","code":429}}`)), 'daily');
+  assert.equal(upstreamWhy(fail('stream', `429: ${day}`)), 'daily');
+  assert.equal(upstreamWhy(fail('stream', day)), 'daily');
+  // the per-minute one is an ordinary rate limit, and credit is still credit
+  assert.equal(upstreamWhy(fail(429, 'Rate limit exceeded: free-models-per-min.')), 'rate');
+  assert.equal(upstreamWhy(fail(402, 'Insufficient credits. Add more using https://openrouter.ai/credits')), 'credit');
+  // the page has a line for it, and the life and airden stop on it (the next beat is refused the same way)
+  const b = readFileSync(join(ROOT, 'src/brain.js'), 'utf8');
+  assert.match(b, /export const WHYS = \[[^\]]*'daily'/);
+  assert.match(b, /case 'daily': return `Today’s free thinking on/);
+  assert.match(readFileSync(join(ROOT, 'src/tend.js'), 'utf8'), /const REFUSED = new Set\(\[[^\]]*'daily'/);
+  assert.match(readFileSync(join(ROOT, 'src/airden.js'), 'utf8'), /const FINAL = new Set\(\[[^\]]*'daily'/);
 });
 
 await ok('the server sends the word, never the provider\'s text, on every brain path it was asked for', () => {

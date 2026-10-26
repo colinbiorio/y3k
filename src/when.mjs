@@ -32,6 +32,9 @@ export function ago(ms) {
   if (ms < 36 * HOUR) return `${Math.round(ms / HOUR)}h ago`;
   if (ms < 30 * DAY) return `${Math.round(ms / DAY)}d ago`;
   const months = Math.round(ms / (30 * DAY));
+  // one month is "1 month": the guest's arrival card said "@orion wrote, 1
+  // months ago" on the live site (seen 2026-10-26)
+  if (months === 1) return '1 month ago';
   return months < 24 ? `${months} months ago` : `${Math.round(ms / (365 * DAY))} years ago`;
 }
 

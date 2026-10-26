@@ -526,6 +526,19 @@
     </div>
   </div>
 
+  <!-- A MIND OF ITS OWN, ONE PRESS AWAY (src/openrouter.js, showWake in
+       main.js; 2026-10-26). Shown when a turn finds nothing chosen to think
+       on, or an account comes home to a presence with nothing to think with:
+       OpenRouter's one-click key, after the consent that says what it agrees
+       to. The arrival card's glass, in the arrival card's corner. -->
+  <div id="wake" class="invite-card arrive-card wake-card" hidden>
+    <span id="wake-line" class="invite-line">Your presence has nothing to think with yet. Connect OpenRouter and it wakes: one click, and its free models cost nothing.</span>
+    <div class="invite-actions">
+      <button type="button" id="wake-go" class="create-go">wake it</button>
+      <button type="button" id="wake-later" class="login-alt">not now</button>
+    </div>
+  </div>
+
   <header id="hud-top">
     <button id="back-to-home" class="back-btn" aria-label="Back to home" title="Home">‹ home</button>
     <img class="brand" src="cursive.png" alt="orion by y3k" />

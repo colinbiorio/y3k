@@ -48,6 +48,7 @@ globalThis.fetch = (url, o) => route(String(url), o);
 
 const brain = await import('../src/brain.js');
 const ownBrain = await import('../src/own-brain.js');
+const openrouter = await import('../src/openrouter.js');
 
 // a recorder: every call on it is kept, in order, as [name, ...args]
 const recorder = (calls) => new Proxy({}, { get: (_, k) => (...a) => { calls.push([String(k), ...a]); } });
@@ -223,6 +224,8 @@ function element(id) {
   return el;
 }
 let liveNow = false;   // whether this page thinks for the site (own-brain.js ownLive), as the stand-in says
+let wakes = 0;   // presses of Connect OpenRouter (the pane hands them to main.js's createWake)
+const wakeStub = () => { wakes += 1; };
 function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = {}) {
   liveNow = false;
   listeners['y3k:own-brain-state'] = [];   // only this pane hears what own-brain.js says
@@ -253,6 +256,8 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
     // how fast it writes (speed.js, 2026-10-19): the pane's Speed section, standing still here
     speedShown: () => true, setSpeedShown() {}, recentSpeeds: () => [], speedsByModel: () => [], fmtRate: String, fmtSec: String,
     testSpeed: async () => [], testModels: () => [], engineCmd: async () => ({ ok: false }), tabOf: () => null,
+    // the one-click OpenRouter key (2026-10-26): the press, and how a free model is chosen and said
+    wake: wakeStub, pickFreeModel: openrouter.pickFreeModel, isFreeModel: openrouter.isFreeModel,
   };
   new Function('__s', `with (__s) {\n${helpers}\n${brainPane}\n}`)(new Proxy(stubs, { has: (t, k) => Object.prototype.hasOwnProperty.call(t, k) }));
   const models = (list) => answer({ models: list });
@@ -477,7 +482,9 @@ await ok('the default is shown only while this page thinks for the site, whateve
   await settle();
   window.dispatchEvent({ type: 'y3k:own-brain-state' });
   await settle();
-  assert.equal(p.provider(), 'anthropic');
+  // not Claude Code; and with no key kept and nothing chosen, OpenRouter, the
+  // provider with the one-click key (2026-10-26: it was the first key provider, Anthropic)
+  assert.equal(p.provider(), 'openrouter');
   assert.equal(ownBrain.ownChoiceFor({ id: 'u-2' }, false, { win: {} }), null, 'main.js would start the default on someone else\'s y3kode');
 });
 

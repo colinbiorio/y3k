@@ -34,7 +34,7 @@ const HOURS_CAP = 0.15;
 // A key its provider turned away, an account with no credit, a model the key
 // cannot use: the next beat would be refused the same way, so the life rests
 // and says which (brain.js whyLine) rather than glowing on, doing nothing.
-const REFUSED = new Set(['key', 'credit', 'model']);
+const REFUSED = new Set(['key', 'credit', 'daily', 'model']);   // 'daily': OpenRouter's free models, out until midnight UTC
 
 export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite, isEngaged }) {
   let running = false;

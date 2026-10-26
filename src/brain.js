@@ -54,6 +54,10 @@ function keepKey(provider, v) {
 }
 export const keyFor = (provider) => allKeys()[provider] || null;
 export const forgetKey = (provider) => keepKey(provider, null);
+// …kept without being put in use: a key OpenRouter handed over that the site
+// could not check just then (src/openrouter.js). Settings → Brain shows it
+// kept, and "Use kept key" puts it in use with its models listed.
+export const keepKeyFor = (provider, key) => keepKey(provider, { key, model: null });
 
 // WHAT LEAVES WITH THE PERSON (2026-10-08). Every key above lives in this
 // browser and in no account, so on a shared computer the next person to sign
@@ -68,8 +72,12 @@ export const forgetKey = (provider) => keepKey(provider, null);
 // account that made it) and the ids of the accounts that chose Claude Code
 // here (y3k.ownBrain.accounts): own-brain.js mayDefault reads both, so the
 // default stays theirs and never becomes the next account's.
+// (y3k.openrouter.*: a one-click key on its way from OpenRouter, and the
+// verifier it is waiting with — src/openrouter.js — are the person's as much
+// as the key in use is.)
 const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
-  'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce'];
+  'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce',
+  'y3k.openrouter.key', 'y3k.openrouter.pkce'];
 const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
 const OWNER_KEY = 'y3k.owner';
 export function forgetAccount() {
@@ -213,15 +221,19 @@ async function ownReady() {
 // looked like an orb being vague (Colin, after deleting the site's key: "it
 // stopped responding" — it had, and it went on talking). Now it says what is
 // missing, off the air, and the unanswered line is not kept as if answered.
-// It names both ways in, because there is no third: the site pays for no one's
-// AI (2026-10-12). Claude Code is listed there for a signed-in account.
+// It names the ways in, because there is no other: the site pays for no one's
+// AI (2026-10-12). Claude Code is listed there for a signed-in account. The
+// one-click key comes first since 2026-10-26 (src/openrouter.js: OpenRouter
+// hands this browser a key of the person's own, and its free models cost
+// nothing), and the room offers the click itself beside the line (main.js
+// showWake, on a notice marked `nobrain`, below).
 // `to` opens it with what it is for (below, noBrain).
-const accountLine = (to) => `${to}, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.`;
+const accountLine = (to) => `${to}, connect OpenRouter in one click (its free models cost nothing), add your own API key, or choose Claude Code in Settings → Brain. The site has no AI key of its own.`;
 export const NO_PROVIDER = accountLine('To talk with y3k');
 // …but that was the only line, said to everyone (2026-10-12). A guest was told
 // to choose Claude Code, which a guest is not offered (the site hands a turn
 // only to a page of the account it is for): they are told to sign in for it.
-const guestLine = (to) => `${to}, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`;
+const guestLine = (to) => `${to}, connect OpenRouter in one click (its free models cost nothing) or add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`;
 export const NO_PROVIDER_GUEST = guestLine('To talk with y3k');
 // And someone who had chosen Claude Code was told to choose it. What is
 // missing there is y3kode answering, and Settings → Brain says why it is not.
@@ -256,6 +268,17 @@ export function noBrain(to = 'To talk with y3k') {
   if (guestHere()) return guestLine(to);
   if (ownChoice()?.provider === 'claude') return OWN_UNREACHED;
   return ownChoiceFor(here(), !!getBrainConfig())?.auto ? OWN_DEFAULT_UNREACHED : accountLine(to);
+}
+// …and whether that line is the one for NOTHING CHOSEN to think on (a guest,
+// or an account with no key, no choice of Claude Code and no default of it):
+// the one-click key is the answer then, and the room offers it (main.js
+// showWake). Someone whose Claude Code is not answering chose a brain
+// already; they are shown what it needs, not offered another.
+export function nothingChosen() {
+  if (getBrainConfig()?.key) return false;
+  if (guestHere()) return true;
+  if (ownChoice()?.provider === 'claude') return false;
+  return !ownChoiceFor(here(), false)?.auto;
 }
 // …and when there is one, in this browser, and it did not answer
 export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
@@ -310,7 +333,7 @@ export const PICTURE_TOO_LARGE = 'That picture is too large to send with this co
 // Each has one line, naming the provider. Every key is the person's own: the
 // site has none (2026-10-12), and a turn on their own sign-in fails in words
 // of its own (OWN_FAILED). An unknown reason keeps the old line.
-export const WHYS = ['key', 'credit', 'rate', 'model', 'busy', 'unreachable', 'dropped', 'offline'];
+export const WHYS = ['key', 'credit', 'rate', 'daily', 'model', 'busy', 'unreachable', 'dropped', 'offline'];
 // …and the reasons a turn on the person's own sign-in can be named by, which
 // name no key provider (own-relay.mjs OWN_WHYS, the server's half). Neither
 // is the plan's limit, and neither is said as one: a busy coding session's
@@ -350,6 +373,8 @@ export function whyLine(why, provider) {
       ? `Your ${who} account is out of credit, or this key has reached its spending limit. Add credit or raise the limit with ${who}, then try again.`
       : 'The account behind this key is out of credit, or the key has reached its spending limit. Add credit or raise the limit, then try again.';
     case 'rate': return `${who} is limiting how often this key can be used. Wait a little, then try again.`;
+    // OpenRouter's free models, out for the day (upstream-why.mjs 'daily')
+    case 'daily': return `Today’s free thinking on ${PROVIDER_NAMES[provider] || 'OpenRouter'} is used up: free models answer 50 requests a day until the account adds credits there (then 1,000). It renews at midnight UTC, or choose a paid model in Settings → Brain.`;
     case 'model': return cfg?.model
       ? `This key cannot use ${modelName(cfg.model)}. Choose another model in Settings → Brain.`
       : 'This key cannot use the model the site chose for it. Choose a model in Settings → Brain.';
@@ -370,8 +395,14 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 // The notice itself: captioned, off the air, carrying its reason (`why`) so the
 // room can act on it (main.js gives the words back when nothing was sent).
 function notice(why, provider) {
-  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownHere() ? ownFailedLine() : noBrain());
-  return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(known(why) ? { why } : {}) };
+  const named = whyLine(why, provider);
+  const keyed = !!getBrainConfig()?.key;
+  const own = !named && !keyed && ownHere();
+  const line = named || (keyed ? PROVIDER_FAILED : own ? ownFailedLine() : noBrain());
+  // `nobrain`: the line said is the one for nothing chosen at all, and the
+  // room offers the one-click key beside it (main.js showWake)
+  const nobrain = !named && !keyed && !own && nothingChosen();
+  return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(known(why) ? { why } : {}), ...(nobrain ? { nobrain: true } : {}) };
 }
 function unanswered(why, provider) {
   history.pop();   // the person's turn went unanswered; don't record it as if it had been
@@ -786,7 +817,7 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
     const missing = unreached ? whyLine('offline') : noBrain();
     onMood?.('calm');
     onText?.(missing);
-    return { mood: 'calm', form: null, scheme: null, speech: missing, paint: null, seeded: true, notice: true };
+    return { mood: 'calm', form: null, scheme: null, speech: missing, paint: null, seeded: true, notice: true, ...(!unreached && nothingChosen() ? { nobrain: true } : {}) };
   }
   const line = SEEDED_OPENINGS[Date.now() % SEEDED_OPENINGS.length];
   history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
