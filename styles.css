@@ -3019,6 +3019,10 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
   width: min(760px, calc(100% - var(--hole-l, 96px) - var(--hole-r, 96px) - 40px)); max-height: calc(var(--life-chat-top, 80%) - var(--hole-t, 96px) - 40px);
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 12px; pointer-events: none; overflow: hidden; }
 .life-under > * { pointer-events: auto; }
+.life-root.quiet .life-under { opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
+.life-under { transition: opacity 0.5s ease; }
+.life-hint { color: rgba(255, 255, 255, 0.42); font-style: italic; }
+.life-hint[hidden] { display: none; }
 .life-words { width: 100%; text-align: center; pointer-events: none; }
 .life-words[hidden] { display: none; }
 .life-thought { margin: 0; color: rgba(236, 238, 244, 0.88); font-size: 1.05rem; line-height: 1.55; font-style: italic; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6);
@@ -3043,7 +3047,9 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
 body.in-home.panel-open.in-life:not(.gated) #home { visibility: hidden; }
 body.in-life .home-panel-head { display: none; }
 body.panel-open.in-life #chat { opacity: 1; pointer-events: auto; z-index: 45; }
-body.panel-open.in-life #caption { opacity: 1; z-index: 45; }
+/* no caption in the life: what the home last said is not the life's (Colin, 2026-10-26:
+   "hide any text that is carried over from previous screens"); its words are on the stage */
+body.panel-open.in-life #caption { opacity: 0; pointer-events: none; }
 @media (max-width: 560px) {
   .life-thought { font-size: 0.96rem; } .life-said { font-size: 1.12rem; }
   .life-card { padding: 16px 18px; }

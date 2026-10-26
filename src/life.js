@@ -51,6 +51,21 @@ export const LIFE_ENGINE = '0.3.4';
 // the page sends it only to one that takes it, and offers the update to one
 // that does not (the same update Settings → Brain runs).
 export const LIFE_PUBLISH_ENGINE = '0.3.6';
+// …and the one whose "go to sleep" reaches a life another hand lives on this
+// computer (lucid --live), through its door (y3kode 0.3.7). On an older one
+// the press reaches nothing, and the page says so.
+export const LIFE_DOOR_ENGINE = '0.3.7';
+// ONE SENTENCE ON THE SCREEN (Colin, 2026-10-26: "there should only be one
+// sentence of text printed to the screen"): its spoken words if it spoke,
+// else the first sentence of its thought. The whole thought stays in the
+// journal and in its voice.
+export function oneSentence(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const m = t.match(/^.*?[.!?…](?=\s|$)/);
+  return (m ? m[0] : t).trim();
+}
+export const QUIET_KEY = 'y3k.life.quiet';
 export const versionAtLeast = (have, want) => {
   const a = String(have || '').split('.').map((n) => parseInt(n, 10) || 0), b = String(want).split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < Math.max(a.length, b.length); i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); }
@@ -206,6 +221,9 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   let lines = null;        // its words being said, while the view is open
   let bridge = true;       // moments go to the record, until the site says there is nobody, or no presence, to remember for
   let shown = '', face = 0;   // the picture on the stage, and which of its two layers holds it
+  let quiet = (() => { try { return localStorage.getItem(QUIET_KEY) === '1'; } catch { return false; } })();   // the words hidden, by a tap on the picture
+  let hinted = false;         // the tap is said once
+  let sleptAt = 0;            // when "go to sleep" reached a life lived afar: asleep from then, whatever its last moment's age
 
   const h = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   const btn = (label, cls, fn) => { const b = h('button', cls, label); b.type = 'button'; b.addEventListener('click', fn); return b; };
@@ -325,12 +343,25 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     since = -1;
     poll();
   }
+  // asleep: its last published word says so, or "go to sleep" reached it from here
+  function awake(life) {
+    if (!life) return false;
+    if (life.status === 'asleep') return false;
+    if (sleptAt && Number(life.at || 0) <= sleptAt) return false;
+    return fresh(life);
+  }
   async function sleep() {
     if (stopping) return;
     stopping = true; paint();
+    const afar = !!pub?.ok && !!pub.mine && awake(pub.life) && phase !== 'living';
     const r = await cmd({ cmd: 'life.stop' });
     stopping = false;
     if (!r?.ok) toast(r?.error || 'it did not hear that');
+    else if (afar && !r.door) {
+      // a y3kode from before the door: the press reached nothing (Colin,
+      // 2026-10-26: "'go to sleep' stays 'go to sleep' even if you click on it")
+      toast(versionAtLeast(engine?.version, LIFE_DOOR_ENGINE) ? 'this life is lived by another hand on this computer; y3kode could not reach its door' : `this life is lived by another hand on this computer; y3kode ${engine?.version || ''} cannot reach it — update y3kode (${LIFE_DOOR_ENGINE})`);
+    } else if (afar && r.door) sleptAt = Date.now();
     since = -1;
     poll(); pollPub();
   }
@@ -344,8 +375,9 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     el.veil = h('div', 'life-veil');
     el.words = h('div', 'life-words'); el.thought = h('p', 'life-thought'); el.said = h('p', 'life-said'); el.words.append(el.thought, el.said);
     el.line = h('div', 'life-line'); el.status = h('span', 'life-status');
+    el.hint = h('span', 'life-hint', 'tap the picture to hide the words'); el.hint.hidden = true;
     el.share = btn('', 'life-share', () => share(!pub?.shared)); el.share.hidden = true;
-    el.line.append(el.status, el.share);
+    el.line.append(el.status, el.share, el.hint);
     el.acts = h('div', 'life-acts');
     el.wake = btn('wake up', 'create-go life-wake', () => wake(false));
     el.sleep = btn('go to sleep', 'login-alt life-sleep', () => sleep());
@@ -358,6 +390,15 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     el.under = h('div', 'life-under');
     el.under.append(el.words, el.line, el.acts);
     root.append(el.a, el.b, el.veil, el.under, el.card);
+    root.classList.toggle('quiet', quiet);
+    // a tap on the picture hides the words, and brings them back (Colin,
+    // 2026-10-26: "give a way to hide text"); not on the words or buttons themselves
+    el.veil.addEventListener('click', () => {
+      quiet = !quiet;
+      try { if (quiet) localStorage.setItem(QUIET_KEY, '1'); else localStorage.removeItem(QUIET_KEY); } catch { /* private window */ }
+      root.classList.toggle('quiet', quiet);
+    });
+    el.veil.style.pointerEvents = 'auto';
     doc.body.appendChild(root);
     measure();
     globalThis.window?.addEventListener?.('resize', measure);
@@ -372,7 +413,11 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     for (const id of ['chat', 'chat-air', 'nav-collapse-bottom', 'caption']) {
       const el = doc.getElementById?.(id);
       const r = el?.getBoundingClientRect?.();
-      if (r && r.height > 0 && r.top < top) top = r.top;
+      if (!r || !(r.height > 0) || r.top >= top) continue;
+      // a thing that is there but not shown (the home's caption, hidden in the life) takes no room
+      const cs = globalThis.getComputedStyle?.(el);
+      if (cs && (cs.opacity === '0' || cs.visibility === 'hidden' || cs.display === 'none')) continue;
+      top = r.top;
     }
     if (!Number.isFinite(top)) top = (globalThis.innerHeight || 900) - 120;
     root.style?.setProperty?.('--life-chat-top', `${Math.round(top)}px`);
@@ -399,14 +444,16 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     showPicture(source === 'web' ? (web.frameUrl || '') : pic);
     const thought = web ? web.thought : m?.thought;
     const said = web ? web.say : (phase === 'living' ? m?.say : '');
-    setText(el.thought, thought || '');
-    setText(el.said, said ? `“${said}”` : '');
+    // one sentence on the screen: its words if it spoke, else the first of its thought
+    setText(el.thought, said ? '' : oneSentence(thought));
+    setText(el.said, said ? `“${oneSentence(said)}”` : '');
     el.words.hidden = !(thought || said);
+    if (!hinted && (thought || said) && !quiet) { hinted = true; el.hint.hidden = false; schedule(() => { if (el.hint) el.hint.hidden = true; }, 5000); }
     // one thin line: where it stands, and that it lives
     let line = '';
     const placeOf = (p) => { const t = String(p || '').trim(); return t.length > 44 ? t.slice(0, 43).trimEnd() + '…' : t; };
     if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, placeOf(m.place), m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
-    else if (web) line = [`moment ${web.n ?? 0}`, placeOf(web.place), web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : fresh(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
+    else if (web) line = [`moment ${web.n ?? 0}`, placeOf(web.place), web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : awake(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
     else if (phase === 'resting' && m) line = `asleep · moment ${m.n ?? 0}${m.place ? ' · ' + placeOf(m.place) : ''}`;
     else if (phase === 'living') line = 'dreaming the first moment…';
     setText(el.status, line);
@@ -420,7 +467,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     // when it lives here, or when a published life of yours is awake on this
     // computer under another hand (lucid --live) and y3kode is here to tell it.
     const here = !watch && (phase === 'living' || phase === 'resting');
-    const awakeAfar = mine && fresh(pub.life);
+    const awakeAfar = mine && awake(pub.life);
     const canSleep = here && (phase === 'living' || awakeAfar);
     const canWake = here && phase === 'resting' && !awakeAfar;
     el.wake.hidden = !canWake; el.sleep.hidden = !canSleep;
@@ -455,6 +502,11 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
       // a y3kode from before the life published itself: the update, offered once, before it wakes
       c.append(h('b', null, `y3kode ${engine.version} can run the life, but not publish it`));
       note(`From y3kode ${LIFE_PUBLISH_ENGINE} a life begun here is watched from any device by itself.`);
+      if (engine.update) c.append(btn('update y3kode', 'create-go', () => doUpdate())); else appButton(c);
+    } else if (phase === 'resting' && engine?.version && !versionAtLeast(engine.version, LIFE_DOOR_ENGINE) && !!pub?.ok && !!pub.mine && awake(pub.life) && !updating) {
+      // a life awake on this computer under another hand, and a y3kode that cannot tell it to sleep
+      c.append(h('b', null, `y3kode ${engine.version} cannot put this life to sleep`));
+      note(`This life is lived on this computer by another hand (lucid's own door). From y3kode ${LIFE_DOOR_ENGINE}, "go to sleep" reaches it.`);
       if (engine.update) c.append(btn('update y3kode', 'create-go', () => doUpdate())); else appButton(c);
     } else show = false;
     c.hidden = !show;
