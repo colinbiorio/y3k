@@ -23,6 +23,12 @@
 //                spent what it was allowed (402; a 400 or 429 that says so, as
 //                Anthropic and OpenAI do; OpenRouter's 403 "Key limit exceeded")
 //   rate         the provider is limiting how often the key may be used (429)
+//   daily        the day's free allowance is spent: OpenRouter's free models
+//                answer 50 requests a day for an account that has not bought
+//                credit (1,000 for one that has), and say so as "Rate limit
+//                exceeded: free-models-per-day", with 429 or 402. Neither "wait
+//                a little" nor "out of credit" is true of it: it renews at
+//                midnight UTC (2026-10-26, the one-click key, src/openrouter.js)
 //   model        the key cannot use the model that was asked for (404; a 400
 //                or 403 that says so)
 //   busy         the trouble is on the provider's side (408, 5xx, 529, and an
@@ -33,7 +39,7 @@
 // Server-only. Two more reasons are the page's own (src/brain.js): 'dropped'
 // (its own connection to the site went quiet or broke) and 'offline'.
 
-export const UPSTREAM_WHYS = ['key', 'credit', 'rate', 'model', 'busy', 'unreachable'];
+export const UPSTREAM_WHYS = ['key', 'credit', 'rate', 'daily', 'model', 'busy', 'unreachable'];
 
 // OpenAI answers 429 for two different things, told apart only by the error's
 // code: insufficient_quota (no money left) and rate_limit_exceeded (too fast).
@@ -63,6 +69,9 @@ const NOT_KEY = /moderat|flagged|country|region|territory/i;
 // key, for a key that works, and airden and the komputer stopped on it.
 const MODEL_REFUSED = /model_not_found|access to model/i;
 const KEY_SPENT = /key limit exceeded/i;
+// OpenRouter's free models, out for the day (the per-minute one,
+// free-models-per-min, is an ordinary rate limit and stays 'rate')
+const FREE_DAY = /free-models-per-day/i;
 // The middle of a stream, where there is no status: an error event, or the
 // connection breaking. server.mjs puts the event's type (Anthropic) or code
 // (OpenAI, OpenRouter) in front of its message, and these read it as the
@@ -83,6 +92,7 @@ function fromStatus(code, text) {
     if (KEY_SPENT.test(text)) return 'credit';
     return NOT_KEY.test(text) ? null : 'key';
   }
+  if ((code === 402 || code === 429) && FREE_DAY.test(text)) return 'daily';
   if (code === 402) return 'credit';
   if (code === 429) {
     if (QUOTA_CODE.test(text)) return 'credit';
@@ -116,6 +126,7 @@ export function upstreamWhy(out) {
       const code = /^\d{3}$/.test(pre[1]) ? Number(pre[1]) : CODE_STATUS[pre[1]];
       return code ? fromStatus(code, text.slice(pre[0].length)) : null;
     }
+    if (FREE_DAY.test(text)) return 'daily';
     if (QUOTA_CODE.test(text)) return 'credit';
     if (STREAM_BUSY.test(text)) return 'busy';
     if (RATE.test(text)) return 'rate';

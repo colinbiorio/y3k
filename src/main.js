@@ -11,9 +11,12 @@ import * as merc from './mercury-buttons.js';
 import { createVoice, browserVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, ownFailedLine, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
+import { respondStream, openingStream, getBrainConfig, setBrainConfig, keepKeyFor, canLive, nothingChosen, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, ownFailedLine, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd, siteSetup } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd, siteSetup, setOwnChoice } from './own-brain.js';
+import { createWake, oneClickHere } from './openrouter.js';
+import { consent } from './consent.js';
+import { modelName } from './models.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { wireDownloadGlyph } from './download-glyph.js';
@@ -306,6 +309,12 @@ enterApp.now = function enterAppNow() {
   // in this browser by someone else (a session that ran out, a guest) are
   // forgotten, before the hours, the brain or Settings can read them.
   claimBrowser(account);
+  // a one-click key OpenRouter left for whoever is here now while a page of
+  // theirs was away (src/openrouter.js take): now that they have claimed the
+  // browser. And only from here on does this page hear a key land: a page
+  // still at the door takes nobody's.
+  wakeFlow.take({ any: true });
+  wakeFlow.listen();
   // SIGNED IN, SO SAY SO TO YOUR OTHER DEVICES. One small POST every fifteen
   // seconds and one idle stream — the price of appearing in the list on your
   // phone without having had to arrange it first. Gated on being signed in
@@ -327,6 +336,9 @@ enterApp.now = function enterAppNow() {
     syncOwnBrain();         // …or offered from this one, through y3kode (chosen in Settings → Brain, or the default)
     showThinking();         // and what is thinking, under the house's name
     if (!account) greetGuest(); // a guest lands next to something alive, if anything is
+    // …and an account whose presence has nothing to think with is offered
+    // one, once its own sign-in has had a moment to answer (checkOwnBrain)
+    else setTimeout(() => { if (!canLive() && nothingChosen()) showWake(); }, 2500);
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
@@ -789,7 +801,36 @@ body.setWorldSound((o) => voice.ring(o));
 // a tend beat, so a sleeping presence is told nothing and is charged nothing.
 const music = createMusic({});
 
-const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setFace, setHands, setCamView });
+// WAKE IT IN ONE CLICK (src/openrouter.js; 2026-10-26). One flow for the
+// page: Settings → Brain's Connect OpenRouter and the wake card (showWake,
+// below) both press it. The key OpenRouter hands over is put in use as a key
+// chosen in Settings → Brain would be (the pick, and no to Claude Code for
+// this page, as settings.js choose() records), and the presence takes its
+// first turn on it (woke, below). A key handed to this browser while the page
+// was away (the window was blocked, and the whole page went to OpenRouter)
+// is taken at the door, once whoever came in has claimed the browser
+// (enterApp.now): a key left for someone else is forgotten there first.
+const wakeFlow = createWake({
+  consent,
+  setBrainConfig,
+  keepKey: keepKeyFor,
+  choose: (v) => {
+    try { localStorage.setItem('y3k.brainPick', v); } catch { /* private window */ }
+    setOwnChoice({ provider: 'none' }, { by: account?.id || null });
+    window.dispatchEvent(new Event('y3k:own-brain'));   // a stream opened on Claude Code closes (syncOwnBrain)
+  },
+  onConnected: (c) => woke(c),
+  onFailed: (line) => { hideWake(); showCaption(line, 'y3k'); },
+  // whose the key will be: the account at the door, else a guest (brain.js
+  // claimBrowser keys the browser the same way); a key begun for someone
+  // else is never taken for whoever is here
+  who: () => (account?.id ? String(account.id) : 'guest'),
+});
+wakeFlow.prepare();
+// a key put in use in another tab of this browser: this tab's card has nothing left to offer
+window.addEventListener('storage', (e) => { if (e?.key === 'y3k.brain' && e.newValue) hideWake(); });
+
+const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setFace, setHands, setCamView, wake: oneClickHere() ? () => wakeFlow.wake() : null });
 
 let currentMood = 'calm';
 let busy = false;
@@ -1589,7 +1630,7 @@ function flushQueued() {
 // one of orion's turns — whether the visitor prompted it (handle) or orion is
 // speaking first, unprompted (openingMoment). onSettled fires exactly once when
 // the turn has fully landed (speech done, UI back to calm).
-async function runReply(call, onSettled) {
+async function runReply(call, onSettled, { wake = false } = {}) {
   busy = true;
   body.setMood('thinking');
   setMoodTag('thinking');
@@ -1743,13 +1784,18 @@ async function runReply(call, onSettled) {
   if (!wore && result?.shape) body.setShape(result.shape);
   applyBodyBlock(bodyBlock);               // count / turn, standing
   if (scoreSteps) score.start(scoreSteps, performance.now());   // ...and then, in time
-  if (speech) showCaption(speech, 'y3k');
+  // NOTHING CHOSEN TO THINK ON, AND THE WAKE CARD CAN SAY SO (handle passes
+  // `wake`): the card is the answer, in fewer words and with the way in, so
+  // the long line is neither captioned, nor put in the conversation column,
+  // nor spoken over it (2026-10-26: one message on the screen)
+  const byCard = wake && !!result?.nobrain && wakeCanShow();
+  if (speech && !byCard) showCaption(speech, 'y3k');
 
   // Release whatever the splitter was holding behind a possible mark — a
   // dangling '~fla' at the end of a reply was never a beat, so it is speech.
   if (gotStream) { const r = beats.end(); for (const b of r.beats) body.beat(b.beat, b.n); feed(r.text); }
   if (gotStream) flush(true);              // speak the trailing partial sentence
-  else if (speech) pushSpeak(speech);      // non-stream / local-brain fallback: speak the whole reply
+  else if (speech && !byCard) pushSpeak(speech);   // non-stream / local-brain fallback: speak the whole reply
   speaker.end();
 
   // Safety net: never strand the UI on busy if speech callbacks never fire.
@@ -1759,7 +1805,7 @@ async function runReply(call, onSettled) {
   watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
 
-  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, why: result?.why || null, unsent: !!result?.unsent, invite: result?.invite || null };
+  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, why: result?.why || null, unsent: !!result?.unsent, invite: result?.invite || null, nobrain: !!result?.nobrain };   // nobrain: the room offers the one-click key (showWake)
 }
 
 // Publish a turn to viewers ONLY while broadcasting. Going live is now an
@@ -1799,7 +1845,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // mode in every tab, so a second tab or device sent each private line to the
   // stream another one had open (and kept that stream alive by doing it).
   if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
-  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting }));
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting }), undefined, { wake: !priv });
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room
@@ -1811,6 +1857,9 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
     autoGrow(chatInput);
   }
   if (!priv) goLiveAndPublish(gen, hosting, r);
+  // nothing chosen to think on: the one-click key, in place of the line that
+  // says so (runReply left that line unsaid when the card could show)
+  if (r?.nobrain && !priv) showWake();
   // A reply to y3k Code is private as the line it answers (see codeLink.talk).
   if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech, private: priv } }));
   if (roomGen === gen && r?.invite && !r.local && !r.seeded) showInvite(r.invite);
@@ -2045,6 +2094,70 @@ $('invite-decline')?.addEventListener('click', () => {
   tend.noteInviteDecline?.();
 });
 
+// --- The wake card: a mind of its own, one press away (2026-10-26) -----------
+// When a turn finds nothing chosen to think on (brain.js `nobrain`: a guest,
+// or an account with no key, no Claude Code and no default of it), or an
+// account comes home to a presence with nothing to think with, a card beside
+// the line offers OpenRouter's one-click key (src/openrouter.js). Home only,
+// one card at a time (a guest's arrival card makes way), and "not now" puts
+// it away for the rest of the visit; the line in Settings → Brain stays.
+const WAKE_LATER = 'y3k.wake.later';
+// whether the card may show now: home, nothing open over it, not put away this visit
+function wakeCanShow() {
+  if (!$('wake') || !oneClickHere()) return false;   // the desktop app cannot finish it (openrouter.js)
+  try { if (sessionStorage.getItem(WAKE_LATER)) return false; } catch { /* no storage: it may */ }
+  const b = document.body.classList;
+  return b.contains('in-home') && !b.contains('panel-open') && !b.contains('in-code') && !viewing();
+}
+function showWake() {   // → true when the card is on the screen
+  if (!wakeCanShow()) return false;
+  const card = $('wake');
+  hideArrive();
+  const line = $('wake-line');
+  if (line) line.textContent = `${account ? 'Your presence has' : 'y3k has'} nothing to think with yet. Connect OpenRouter and it wakes: one click, and its free models cost nothing.`;
+  card.hidden = false;
+  // one message on the screen, not two: the card says what is missing and
+  // offers the way (a turn's own line was left unsaid: runReply `byCard`),
+  // and any caption still showing goes; Settings → Brain names the other ways in
+  $('caption')?.classList.remove('show');
+  document.addEventListener('click', onGlyphWake, true);
+  wakeFlow.prepare();   // the window opens inside the press (openrouter.js)
+  return true;
+}
+function hideWake() {
+  document.removeEventListener('click', onGlyphWake, true);
+  const c = $('wake'); if (c) c.hidden = true;
+}
+const onGlyphWake = (e) => { if (e.target?.closest?.('.nav-btn')) hideWake(); };
+$('wake-go')?.addEventListener('click', () => { wakeFlow.wake(); });
+$('wake-later')?.addEventListener('click', () => {
+  hideWake();
+  try { sessionStorage.setItem(WAKE_LATER, '1'); } catch { /* this page load only */ }
+});
+// THE KEY IS IN USE: the card goes, Settings → Brain follows (settings.js),
+// the name under the wordmark already has (y3k:model), and the presence
+// takes the first turn on its new mind — one request, once, at the moment it
+// has one (homeContext's rule, no greeting on every visit, is about spending
+// a key it already had). A guest has no presence of its own: y3k says so.
+function woke({ model, models = [], free } = {}) {
+  hideWake();
+  window.dispatchEvent(new Event('y3k:brain-connected'));
+  const name = modelName(model, models);
+  const freeWord = free !== false && /:free$/.test(model) && !/\bfree\b/i.test(name) ? ' (free)' : '';   // OpenRouter's own names say "(free)"
+  const line = `${account ? 'Your presence thinks' : 'y3k thinks'} on OpenRouter now, with ${name}${freeWord}. Say something.`;
+  showCaption(line, 'y3k');
+  if (!account) return;
+  // the line is read first, then it speaks; a key taken at the door (the
+  // whole page went to OpenRouter and came back) lands before the home has
+  // opened its room, so it waits for the room, a little, and not for ever
+  let tries = 0;
+  const speak = () => {
+    if (room?.mode === 'host' && !busy) { openingDone = false; openingMoment(); return; }
+    if (++tries < 10) setTimeout(speak, 800);
+  };
+  setTimeout(speak, 1200);
+}
+
 // --- A guest's arrival: one real thing, next to them -------------------------
 // The invitation's twin (src/arrive.mjs says what it may show, and why). A
 // guest only: a signed-in person has a presence of their own, and its
@@ -2072,7 +2185,8 @@ async function greetGuest() {
   // nothing real to point at, or the guest has already gone somewhere (a
   // panel, someone's room) while we asked
   const b = document.body.classList;
-  if (!a || account || arrived || !b.contains('in-home') || b.contains('panel-open') || viewing()) return;
+  // (nor over the wake card, in the same corner: a guest who spoke before the feed answered)
+  if (!a || account || arrived || !b.contains('in-home') || b.contains('panel-open') || viewing() || !$('wake')?.hidden) return;
   arrived = true;
   try { sessionStorage.setItem(ARRIVED, '1'); } catch { /* see above */ }
   const card = $('arrive');

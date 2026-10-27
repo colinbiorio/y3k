@@ -113,7 +113,10 @@ export function inlineScriptHashes(html) {
 // as narrow as it can be: the one pinned vision package on jsDelivr (anyone can
 // publish to jsDelivr, so the whole host would let any injected script in),
 // the hand and face models in Google's mediapipe-models folder, lichess for
-// chess, the 4irden portal, 127.0.0.1 where the y3k Code engine listens, and
+// chess, OpenRouter for the one-click key (src/openrouter.js: the return page
+// trades OpenRouter's code for the person's key with OpenRouter itself, so the
+// key never passes through this site on its way to them; the host only, which
+// is OpenRouter's own), the 4irden portal, 127.0.0.1 where the y3k Code engine listens, and
 // y3k: — the desktop app's own scheme, which Firefox opens through a hidden
 // frame from kode's "Open the y3k app". three.js is served from src/vendor.
 // The version here, the two importmaps and WASM_BASE in perceive.js and
@@ -127,7 +130,7 @@ export function appShellCsp(scriptHashes = [], { dev = false } = {}) {
     "default-src 'self'",
     `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' ${VISION_PKG}`.replace(/\s+/g, ' '),
     "worker-src 'self' blob:",
-    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://storage.googleapis.com/mediapipe-models/ ${VISION_PKG}`,
+    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://openrouter.ai https://storage.googleapis.com/mediapipe-models/ ${VISION_PKG}`,
     `img-src 'self' data: blob: https:${local}`,
     "media-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",

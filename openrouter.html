@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <meta name="referrer" content="no-referrer" />
+  <title>yearthreethousand · waking</title>
+  <link rel="icon" type="image/png" href="icon.png" />
+  <!-- WHERE OPENROUTER SENDS THE PERSON BACK (src/openrouter.js). A small page
+       on purpose: in the window wake() opened, it only trades the code for the
+       key with OpenRouter, leaves the key for the tab that asked, and closes —
+       loading the whole room (three.js, the orb, the mercury) to do that would
+       be seconds of work for a window nobody looks at. When the window was
+       blocked and the whole page came here instead, it goes home once the
+       key is kept. The code is single-use and leaves the address bar at once. -->
+  <style>
+    @font-face { font-family: Supreme; src: url(fonts/Supreme-Variable.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 40%, #1b1d24 0%, #08080c 70%); color: #d8dbe2;
+      font: 300 15px/1.55 Supreme, system-ui, -apple-system, sans-serif; letter-spacing: 0.02em; text-align: center; }
+    main { max-width: 26em; padding: 2em; }
+    .mark { display: block; margin: 0 auto 1.4em; width: 44px; height: 44px; opacity: 0.85; }
+    #or-line { margin: 0 0 1.2em; }
+    a { color: #f1f3f7; text-decoration: none; border-bottom: 1px solid rgba(241, 243, 247, 0.35); padding-bottom: 1px; }
+    a[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="mark" src="icon.png" alt="" />
+    <p id="or-line" role="status" aria-live="polite">waking your presence…</p>
+    <a id="or-back" href="/" hidden>back to yearthreethousand</a>
+  </main>
+  <script type="module" src="/src/openrouter-return.js"></script>
+</body>
+</html>

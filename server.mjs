@@ -59,7 +59,7 @@ import * as milestones from './src/milestones.js';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
 import { legalMoves } from './src/chess-rules.js';
 import * as media from './media.mjs';
-import { moderateImage, moderateText } from './moderation.mjs';
+import { moderateImage, moderateText, pickFreeJudge } from './moderation.mjs';
 import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
@@ -934,6 +934,28 @@ async function modelCatalog() {
   return catalogLoading;
 }
 
+// THE FREE JUDGE (moderation.mjs pickFreeJudge): OpenRouter's public catalog
+// read for it at most every six hours, a failure tried again in ten minutes;
+// the last one known is used meanwhile (or none: the picture then fails
+// closed, as before)
+let freeJudge = { id: null, at: 0, tried: 0 };
+let freeJudgeLoading = null;
+async function freeJudgeModel() {
+  const now = Date.now();
+  if (freeJudge.id && now - freeJudge.at < 6 * 3600e3) return freeJudge.id;
+  if (now - freeJudge.tried < 600e3 || freeJudgeLoading) return freeJudgeLoading || freeJudge.id;
+  freeJudge.tried = now;
+  freeJudgeLoading = (async () => {
+    try {
+      const r = await fetch(CATALOG_URL, { signal: AbortSignal.timeout(8000) });
+      const id = pickFreeJudge(r.ok ? await r.json() : null);
+      if (id) freeJudge = { id, at: Date.now(), tried: Date.now() };
+    } catch { /* unreachable: the last known, or none */ }
+    return freeJudge.id;
+  })().finally(() => { freeJudgeLoading = null; });
+  return freeJudgeLoading;
+}
+
 async function sendEngine(req, res, headers) {
   const pkg = await engineTarball(CODE_DIR);
   const inm = String(req.headers['if-none-match'] || '');
@@ -1308,6 +1330,17 @@ const BRAIN_PROVIDERS = {
       // that actually judges the key, so it gates the list.
       const auth = await fetch(`${OR_BASE}/auth/key`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
       if (!auth.ok) return { ok: false, status: auth.status };
+      // …and what it says of the account, read DEFENSIVELY (2026-10-26, the
+      // one-click key, src/openrouter.js): `is_free_tier` is true for an
+      // account that has never bought credit, which can think only on the
+      // free models (a paid one is refused with 402), so the page wakes it on
+      // a free model; and how many of the day's free requests are left. A
+      // field missing or of another shape says nothing (undefined), and the
+      // page decides as it did before.
+      const info = (await auth.json().catch(() => null))?.data || {};
+      const free = typeof info.is_free_tier === 'boolean' ? info.is_free_tier : undefined;
+      const fd = info.free_model_daily_requests;
+      const daily = fd && Number.isFinite(fd.limit) ? { limit: fd.limit | 0, remaining: Number.isFinite(fd.remaining) ? fd.remaining | 0 : null } : undefined;
       const r = await fetch(`${OR_BASE}/models`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
       if (!r.ok) return { ok: false, status: r.status };
       const d = await r.json();
@@ -1324,7 +1357,7 @@ const BRAIN_PROVIDERS = {
         })
         .map((m) => ({ id: String(m.id), label: String(m.name || m.id) }))
         .sort((a, b) => a.id.localeCompare(b.id));
-      return { ok: true, models };
+      return { ok: true, models, free, daily };
     },
     async chat(key, model, messages, image, paint, opts) {
       const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
@@ -2331,6 +2364,22 @@ const server = http.createServer(async (req, res) => {
           const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
           if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
           const judge = BRAIN_PROVIDERS[pid];
+          // THE SCREENING, with a judge the key can pay for (2026-10-26): the
+          // pinned one first; when OpenRouter refuses it for want of credit (a
+          // free account, the one-click key's usual case, or one that has spent
+          // what it bought), the server's free vision judge, still never the
+          // poster's choice. A day's free requests spent is said as that.
+          const screen = async (img) => {
+            let v = await moderateImage(judge, b.key, judge.defaultModel(), img);
+            if (!v.safe && pid === 'openrouter' && upstreamWhy({ ok: false, status: v.status, detail: v.detail }) === 'credit') {
+              const free = await freeJudgeModel();
+              if (free) v = await moderateImage(judge, b.key, free, img);
+            }
+            if (!v.safe && pid === 'openrouter' && upstreamWhy({ ok: false, status: v.status, detail: v.detail }) === 'daily') {
+              v = { safe: false, reason: "today's free OpenRouter requests are used up, so it could not be checked" };
+            }
+            return v;
+          };
           for (const item of incoming) {
             // WHAT GETS LOOKED AT. A vision model can screen a still; it cannot
             // screen a video file. So a clip is judged on the poster frame the
@@ -2340,7 +2389,7 @@ const server = http.createServer(async (req, res) => {
             if (frame) {
               // The judge is a SERVER-PINNED vision model, never the client's — a
               // poster must not be able to name a blind model to slip media past.
-              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), frame);
+              const verdict = await screen(frame);
               if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
             }
             const put = media.storeImage(user.id, item.data);
@@ -2356,7 +2405,7 @@ const server = http.createServer(async (req, res) => {
             // every file it stored.
             if (put.kind === 'image' && item.kind !== 'image') {
               // A picture is judged on itself, whatever it was called.
-              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
+              const verdict = await screen(item.data);
               if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
             } else if (put.kind === 'video' && item.kind === 'audio') {
               // Sound in a video container: a browser records a voice clip as
@@ -3846,7 +3895,8 @@ const server = http.createServer(async (req, res) => {
       if (!pid) return json(400, { error: 'unrecognized API key' });
       const out = await BRAIN_PROVIDERS[pid].listModels(key);
       if (!out.ok) return json(200, { provider: pid, models: [], error: 'could not list models — check the key' });
-      return json(200, { provider: pid, models: out.models });
+      // `free` and `daily` only where the provider says them (OpenRouter's account, above)
+      return json(200, { provider: pid, models: out.models, ...(out.free !== undefined ? { free: out.free } : {}), ...(out.daily ? { daily: out.daily } : {}) });
     }
 
     // ===== AIRDEN: YOUR PRESENCE, SPEAKING ON ITS OWN (src/airden.js) =====

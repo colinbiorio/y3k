@@ -1,5 +1,6 @@
 // Settings: collapsible sections — Brain, Voice, Room, API usage.
-//   • Brain  — bring-your-own AI key (Anthropic / OpenAI / OpenRouter) + model.
+//   • Brain  — bring-your-own AI key (Anthropic / OpenAI / OpenRouter) + model;
+//              OpenRouter's in one click (src/openrouter.js).
 //   • Voice  — ElevenLabs key, choose/describe a voice, delivery sliders.
 //   • Room   — the metal room, made yours: brightness / grooves / tint / glow.
 //   • Graphics — how smooth it runs: Smooth, Automatic, or a fixed tier, and
@@ -10,6 +11,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, checkOwnBrain, forgetAccount, keyFields } from './brain.js';
+import { pickFreeModel, isFreeModel } from './openrouter.js';
 import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels, engineCmd } from './own-brain.js';
 import { shown as speedShown, setShown as setSpeedShown, recent as recentSpeeds, byModel as speedsByModel, fmtRate, fmtSec, testSpeed, testModels } from './speed.js';
 import { modelsFor, modelName } from './models.js';
@@ -57,13 +59,29 @@ function detectProviderLocal(key) {
   return null;
 }
 const PROVIDER_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' };
-function pickDefaultModel(prov, models) {
+// `free`: the site says this OpenRouter account has never bought credit
+// (server.mjs listModels, is_free_tier), so only the free models answer it —
+// a paid one is refused with 402 — and one of them is chosen (openrouter.js)
+function pickDefaultModel(prov, models, free) {
   const ids = models.map((m) => m.id);
+  if (prov === 'openrouter' && free === true) { const f = pickFreeModel(models); if (f) return f; }
   if (prov === 'anthropic') return ids.find((id) => id.includes('opus-4-8')) || ids.find((id) => id.includes('sonnet-4-6')) || ids[0];
   // OpenRouter ids are vendor-qualified, so match the qualified id — a bare
   // /gpt-4o-mini/ test would also hit 'azure/gpt-4o-mini' and friends.
   if (prov === 'openrouter') return ids.find((id) => id === 'openai/gpt-4o-mini') || ids.find((id) => /claude.*sonnet/.test(id)) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
+}
+// WHAT A FREE MODEL ALLOWS, said where the model is chosen (2026-10-26):
+// OpenRouter's free models answer a number of requests a day (50, or 1,000
+// once the account has bought at least 10 credits), and the site says how many are
+// left today when OpenRouter says so (server.mjs listModels `daily`)
+function freeNote(model, d) {
+  if (!isFreeModel(model)) return '';
+  const daily = d?.daily;
+  if (daily && Number.isFinite(daily.limit)) {
+    return ` A free model: ${daily.limit} requests a day${Number.isFinite(daily.remaining) ? `, ${daily.remaining} left today` : ''}.`;
+  }
+  return ' A free model: it answers a limited number of requests a day (50, or 1,000 once you have bought at least 10 credits on OpenRouter).';
 }
 // The voice services Settings → Voice offers (voice-providers.mjs on the
 // server knows how to ask each). Each speaks only on the person's own key: the
@@ -83,7 +101,9 @@ const SLIDER_NAMES = { stability: 'Stability', speed: 'Speed' };
 // cameraIsOn / setHands are handed in rather than imported: settings must not
 // reach into the camera or the eye directly, and the honest note about what the
 // camera does needs to know its live state, not guess it.
-export function createSettings(body, { music, cameraIsOn = null, setFace = null, setHands = null, setCamView = null } = {}) {
+// wake: the one-click OpenRouter key (src/openrouter.js createWake, made once
+// in main.js and pressed from here and from the room's wake card)
+export function createSettings(body, { music, cameraIsOn = null, setFace = null, setHands = null, setCamView = null, wake = null } = {}) {
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -479,6 +499,14 @@ function kommandPane() {
               '<button type="button" id="cc-check" class="btn small">Check again</button></div>' +
           '</div>' +
           '<div id="key-sec" hidden>' +
+            // OpenRouter in one click (src/openrouter.js; Colin, 2026-10-25:
+            // "copying and pasting keys is not user-friendly"): the key it
+            // hands over goes in use as a pasted one would, and the field
+            // below stays for a key someone already has
+            '<div id="or-connect" class="or-connect" hidden>' +
+              '<button type="button" id="or-connect-go" class="btn">Connect OpenRouter</button>' +
+              '<div class="muted">One click: sign in at OpenRouter and it gives this browser a key of your own. It wakes on a free model: free models cost nothing, up to 50 requests a day (1,000 once you have bought at least 10 credits there).</div>' +
+            '</div>' +
             '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
             '<div id="brain-status" class="muted"></div>' +
             '<button id="brain-use" class="btn small" hidden>Use kept key</button>' +
@@ -1589,8 +1617,9 @@ function kommandPane() {
         }
         modelsSeq += 1;   // the live list wins over a catalog still on its way
         const want = preferModel || prefModel(prov);
-        fillModels(d.models, (want && d.models.some((m) => m.id === want)) ? want : pickDefaultModel(prov, d.models));
-        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).`;
+        fillModels(d.models, (want && d.models.some((m) => m.id === want)) ? want : pickDefaultModel(prov, d.models, d.free));
+        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).`
+          + (prov === 'openrouter' ? freeNote(modelSel.value, d) : '');
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
         if (seq !== brainSeq || $('brain-provider').value !== prov) return;
@@ -1636,10 +1665,11 @@ function kommandPane() {
     {
       const provSel = $('brain-provider'), what = $('brain-what');
       const ccSec = $('cc-sec'), keySec = $('key-sec');
+      const orConnect = $('or-connect'), orGo = $('or-connect-go');
       const KEY_PROVIDERS = [
         ['anthropic', 'Anthropic', 'API key from console.anthropic.com'],
         ['openai', 'OpenAI', 'API key from platform.openai.com'],
-        ['openrouter', 'OpenRouter', 'One API key for models from many providers'],
+        ['openrouter', 'OpenRouter', wake ? 'One click, or one key: models from many providers, some of them free' : 'One API key for models from many providers, some of them free'],
       ];
       const PICK = 'y3k.brainPick';   // the provider last chosen here, so the list reopens on it
       const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
@@ -1668,7 +1698,11 @@ function kommandPane() {
         if (signedIn && (own ? own.provider === 'claude' : ownLive())) return 'claude';
         const pick = picked();
         if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
-        return KEY_PROVIDERS[0][0];
+        // nothing chosen: a provider whose key is kept here (shown idle, with
+        // "Use kept key"), else OpenRouter, the one that needs no key in hand
+        // (its one click, above the field) — 2026-10-26; where there is no
+        // one click (the desktop app: main.js hands no `wake`), the first
+        return KEY_PROVIDERS.find(([id]) => keyFor(id))?.[0] || (wake ? 'openrouter' : KEY_PROVIDERS[0][0]);
       }
       // A KEY PROVIDER SHOWN FOR WANT OF A CHOICE puts nothing in use. Only the
       // provider of the key in use, or the one last chosen here, gets its kept
@@ -1690,6 +1724,8 @@ function kommandPane() {
         const v = provSel.value;
         ccSec.hidden = v !== 'claude';
         keySec.hidden = !isKey(v);
+        orConnect.hidden = v !== 'openrouter' || !wake;
+        orGo.textContent = getBrainConfig()?.provider === 'openrouter' ? 'Connect again' : 'Connect OpenRouter';
         speedTestSec.hidden = v !== 'claude';   // the test runs through y3kode, on the plan
         what.textContent = v === 'claude'
           ? 'Replies use your own Claude plan through y3kode on this computer, within your plan’s own usage limits. Claude Code runs with no tools and cannot read your files.'
@@ -1769,6 +1805,17 @@ function kommandPane() {
 
       provSel.addEventListener('change', () => choose(provSel.value));
       useBtn.addEventListener('click', () => { if (isKey(provSel.value)) choose(provSel.value); });
+      // THE ONE CLICK (src/openrouter.js): consent, then OpenRouter in a small
+      // window; the key comes back to main.js, which puts it in use and says
+      // so (y3k:brain-connected), and the pane follows: OpenRouter shown, its
+      // key in the field, its models listed, the model it woke on chosen
+      orGo.addEventListener('click', () => { wake?.(); });
+      window.addEventListener('y3k:brain-connected', () => {
+        if (!settled) return;   // the second pass (below) shows what is in use
+        provSel.value = 'openrouter';
+        paint();
+        loadKey('openrouter');
+      });
 
       // a key says whose it is: the list follows it
       let keyTimer;

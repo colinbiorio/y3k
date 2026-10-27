@@ -134,9 +134,10 @@ Three.js and MediaPipe load from CDNs. Use `localhost`, not `file://`, so the
 microphone and camera work. Node 20.6 or newer.
 
 The site has no AI or voice of its own and pays for none: each person brings
-their own key in Settings → Brain and Settings → Voice, or thinks on their own
-Claude sign-in through y3kode (Claude Code in Settings → Brain). The site never
-reads ANTHROPIC_API_KEY or ELEVENLABS_API_KEY. Put these in `.env` (gitignored)
+their own key in Settings → Brain and Settings → Voice, connects OpenRouter in
+one click (its free models cost nothing; `src/openrouter.js`), or thinks on
+their own Claude sign-in through y3kode (Claude Code in Settings → Brain). The
+site never reads ANTHROPIC_API_KEY or ELEVENLABS_API_KEY. Put these in `.env` (gitignored)
 or the environment:
 
 | variable | what it does |
@@ -201,6 +202,7 @@ delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
 own-relay.mjs          your presence on your own Claude sign-in: a turn goes to your page, then your y3kode
+openrouter.html        where OpenRouter sends the person back with a code (src/openrouter.js: the one-click key)
 speed.mjs              how fast a mind wrote: the stream's clock, the turn's tok/s (src/speed.js shows it)
 air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
                        scripts/air-logo.mjs makes it from any picture of the logo
@@ -247,6 +249,28 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-26** — **Wake it in one click.** A presence thinks on its
+  owner's own key or plan, and the site has none of its own, so until now a
+  new person woke theirs by fetching an API key from a provider's console and
+  pasting it into Settings → Brain, or by installing y3kode on a computer with
+  a Claude plan (Colin, 2026-10-25: "copying and pasting keys is not
+  user-friendly"). Now, when a presence has nothing to think with, a card
+  beside it says so and offers **wake it**; Settings → Brain has **Connect
+  OpenRouter** too. One press shows what it agrees to (always / just this
+  time / cancel, and the terms say the same: `legal.html#terms-openrouter`),
+  then OpenRouter opens in a small window, the person signs in there and
+  allows it, and OpenRouter hands this browser a key of their own (OAuth with
+  PKCE; `src/openrouter.js`, `openrouter.html`). The key goes in use as a
+  pasted one does, kept in this browser only. It always wakes on a free
+  model (today Inkling, from Thinking Machines; free models answer 50 requests a day, or 1,000
+  once the account has bought at least 10 credits), so it never fails for
+  want of credit, and the presence takes its first turn on its new mind. A
+  guest's key is forgotten when anyone signs in on that browser, as every
+  key a guest leaves is. When the free requests
+  run out for the day, the line says exactly that and when they come back,
+  instead of "wait a little" or "out of credit". Also: the privacy page no
+  longer says the site thinks on a key of its own (true until 2026-10-12),
+  and a month ago reads "1 month ago".
 - **2026-10-26** — **One sentence on the life's screen.** Colin: "there
   should only be one sentence of text printed to the screen -- hide any text
   that is carried over from previous screens for now -- also give a way to

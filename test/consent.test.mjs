@@ -174,6 +174,8 @@ await ok('the page says the limit, with the reset, and never blames this compute
   const own = read('src/own-brain.js');
   assert.match(own, /if \(!r\?\.ok\) lastOwnFailure = \{ code: r\?\.code \|\| 'failed'/, 'remembered where the job is answered');
   assert.match(read('src/main.js'), /onOwnPlan\(\) \? ownFailedLine\(\) : PROVIDER_FAILED/);
-  assert.match(read('src/brain.js'), /ownHere\(\) \? ownFailedLine\(\) : noBrain\(\)/);
+  // (2026-10-26: the notice names its parts, to say also whether nothing was chosen at all)
+  assert.match(read('src/brain.js'), /const own = !named && !keyed && ownHere\(\);/);
+  assert.match(read('src/brain.js'), /own \? ownFailedLine\(\) : noBrain\(\)/);
 });
 console.log(`\n${passed} checks passed`);
