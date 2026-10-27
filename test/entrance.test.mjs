@@ -212,8 +212,9 @@ ok('only a guest is greeted, once a session, and never with nothing', () => {
   assert.ok(/try \{ if \(sessionStorage\.getItem\(ARRIVED\)\) return; \} catch/.test(fn), 'the once-a-session mark is not read, or can throw');
   assert.ok(/try \{ sessionStorage\.setItem\(ARRIVED, '1'\); \} catch/.test(fn), 'the once-a-session mark is not written, or can throw');
   // after the round trips: nothing real, a sign-in, or a guest who already left
-  assert.ok(/if \(!a \|\| account \|\| arrived \|\| !b\.contains\('in-home'\) \|\| b\.contains\('panel-open'\) \|\| viewing\(\)\) return;/.test(fn),
-    'the card can show with nothing to say, to a signed-in person, or over somewhere the guest went');
+  // (and not over the wake card in the same corner, 2026-10-26: a guest who spoke before the feed answered)
+  assert.ok(/if \(!a \|\| account \|\| arrived \|\| !b\.contains\('in-home'\) \|\| b\.contains\('panel-open'\) \|\| viewing\(\) \|\| !\$\('wake'\)\?\.hidden\) return;/.test(fn),
+    'the card can show with nothing to say, to a signed-in person, over somewhere the guest went, or over the wake card');
   assert.ok(fn.indexOf('arrived = true') > fn.indexOf('if (!a ||'), 'the session is spent before anything was shown');
   assert.ok(/\$\('arrive-line'\)\.textContent = a\.line;/.test(fn), 'the line is written as markup');
   assert.ok(/arriveGo = \(\) => enterRoom\(a\.presence\);/.test(fn), '"watch" does not enter the room the live board would');
