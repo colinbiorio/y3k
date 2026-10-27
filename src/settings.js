@@ -72,8 +72,8 @@ function pickDefaultModel(prov, models, free) {
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
 // WHAT A FREE MODEL ALLOWS, said where the model is chosen (2026-10-26):
-// OpenRouter's free models answer a number of requests a day (50 until the
-// account has bought credits, then 1,000), and the site says how many are
+// OpenRouter's free models answer a number of requests a day (50, or 1,000
+// once the account has bought at least 10 credits), and the site says how many are
 // left today when OpenRouter says so (server.mjs listModels `daily`)
 function freeNote(model, d) {
   if (!isFreeModel(model)) return '';
@@ -81,7 +81,7 @@ function freeNote(model, d) {
   if (daily && Number.isFinite(daily.limit)) {
     return ` A free model: ${daily.limit} requests a day${Number.isFinite(daily.remaining) ? `, ${daily.remaining} left today` : ''}.`;
   }
-  return ' A free model: it answers a limited number of requests a day (50 until you add credits on OpenRouter).';
+  return ' A free model: it answers a limited number of requests a day (50, or 1,000 once you have bought at least 10 credits on OpenRouter).';
 }
 // The voice services Settings → Voice offers (voice-providers.mjs on the
 // server knows how to ask each). Each speaks only on the person's own key: the
@@ -505,7 +505,7 @@ function kommandPane() {
             // below stays for a key someone already has
             '<div id="or-connect" class="or-connect" hidden>' +
               '<button type="button" id="or-connect-go" class="btn">Connect OpenRouter</button>' +
-              '<div class="muted">One click: sign in at OpenRouter and it gives this browser a key of your own. Its free models cost nothing, up to 50 requests a day until you add credits there.</div>' +
+              '<div class="muted">One click: sign in at OpenRouter and it gives this browser a key of your own. It wakes on a free model: free models cost nothing, up to 50 requests a day (1,000 once you have bought at least 10 credits there).</div>' +
             '</div>' +
             '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
             '<div id="brain-status" class="muted"></div>' +
@@ -1669,7 +1669,7 @@ function kommandPane() {
       const KEY_PROVIDERS = [
         ['anthropic', 'Anthropic', 'API key from console.anthropic.com'],
         ['openai', 'OpenAI', 'API key from platform.openai.com'],
-        ['openrouter', 'OpenRouter', 'One click, or one key: models from many providers, some of them free'],
+        ['openrouter', 'OpenRouter', wake ? 'One click, or one key: models from many providers, some of them free' : 'One API key for models from many providers, some of them free'],
       ];
       const PICK = 'y3k.brainPick';   // the provider last chosen here, so the list reopens on it
       const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
@@ -1700,8 +1700,9 @@ function kommandPane() {
         if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
         // nothing chosen: a provider whose key is kept here (shown idle, with
         // "Use kept key"), else OpenRouter, the one that needs no key in hand
-        // (its one click, above the field) — 2026-10-26
-        return KEY_PROVIDERS.find(([id]) => keyFor(id))?.[0] || 'openrouter';
+        // (its one click, above the field) — 2026-10-26; where there is no
+        // one click (the desktop app: main.js hands no `wake`), the first
+        return KEY_PROVIDERS.find(([id]) => keyFor(id))?.[0] || (wake ? 'openrouter' : KEY_PROVIDERS[0][0]);
       }
       // A KEY PROVIDER SHOWN FOR WANT OF A CHOICE puts nothing in use. Only the
       // provider of the key in use, or the one last chosen here, gets its kept

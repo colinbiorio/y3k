@@ -10,6 +10,7 @@ import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
 import { PROVIDER_NAMES, modelName } from './models.js';
 import { BRAIN_BODY_MAX } from './media-rules.mjs';
 import { ownDeclined, ownChoice, ownChoiceFor, recentOwnFailure } from './own-brain.js';
+import { oneClickHere } from './openrouter.js';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -77,7 +78,10 @@ export const keepKeyFor = (provider, key) => keepKey(provider, { key, model: nul
 // as the key in use is.)
 const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
   'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce',
-  'y3k.openrouter.key', 'y3k.openrouter.pkce'];
+  'y3k.openrouter.key', 'y3k.openrouter.pkce',
+  // …and the "always allow" given to it: the next person at a shared computer
+  // is asked for themselves (review, 2026-10-26)
+  'y3k.consent.openrouter'];
 const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
 const OWNER_KEY = 'y3k.owner';
 export function forgetAccount() {
@@ -228,12 +232,18 @@ async function ownReady() {
 // nothing), and the room offers the click itself beside the line (main.js
 // showWake, on a notice marked `nobrain`, below).
 // `to` opens it with what it is for (below, noBrain).
-const accountLine = (to) => `${to}, connect OpenRouter in one click (its free models cost nothing), add your own API key, or choose Claude Code in Settings → Brain. The site has no AI key of its own.`;
-export const NO_PROVIDER = accountLine('To talk with y3k');
+// (the desktop app cannot finish the one click, openrouter.js oneClickHere:
+// there the line names the ways that work)
+const accountLine = (to) => (oneClickHere()
+  ? `${to}, connect OpenRouter in one click (its free models cost nothing), add your own API key, or choose Claude Code in Settings → Brain. The site has no AI key of its own.`
+  : `${to}, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.`);
+export const NO_PROVIDER = accountLine('To talk with y3k');   // (as this page says it: noBrain() asks again each time)
 // …but that was the only line, said to everyone (2026-10-12). A guest was told
 // to choose Claude Code, which a guest is not offered (the site hands a turn
 // only to a page of the account it is for): they are told to sign in for it.
-const guestLine = (to) => `${to}, connect OpenRouter in one click (its free models cost nothing) or add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`;
+const guestLine = (to) => (oneClickHere()
+  ? `${to}, connect OpenRouter in one click (its free models cost nothing) or add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`
+  : `${to}, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`);
 export const NO_PROVIDER_GUEST = guestLine('To talk with y3k');
 // And someone who had chosen Claude Code was told to choose it. What is
 // missing there is y3kode answering, and Settings → Brain says why it is not.
@@ -374,7 +384,7 @@ export function whyLine(why, provider) {
       : 'The account behind this key is out of credit, or the key has reached its spending limit. Add credit or raise the limit, then try again.';
     case 'rate': return `${who} is limiting how often this key can be used. Wait a little, then try again.`;
     // OpenRouter's free models, out for the day (upstream-why.mjs 'daily')
-    case 'daily': return `Today’s free thinking on ${PROVIDER_NAMES[provider] || 'OpenRouter'} is used up: free models answer 50 requests a day until the account adds credits there (then 1,000). It renews at midnight UTC, or choose a paid model in Settings → Brain.`;
+    case 'daily': return `Today’s free thinking on ${PROVIDER_NAMES[provider] || 'OpenRouter'} is used up: free models answer 50 requests a day (1,000 once the account has bought at least 10 credits there). It renews at midnight UTC, or choose a paid model in Settings → Brain.`;
     case 'model': return cfg?.model
       ? `This key cannot use ${modelName(cfg.model)}. Choose another model in Settings → Brain.`
       : 'This key cannot use the model the site chose for it. Choose a model in Settings → Brain.';

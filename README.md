@@ -261,10 +261,12 @@ build. Read the one for the part you are touching.
   then OpenRouter opens in a small window, the person signs in there and
   allows it, and OpenRouter hands this browser a key of their own (OAuth with
   PKCE; `src/openrouter.js`, `openrouter.html`). The key goes in use as a
-  pasted one does, kept in this browser only. An account that has never
-  bought credit there wakes on a free model (today Gemma 4 31B; free models
-  answer 50 requests a day until the account adds credits, then 1,000), and
-  the presence takes its first turn on its new mind. When the free requests
+  pasted one does, kept in this browser only. It always wakes on a free
+  model (today Inkling, from Thinking Machines; free models answer 50 requests a day, or 1,000
+  once the account has bought at least 10 credits), so it never fails for
+  want of credit, and the presence takes its first turn on its new mind. A
+  guest's key is forgotten when anyone signs in on that browser, as every
+  key a guest leaves is. When the free requests
   run out for the day, the line says exactly that and when they come back,
   instead of "wait a little" or "out of credit". Also: the privacy page no
   longer says the site thinks on a key of its own (true until 2026-10-12),

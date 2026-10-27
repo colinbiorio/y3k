@@ -59,7 +59,7 @@ import * as milestones from './src/milestones.js';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
 import { legalMoves } from './src/chess-rules.js';
 import * as media from './media.mjs';
-import { moderateImage, moderateText } from './moderation.mjs';
+import { moderateImage, moderateText, pickFreeJudge } from './moderation.mjs';
 import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
@@ -932,6 +932,28 @@ async function modelCatalog() {
     return catalog.models;
   })().finally(() => { catalogLoading = null; });
   return catalogLoading;
+}
+
+// THE FREE JUDGE (moderation.mjs pickFreeJudge): OpenRouter's public catalog
+// read for it at most every six hours, a failure tried again in ten minutes;
+// the last one known is used meanwhile (or none: the picture then fails
+// closed, as before)
+let freeJudge = { id: null, at: 0, tried: 0 };
+let freeJudgeLoading = null;
+async function freeJudgeModel() {
+  const now = Date.now();
+  if (freeJudge.id && now - freeJudge.at < 6 * 3600e3) return freeJudge.id;
+  if (now - freeJudge.tried < 600e3 || freeJudgeLoading) return freeJudgeLoading || freeJudge.id;
+  freeJudge.tried = now;
+  freeJudgeLoading = (async () => {
+    try {
+      const r = await fetch(CATALOG_URL, { signal: AbortSignal.timeout(8000) });
+      const id = pickFreeJudge(r.ok ? await r.json() : null);
+      if (id) freeJudge = { id, at: Date.now(), tried: Date.now() };
+    } catch { /* unreachable: the last known, or none */ }
+    return freeJudge.id;
+  })().finally(() => { freeJudgeLoading = null; });
+  return freeJudgeLoading;
 }
 
 async function sendEngine(req, res, headers) {
@@ -2342,6 +2364,22 @@ const server = http.createServer(async (req, res) => {
           const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
           if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
           const judge = BRAIN_PROVIDERS[pid];
+          // THE SCREENING, with a judge the key can pay for (2026-10-26): the
+          // pinned one first; when OpenRouter refuses it for want of credit (a
+          // free account, the one-click key's usual case, or one that has spent
+          // what it bought), the server's free vision judge, still never the
+          // poster's choice. A day's free requests spent is said as that.
+          const screen = async (img) => {
+            let v = await moderateImage(judge, b.key, judge.defaultModel(), img);
+            if (!v.safe && pid === 'openrouter' && upstreamWhy({ ok: false, status: v.status, detail: v.detail }) === 'credit') {
+              const free = await freeJudgeModel();
+              if (free) v = await moderateImage(judge, b.key, free, img);
+            }
+            if (!v.safe && pid === 'openrouter' && upstreamWhy({ ok: false, status: v.status, detail: v.detail }) === 'daily') {
+              v = { safe: false, reason: "today's free OpenRouter requests are used up, so it could not be checked" };
+            }
+            return v;
+          };
           for (const item of incoming) {
             // WHAT GETS LOOKED AT. A vision model can screen a still; it cannot
             // screen a video file. So a clip is judged on the poster frame the
@@ -2351,7 +2389,7 @@ const server = http.createServer(async (req, res) => {
             if (frame) {
               // The judge is a SERVER-PINNED vision model, never the client's — a
               // poster must not be able to name a blind model to slip media past.
-              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), frame);
+              const verdict = await screen(frame);
               if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
             }
             const put = media.storeImage(user.id, item.data);
@@ -2367,7 +2405,7 @@ const server = http.createServer(async (req, res) => {
             // every file it stored.
             if (put.kind === 'image' && item.kind !== 'image') {
               // A picture is judged on itself, whatever it was called.
-              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
+              const verdict = await screen(item.data);
               if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
             } else if (put.kind === 'video' && item.kind === 'audio') {
               // Sound in a video container: a browser records a voice clip as

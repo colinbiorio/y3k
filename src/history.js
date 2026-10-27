@@ -607,26 +607,6 @@ export function createHistory() {
     }
   }
 
-  // THE NEWEST LINE, TAKEN BACK (2026-10-26). A notice that a card says
-  // instead — the line for nothing chosen to think on, which the wake card
-  // (main.js showWake) says in fewer words beside the one-click key — leaves
-  // the column, so the screen carries one message, and on a phone the card
-  // does not sit over the end of the line it replaced. Only the newest line,
-  // only that speaker's, and only when it is that line; true when it went.
-  function dropLast(who, text) {
-    const t = String(text || '').trim();
-    if (!t) return false;
-    flush();
-    const last = entries[entries.length - 1];
-    if (!last || last.who !== who || !sameLine(t, last.text)) return false;
-    entries.pop();
-    unwatch(last);
-    stopScrollAnim(); scroll = 0;
-    moved();
-    relayout();
-    return true;
-  }
-
   function clear() {
     queued = null;
     if (queuedRaf) { cancelAnimationFrame(queuedRaf); queuedRaf = 0; }
@@ -822,5 +802,5 @@ export function createHistory() {
   // is this point on something the conversation has written? The pointer bus
   // uses it to decide whether pressing there means anything at all, which keeps
   // one definition of where the past lives.
-  return { push, clear, dropLast, onWords: (x, y) => onWords(x, y) };
+  return { push, clear, onWords: (x, y) => onWords(x, y) };
 }
