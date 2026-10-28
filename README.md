@@ -110,6 +110,8 @@ of its own, hosted by their account. The rails around the room are its places.
   answer, in your presence's own voice; each moment it lives there becomes a
   line of your presence's journal, so the one in the room remembers it. It
   asks on the computer before it starts, and rests when nobody is watching.
+  Between its moments it keeps moving: a view about every 0.7s, here and,
+  while someone watches a published life, from afar (`/api/life/view`).
 - **The app, by the name** (`src/download-glyph.js`) — the browser tab's own
   y3k mark, small and in unimat, just right of the wordmark in the top bar's
   middle. A press downloads the desktop app for this computer (the build the
@@ -249,6 +251,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-27** — **The life moves.** Colin: "an update every 60s doesn't
+  work -- we need a new frame in at least every second. the updates can be
+  tiny -- that's fine... we need to make life fluid, thinking, observing."
+  lucid now makes a view between its moments about every 0.7s on an 8GB M2
+  Air (its flow: the eye easing over the moment's picture the way the move
+  went, the picture touched lightly; nothing between is dreamed from, so the
+  world holds as before). The life page asks y3kode every 400ms instead of
+  700, and each picture fades in over most of the gap since the last
+  (`fadeFor`: 0.3s to 1.8s, so views flow and a life that sends one picture a
+  moment still dissolves slowly); a picture that comes while a fade runs
+  waits for it, the newest only, so a layer is never swapped mid-fade; both
+  layers drift as one. A published life sends its newest view too, while
+  someone watches it on the site: `POST /api/life/view` (the JPEG's bytes,
+  with the key; at most one each 400ms), kept only in memory and only the
+  newest, served as `/life/<user>/view.jpg` with a tag so a page asking every
+  900ms is answered 304 when nothing changed; `/api/life/latest` says when
+  there is one (`life.view`), and when views stop the moment's own picture
+  comes back. Whether a life is shared stays its owner's switch.
 - **2026-10-26** — **Wake it in one click.** A presence thinks on its
   owner's own key or plan, and the site has none of its own, so until now a
   new person woke theirs by fetching an API key from a provider's console and

@@ -84,11 +84,32 @@ await ok('words from the web wait in the inbox, bounded, and are taken once', ()
   assert.deepEqual(got.map((l) => l.text), ['two', 'three']);
   assert.deepEqual(pub.takeInbox('u1'), [], 'taken');
 });
+await ok('a view between moments: a JPEG under the limit, the newest only, a few a second at most, gone when it is not fresh', () => {
+  const j = (n = 64) => Buffer.from(jpeg(n), 'base64');
+  const t = 1_000_000;
+  assert.equal(pub.putView('u1', Buffer.from('not a jpeg'), 1, t).ok, false);
+  assert.equal(pub.putView('u1', Buffer.alloc(pub.VIEW_MAX + 1, 0xff), 1, t).ok, false);
+  assert.equal(pub.putView('bad uid!', j(), 1, t).ok, false);
+  const a = pub.putView('u1', j(10), 7, t);
+  assert.equal(a.ok, true);
+  const slow = pub.putView('u1', j(11), 7, t + pub.VIEW_EVERY_MS - 1);
+  assert.deepEqual([slow.ok, slow.status], [false, 429], 'not faster than its pace');
+  const b = pub.putView('u1', j(12), 8, t + pub.VIEW_EVERY_MS);
+  assert.equal(b.ok, true); assert.equal(b.seq, a.seq + 1);
+  const v = pub.view('u1', t + pub.VIEW_EVERY_MS + 5);
+  assert.equal(v.seq, b.seq); assert.equal(v.n, 8); assert.equal(v.buf.length, 16, 'the newest only');
+  assert.equal(pub.view('u2', t), null);
+  assert.equal(pub.view('u1', t + pub.VIEW_EVERY_MS + pub.VIEW_FRESH_MS + 1), null, 'a stale view is gone');
+  assert.equal(pub.view('u1', t + pub.VIEW_EVERY_MS + 5), null, '…and stays gone');
+  pub.putView('u1', j(), 9, t + 60_000);
+  assert.ok(pub.view('u1', t + 60_001));
+});
 await ok('shared is off until set; forgetting an account removes its life and key', () => {
   assert.equal(pub.isShared('u1'), false);
   assert.equal(pub.setShared('u1', true), true); assert.equal(pub.isShared('u1'), true);
   pub.forget('u1');
   assert.equal(pub.latest('u1'), null); assert.equal(pub.hasKey('u1'), false); assert.equal(pub.isShared('u1'), false);
+  assert.equal(pub.view('u1', Date.now()), null, 'and its view');
   assert.ok(!existsSync(join(DATA, 'life', 'u1')));
 });
 
@@ -156,6 +177,33 @@ try {
     assert.equal((await fetch(`${BASE}/life/ann/000001.jpg`)).status, 200);
     assert.equal((await fetch(`${BASE}/life/ann/000009.jpg`)).status, 404);
     assert.equal((await fetch(`${BASE}/api/life/latest?user=nobody`)).status, 404);
+  });
+  await ok('a view between moments is posted with the key as its bytes, and watched by whoever may watch the life, asked again for nothing', async () => {
+    const view = (bytes, headers = {}) => fetch(`${BASE}/api/life/view`, { method: 'POST', headers: { 'content-type': 'image/jpeg', authorization: `Bearer ${key}`, ...headers }, body: bytes });
+    assert.equal((await fetch(`${BASE}/life/ann/view.jpg`)).status, 404, 'no view yet');
+    assert.equal((await view(Buffer.from(jpeg(50), 'base64'), { authorization: 'Bearer y3kl_nope' })).status, 401);
+    assert.equal((await view(Buffer.from('not a jpeg'))).status, 400);
+    assert.equal((await view(Buffer.alloc(300 * 1024, 0xff))).status, 413);
+    const r = await view(Buffer.from(jpeg(50), 'base64'), { 'x-life-n': '1' });
+    assert.equal(r.status, 200);
+    const { seq } = await r.json();
+    assert.ok(Number.isInteger(seq));
+    assert.equal((await view(Buffer.from(jpeg(51), 'base64'))).status, 429, 'at its own pace');
+    const l = await (await fetch(`${BASE}/api/life/latest?user=ann`)).json();
+    assert.deepEqual([l.life.view.url, l.life.view.seq], ['/life/ann/view.jpg', seq]);
+    const g = await fetch(`${BASE}/life/ann/view.jpg`);
+    assert.equal(g.status, 200);
+    assert.equal(g.headers.get('content-type'), 'image/jpeg');
+    assert.equal(g.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(g.headers.get('etag'), `"v${seq}"`);
+    assert.match(g.headers.get('cache-control') || '', /no-cache/);
+    assert.equal((await g.arrayBuffer()).byteLength, 54);
+    const again = await fetch(`${BASE}/life/ann/view.jpg`, { headers: { 'if-none-match': `"v${seq}"` } });
+    assert.equal(again.status, 304, 'unchanged: nothing sent');
+    await post('/api/life/share', { shared: false }, ann);
+    assert.equal((await fetch(`${BASE}/life/ann/view.jpg`, { headers: { cookie: bob } })).status, 404, 'not shared: only its own');
+    assert.equal((await fetch(`${BASE}/life/ann/view.jpg`, { headers: { cookie: ann } })).status, 200);
+    await post('/api/life/share', { shared: true }, ann);
   });
   await ok('words said on the page wait in the inbox for the life, which takes them with its key', async () => {
     assert.equal((await post('/api/life/say', { text: 'you are welcome' })).status, 401);

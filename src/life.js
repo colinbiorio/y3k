@@ -84,6 +84,26 @@ export const versionAtLeast = (have, want) => {
 // watches someone else's, if they share it.
 export const PUB_LIVE_MS = 5000, PUB_IDLE_MS = 20000;
 
+// THE FLOW (lucid, 2026-10-27; Colin: "an update every 60s doesn't work -- we
+// need a new frame in at least every second... make life fluid, thinking,
+// observing"). Between its moments a life now makes a view about every 0.7s:
+// the eye moving over the moment's picture, touched lightly. Here they come
+// through y3kode (polled every LIVE_MS), or, for a published life, as
+// life.view: watched every VIEW_MS, an unchanged one costing a 304. Each
+// picture fades in over most of the time until the next is due (FADE_SHARE of
+// the recent gaps, from FADE_MIN to FADE_MAX), so views flow into each other
+// and a life that sends one picture a moment still dissolves slowly; one that
+// comes while a fade is running waits for it (only the newest waits), so a
+// layer is never swapped while it is showing.
+export const VIEW_MS = 900, VIEW_FRESH_MS = 8000;
+export const FADE_MIN = 300, FADE_MAX = 1800, FADE_SHARE = 0.85;
+/** How long a picture fades in (ms), from the gaps between the last few pictures (ms). */
+export function fadeFor(gaps) {
+  if (!gaps?.length) return FADE_MAX;
+  const s = [...gaps].sort((a, b) => a - b);
+  return Math.round(Math.max(FADE_MIN, Math.min(FADE_MAX, FADE_SHARE * s[s.length >> 1])));
+}
+
 // ONE CLICK (Colin, 2026-10-25: "an easy one-click start and stop… copying and
 // pasting keys is not user-friendly"). "begin" says what it does and asks once
 // (consent.js: always / just this time / cancel; the terms carry the same
@@ -112,7 +132,7 @@ export function agoText(at, now = Date.now()) {
 }
 import { whoseFields, reloaded } from './brain.js';
 
-const LIVE_MS = 700;     // how often a running life is asked how it is
+const LIVE_MS = 400;     // how often a running life is asked how it is (its views come about every 0.7s: THE FLOW)
 const IDLE_MS = 3000;    // and one that is not running, or not reachable
 const SAY_KEY = 'y3k.life.say';           // '0': its words stay written (said aloud unless so)
 const THOUGHTS_KEY = 'y3k.life.thoughts'; // '1': its inner monologue is said too (a lot of words: off unless so)
@@ -221,6 +241,9 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   let lines = null;        // its words being said, while the view is open
   let bridge = true;       // moments go to the record, until the site says there is nobody, or no presence, to remember for
   let shown = '', face = 0;   // the picture on the stage, and which of its two layers holds it
+  let fadeMs = FADE_MAX, fadeUntil = 0, waiting = '', waitTimer = 0, lastPicAt = 0;   // THE FLOW: the fade, and a picture waiting for it
+  let gaps = [];              // the last few gaps between pictures (ms)
+  let viewTimer = 0, viewTag = '', viewPic = '', viewAt = 0, viewUrls = [];   // a published life's views (object URLs, the newest last)
   let quiet = (() => { try { return localStorage.getItem(QUIET_KEY) === '1'; } catch { return false; } })();   // the words hidden, by a tap on the picture
   let hinted = false;         // the tap is said once
   let sleptAt = 0;            // when "go to sleep" reached a life lived afar: asleep from then, whatever its last moment's age
@@ -232,6 +255,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   function open() {
     if (root) close();
     since = -1; pic = ''; shown = ''; face = 0; st = null; phase = watch ? 'none' : 'checking'; bridge = true;
+    fadeMs = FADE_MAX; fadeUntil = 0; waiting = ''; lastPicAt = 0; gaps = []; viewTag = ''; viewPic = ''; viewAt = 0;
     pub = null; engine = null; setupV = null; updating = ''; starting = false; stopping = false;
     lines = speak ? createLines({ speak, schedule, unschedule }) : null;
     render();
@@ -241,6 +265,8 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   function close() {
     unschedule(timer); timer = 0;
     unschedule(pubTimer); pubTimer = 0;
+    unschedule(waitTimer); waitTimer = 0; waiting = '';
+    dropView();
     lines?.close(); lines = null;
     globalThis.window?.removeEventListener?.('resize', measure);
     root?.remove(); root = null; el = {};
@@ -291,10 +317,44 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     } catch { r = { ok: false, status: 0 }; }
     if (!root) return;
     pub = r;
+    if (!viewTimer && r?.life?.view?.url) pollView();   // it is making views: watch them
     // its words from afar are said here too, once each, when the published life is what is shown
     if (sourceOf(phase, pub) === 'web' && r?.life) { const { said } = newIn({ n: r.life.n, thought: r.life.thought || '', say: r.life.say || '' }, seen); if (said) lines?.say(said); }
     paint();
     pubTimer = schedule(pollPub, r?.life && fresh(r.life) ? pubEvery : PUB_IDLE_MS);
+  }
+  // A PUBLISHED LIFE'S VIEWS, about once a second while it makes them (THE
+  // FLOW): asked with the tag of the last (cache: no-cache), so an unchanged
+  // one comes back as the same and is not shown again; when they stop (a 404,
+  // or none for VIEW_FRESH_MS) the moment's own picture is shown again.
+  function dropView() {
+    unschedule(viewTimer); viewTimer = 0;
+    viewTag = ''; viewPic = ''; viewAt = 0;
+    for (const u of viewUrls) { try { URL.revokeObjectURL(u); } catch { /* gone */ } }
+    viewUrls = [];
+  }
+  async function pollView() {
+    unschedule(viewTimer); viewTimer = 0;
+    if (!root) return;
+    const web = sourceOf(phase, pub) === 'web' ? pub.life : null;
+    const url = web && awake(web) && typeof web.view?.url === 'string' && web.view.url.startsWith('/life/') ? web.view.url : '';
+    if (!url) { const had = !!viewPic; dropView(); if (had) paint(); return; }
+    try {
+      const x = await fetchFn(url, { cache: 'no-cache', credentials: 'same-origin' });
+      if (!root) return;
+      if (x?.status === 404) { dropView(); paint(); return; }   // it stopped making them
+      const tag = x?.ok ? (x.headers?.get?.('etag') || '') : '';
+      if (x?.ok && tag !== viewTag && typeof x.blob === 'function' && globalThis.URL?.createObjectURL) {
+        const u = URL.createObjectURL(await x.blob());
+        viewUrls.push(u);
+        // two layers and one waiting hold at most three; the older are let go
+        while (viewUrls.length > 4) { const old = viewUrls.shift(); try { URL.revokeObjectURL(old); } catch { /* gone */ } }
+        viewTag = tag; viewPic = u; viewAt = Date.now();
+        paint();
+      } else if (x?.ok) viewAt = Date.now();   // the same view: still coming
+    } catch { /* offline a moment: asked again */ }
+    if (!root) return;
+    viewTimer = schedule(pollView, VIEW_MS);
   }
   async function share(on) {
     sharing = true; paint();
@@ -372,6 +432,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     root = h('div', 'life-root');
     root.setAttribute('role', 'region'); root.setAttribute('aria-label', 'life');
     el.a = h('img', 'life-frame'); el.b = h('img', 'life-frame'); el.a.alt = ''; el.b.alt = ''; el.a.hidden = el.b.hidden = true;
+    el.frames = h('div', 'life-frames'); el.frames.append(el.a, el.b);   // one drift for both layers
     el.veil = h('div', 'life-veil');
     el.words = h('div', 'life-words'); el.thought = h('p', 'life-thought'); el.said = h('p', 'life-said'); el.words.append(el.thought, el.said);
     el.line = h('div', 'life-line'); el.status = h('span', 'life-status');
@@ -389,7 +450,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     // the bar (Colin, 2026-10-25: "nothing overlaps").
     el.under = h('div', 'life-under');
     el.under.append(el.words, el.line, el.acts);
-    root.append(el.a, el.b, el.veil, el.under, el.card);
+    root.append(el.frames, el.veil, el.under, el.card);
     root.classList.toggle('quiet', quiet);
     // a tap on the picture hides the words, and brings them back (Colin,
     // 2026-10-26: "give a way to hide text"); not on the words or buttons themselves
@@ -423,15 +484,30 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     root.style?.setProperty?.('--life-chat-top', `${Math.round(top)}px`);
   }
 
-  // the next picture fades in over the last: two layers, the newer on top
+  // the next picture fades in over the last: two layers, the newer on top;
+  // the fade follows how often pictures come, and one that comes while a fade
+  // runs waits for it (THE FLOW)
   function showPicture(url) {
     if (!root) return;
-    if (!url) { el.a.hidden = el.b.hidden = true; el.a.classList.remove('on'); el.b.classList.remove('on'); shown = ''; return; }
-    if (url === shown) return;
+    if (!url) { el.a.hidden = el.b.hidden = true; el.a.classList.remove('on'); el.b.classList.remove('on'); shown = ''; waiting = ''; return; }
+    if (url === shown || url === waiting) return;
+    const t = Date.now();
+    if (lastPicAt) { gaps.push(t - lastPicAt); if (gaps.length > 8) gaps.shift(); }
+    lastPicAt = t;
+    fadeMs = fadeFor(gaps);
+    root.style?.setProperty?.('--life-fade', `${fadeMs}ms`);
+    if (t < fadeUntil) {
+      waiting = url;
+      if (!waitTimer) waitTimer = schedule(() => { waitTimer = 0; const u = waiting; waiting = ''; if (u && root) swap(u); }, fadeUntil - t);
+      return;
+    }
+    swap(url);
+  }
+  function swap(url) {
     const next = face ? el.a : el.b, prev = face ? el.b : el.a;
     shown = url; face = face ? 0 : 1;
     next.hidden = false;
-    next.onload = () => { next.classList.add('on'); prev.classList.remove('on'); };
+    next.onload = () => { next.classList.add('on'); prev.classList.remove('on'); fadeUntil = Date.now() + fadeMs; };
     next.src = url;
   }
 
@@ -441,7 +517,8 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     const source = sourceOf(phase, pub);
     const web = source === 'web' ? pub.life : null;
     const m = st?.moment || null;
-    showPicture(source === 'web' ? (web.frameUrl || '') : pic);
+    const viewing = source === 'web' && viewPic && Date.now() - viewAt < VIEW_FRESH_MS;
+    showPicture(source === 'web' ? (viewing ? viewPic : (web.frameUrl || '')) : pic);
     const thought = web ? web.thought : m?.thought;
     const said = web ? web.say : (phase === 'living' ? m?.say : '');
     // one sentence on the screen: its words if it spoke, else the first of its thought

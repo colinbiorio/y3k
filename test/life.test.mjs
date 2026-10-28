@@ -333,6 +333,82 @@ await ok('a published life of your own, awake: the picture, its thought and word
   view.close();
 });
 
+// THE FLOW (2026-10-27): a living life sends a view about every 0.7s. Asked
+// every 400ms here; each picture fades over most of the recent gap; one that
+// comes while a fade runs waits for it, the newest only; a published life's
+// views are watched by their tag, an unchanged one not shown again, and when
+// they stop the moment's own picture comes back.
+await ok('the flow: views flow into each other here and from afar, never swapping a layer mid-fade', async () => {
+  const { createLifeView, fadeFor, FADE_MIN, FADE_MAX, VIEW_MS } = await import('../src/life.js');
+  assert.equal(fadeFor([]), FADE_MAX, 'one picture a moment: the slow dissolve');
+  assert.equal(fadeFor([700, 650, 720]), Math.round(0.85 * 700), 'views: most of the gap');
+  assert.equal(fadeFor([50, 60]), FADE_MIN);
+  assert.equal(fadeFor([20000]), FADE_MAX);
+  // a hand-run clock: nothing scheduled runs until the test runs it
+  const q = []; let ids = 0;
+  const schedule = (fn, ms) => { const id = ++ids; q.push({ id, fn, ms }); return id; };
+  const unschedule = (id) => { const i = q.findIndex((x) => x.id === id); if (i >= 0) q.splice(i, 1); };
+  const run = async (pick) => { const i = q.findIndex(pick); assert.ok(i >= 0, 'nothing like that is waiting: ' + q.map((x) => x.ms).join(',')); const [x] = q.splice(i, 1); await x.fn(); for (let j = 0; j < 4; j++) await new Promise((r) => setTimeout(r, 1)); };
+  let k = 0;
+  const view = createLifeView({
+    toast: () => {}, speak: null, openKode: () => {}, schedule, unschedule,
+    cmd: async (c) => (c.cmd === 'life.state' ? { ok: true, installed: true, running: true, frameN: ++k, frame: 'F' + k, moment: { n: k, thought: 't' + k } }
+      : c.cmd === 'engine.hello' ? { ok: true, version: '0.3.7' } : { ok: true }),
+    fetchFn: async () => ({ ok: false, status: 401, json: async () => ({}) }),
+    setup: async () => ({}),
+  });
+  view.open();
+  for (let j = 0; j < 6; j++) await new Promise((r) => setTimeout(r, 1));
+  const [a, b] = document.body.querySelectorAll('img.life-frame');
+  const url = (n) => 'data:image/jpeg;base64,F' + n;
+  const holding = () => [a.src || '', b.src || ''];
+  assert.ok(holding().includes(url(1)), 'the first view is on a layer');
+  assert.ok(q.some((x) => x.ms === 400), 'a living life is asked again in 400ms');
+  const first = holding().indexOf(url(1)) === 0 ? a : b;
+  first.onload();   // it has loaded: its fade runs
+  await run((x) => x.ms === 400);
+  assert.ok(!holding().includes(url(2)), 'a view that comes mid-fade waits');
+  await run((x) => x.ms === 400);
+  assert.ok(!holding().includes(url(3)), 'still waiting');
+  const wait = q.find((x) => x.ms > 400 && x.ms <= FADE_MAX);
+  assert.ok(wait, 'it waits for the fade to end');
+  await run((x) => x === wait);
+  assert.ok(holding().includes(url(3)) && !holding().includes(url(2)), 'the newest only, when the fade is done: ' + holding());
+  view.close();
+
+  // from afar: a published life making views
+  q.length = 0; k = 0;
+  const at = Date.now() - 2000;
+  let tag = '"v1"', gone = false;
+  const asked = [];
+  const pubLife = () => ({ n: 9, at, thought: 'here', say: '', place: 'the street', who: 'claude', frameUrl: '/life/ann/000009.jpg', ...(gone ? {} : { view: { url: '/life/ann/view.jpg', seq: 1, at } }) });
+  const far = createLifeView({
+    toast: () => {}, speak: null, openKode: () => {}, schedule, unschedule,
+    cmd: async () => ({ ok: false, code: 'unpaired' }),
+    fetchFn: async (u, o) => {
+      asked.push([u, o?.cache || '']);
+      if (u === '/life/ann/view.jpg') return gone ? { ok: false, status: 404 } : { ok: true, status: 200, headers: { get: (h) => (h === 'etag' ? tag : null) }, blob: async () => new Blob([Uint8Array.from([0xff, 0xd8, 0xff, 1])], { type: 'image/jpeg' }) };
+      return { ok: true, json: async () => ({ ok: true, user: 'ann', mine: true, shared: false, key: true, life: pubLife(), recent: [] }) };
+    },
+    setup: async () => ({}),
+  });
+  far.open();
+  for (let j = 0; j < 8; j++) await new Promise((r) => setTimeout(r, 1));
+  const [fa, fb] = document.body.querySelectorAll('img.life-frame');
+  const shownNow = () => [fa.src || '', fb.src || ''].filter(Boolean);
+  assert.ok(asked.some(([u, c]) => u === '/life/ann/view.jpg' && c === 'no-cache'), 'its views are asked by their tag: ' + JSON.stringify(asked));
+  assert.ok(shownNow().some((s) => s.startsWith('blob:')), 'a view is shown, not the moment: ' + shownNow());
+  assert.ok(q.some((x) => x.ms === VIEW_MS), 'asked again about once a second');
+  const before = shownNow().join();
+  await run((x) => x.ms === VIEW_MS);
+  assert.equal(shownNow().join(), before, 'the same tag: not shown again');
+  gone = true;
+  await run((x) => x.ms === VIEW_MS);
+  assert.ok(shownNow().includes('/life/ann/000009.jpg'), 'views stopped: the moment\'s own picture again: ' + shownNow());
+  assert.ok(!q.some((x) => x.ms === VIEW_MS), 'and they are not asked for');
+  far.close();
+});
+
 // THE REAL THING, when it is here: lucid's scripted brain and placeholder
 // dreamer in a scratch life (no model, no plan, no real life touched), through
 // the bridge exactly as y3kode runs it.
