@@ -109,7 +109,8 @@ export const COMMANDS = {
   'computer.stop': {},
   // life (life.mjs): lucid on this computer, shown in the site's life mode
   'life.status': {},
-  'life.start': { fresh: B(), publish: O() },   // publish: { to, key } — the site the life posts its moments to, with the account's key (life.mjs checks both)
+  'life.start': { fresh: B(), publish: O(), asked: B() },   // asked: the person said yes in the life window itself (life.mjs)
+  // (publish: { to, key } — the site the life posts its moments to, with the account's key (life.mjs checks both))   // publish: { to, key } — the site the life posts its moments to, with the account's key (life.mjs checks both)
   'life.state': { since: N() },
   // (to: the life's mode, human or autonomous; not `mode`, which every command
   // shares as kode's permission mode and is checked against MODES below)

@@ -55,6 +55,9 @@ export const LIFE_PUBLISH_ENGINE = '0.3.6';
 // computer (lucid --live), through its door (y3kode 0.3.7). On an older one
 // the press reaches nothing, and the page says so.
 export const LIFE_DOOR_ENGINE = '0.3.7';
+// …and from 0.3.8 the yes given in the life window is the computer's yes too
+// (life.start `asked`; an older one refuses a field it does not know, so it is sent only to one that takes it)
+export const LIFE_ASK_ENGINE = '0.3.8';
 // ONE SENTENCE ON THE SCREEN (Colin, 2026-10-26: "there should only be one
 // sentence of text printed to the screen"): its spoken words if it spoke,
 // else the first sentence of its thought. The whole thought stays in the
@@ -83,7 +86,7 @@ export const versionAtLeast = (have, want) => {
 // a phone, another computer, a browser with no y3kode. `?life=<username>`
 // watches someone else's, if they share it.
 export const PUB_LIVE_MS = 5000, PUB_IDLE_MS = 20000;
-export const ASK_AFTER_MS = 2500;
+export const ASK_AFTER_MS = 2500;   // (a y3kode before 0.3.8 still asks in its own window; this says where)
 export const ASK_HERE = 'y3kode is asking on this computer: answer "y" in the window where y3kode runs (a Terminal, or the y3k app), within two minutes';
 
 // THE FLOW (lucid, 2026-10-27; Colin: "an update every 60s doesn't work -- we
@@ -407,7 +410,8 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     // starting up": the question sat in a Terminal tab he could not see)
     askedHere = false;
     const hint = schedule(() => { if (!starting || !root) return; askedHere = true; paint(); toast(ASK_HERE); }, ASK_AFTER_MS);
-    const r = await cmd({ cmd: 'life.start', fresh: !!anew, ...(publish ? { publish } : {}) });
+    // the yes just given here is the computer's yes too (y3kode 0.3.8: no second question in another window)
+    const r = await cmd({ cmd: 'life.start', fresh: !!anew, ...(versionAtLeast(engine?.version, LIFE_ASK_ENGINE) ? { asked: true } : {}), ...(publish ? { publish } : {}) });
     unschedule(hint);
     starting = false; askedHere = false;
     if (!r?.ok) toast(r?.code === 'declined' ? 'not started: the computer said no' : (r?.error || 'the life could not start'));

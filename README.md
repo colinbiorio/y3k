@@ -251,6 +251,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-28** — **Wake it in the life window, nowhere else.** Colin: "you
+  shouldn't have to switch between tabs -- the approval should happen within
+  the life window." Waking a life asked twice: once on the page, then again
+  in the Terminal window y3kode runs in, where nobody was looking, so the
+  button sat on "waking…" for two minutes and gave up. From y3kode 0.3.8 the
+  yes given in the life window's card (always / just this time / cancel) is
+  the computer's yes for this one thing: `life.start { asked: true }` from the
+  paired page starts lucid without a second question, and the audit records
+  it as `via: 'life window'`. Everything else that changes the computer still
+  asks there. An older y3kode is not sent the field (it refuses fields it does
+  not know); with one, a wake still waiting after 2.5s says where to answer.
 - **2026-10-27** — **The life moves.** Colin: "an update every 60s doesn't
   work -- we need a new frame in at least every second. the updates can be
   tiny -- that's fine... we need to make life fluid, thinking, observing."
