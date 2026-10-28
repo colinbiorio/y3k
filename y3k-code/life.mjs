@@ -81,7 +81,7 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
   let log = [];              // stderr's last lines, for when it stops on its own
   let ended = null;          // how the last run ended: { code, why }
   let lastSeen = 0;
-  let allowed = false;       // asked on this computer, once each time y3kode starts
+  let allowed = false;       // asked on this computer (or in the life window: start's `asked`), once each time y3kode starts
   let asking = null;
 
   const at = () => lucidAt({ env, config: config() });
@@ -112,10 +112,19 @@ export function createLife({ ask, audit, env = process.env, config = () => ({}),
     return true;
   }
 
-  async function start({ fresh = false, publish = null } = {}) {
+  async function start({ fresh = false, publish = null, asked: askedThere = false } = {}) {
     const where = at();
     if (!where.installed) return { ok: false, code: 'not-installed', error: `lucid is not on this computer (looked in ${where.dir}).`, dir: where.dir };
     if (running()) { lastSeen = now(); return { ok: true, running: true }; }
+    // ASKED IN THE LIFE WINDOW (0.3.8; Colin, 2026-10-28: "you shouldn't have
+    // to switch between tabs -- the approval should happen within the life
+    // window"). The page asks first (the consent card: always / just this
+    // time / cancel); a page paired with this engine that says the person said
+    // yes there is taken at its word for this one thing, starting lucid, which
+    // runs only the script in its own folder, with arguments only from this
+    // computer's environment. It is written to the audit as such. Everything
+    // else that changes this computer still asks here.
+    if (!allowed && askedThere === true) { allowed = true; audit?.write('consent', { consent: 'life.run', allowed: true, via: 'life window' }); }
     if (!allowed) {
       if (!asking) asking = Promise.resolve(ask('life.run', {})).finally(() => { asking = null; });
       if (!(await asking)) return { ok: false, code: 'declined', error: 'Not allowed on the computer.' };

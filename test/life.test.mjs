@@ -100,6 +100,24 @@ await ok('it is asked on the computer first, once, then runs lucid --serve on th
   rmSync(home, { recursive: true, force: true });
 });
 
+await ok('a yes said in the life window is the computer\'s yes: no second question elsewhere, and the audit says where it came from', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'life-'));
+  mkdirSync(join(dir, '.venv', 'bin'), { recursive: true });
+  writeFileSync(join(dir, '.venv', 'bin', 'python'), ''); writeFileSync(join(dir, 'lucid.py'), '');
+  const { spawn, calls } = fakeSpawn();
+  let asked = 0; const audits = [];
+  const life = createLife({ ask: async () => { asked += 1; return false; }, audit: { write: (k, v) => audits.push([k, v]) }, env: { Y3K_LUCID: dir }, spawn, every: () => ({}), clear: () => {} });
+  assert.equal((await life.start({ asked: 'yes' })).code, 'declined', 'only a real true counts');
+  assert.equal((await life.start({ asked: true })).ok, true);
+  assert.equal(calls.length, 1, 'it ran');
+  assert.equal(asked, 1, 'and nothing was asked in another window for it');
+  assert.ok(audits.some(([k, v]) => k === 'consent' && v.via === 'life window' && v.allowed === true));
+  assert.equal(validateCommand({ cmd: 'life.start', asked: true }).ok !== false, true);
+  const src = readFileSync(new URL('../src/life.js', import.meta.url), 'utf8');
+  assert.match(src, /LIFE_ASK_ENGINE\) \? \{ asked: true \} : \{\}/, 'the page sends the yes it was given, to a y3kode that takes it');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 await ok('the page gets each moment, and a picture only when it has not got it yet', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'life-'));
   mkdirSync(join(dir, '.venv', 'bin'), { recursive: true });
