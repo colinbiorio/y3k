@@ -83,6 +83,8 @@ export const versionAtLeast = (have, want) => {
 // a phone, another computer, a browser with no y3kode. `?life=<username>`
 // watches someone else's, if they share it.
 export const PUB_LIVE_MS = 5000, PUB_IDLE_MS = 20000;
+export const ASK_AFTER_MS = 2500;
+export const ASK_HERE = 'y3kode is asking on this computer: answer "y" in the window where y3kode runs (a Terminal, or the y3k app), within two minutes';
 
 // THE FLOW (lucid, 2026-10-27; Colin: "an update every 60s doesn't work -- we
 // need a new frame in at least every second... make life fluid, thinking,
@@ -237,6 +239,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
   let st = null;           // the last life.state answer
   let phase = 'checking';
   let starting = false, stopping = false;
+  let askedHere = false;   // the start is waiting on y3kode's own question, on this computer
   const seen = { thought: '', say: '' };   // what has been kept and said: across openings (newIn)
   let lines = null;        // its words being said, while the view is open
   let bridge = true;       // moments go to the record, until the site says there is nobody, or no presence, to remember for
@@ -397,8 +400,16 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
         if (j?.key) { publish = { to: location.origin, key: j.key }; if (pub) pub.key = true; }
       } catch { /* it still lives here; it is just not published */ }
     }
+    // y3kode asks once more on the computer itself (its own consent, in the
+    // window it runs in) and waits up to two minutes for the answer: a start
+    // still waiting after a moment is waiting on that, and the page says where
+    // (Colin, 2026-10-28: "it's getting stuck on 'waking' and never actually
+    // starting up": the question sat in a Terminal tab he could not see)
+    askedHere = false;
+    const hint = schedule(() => { if (!starting || !root) return; askedHere = true; paint(); toast(ASK_HERE); }, ASK_AFTER_MS);
     const r = await cmd({ cmd: 'life.start', fresh: !!anew, ...(publish ? { publish } : {}) });
-    starting = false;
+    unschedule(hint);
+    starting = false; askedHere = false;
     if (!r?.ok) toast(r?.code === 'declined' ? 'not started: the computer said no' : (r?.error || 'the life could not start'));
     since = -1;
     poll();
@@ -549,7 +560,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     const canWake = here && phase === 'resting' && !awakeAfar;
     el.wake.hidden = !canWake; el.sleep.hidden = !canSleep;
     el.acts.hidden = !(canWake || canSleep);
-    el.wake.disabled = starting; setText(el.wake, starting ? 'waking…' : 'wake up');
+    el.wake.disabled = starting; setText(el.wake, starting ? (askedHere ? 'allow it on your computer…' : 'waking…') : 'wake up');
     el.sleep.disabled = stopping; setText(el.sleep, stopping ? 'going to sleep…' : 'go to sleep');
     card(source);
   }
