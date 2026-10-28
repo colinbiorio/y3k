@@ -409,6 +409,15 @@ await ok('the flow: views flow into each other here and from afar, never swappin
   far.close();
 });
 
+await ok('a wake that waits on the computer\'s own question says where to answer it', async () => {
+  const { ASK_AFTER_MS, ASK_HERE } = await import('../src/life.js');
+  const src = readFileSync(new URL('../src/life.js', import.meta.url), 'utf8');
+  assert.match(src, /schedule\(\(\) => \{ if \(!starting \|\| !root\) return; askedHere = true; paint\(\); toast\(ASK_HERE\); \}, ASK_AFTER_MS\)/, 'a start still waiting says so');
+  assert.match(src, /unschedule\(hint\);/, 'and stops saying it once answered');
+  assert.match(src, /askedHere \? 'allow it on your computer…' : 'waking…'/, 'the button says where');
+  assert.ok(ASK_AFTER_MS < 5000 && /Terminal/.test(ASK_HERE));
+});
+
 // THE REAL THING, when it is here: lucid's scripted brain and placeholder
 // dreamer in a scratch life (no model, no plan, no real life touched), through
 // the bridge exactly as y3kode runs it.
