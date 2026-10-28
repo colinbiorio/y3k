@@ -43,7 +43,7 @@ const DIR = join(DATA_DIR, 'life');
 const KEYS = join(DATA_DIR, '.life-keys.json');
 export const FRAME_MAX = 400 * 1024;
 export const KEEP = { frames: 240, journal: 2000, inbox: 40 };   // tests shrink these
-const CLIP = { sees: 400, thought: 2000, say: 500, scene: 300, intention: 300, place: 120, status: 80, action: 40, mode: 12, who: 8 };
+const CLIP = { sees: 400, thought: 2000, say: 500, answer: 400, scene: 300, intention: 300, place: 120, status: 80, action: 40, mode: 12, who: 8 };
 
 const atomic = (file, text) => { const tmp = file + '.tmp'; writeFileSync(tmp, text); renameSync(tmp, file); };
 const readJson = (file, fallback) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; } };

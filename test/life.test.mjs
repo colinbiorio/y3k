@@ -320,7 +320,7 @@ await ok('a published life of your own, awake: the picture, its thought and word
   const { serialize } = await import('./fakes/mini-dom.mjs');
   const { createLifeView } = await import('../src/life.js');
   const posts = [];
-  const life = { n: 2551, at: Date.now() - 20_000, thought: 'Sixty-two moments, and it holds.', say: 'The rain is back.', place: 'The lantern colonnade', who: 'claude', frameUrl: '/life/y3klay/002551.jpg' };
+  const life = { n: 2551, at: Date.now() - 20_000, thought: 'Sixty-two moments, and it holds.', say: 'The rain is back.', answer: 'the hooded man: “Wet every night this month.”', place: 'The lantern colonnade', who: 'claude', frameUrl: '/life/y3klay/002551.jpg' };
   const said = [];
   const view = createLifeView({
     toast: () => {}, speak: (t) => { said.push(t); return undefined; }, openKode: () => {},
@@ -335,6 +335,7 @@ await ok('a published life of your own, awake: the picture, its thought and word
   // one sentence on the screen (2026-10-26): when it spoke, its words alone; the thought stays in the journal and its voice
   assert.ok(!/Sixty-two moments/.test(html), 'the thought is not drawn beside its words');
   assert.match(html, /“The rain is back\.”/, 'its words');
+  assert.match(html, /life-answer>"the hooded man: “Wet every night this month\.”"/, 'and the world answering, under them');
   assert.match(html, /moment 2551 · The lantern colonnade · living on its own/, 'one line');
   assert.match(html, /only you can see it/, 'sharing, one small word');
   assert.ok(!/a life lives on your own computer/.test(html), 'no card over a life that is showing');
@@ -381,14 +382,14 @@ await ok('the flow: views flow into each other here and from afar, never swappin
   const url = (n) => 'data:image/jpeg;base64,F' + n;
   const holding = () => [a.src || '', b.src || ''];
   assert.ok(holding().includes(url(1)), 'the first view is on a layer');
-  assert.ok(q.some((x) => x.ms === 400), 'a living life is asked again in 400ms');
+  assert.ok(q.some((x) => x.ms === 200), 'a living life is asked again in 200ms');
   const first = holding().indexOf(url(1)) === 0 ? a : b;
   first.onload();   // it has loaded: its fade runs
-  await run((x) => x.ms === 400);
+  await run((x) => x.ms === 200);
   assert.ok(!holding().includes(url(2)), 'a view that comes mid-fade waits');
-  await run((x) => x.ms === 400);
+  await run((x) => x.ms === 200);
   assert.ok(!holding().includes(url(3)), 'still waiting');
-  const wait = q.find((x) => x.ms > 400 && x.ms <= FADE_MAX);
+  const wait = q.find((x) => x.ms > 200 && x.ms <= FADE_MAX);
   assert.ok(wait, 'it waits for the fade to end');
   await run((x) => x === wait);
   assert.ok(holding().includes(url(3)) && !holding().includes(url(2)), 'the newest only, when the fade is done: ' + holding());
