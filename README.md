@@ -251,6 +251,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-28** — **The world answers, on the page too.** lucid's world now
+  answers what the life says aloud (another mind, speaking as the person it
+  spoke to: "Wet every night this month. I've given up on the umbrella.").
+  The life page shows that answer under its words, smaller and in another
+  colour, here and from afar (`answer`, kept with a published moment). lucid
+  now draws about seven frames a second between its views, so the page asks
+  y3kode every 200ms instead of 400, and a fade can be as short as 0.15s.
 - **2026-10-28** — **Wake it in the life window, nowhere else.** Colin: "you
   shouldn't have to switch between tabs -- the approval should happen within
   the life window." Waking a life asked twice: once on the page, then again

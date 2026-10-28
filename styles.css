@@ -3031,7 +3031,8 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
 .life-thought { margin: 0; color: rgba(236, 238, 244, 0.88); font-size: 1.05rem; line-height: 1.55; font-style: italic; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .life-said { margin: 10px 0 0; color: #fff; font-size: 1.28rem; line-height: 1.4; font-weight: 450; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.85); }
-.life-said:empty, .life-thought:empty { display: none; }
+.life-answer { margin: 6px 0 0; color: rgba(190, 214, 255, 0.92); font-size: 1.02rem; line-height: 1.4; font-style: italic; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85); }
+.life-said:empty, .life-thought:empty, .life-answer:empty { display: none; }
 .life-line { display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap; max-width: 100%;
   font-size: 0.78rem; letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.58); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
 .life-line[hidden] { display: none; }

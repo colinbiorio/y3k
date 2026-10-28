@@ -101,7 +101,7 @@ export const ASK_HERE = 'y3kode is asking on this computer: answer "y" in the wi
 // comes while a fade is running waits for it (only the newest waits), so a
 // layer is never swapped while it is showing.
 export const VIEW_MS = 900, VIEW_FRESH_MS = 8000;
-export const FADE_MIN = 300, FADE_MAX = 1800, FADE_SHARE = 0.85;
+export const FADE_MIN = 150, FADE_MAX = 1800, FADE_SHARE = 0.85;
 /** How long a picture fades in (ms), from the gaps between the last few pictures (ms). */
 export function fadeFor(gaps) {
   if (!gaps?.length) return FADE_MAX;
@@ -137,7 +137,7 @@ export function agoText(at, now = Date.now()) {
 }
 import { whoseFields, reloaded } from './brain.js';
 
-const LIVE_MS = 400;     // how often a running life is asked how it is (its views come about every 0.7s: THE FLOW)
+const LIVE_MS = 200;     // how often a running life is asked how it is (THE FLOW: about seven frames a second, lucid 2026-10-28)
 const IDLE_MS = 3000;    // and one that is not running, or not reachable
 const SAY_KEY = 'y3k.life.say';           // '0': its words stay written (said aloud unless so)
 const THOUGHTS_KEY = 'y3k.life.thoughts'; // '1': its inner monologue is said too (a lot of words: off unless so)
@@ -449,7 +449,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     el.a = h('img', 'life-frame'); el.b = h('img', 'life-frame'); el.a.alt = ''; el.b.alt = ''; el.a.hidden = el.b.hidden = true;
     el.frames = h('div', 'life-frames'); el.frames.append(el.a, el.b);   // one drift for both layers
     el.veil = h('div', 'life-veil');
-    el.words = h('div', 'life-words'); el.thought = h('p', 'life-thought'); el.said = h('p', 'life-said'); el.words.append(el.thought, el.said);
+    el.words = h('div', 'life-words'); el.thought = h('p', 'life-thought'); el.said = h('p', 'life-said'); el.answer = h('p', 'life-answer'); el.words.append(el.thought, el.said, el.answer);
     el.line = h('div', 'life-line'); el.status = h('span', 'life-status');
     el.hint = h('span', 'life-hint', 'tap the picture to hide the words'); el.hint.hidden = true;
     el.share = btn('', 'life-share', () => share(!pub?.shared)); el.share.hidden = true;
@@ -539,6 +539,11 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     // one sentence on the screen: its words if it spoke, else the first of its thought
     setText(el.thought, said ? '' : oneSentence(thought));
     setText(el.said, said ? `“${oneSentence(said)}”` : '');
+    // THE WORLD ANSWERS (lucid, 2026-10-28): the one it spoke to, answering,
+    // under its words, smaller (Colin: "a way for its environment to respond
+    // back to it? a way for it to meet others inside its own dream?")
+    const answer = said ? String((web ? web.answer : m?.answer) || '') : '';
+    setText(el.answer, answer.slice(0, 300));
     el.words.hidden = !(thought || said);
     if (!hinted && (thought || said) && !quiet) { hinted = true; el.hint.hidden = false; schedule(() => { if (el.hint) el.hint.hidden = true; }, 5000); }
     // one thin line: where it stands, and that it lives
