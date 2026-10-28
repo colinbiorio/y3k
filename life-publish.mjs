@@ -21,6 +21,14 @@
 // retires the old. `shared` on the same record says whether anyone may watch
 // (by username); until it is set, only the account sees its own life.
 //
+// VIEWS (2026-10-27, lucid's flow: "we need a new frame in at least every
+// second"): between its moments a life makes a view about every 0.7s, the eye
+// moving over the moment's picture. While someone watches the published life
+// the living process posts the newest, about once a second; only the newest
+// is kept, IN MEMORY, for VIEW_FRESH_MS, and served as view.jpg with a tag so
+// an unchanged one costs a watcher nothing. A view is not a moment: nothing
+// of it is written down, and a restart forgets it.
+//
 // BOUNDED EVERYTHING: strings are clipped to what a moment needs, a picture is
 // a JPEG of at most FRAME_MAX bytes (checked by its first bytes, not its
 // name), frames and journal lines beyond the keep are dropped oldest first,
@@ -168,6 +176,29 @@ export function takeInbox(uid) {
   return text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).slice(-KEEP.inbox);
 }
 
+// ---- views: the life between its moments, the newest only, in memory ------------
+export const VIEW_MAX = 256 * 1024, VIEW_EVERY_MS = 400, VIEW_FRESH_MS = 10_000;
+const views = new Map();   // uid -> { buf, at, seq, n }
+let viewSeq = 0;
+/** The newest view, as the living process posts it (the JPEG's bytes). → { ok, seq } | { ok: false, error, status } */
+export function putView(uid, buf, n = null, now = Date.now()) {
+  uid = safeUid(uid); if (!uid) return { ok: false, error: 'bad uid', status: 400 };
+  if (!Buffer.isBuffer(buf) || buf.length < 4 || buf.length > VIEW_MAX || !buf.subarray(0, 3).equals(JPEG)) return { ok: false, error: 'a view is a JPEG under the limit', status: 400 };
+  const was = views.get(uid);
+  if (was && now - was.at < VIEW_EVERY_MS) return { ok: false, error: 'slow down', status: 429 };
+  viewSeq += 1;
+  views.set(uid, { buf, at: now, seq: viewSeq, n: Number.isInteger(n) && n >= 0 && n < 1e9 ? n : null });
+  return { ok: true, seq: viewSeq };
+}
+/** The newest view while it is fresh, or null. */
+export function view(uid, now = Date.now()) {
+  uid = safeUid(uid); if (!uid) return null;
+  const v = views.get(uid);
+  if (!v) return null;
+  if (now - v.at > VIEW_FRESH_MS) { views.delete(uid); return null; }
+  return v;
+}
+
 // Whether the site is showing this life to someone, lately: a signal for the
 // living process (it slows to a moment a minute while nobody looks), carried
 // in the inbox's answer. In memory: it is not a record.
@@ -179,5 +210,6 @@ export function watched(uid, within = 60_000, now = Date.now()) { uid = safeUid(
 export function forget(uid) {
   uid = safeUid(uid); if (!uid) return;
   try { rmSync(dirOf(uid), { recursive: true, force: true }); } catch { /* none */ }
+  views.delete(uid);
   const k = keys(); if (k[uid]) { delete k[uid]; saveKeys(k); }
 }

@@ -301,8 +301,10 @@ const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_R
 const CODE_DIR = join(ROOT, 'y3k-code');
 // A published life's pictures, by username and moment (life-publish.mjs).
 const LIFE_FRAME = /^\/life\/([^/]{1,64})\/(\d{1,9})\.jpg$/;
+// …its newest view between moments (lucid's flow), by username
+const LIFE_VIEW = /^\/life\/([^/]{1,64})\/view\.jpg$/;
 // …and its doors, named: /api/life/moment (the presence's record, below) is not one of them
-const LIFE_PUB_PATHS = new Set(['/api/life/publish', '/api/life/inbox', '/api/life/key', '/api/life/share', '/api/life/say', '/api/life/latest']);
+const LIFE_PUB_PATHS = new Set(['/api/life/publish', '/api/life/view', '/api/life/inbox', '/api/life/key', '/api/life/share', '/api/life/say', '/api/life/latest']);
 // The version that tarball is, so a page can tell a y3kode that is behind it
 // (Settings → Brain's "Update needed", y3k-code/update.mjs).
 const ENGINE_VERSION = (() => { try { return JSON.parse(readFileSync(join(CODE_DIR, 'package.json'), 'utf8')).version || null; } catch { return null; } })();
@@ -969,6 +971,21 @@ async function sendEngine(req, res, headers) {
 // The bytes of each request's body, as readJsonBody read it: what a route
 // that waits on someone's page holds for as long as it waits (bodyHeld).
 const BODY_BYTES = new WeakMap();
+// A body as its bytes (a life's view, a JPEG), bounded as readJsonBody bounds one.
+async function readRawBody(req, max) {
+  const tooLarge = () => { const e = new Error('payload too large'); e.statusCode = 413; return e; };
+  if (Number(req.headers['content-length']) > max) throw tooLarge();
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > max) throw tooLarge();
+    chunks.push(c);
+  }
+  BODY_BYTES.set(req, size);
+  return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, size);
+}
+
 async function readJsonBody(req, max = 256 * 1024) {
   const tooLarge = () => { const e = new Error('payload too large'); e.statusCode = 413; return e; };
   // A body that says up front it is too long is refused before a byte of it is
@@ -1912,7 +1929,7 @@ const server = http.createServer(async (req, res) => {
     // anywhere; words typed on the page wait in the inbox until the life asks.
     // Pictures leave by their own route, as what they are (nosniff), to the
     // account, or to anyone by username once the account shares its life.
-    if (LIFE_PUB_PATHS.has(reqPath) || LIFE_FRAME.test(reqPath)) {
+    if (LIFE_PUB_PATHS.has(reqPath) || LIFE_FRAME.test(reqPath) || LIFE_VIEW.test(reqPath)) {
       const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
       if (reqPath === '/api/life/publish' && req.method === 'POST') {
         const uid = lifePub.uidOf(bearer);
@@ -1922,6 +1939,19 @@ const server = http.createServer(async (req, res) => {
         try { b = await readJsonBody(req, 700 * 1024); } catch (e) { return json(e.statusCode === 413 ? 413 : 400, { error: e.statusCode === 413 ? 'the moment is too big' : 'bad json' }); }
         const r = lifePub.publish(uid, b);
         return json(r.ok ? 200 : 400, r);
+      }
+      // a view between moments: the JPEG's bytes, with the key; the newest is
+      // kept in memory for a few seconds (life-publish.mjs VIEWS), at most a
+      // few a second (its own pace, not the download ceiling: about one a
+      // second is what it is for)
+      if (reqPath === '/api/life/view' && req.method === 'POST') {
+        const uid = lifePub.uidOf(bearer);
+        if (!uid) return json(401, { error: 'no such key' });
+        let buf;
+        try { buf = await readRawBody(req, lifePub.VIEW_MAX); } catch (e) { return json(e.statusCode === 413 ? 413 : 400, { error: e.statusCode === 413 ? 'the view is too big' : 'bad view' }); }
+        const n = Number.parseInt(String(req.headers['x-life-n'] || ''), 10);
+        const r = lifePub.putView(uid, buf, Number.isInteger(n) ? n : null);
+        return r.ok ? json(200, r) : json(r.status || 400, { ok: false, error: r.error });
       }
       if (reqPath === '/api/life/inbox' && req.method === 'GET') {
         const uid = lifePub.uidOf(bearer);
@@ -1962,9 +1992,26 @@ const server = http.createServer(async (req, res) => {
         const name = usernameById(uid) || String(who || '');
         lifePub.touchWatched(uid);
         const l = lifePub.latest(uid);
+        const v = lifePub.view(uid);   // a view between moments, while the life makes them and someone watches
         return json(200, { ok: true, user: name, mine, shared: lifePub.isShared(uid), key: mine ? lifePub.hasKey(uid) : undefined,
-          life: l ? { ...l, frameUrl: l.frameUrl ? `/life/${encodeURIComponent(name)}/${l.frameUrl}` : null } : null,
+          life: l ? { ...l, frameUrl: l.frameUrl ? `/life/${encodeURIComponent(name)}/${l.frameUrl}` : null,
+            ...(v ? { view: { url: `/life/${encodeURIComponent(name)}/view.jpg`, seq: v.seq, at: v.at } } : {}) } : null,
           recent: l ? lifePub.recent(uid, 12) : [] });
+      }
+      const vm = LIFE_VIEW.exec(reqPath);
+      if (vm && req.method === 'GET') {
+        let name = ''; try { name = decodeURIComponent(vm[1]); } catch { name = ''; }
+        const uid = name ? idByUsername(name) : null;
+        if (!uid || !(lifePub.isShared(uid) || (user && user.id === uid))) return json(404, { error: 'not found' });
+        const v = lifePub.view(uid);
+        if (!v) return json(404, { error: 'no view now' });
+        lifePub.touchWatched(uid);
+        // tagged, never cached without asking: a watcher asks about once a
+        // second, and an unchanged view is a 304 with no picture in it
+        const tag = `"v${v.seq}"`;
+        const head = { etag: tag, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'x-life-n': String(v.n ?? '') };
+        if (String(req.headers['if-none-match'] || '') === tag) return send(res, 304, '', head);
+        return send(res, 200, v.buf, { 'content-type': 'image/jpeg', ...head });
       }
       const fm = LIFE_FRAME.exec(reqPath);
       if (fm && req.method === 'GET') {
