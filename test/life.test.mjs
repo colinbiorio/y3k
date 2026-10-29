@@ -320,7 +320,7 @@ await ok('a published life of your own, awake: the picture, its thought and word
   const { serialize } = await import('./fakes/mini-dom.mjs');
   const { createLifeView } = await import('../src/life.js');
   const posts = [];
-  const life = { n: 2551, at: Date.now() - 20_000, thought: 'Sixty-two moments, and it holds.', say: 'The rain is back.', answer: 'the hooded man: “Wet every night this month.”', place: 'The lantern colonnade', who: 'claude', frameUrl: '/life/y3klay/002551.jpg' };
+  const life = { n: 2551, at: Date.now() - 20_000, thought: 'Sixty-two moments, and it holds.', say: 'The rain is back.', answer: 'the hooded man: “Wet every night this month.”', hour: 'dusk, about 6 o\'clock', place: 'The lantern colonnade', who: 'claude', frameUrl: '/life/y3klay/002551.jpg' };
   const said = [];
   const view = createLifeView({
     toast: () => {}, speak: (t) => { said.push(t); return undefined; }, openKode: () => {},
@@ -336,7 +336,7 @@ await ok('a published life of your own, awake: the picture, its thought and word
   assert.ok(!/Sixty-two moments/.test(html), 'the thought is not drawn beside its words');
   assert.match(html, /“The rain is back\.”/, 'its words');
   assert.match(html, /life-answer>"the hooded man: “Wet every night this month\.”"/, 'and the world answering, under them');
-  assert.match(html, /moment 2551 · The lantern colonnade · living on its own/, 'one line');
+  assert.match(html, /moment 2551 · The lantern colonnade · dusk · living on its own/, 'one line, with the hour in its world');
   assert.match(html, /only you can see it/, 'sharing, one small word');
   assert.ok(!/a life lives on your own computer/.test(html), 'no card over a life that is showing');
   assert.deepEqual(said, ['The rain is back.'], 'its words are said once, in the presence\'s voice');

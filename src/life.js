@@ -549,8 +549,10 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     // one thin line: where it stands, and that it lives
     let line = '';
     const placeOf = (p) => { const t = String(p || '').trim(); return t.length > 44 ? t.slice(0, 43).trimEnd() + '…' : t; };
-    if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, placeOf(m.place), m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
-    else if (web) line = [`moment ${web.n ?? 0}`, placeOf(web.place), web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : awake(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
+    // the world's own time, its first words ("dusk", "late afternoon": lucid's clock, 2026-10-29)
+    const hourOf = (x) => String(x?.hour || '').split(',')[0].trim().slice(0, 24);
+    if (phase === 'living' && m) line = [`moment ${m.n ?? 0}`, placeOf(m.place), hourOf(m), m.busy ? (m.status || 'thinking') : ''].filter(Boolean).join(' · ');
+    else if (web) line = [`moment ${web.n ?? 0}`, placeOf(web.place), hourOf(web), web.who === 'me' ? 'lived through the door' : web.who === 'nobody' ? 'time stopped' : awake(web) ? 'living on its own' : 'asleep', agoText(web.at)].filter(Boolean).join(' · ');
     else if (phase === 'resting' && m) line = `asleep · moment ${m.n ?? 0}${m.place ? ' · ' + placeOf(m.place) : ''}`;
     else if (phase === 'living') line = 'dreaming the first moment…';
     setText(el.status, line);

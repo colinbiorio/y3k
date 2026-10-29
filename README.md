@@ -251,6 +251,10 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-29** — **The hour in its world.** lucid's world now keeps its own
+  time (afternoon turns to dusk, night, dawn, four world-minutes a moment;
+  the light of the hour is dreamed into every picture). The life page's one
+  thin line says it: "moment 3948 · Odile's house · dusk · living on its own".
 - **2026-10-29** — **Your presence remembers who the life met.** Each moment
   the life lives here becomes a line of your presence's journal; now, when
   the world answered what it said, the line carries that too ("I said:
