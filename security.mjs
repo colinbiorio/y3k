@@ -1,7 +1,7 @@
 // The site's own fence: which requests may change anything, what every response
 // says about framing and sniffing, and what the app shell is allowed to load.
 //
-// Written before y3k Code (CODE.md) exists, because Code makes this origin the
+// Written before y3kode (CODE.md) exists, because Code makes this origin the
 // one a person's own machine listens to. Until now a page on ANOTHER port of the
 // same host — a dev server, a hostile tool on localhost — could POST text/plain
 // to /api/brain/stream on a local y3k and the founder's cookie went with it:
@@ -116,7 +116,7 @@ export function inlineScriptHashes(html) {
 // chess, OpenRouter for the one-click key (src/openrouter.js: the return page
 // trades OpenRouter's code for the person's key with OpenRouter itself, so the
 // key never passes through this site on its way to them; the host only, which
-// is OpenRouter's own), the 4irden portal, 127.0.0.1 where the y3k Code engine listens, and
+// is OpenRouter's own), the 4irden portal, 127.0.0.1 where the y3kode engine listens, and
 // y3k: — the desktop app's own scheme, which Firefox opens through a hidden
 // frame from kode's "Open the y3k app". three.js is served from src/vendor.
 // The version here, the two importmaps and WASM_BASE in perceive.js and

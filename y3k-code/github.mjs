@@ -1,5 +1,5 @@
 // GitHub, through the person's own `gh` sign-in: list their repositories and
-// clone one onto this computer. y3k Code never holds a GitHub token — `gh`
+// clone one onto this computer. y3kode never holds a GitHub token — `gh`
 // does, the way it always has — and a cloned folder is not trusted until the
 // person says so on the trust card, like any other.
 

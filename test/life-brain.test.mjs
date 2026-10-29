@@ -96,10 +96,10 @@ const route = (from, to) => {
 const lifeSrc = fnSrc('lifeBrain');
 const ownSrc = fnSrc('ownFor');
 const rungSrc = fnSrc('ownRung');
-const brainRoute = route("req.url === '/api/brain')", '// --- y3k Code × the presence');
+const brainRoute = route("req.url === '/api/brain')", '// --- y3kode × the presence');
 const streamRoute = route("req.url === '/api/brain/stream')", '// --- Voice endpoints');
 const handoffRoute = route("reqPath === '/api/code/handoff' || reqPath === '/api/code/note')", "reqPath === '/api/code/voice')");
-const voiceRoute = route("reqPath === '/api/code/voice')", '// --- y3k Code, handed over');
+const voiceRoute = route("reqPath === '/api/code/voice')", '// --- y3kode, handed over');
 const DECIDE = "const own = ownRung(user, { key, own: ownAsked });";
 // Code as the server runs it: comment lines, and comments after code, gone,
 // so a sentence about the rule never trips the check for it

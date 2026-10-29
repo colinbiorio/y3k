@@ -1,6 +1,6 @@
 // THE COMPANION'S DOOR. Run:  node test/code-http.test.mjs
 //
-// y3k Code's engine listens on 127.0.0.1. Any web page the person has open can
+// y3kode's engine listens on 127.0.0.1. Any web page the person has open can
 // try to talk to it, and a hostile DNS name can point at 127.0.0.1. These checks
 // pin who gets in: only yearthreethousand.com, only by the right host name, only
 // after the person says yes on the machine, only with the token that yes minted.

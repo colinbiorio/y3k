@@ -219,7 +219,7 @@ try {
     assert.deepEqual(Object.keys(body).sort(), ['note', 'presence']);
     assert.deepEqual(Object.keys(body.presence).sort(), ['bio', 'handle', 'name', 'scheme']);
     assert.equal(body.presence.handle, 'orion');
-    assert.match(body.note, /Colin is building y3k Code/);
+    assert.match(body.note, /Colin is building y3kode/);
   });
 
   await ok('what the reply tried to do besides — a tag, a memory, a journal line, markup — is gone', () => {

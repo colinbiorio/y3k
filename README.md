@@ -251,6 +251,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-29** — **One conversation, forever.** Colin: "no new chats -- no
+  separate history -- no different contexts and chats -- just one
+  conversation forever … it keeps a thread alive. our friendship doesn't have
+  to get wiped every time." kode's tab strip, its "+" and its Past sessions
+  drawer are gone. The room opens on the conversation it last had: with
+  nothing running, the newest session in y3kode's own index is continued
+  where it was (its folder, its tool, the coder's own session resumed), and a
+  line said to one that has ended continues it first. When the context
+  window passes 80% and the coder is idle, the page asks it to compact,
+  saying what to keep — what we are building and why, the decisions, what is
+  open, the names that matter, how the person works, what has passed between
+  us — so the thread survives the cut (once, then not again for ten minutes).
+  `/clear` and `/new` still start over, by the person's own hand. While the
+  last conversation is picked up the room says so ("Picking up where we
+  were…") instead of flashing the folders; a stop says "Stopped. Say more and
+  it goes on from here." In a comparison, each column has an "open" that puts
+  that second opinion's own session on screen (there is no tab to click any
+  more): to answer what it asks, or read it whole. The claude.ai session box
+  moved into the Coding tools drawer. And every "y3k Code" in the house now
+  says y3kode (CODE.md, line 8).
 - **2026-10-29** — **The hour in its world.** lucid's world now keeps its own
   time (afternoon turns to dusk, night, dawn, four world-minutes a moment;
   the light of the hour is dreamed into every picture). The life page's one
@@ -783,7 +803,7 @@ build. Read the one for the part you are touching.
   library's Google beacon itself, as the room's eye already did. Locally (no
   `RENDER`) the policy also lets the portal frame a 4irden on localhost.
 
-- **2026-10-12** — **The same app for everyone, on their own AI.** y3k Code
+- **2026-10-12** — **The same app for everyone, on their own AI.** y3kode
   is open to every account (`CODE_ROLLOUT` defaults to `all`; `founder`
   narrows it, `off` closes it), and guests see every entry point the way
   members do — the laptop, the chat bar's komputer, dance and air marks,

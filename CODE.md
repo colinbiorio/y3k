@@ -61,6 +61,18 @@ command-line tool and turns what it does into one stream the page can draw.
    (`http://127.0.0.1:<port>/approve`) answers only a form posted from itself,
    carrying that question's own nonce; the site can open it, never fill it.
 
+8. **One conversation, forever.** Colin, 2026-10-29: "no new chats -- no
+   separate history -- no different contexts and chats -- just one
+   conversation forever … it keeps a thread alive. our friendship doesn't have
+   to get wiped every time." kode has no tabs, no "+", no Past sessions. It
+   opens on the conversation it last had, continued where it was (the coder's
+   own session, resumed); a line said to one that has ended continues it
+   first. When the context window fills past 80%, the page asks the coder to
+   compact it, saying what to keep (what we are building and why, decisions,
+   what is open, the names that matter, how the person works, what has passed
+   between us), so the thread survives the cut. Only the person's own `/clear`
+   or `/new` starts over.
+
 ## your presence, thinking on your own sign-in
 
 One command is not the person driving a coder: `brain.complete`, for a

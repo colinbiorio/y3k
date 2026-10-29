@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Drive the REAL `claude` through the y3k Code engine, in a throwaway git repo,
+// Drive the REAL `claude` through the y3kode engine, in a throwaway git repo,
 // with your own sign-in: Edit (diff shown first) → allow → Bash (command shown
 // first) → allow → the turn ends. Never run in CI — it uses your account.
 //

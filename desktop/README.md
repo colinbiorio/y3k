@@ -12,7 +12,7 @@ opens onto.
 ## What it gives you that a tab does not
 
 - the room fills the frame, with nothing above it
-- y3k Code runs your own coding tools right here, with no companion to start
+- y3kode runs your own coding tools right here, with no companion to start
 - a `y3k://code` link (the site's *Open the y3k app*) opens it straight on Code
 - the camera permission is the **app's** — granted once, not re-asked per tab
 - its own icon, its own window, its own place in the dock
@@ -40,7 +40,7 @@ never come to depend on being in here.
 
 **The one exception is the local bridge** (CODE.md, HANDS.md). A single
 preload (`preload.cjs`) puts one frozen object on the page, `window.y3kCode` —
-`cmd`, `since`, `onEvent`, JSON in and out — so y3k Code can reach its engine on
+`cmd`, `since`, `onEvent`, JSON in and out — so y3kode can reach its engine on
 this machine without a port or a pairing code. No Node, no `ipcRenderer`, no
 file system reaches the page, and `code-host.cjs` answers only the site's own
 top frame (`policy.bridgeMay`). The engine (`../y3k-code`, packed as a
@@ -55,7 +55,7 @@ connector — is a native dialog that defaults to *Don't allow*.
 
 The app owns the `y3k:` link scheme. The site's **Open the y3k app** button
 points at `y3k://code`: the OS starts the app (or brings the running one
-forward) and the window goes to y3k Code. The first time, the browser asks
+forward) and the window goes to y3kode. The first time, the browser asks
 whether to open y3k — that prompt is the browser's, and it is right to ask.
 
 Exactly two links mean anything (`policy.deepLinkFor`): `y3k://code` opens Code,

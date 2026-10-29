@@ -1,4 +1,4 @@
-// y3k Code — the room. A coding terminal beside the orb: your own coding tools,
+// y3kode — the room. A coding terminal beside the orb: your own coding tools,
 // running on your own computer, drawn here.
 //
 // The controller (connection + state) lives as long as the page, so sessions
@@ -60,7 +60,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // nothing that redraws home can paint over it.
   // home.full: the engine refused a start, running as many sessions as it can
   // (start, fullList): how many were running then, or 0.
-  let home = { screen: 'folders', browse: null, pending: null, pastSessions: null, error: null, pairing: null, full: 0 };
+  let home = { screen: 'folders', browse: null, pending: null, error: null, pairing: null, full: 0, wantsFolders: false, continuing: false };
   const els = new Map();   // top-level item uid → element
   // ...and every subagent child drawn inside a Task card too, so a change deep
   // in a subagent patches that one element instead of redrawing the whole card.
@@ -198,7 +198,52 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       apply(S, { sid, type: 'session.ended', reason: 'exited' }, { replay: true });
     }
     if (!S.active) { const l = liveSessions(S).filter((x) => !x.closing); if (l.length) S.active = l[l.length - 1].sid; }
+    if (!S.active && !home.wantsFolders) continueLast();   // (not awaited: an engine that never answers must not hold the hello)
     schedule('engine'); schedule('meta'); rebuildTranscript();
+  }
+
+  // ONE CONVERSATION, FOREVER: with nothing running, the newest conversation
+  // in the engine's own index is continued where it was — in its folder, with
+  // its tool, the coder's own session resumed (session.resume) — and its
+  // session.started on the stream puts it on screen. Only when there is none
+  // at all, the first time, do the folders ask where it begins. A second
+  // opinion (compare, `aside`) is never the one picked up.
+  let continuing = null;
+  function continueLast() {
+    if (continuing) return continuing;
+    home.continuing = true;   // (the folders are not shown while it is picked up: renderHome)
+    continuing = (async () => {
+      const r = await cmd({ cmd: 'session.list' });
+      const last = (r?.sessions || []).find((x) => x && x.providerSessionId && !x.live && !x.aside && x.provider && x.cwd);
+      if (!last) return false;
+      const got = await cmd({ cmd: 'session.resume', provider: last.provider, cwd: last.cwd, providerSessionId: last.providerSessionId, sid: last.sid });
+      if (!got?.ok || !got.sid) return false;
+      viewingSid = null;
+      if (!S.active) { S.active = got.sid; schedule('engine'); }
+      return true;
+    })().catch(() => false).finally(() => { continuing = null; home.continuing = false; if (ui) redrawHome(); });
+    return continuing;
+  }
+
+  // ...AND IT NEVER FILLS UP. A conversation that lasts has to make room for
+  // itself: at COMPACT_AT percent of the context window, once the coder is
+  // idle, the page asks it to compact — Claude Code's own /compact, with what
+  // to keep said plainly (COMPACT_FOCUS), so the thread survives the cut:
+  // what we are building and why, the decisions, what is open, the names
+  // that matter, how the person works, and what has passed between us. Once,
+  // then not again for COMPACT_AGAIN_MS: a compaction that lands shows as the
+  // 'compact' line, and the window's percent falls with the next reply.
+  const COMPACT_AT = 80, COMPACT_AGAIN_MS = 10 * 60 * 1000;
+  const COMPACT_FOCUS = 'Keep what matters to continuing this one conversation: what we are building and why; the decisions made and their reasons; what is open and what comes next; the file paths, commands, names and numbers that matter; how this person likes to work and what they have asked for; and what has passed between us. Drop tool output, resolved errors and superseded attempts.';
+  const compacted = new Map();   // sid → when it was last asked to
+  function maybeCompact(s) {
+    if (!s || s.state !== 'idle' || s.closing || viewingSid) return;
+    const p = s.usage?.context?.percent;
+    if (!(p >= COMPACT_AT)) return;
+    if (Date.now() - (compacted.get(s.sid) || 0) < COMPACT_AGAIN_MS) return;
+    compacted.set(s.sid, Date.now());
+    cmd({ cmd: 'session.send', sid: s.sid, text: '/compact ' + COMPACT_FOCUS })
+      .then((r) => { if (!r?.ok) toast(r?.error || 'could not compact the conversation'); }).catch(() => {});
   }
 
   // What was held since a reset, played in order.
@@ -263,7 +308,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   // What a bare session knew that its file does not: the line back and the
   // todos as the person left them, when it started (the file keeps no times),
-  // whether there is anything new to read in its tab (every reloaded session
+  // whether there is anything new to read in it (every reloaded session
   // read as unread), the words of a block that were only streamed (never on
   // disk), what the presence already said over the coder's words (a reloaded
   // reply went back to the coder's own), and the lines to and from the
@@ -272,7 +317,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     s.noteBack = old.noteBack;
     s.todosOpen = old.todosOpen;
     s.startedAt = old.startedAt || s.startedAt;
-    s.closing = old.closing;           // a reset hello mid-stop must not bring its tab back
+    s.closing = old.closing;           // a reset hello mid-stop must not bring it back
     if (s.items.length <= old.items.length) s.unread = old.unread;
     for (const [k, it] of old.byKey) {
       const now = k.startsWith('m:') ? s.byKey.get(k) : null;
@@ -321,8 +366,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (it && b && it.parentUid == null) voicer.block({ item: it, block: b, where: s.cwd ? folderName(s.cwd) : '' });
     }
     if (out.sid && !S.active && !viewingSid && e.type === 'session.started') S.active = out.sid;
+    if (e.type === 'session.started' && out.sid) home.wantsFolders = false;
     const here = !!out.sid && out.sid === currentSession()?.sid;
-    // A session in another tab changes only its tab: its state, its question,
+    // A session not on screen changes only its own state: its state, its question,
     // its unread light. Its words, and its meta events too (a subagent's
     // progress line, usage, state), used to mark the whole toolbar and the
     // composer for rebuilding, so two sessions streaming at once meant both
@@ -332,7 +378,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // session heard them last, so those still reach the meters.)
     if (out.meta) { if (!out.sid || here || e.type === 'usage.limits') metaDirty = true; else tabsDirty = true; }
     // ...but the answers side by side are read from every session in their
-    // group, whichever tab it is in (the strip and the view are keyed, so an
+    // group, on screen or not (the strip and the view are keyed, so an
     // event that changes nothing they show costs a comparison and no DOM)
     if (out.sid && S.compares.size) cmpDirty = true;
     // only the session on screen redraws; the others catch up when opened
@@ -341,6 +387,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (e.type === 'subagent.progress' && e.taskId) agentDirty.add(e.taskId);
     } else if (out.sid && out.changed.length && !wasUnread) tabsDirty = true;
     onNeedsYou(needsYou(S));
+    if (!late && (e.type === 'usage.context' || e.type === 'turn.ended' || e.type === 'session.state')) maybeCompact(S.sessions.get(e.sid));
     if (e.type === 'turn.ended' && !late && globalThis.document?.visibilityState === 'hidden') tab.done = true;
     markTab();
     reactTo(e);
@@ -433,7 +480,6 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const s = currentSession();
     if (engineDirty) { engineDirty = false; renderChrome(); if (!s) renderHome(); }
     else if (metaDirty) renderBar(s);
-    else if (tabsDirty) renderTabs(s);
     // home listing the sessions running (start, too-many): one of them ended or changed
     if (!s && home.full && tabsDirty) renderHome();
     if (metaDirty) renderDock();
@@ -469,7 +515,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // is still this screen's to act on.
     if (root) { pairFromLink(); if (home.pairing) redrawHome(); return; }
     dropLeaving();
-    root = h('div.code-root', { role: 'region', 'aria-label': 'y3k Code' });
+    root = h('div.code-root', { role: 'region', 'aria-label': 'y3kode' });
     ui = {
       pane: h('div.cv-pane'),
       bar: h('div.cv-bar'),
@@ -527,7 +573,6 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ro?.disconnect(); ro = null;
     rebuildGen++; prepending = false;
     shown = null; bar = null; dockUi = null;
-    tabEls.clear(); tabShown = null;
   }
 
   // Leaving fades the room out (0.2s, the same as the orb's column fades back
@@ -662,28 +707,24 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   // THE TOOLBAR IS PATCHED, NOT REBUILT. It was torn down and made again on
   // every meta event — usage, git, todos, each subagent's progress line — and,
-  // through its tabs, on every delta from a session in another tab. That
+  // through its chrome, on every delta from a session not on screen. That
   // snapped an open model or effort <select> shut under the cursor, restarted
   // every pulse on the tabs, and left the meters no element that lived long
   // enough for their sweep and width transitions to run. Now the bar is built
-  // once per open(); each session keeps its tab and only its classes change;
+  // once per open(); each part keeps its element and only its classes change;
   // the meters move in place; each control is redrawn only when what it shows
   // changes (its key), and a <select> never while it has focus.
   let bar = null;
-  const tabEls = new Map();   // sid → its tab
-  let tabShown = null;        // the sid whose tab was last brought into view (renderTabs)
   function renderBar(s) {
     if (!ui) return;
     if (!bar) {
-      const plus = h('button.cv-tab.cv-new', { type: 'button', title: 'New session' }, icon('plus'));
-      plus.addEventListener('click', () => { viewingSid = null; S.active = null; home.screen = 'folders'; rebuildTranscript(); renderChrome(); renderDock(); });
       const right = toolButtons();
       bar = {
-        tabs: h('div.cv-tabs', { role: 'tablist' }), plus, right, tools: [...right.children],
+        right, tools: [...right.children],
         ring: null, bars: null, cost: null, tell: slot(),
         row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
-      bar.row = h('div.cv-row', bar.tabs, right);
+      bar.row = h('div.cv-row', right);
       bar.right = right;
       // the ring and the plan bars open the context panel
       right.addEventListener('click', (e) => { const m = e.target.closest('.mt-ctx, .mt-limits'); if (m) togglePanel(m); });
@@ -691,79 +732,36 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       // a <select> whose redraw waited for it to lose focus gets it now
       bar.row2.addEventListener('focusout', () => schedule('meta'));
     }
-    renderTabs(s);
     renderMeters(s);
     renderControls(s);
     arrange(ui.bar, [bar.row, s ? bar.row2 : null]);
   }
 
-  // tabs: every running session, plus the one being viewed. A session being
-  // stopped from here (`closing`) leaves the strip at once, not when it ends;
-  // once it has ended it is like any other, so opened again from Past
-  // sessions it has its tab while it is on screen.
-  //
-  // Each tab is a pair: the tab, and beside it (never inside it: a button
-  // cannot hold a button) the × that closes it (closeTab). The × shows on the
-  // tab on screen, on the one under the pointer or the keyboard, and on every
-  // tab where there is no pointer to hover with (styles.css).
-  function renderTabs(s) {
-    if (!ui) return;
-    if (!bar) { renderBar(s); return; }
-    const list = S.order.map((sid) => S.sessions.get(sid)).filter((x) => x && (x.state !== 'ended' ? !x.closing : x.sid === S.active || x.sid === viewingSid));
-    const kids = [];
-    for (const x of list) {
-      let t = tabEls.get(x.sid);
-      if (!t) {
-        const sid = x.sid;
-        const tab = h('button.cv-tab', { type: 'button', role: 'tab' }, h('i.cv-tabdot'), h('span.cv-tabname'));
-        tab.addEventListener('click', () => { const y = S.sessions.get(sid); if (!y) return; viewingSid = null; S.active = sid; y.unread = false; rebuildTranscript(); renderChrome(); renderDock(); });
-        // a middle click closes it, as it does a browser's own tab (and does
-        // not start the browser's scrolling on the way)
-        tab.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
-        tab.addEventListener('auxclick', (e) => { if (e.button !== 1) return; e.preventDefault(); closeTab(sid); });
-        const shut = h('button.cv-tabx', { type: 'button' }, icon('close'));
-        shut.addEventListener('click', () => closeTab(sid));
-        t = { wrap: h('span.cv-tabwrap', { role: 'presentation' }, tab, shut), tab, x: shut };
-        tabEls.set(sid, t);
-      }
-      const on = !!s && x.sid === s.sid;
-      const name = x.title || folderName(x.cwd) || 'new session';
-      // `unread`: something happened there since you last looked — the dot lights
-      put(t.tab, 'className', 'cv-tab' + (on ? ' on' : '') + (x.waiting ? ' ask' : '') + (x.state === 'running' ? ' run' : '') + (x.state === 'ended' ? ' ended' : '') + (x.unread && !on ? ' unread' : ''));
-      put(t.wrap, 'className', 'cv-tabwrap' + (on ? ' on' : ''));
-      if (t.tab.getAttribute('aria-selected') !== String(on)) t.tab.setAttribute('aria-selected', String(on));
-      put(t.tab, 'title', `${x.title || 'new session'} — ${x.cwd}`);
-      put(t.tab.lastChild, 'textContent', name);
-      // what the × does: one that has ended only leaves the strip
-      const says = x.state === 'ended' ? `Close ${name}` : `Stop and close ${name}`;
-      if (t.x.getAttribute('aria-label') !== says) { t.x.setAttribute('aria-label', says); t.x.title = says; }
-      kids.push(t.wrap);
-    }
-    for (const sid of [...tabEls.keys()]) if (!list.some((x) => x.sid === sid)) tabEls.delete(sid);
-    kids.push(bar.plus);
-    arrange(bar.tabs, kids);
-    // The strip scrolls sideways, with no bar to show it, and a tab on screen
-    // past its edge took its × out of sight with it. It is brought into view
-    // when it becomes the one on screen: once, in the next frame, not on every
-    // pass (flush reads no layout).
-    const onSid = s && tabEls.has(s.sid) ? s.sid : null;
-    if (onSid && onSid !== tabShown) { const el = tabEls.get(onSid).wrap; requestAnimationFrame(() => el.isConnected && el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })); }
-    tabShown = onSid;
-  }
-
-  // CLOSING A SESSION (2026-10-08). y3kode runs four sessions at most
-  // (y3k-code/engine.mjs MAX_SESSIONS), and nothing on this screen could stop
-  // one: the engine has session.stop, but the page never sent it, so a fifth
-  // was refused until y3kode was restarted, and every /clear left its session
-  // running in a tab, counting toward the four. Now the × on a tab, a middle
-  // click on it, /clear and /new, and the Stop beside each session on the
-  // folder screen when the four are running all stop it here.
+  // ONE CONVERSATION, FOREVER (Colin, 2026-10-29: "no new chats -- no
+  // separate history -- no different contexts and chats -- just one
+  // conversation forever ... it keeps a thread alive. our friendship doesn't
+  // have to get wiped every time"). There is no tab strip, no "+", no Past
+  // sessions: the room opens on the conversation it last had (continueLast,
+  // below), and a line said to one that has ended continues it first (send).
+  // What still starts over is the person's own word: /clear and /new stop the
+  // session they leave (stopSession, asking first if it is mid-turn) and show
+  // the folders. When a fifth session is refused (compare's second opinions
+  // count), the folder screen lists the ones running, each with a Stop.
   //
   // One at rest stops at once. One in the middle of a turn asks first:
   // stopping it cuts the turn short, and a stray click should not. Stopped is
-  // not gone: it is in Past sessions, and its Continue it button picks it up
-  // again. One that has ended has nothing to stop (true: the caller goes on).
-  // A second click while the first is asking or being answered does nothing.
+  // not gone: the conversation is kept, and a line said to it goes on from
+  // there. One that has ended has nothing to stop (true: the caller goes on).
+  // A second word while the first is asking or being answered does nothing.
+  // Put a session on screen (a second opinion's, from the compare view, to
+  // answer what it asks; the one the question was asked from, to go back).
+  function showSession(sid) {
+    const y = S.sessions.get(sid);
+    if (!y) return;
+    viewingSid = null; S.active = sid; y.unread = false;
+    rebuildTranscript(); renderChrome(); renderDock();
+  }
+
   const stopping = new Set();
   async function stopSession(s) {
     if (s.state === 'ended' || s.closing) return true;
@@ -773,7 +771,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (s.state === 'running' || s.state === 'waiting') {
         const go = await confirmDialog({
           title: `Stop ${AGENT_NAME[s.provider] || 'the coder'} in ${folderName(s.cwd)}?`,
-          text: 'It is in the middle of a turn. What it has done to files stays done, and the session stays in Past sessions.',
+          text: 'It is in the middle of a turn. What it has done to files stays done, and the conversation is kept.',
           ok: 'Stop', cancel: 'Cancel',
         });
         if (!go) return false;
@@ -782,24 +780,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       const r = await cmd({ cmd: 'session.stop', sid: s.sid });
       if (!r?.ok) { toast(r?.error || 'could not stop it'); return false; }
       s.closing = true;
-      toast(s.providerSessionId ? 'Stopped. It is in Past sessions; Continue picks it up.' : 'Stopped. It is in Past sessions.');
+      toast(s.providerSessionId ? 'Stopped. Say more and it goes on from here.' : 'Stopped.');
       return true;
     } finally { stopping.delete(s.sid); }
-  }
-
-  // The × on a tab, or a middle click on it. A live session is stopped first;
-  // one that has ended only leaves the strip. If it was the one on screen, the
-  // newest other live session takes its place, or home if there is none.
-  async function closeTab(sid) {
-    const x = S.sessions.get(sid);
-    if (!x || !(await stopSession(x))) return;
-    if (viewingSid === sid) viewingSid = null;
-    if (S.active === sid) {
-      const next = [...S.order].reverse().map((k) => S.sessions.get(k)).find((y) => y && y.sid !== sid && y.state !== 'ended' && !y.closing);
-      S.active = next ? next.sid : null;
-    }
-    if (!currentSession()) home.screen = 'folders';
-    rebuildTranscript(); renderChrome(); renderDock();
   }
 
   function renderMeters(s) {
@@ -872,15 +855,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // The toolbar's own buttons, made once with the bar.
   function toolButtons() {
     const right = h('div.cv-meters');
-    const hist = h('button.cv-iconbtn', { type: 'button', title: 'Past sessions' }, icon('history'));
-    hist.addEventListener('click', () => toggleDrawer('history'));
     const keys = h('button.cv-iconbtn', { type: 'button', title: 'Coding tools and keys' }, icon('key'));
     keys.addEventListener('click', () => toggleDrawer('providers'));
     const plug = h('button.cv-iconbtn', { type: 'button', title: 'Connectors' }, icon('plug'));
     plug.addEventListener('click', () => toggleDrawer('connectors'));
-    const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3k Code did on this computer' }, icon('activity'));
+    const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3kode did on this computer' }, icon('activity'));
     act.addEventListener('click', () => toggleDrawer('activity'));
-    right.append(plug, act, hist, keys);
+    right.append(plug, act, keys);
     return right;
   }
 
@@ -890,7 +871,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // banners: asking on the computer, connection
     const banners = [];
     for (const [, c] of S.consent) banners.push(ob.consentNote(c, transport));
-    if (S.conn === 'reconnecting') banners.push(h('div.cv-note', 'Reconnecting to y3k Code on this computer…'));
+    if (S.conn === 'reconnecting') banners.push(h('div.cv-note', 'Reconnecting to y3kode on this computer…'));
     if (viewingSid && s) banners.push(h('div.cv-note', 'A past session, read-only. ', resumeButton(s)));
     swap(ui.banner, banners);
     ui.banner.hidden = !banners.length;
@@ -1925,9 +1906,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     d.box.classList.toggle('running', running && !toOrion);
     d.box.classList.toggle('to-orion', toOrion);
-    put(d.ta, 'placeholder', toOrion ? `Say something to ${comp.name}…` : ended ? 'This session has ended.' : running ? 'Add to what it is doing… (Esc to stop)' : `Tell ${AGENT_NAME[s.provider] || 'it'} what to do…`);
-    put(d.ta, 'disabled', ended && !toOrion);
-    put(d.clip, 'disabled', ended);
+    const goesOn = ended && !!s.providerSessionId && !viewingSid;   // ended, but a line continues it (send)
+    put(d.ta, 'placeholder', toOrion ? `Say something to ${comp.name}…` : goesOn ? 'Say more — it goes on from here…' : ended ? 'This session has ended.' : running ? 'Add to what it is doing… (Esc to stop)' : `Tell ${AGENT_NAME[s.provider] || 'it'} what to do…`);
+    put(d.ta, 'disabled', ended && !toOrion && !goesOn);
+    put(d.clip, 'disabled', ended && !goesOn);
     const kind = running && !toOrion ? 'stop' : 'send';
     if (d.act.dataset.kind !== kind) {
       d.act.dataset.kind = kind;
@@ -1935,7 +1917,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       d.act.title = kind === 'stop' ? 'Stop (Esc)' : 'Send (Enter)';
       swap(d.act, icon(kind));
     }
-    put(d.act, 'disabled', kind === 'send' && ended && !toOrion);
+    put(d.act, 'disabled', kind === 'send' && ended && !toOrion && !goesOn);
     // the microphone: lit while it listens, marked while it is hands-free,
     // and absent where the browser cannot hear at all
     const canHear = !!link?.dictate && (link.canDictate?.() !== false);
@@ -2129,7 +2111,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // The engine's own words for a full house carry a dash and no way out; the
   // page says it plainly, with the way out.
   function refusedWhy(r, otherwise) {
-    if (r.code === 'too-many') return 'y3kode is running as many sessions as it can at once. Close a tab to make room.';
+    if (r.code === 'too-many') return 'y3kode is running as many sessions as it can at once. /clear makes room.';
     return r.error || otherwise;
   }
 
@@ -2234,6 +2216,17 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (req?.kind === 'permission' || req?.kind === 'plan') ctx.answerPermission(req, 'allow', 'once');
       return;
     }
+    // ONE CONVERSATION: a line said to a session that has ended continues it
+    // first — the coder's own session, resumed — and then goes on from there.
+    if (s.state === 'ended' && s.providerSessionId && !viewingSid && text !== '/clear' && text !== '/new') {
+      const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
+      if (!r?.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
+      const sid = r.sid || s.sid;
+      viewingSid = null;
+      S.active = sid;
+      rebuildTranscript(); renderChrome();
+      s = S.sessions.get(sid) || { ...s, sid, state: 'idle', items: [] };
+    }
     // A fresh start, from the folders. Claude Code's /clear ends the
     // conversation it leaves (it is still in its history), and so does this:
     // the session left is stopped (stopSession, which asks first if it is
@@ -2242,6 +2235,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (!(await stopSession(s))) return;
       setDraft('');
       S.active = null; viewingSid = null;
+      home.wantsFolders = true;
       home.screen = 'folders';
       rebuildTranscript(); renderChrome();
       return;
@@ -2293,7 +2287,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // beside it in the same folder in plan mode (state.js asideTools). They
   // write at the same time, so the work line counts them together (harnessRate):
   // more tools writing at once is how a harness multiplies its tokens a
-  // second. Each answer is in its own tab, titled with the question. One
+  // second. Each answer is a session of its own, titled with the question. One
   // message, sent by the person, to tools they set up themselves (CODE.md,
   // line 1); the second opinions leave the folder's remembered tool and mode
   // as they were (session.start aside). → whether this coder got it
@@ -2314,7 +2308,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!r0.ok) { toast(r0.error || 'not sent'); return false; }
     const tools = asideTools(S.providers, s.provider, (p) => !needsSetup(p));
     if (!tools.length) { toast('No other coding tool is ready on this computer to compare with. Set one up on the folder screen.'); return true; }
-    toast(`Asking ${tools.map((t) => AGENT_NAME[t.id] || t.label).join(', ')} too, in plan mode, each in its own tab…`);
+    toast(`Asking ${tools.map((t) => AGENT_NAME[t.id] || t.label).join(', ')} too, in plan mode, side by side…`);
     // the group the strip and the compare view read (state.js openCompare):
     // each second opinion joins it as it starts, and leaves it again if it
     // never takes the question, so a column is only ever a coder that was asked
@@ -2356,7 +2350,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // the comparison (its ×) or every second opinion's session has ended.
   const cmp = { key: null, view: null, gid: null, cols: new Map() };
   const STATE_SAYS = { starting: 'starting', thinking: 'thinking', writing: 'writing', waiting: 'waiting on you', done: 'done', stopped: 'stopped', failed: 'failed' };
-  const EMPTY_SAYS = { starting: 'starting up…', thinking: 'thinking…', writing: 'thinking…', waiting: 'asking you, in its tab', done: 'said nothing', stopped: 'stopped before it answered', failed: 'no answer' };
+  const EMPTY_SAYS = { starting: 'starting up…', thinking: 'thinking…', writing: 'thinking…', waiting: 'asking you — open it to answer', done: 'said nothing', stopped: 'stopped before it answered', failed: 'no answer' };
   const coderName = (a) => AGENT_NAME[a.provider] || a.label || 'the coder';
   const countSays = (answers) => {
     const n = answers.filter(stillAnswering).length;
@@ -2382,7 +2376,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     cmp.key = key;
     const open = h('button.cv-cmpopen', { type: 'button', title: 'The answers side by side (or type /compare alone)' }, 'side by side');
     open.addEventListener('click', () => openCompareView());
-    const x = h('button.cv-iconbtn.cv-cmpx', { type: 'button', title: 'Stop comparing. The tabs stay.', 'aria-label': 'Stop comparing' }, icon('close'));
+    const x = h('button.cv-iconbtn.cv-cmpx', { type: 'button', title: 'Stop comparing. The sessions stay.', 'aria-label': 'Stop comparing' }, icon('close'));
     x.addEventListener('click', () => endCompare(g));
     swap(ui.cmp, h('span.cv-cmplab', 'comparing: '), h('span.cv-cmpq', { title: g.question }, g.question),
       h('span.cv-cmpn.muted', ' · ' + (g.asides.length ? countSays(answers) : 'starting the others…')), h('span.cv-grow'), open, x);
@@ -2404,7 +2398,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     cmp.gid = g.id;
     const close = h('button.cv-iconbtn.cv-cmpclose', { type: 'button', title: 'Close (Esc). The comparison stays in the strip.', 'aria-label': 'Close the comparison' }, icon('close'));
     close.addEventListener('click', () => closeCompareView(true));
-    const stop = h('button.btn.cv-cmpstop', { type: 'button', title: 'Interrupt the second opinions still writing. Their tabs stay.' }, 'stop the others');
+    const stop = h('button.btn.cv-cmpstop', { type: 'button', title: 'Interrupt the second opinions still writing. Their sessions stay.' }, 'stop the others');
     stop.addEventListener('click', () => stopOthers(g));
     const n = h('span.cv-cmpn.muted');
     const cols = h('div.cv-cmpcols');
@@ -2442,12 +2436,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         const md = mdStream();
         const use = h('button.btn.cv-cmpuse', { type: 'button', title: 'Put this answer in your composer, as a draft, to read, change and send yourself' }, 'use this');
         use.addEventListener('click', () => useAnswer(g, a.sid));
-        c = { md, use, maker: null, mark: h('span.cv-cmpmark'), name: h('span.cv-cmpname'), model: h('span.cv-cmpmodel.muted'), empty: h('div.cv-cmpempty.muted'),
+        // with no tabs (one conversation, forever), this is how a second
+        // opinion's own session is reached: to answer what it asks, or read it whole
+        const go = h('button.cv-link.cv-cmpgo', { type: 'button', title: 'Put this session on screen: to answer what it asks, or read it in full' }, 'open');
+        go.addEventListener('click', () => { showSession(a.sid); closeCompareView(); });
+        c = { md, use, go, maker: null, mark: h('span.cv-cmpmark'), name: h('span.cv-cmpname'), model: h('span.cv-cmpmodel.muted'), empty: h('div.cv-cmpempty.muted'),
           dot: h('i.cv-live'), status: h('span.cv-cmpstate'), nums: h('span.cv-cmpnums.muted') };
         c.el = h('div.cv-cmpcol', { 'data-sid': a.sid },
           h('div.cv-cmpcolhead', c.mark, h('span.cv-cmpwho', c.name, c.model), a.main ? h('span.ag-chip', { title: 'The session you asked from' }, 'yours') : null),
           h('div.cv-cmpbody', c.empty, md.el),
-          h('div.cv-cmpfoot', c.dot, c.status, c.nums, h('span.cv-grow'), c.use));
+          h('div.cv-cmpfoot', c.dot, c.status, c.nums, h('span.cv-grow'), go, c.use));
         cmp.cols.set(a.sid, c);
       }
       const maker = makerOf(a.provider, a.model);
@@ -2469,6 +2467,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (a.cost != null && a.cost > 0) nums.push(usdText(a.cost));
       put(c.nums, 'textContent', nums.join(' · '));
       put(c.use, 'disabled', !a.text);
+      put(c.go, 'hidden', currentSession()?.sid === a.sid);   // the one on screen already
       kids.push(c.el);
     }
     arrange(V.cols, kids);
@@ -2486,7 +2485,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const main = S.sessions.get(g.main);
     if (!a?.text) { toast('Nothing to use yet.'); return; }
     if (!main || main.state === 'ended') { toast('The session you asked from has ended.'); return; }
-    if (currentSession()?.sid !== g.main) { viewingSid = null; S.active = g.main; main.unread = false; rebuildTranscript(); renderChrome(); renderDock(); }
+    if (currentSession()?.sid !== g.main) showSession(g.main);
     closeCompareView();
     talkTo = 'coder';
     setDraft(`Plan from ${coderName(a)}, from /compare:\n\n${a.text}`);
@@ -2496,7 +2495,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     toast(`${coderName(a)}'s answer is in your composer: read it, change it, and send it when you are ready.`);
   }
   // STOP THE OTHERS: the second opinions still writing are interrupted, as Esc
-  // in their own tabs would; their tabs stay.
+  // on their own would; their sessions stay.
   async function stopOthers(g) {
     const live = othersWriting(g);
     if (!live.length) { toast('None of the others is still writing.'); return; }
@@ -2598,7 +2597,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.homeEl.hidden = false;
     ui.dock.hidden = true;
     const down = isDown();
-    const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
+    const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.continuing ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
       plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, attachments.length ? attachVer : 0, companion()?.name || '',
       home.full ? runningSessions().map((x) => `${x.sid}:${x.state}:${x.waiting}:${x.title}`).join() : '',
       JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
@@ -2619,6 +2618,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!transport || S.conn === 'off' || S.conn === 'unpaired') return withPlan(ob.firstRun({ unpaired: S.conn === 'unpaired' }));
     if (down) return withPlan(ob.notRunning({ transport }));
     if (S.conn === 'connecting' && !hello) return h('div.cv-center', h('div.th-shimmer', 'Connecting to y3kode on this computer…'));
+    if (home.continuing) return h('div.cv-center', h('div.th-shimmer', 'Picking up where we were…'));
     if (home.screen === 'browse') return browseScreen();
     if (home.screen === 'github') return githubScreen();
     if (home.screen === 'mode' && home.pending) return modeScreen();
@@ -2883,7 +2883,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // rather than kept as it was.
     homeRev++;
     // Its session.started may have put it on screen already, and the person
-    // may have moved on since (/clear, a tab, +) while this answer was on its
+    // may have moved on since (/clear, /new) while this answer was on its
     // way. Then the answer must not pull a stopped or left session back over
     // what they chose.
     // (Its session.started puts it on screen from home, so once that has come,
@@ -2898,13 +2898,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     setTimeout(() => ui?.dock.querySelector('.cv-input')?.focus(), 50);
   }
 
-  // --- drawers: past sessions, providers and keys ---------------------------------------------
+  // --- drawers: providers and keys, connectors, changes, activity -----------------------------
   let drawerKind = null;
   function toggleDrawer(kind) {
     if (!ui) return;
     drawerKind = drawerKind === kind ? null : kind;
     ui.drawer.hidden = !drawerKind;
-    if (drawerKind === 'history') renderHistory();
     if (drawerKind === 'providers') renderProviders();
     if (drawerKind === 'changes') renderChanges();
     if (drawerKind === 'connectors') renderConnectors();
@@ -2915,29 +2914,6 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const x = h('button.cv-iconbtn', { type: 'button', title: 'Close' }, icon('close'));
     x.addEventListener('click', () => toggleDrawer(drawerKind));
     return h('div.cv-drawerhead', h('b', title), h('span.cv-grow'), x);
-  }
-
-  async function renderHistory() {
-    swap(ui.drawer, drawerHead('Past sessions'), h('div.th-shimmer', 'Loading…'));
-    const r = await cmd({ cmd: 'session.list' });
-    if (drawerKind !== 'history') return;
-    const rows = (r.sessions || []).map((x) => {
-      const b = h('button.cv-histrow', { type: 'button' },
-        h('span.cv-histtitle', x.title || 'untitled'), h('span.muted.cv-small', `${folderName(x.cwd)} · ${x.started ? timeAgo(x.started) : ''}${x.live ? ' · running' : ''}`));
-      b.addEventListener('click', async () => {
-        if (x.live) { viewingSid = null; S.active = x.sid; }
-        else {
-          if (!S.sessions.has(x.sid) || !S.sessions.get(x.sid).items.length) { S.sessions.delete(x.sid); await loadInto(x.sid); }
-          const s = S.sessions.get(x.sid);
-          if (s) { s.state = 'ended'; if (!s.providerSessionId) s.providerSessionId = x.providerSessionId; if (!S.order.includes(x.sid)) S.order.push(x.sid); }
-          viewingSid = x.sid;
-        }
-        toggleDrawer('history');
-        rebuildTranscript(); renderChrome();
-      });
-      return b;
-    });
-    swap(ui.drawer, drawerHead('Past sessions'), rows.length ? h('div.cv-hist', rows) : h('div.muted.cv-small', 'None yet.'), cloudBox());
   }
 
   // A claude.ai/code session: open it there, or copy it here with teleport in a
@@ -3085,7 +3061,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       }
     };
     const rows = (r.entries || []).slice().reverse().map((a) => h('div.cv-actrow', h('span.muted.cv-small', new Date(a.at).toLocaleTimeString()), h('span', say(a))));
-    swap(ui.drawer, drawerHead('Activity on this computer'), h('div.muted.cv-small', 'y3k Code keeps this record on your computer for 30 days. It never leaves it.'), h('div.cv-acts-list', rows));
+    swap(ui.drawer, drawerHead('Activity on this computer'), h('div.muted.cv-small', 'y3kode keeps this record on your computer for 30 days. It never leaves it.'), h('div.cv-acts-list', rows));
   }
 
   // Each coding tool as it stands on this computer: signed in, or the one
@@ -3104,7 +3080,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       pref('y3k-code:noteback') === 'always' ? h('div.cv-small', 'Lines back are sent without asking. ', (() => { const b = h('button.cv-link', { type: 'button' }, 'ask me again'); b.addEventListener('click', () => { pref('y3k-code:noteback', 'ask'); renderProviders(); }); return b; })()) : null) : null;
     swap(ui.drawer, drawerHead('Coding tools'),
       h('div.muted.cv-small', 'Each tool runs on its own sign-in, on this computer — y3kode starts the tool you signed into and never sees the sign-in. A key, where one is needed, stays on your computer and never reaches yearthreethousand.com.'),
-      rows, notesRow, h('div.cv-acts', refresh, unpair));
+      rows, notesRow, h('div.cv-acts', refresh, unpair), cloudBox());
   }
 
   return {
@@ -3117,6 +3093,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them
     _feed: (e) => onEvent(e),
+    _show: showSession,
   };
 }
 

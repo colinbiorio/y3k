@@ -712,7 +712,7 @@ export function createHistory() {
     '#cam-popup',           // the camera preview, title bar and all
     '.mind-win',            // the windows: drag bars, tabs, resize edges
     '#portal', '.budget-pop',
-    '.code-root',           // y3k Code: its transcript scrolls itself
+    '.code-root',           // y3kode: its transcript scrolls itself
     'button', 'textarea', 'input', 'select', 'a',
   ].join(', ');
 

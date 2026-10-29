@@ -211,7 +211,7 @@ await ok('"use this" puts the answer in the composer as a draft, under one line 
   assert.ok(!/session\.send/.test(use), 'use this never sends');
   assert.ok(!/cmd\(/.test(use), 'use this asks the engine for nothing at all');
   // into the MAIN session's composer: it goes to that tab first
-  assert.match(use, /if \(currentSession\(\)\?\.sid !== g\.main\) \{ viewingSid = null; S\.active = g\.main;/);
+  assert.match(use, /if \(currentSession\(\)\?\.sid !== g\.main\) showSession\(g\.main\);/);
   assert.match(use, /talkTo = 'coder';/, 'to the coder, not the presence');
   // and the whole of the compare view sends nothing: only interrupts, on the person's press
   const whole = between('const cmp = { key: null, view: null, gid: null, cols: new Map() };', '\n  async function interrupt(s) {');
@@ -376,6 +376,24 @@ console.log('\nthe screen:');
     tick();
     assert.equal($$('div.cv-cmpcol')[2].querySelector('span.cv-cmpstate').textContent, 'stopped');
     assert.equal($('button.cv-cmpstop').disabled, true);
+  });
+
+  await ok('the screen: "open" puts a second opinion\'s own session on screen (no tabs: it is how what it asks gets answered); the column already on screen has none (2026-10-29)', () => {
+    const cols = $$('div.cv-cmpcol');
+    assert.ok(cols.length >= 2);
+    assert.equal(cols[0].querySelector('button.cv-cmpgo').hidden, true, 'the main is on screen: nothing to open');
+    assert.equal(cols[1].querySelector('button.cv-cmpgo').hidden, false);
+    cols[1].querySelector('button.cv-cmpgo').click();
+    tick();
+    assert.equal(S.active, 'a1', 'the second opinion, on screen');
+    assert.ok(!$('div.cv-cmp'), 'the view closed to show it');
+    assert.equal($('div.cv-cmpstrip').hidden, false, 'the strip stays: the same comparison');
+    // opened again from there: its own column has no "open"; the main's does
+    $('button.cv-cmpopen').click();
+    tick();
+    const again = $$('div.cv-cmpcol');
+    assert.equal(again[1].querySelector('button.cv-cmpgo').hidden, true);
+    assert.equal(again[0].querySelector('button.cv-cmpgo').hidden, false);
   });
 
   await ok('the screen: "use this" puts the answer in the main session\'s composer, prefixed, and sends nothing', async () => {

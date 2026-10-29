@@ -742,7 +742,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     ta.value = 'half a thought';
     ta.dispatch('input');
     const sel = $('div.cv-controls select');
-    const tab = $('button.cv-tab.on');
+    const row = $('div.cv-row');
     sel.focus();
     // the model list changes while its <select> is in use: the redraw waits
     cv._feed({ type: 'provider.status', provider: 'claude', models: [{ id: 'm-a', label: 'A' }, { id: 'm-b', label: 'B' }] });
@@ -757,20 +757,19 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.equal($('textarea.cv-input'), ta, 'the same textarea');
     assert.equal(document.activeElement, ta, 'still focused');
     assert.equal(ta.value, 'half a thought');
-    assert.equal($('button.cv-tab.on'), tab, 'the same tab');
+    assert.equal($('div.cv-row'), row, 'the same toolbar row');
     assert.ok($('details.cv-todos'), 'the todos came in beside it');
     ta.value = ''; ta.dispatch('input');
   });
 
-  await ok('the view: a session in another tab lights its tab and touches nothing else', () => {
+  await ok('the view: a session started elsewhere (a second opinion, another browser) touches nothing on screen', () => {
     const ta = $('textarea.cv-input');
     const row = $('div.cv-bar').firstChild;
     cv._feed({ sid: 'bg1', type: 'session.started', provider: 'claude', cwd: '/tmp/bg1', mode: 'ask' });
     tick();
     const before = $('div.cv-list').childNodes.slice();
     for (let k = 0; k < 5; k++) { cv._feed({ sid: 'bg1', type: 'message.delta', id: 'bgm', block: 0, kind: 'text', text: 'words ' }); tick(); }
-    const bgTab = [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/bg1'));
-    assert.ok(bgTab?.classList.contains('unread'), 'its tab is lit');
+    assert.equal(cv._state.active, sid, 'the one on screen stays on screen');
     assert.equal($('textarea.cv-input'), ta);
     assert.equal($('div.cv-bar').firstChild, row);
     assert.deepEqual($('div.cv-list').childNodes, before, 'the transcript on screen is untouched');
@@ -784,8 +783,8 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     cv._feed({ sid, type: 'message.delta', id: 'mv2', block: 0, kind: 'text', text: 'more' });
     tick();
     assert.equal(sc.scrollTop, 1000, 'left where they were reading');
-    // the same session asked for again (a reconnect's hello; its own tab clicked)
-    $('button.cv-tab.on').click();
+    // the same session asked for again (a reconnect's hello)
+    cv._show(sid);
     tick();
     assert.deepEqual($('div.cv-list').childNodes.slice(0, list.length), list, 'nothing drawn again');
     sc.scrollTop = 4500; sc.dispatch('scroll');
@@ -799,7 +798,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       cv._feed({ sid: 'long1', type: 'message.end', id: 'l' + i });
     }
     tick();
-    [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/long1')).click();
+    cv._show('long1');
     const count = () => $$('div.cv-list > div.it').length;
     const atOnce = count();
     assert.ok(atOnce > 0 && atOnce <= 30, 'drawn at once: ' + atOnce);
@@ -839,10 +838,9 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
   const room = () => document.body.children.filter((c) => c.classList.contains('code-root') && !c.classList.contains('leaving')).pop();
   const $ = (sel) => room().querySelector(sel);
   const $$ = (sel) => room().querySelectorAll(sel);
-  const tabOf = (cwd) => [...$$('button.cv-tab')].find((t) => t.title.includes(cwd));
   const viewWith = async (tag, opts) => (await import(`../src/code/code-view.js?${tag}`)).createCodeView(opts);
 
-  await ok('the view: a reply voiced in a session in another tab stays in that tab; one on screen is voiced in place', async () => {
+  await ok('the view: a reply voiced in a session not on screen stays there; one on screen is voiced in place', async () => {
     const asks = [];
     const cv = await viewWith('voiced', { link: { voice: () => new Promise((resolve) => asks.push(resolve)) } });
     cv._feed({ sid: 'vA', type: 'session.started', provider: 'claude', cwd: '/tmp/vA', mode: 'ask' });
@@ -871,8 +869,8 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.equal($('div.cv-list > div.it.as'), mine, 'patched where it stands');
     assert.ok(mine.querySelector('.voiced'), 'voiced');
     assert.match(mine.textContent, /reads fine to me/);
-    // and the other tab shows its own, voiced, when it is opened
-    tabOf('/tmp/vB').click();
+    // and the other session shows its own, voiced, when it is put on screen
+    cv._show('vB');
     tick();
     const theirs = $('div.cv-list > div.it.as');
     assert.match(theirs.textContent, /migrations folder is gone/);
@@ -1281,10 +1279,11 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.ok($('div.cv-priorline')?.textContent.includes('Gone back to here'), 'and a line where the new one goes on');
     assert.ok([...$$('div.it.as')].some((a) => /First answer/.test(a.textContent)));
     assert.ok(![...$$('div.it.as')].some((a) => /Second answer/.test(a.textContent)));
-    // the old one, let go by the engine, leaves the tabs
+    // the old one, let go by the engine, ends; the one gone back to stays on screen
     cv._feed({ sid, type: 'session.ended', reason: 'stopped' });
     tick();
-    assert.deepEqual([...$$('button.cv-tab')].filter((t) => !t.classList.contains('cv-new')).length, 1);
+    assert.equal(cv._state.sessions.get(sid).state, 'ended');
+    assert.equal(cv._state.active, 'gb2');
     // a new message there is anchored past what came from before
     cv._feed({ sid: 'gb2', type: 'message.user', text: 'second ask, better' });
     cv._feed({ sid: 'gb2', type: 'message.anchor', uuid: U(6), after: U(2) });
@@ -1369,7 +1368,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     // a session whose earlier one the page does not hold: read on the side
     cv._feed({ sid: 'dk2', type: 'session.started', provider: 'claude', cwd: '/tmp/ct', mode: 'ask', prior: 'dk1', priorCut: 1 });
     tick();
-    [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/ct') && !t.classList.contains('on'))?.click();
+    cv._show('dk2');
     tick();
     await settle();
     tick();
@@ -1715,10 +1714,17 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       eng.cmds = [];
       const S = cv._state;
       await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
-      // the person goes to the folders (a new session)
-      $('button.cv-tab.cv-new').click();
+      // the person starts over: /new (the session is mid-turn, so it asks first)
+      const ta = $('textarea.cv-input');
+      ta.value = '/new';
+      ta.dispatch('keydown', { key: 'Enter' });
+      await settle();
+      $('button.cv-dlg-yes').click();
+      await until(() => eng.waiting('session.stop').length);
+      for (const c of eng.waiting('session.stop')) c.answer({ ok: true });
+      eng.cmds = [];
+      await until(() => S.active === null);
       tick();
-      assert.equal(S.active, null);
       // another engine answers now (a restart, or this browser paired again):
       // it runs nothing, and the old session is not chosen in its place
       eng.send({ epoch: 'e2', seq: 3 }, 'reset');
@@ -1854,7 +1860,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       tick();
       assert.equal(S.sessions.get(sid).cwd, '', 'bare: no folder, no history');
       // opened, and a line said to the presence there, before the hello is answered
-      $('button.cv-tab').click();
+      cv._show(sid);
       tick();
       $('button.cv-who').click();
       const ta = $('textarea.cv-input');
@@ -1884,118 +1890,21 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
   });
 
   // 2026-10-08: four sessions is never a dead end. The engine had
-  // session.stop; nothing on the screen sent it.
-  const xOf = (cwd) => tabOf(cwd)?.parentNode.querySelector('button.cv-tabx') || null;
-  await ok('the view: a session is closed from its tab: the × beside the tab, never inside it; at rest it stops at once, mid-turn it asks first, ended it only leaves the strip (2026-10-08)', async () => {
+  // session.stop; nothing on the screen sent it. 2026-10-29: the tabs and
+  // their × went (one conversation, forever); what stops a session is the
+  // person's own /clear or /new, and the Stop beside each on the folder
+  // screen when four are running (the next test).
+  await ok('the view: /clear stops the session it leaves: at rest at once, mid-turn it asks first and Cancel stops nothing; stopped is kept; a stop the engine refuses says why (2026-10-08, 2026-10-29)', async () => {
     const asked = bridge();
     const toasts = [];
     const cv = await viewWith('closetab', { toast: (m) => toasts.push(m) });
     const S = cv._state;
-    const scrolled = [];
-    proto.scrollIntoView = function () { scrolled.push(this); };
     cv.open();
     await settle();
     tick();
-    for (const k of ['ca', 'cb', 'cc']) cv._feed({ sid: k, type: 'session.started', provider: 'claude', cwd: '/tmp/' + k, mode: 'ask', providerSessionId: U(80) });
-    cv._feed({ sid: 'cb', type: 'message.user', text: 'look at cb' });
-    tick();
-    const wraps = [...$$('span.cv-tabwrap')];
-    assert.equal(wraps.length, 3);
-    for (const w of wraps) {
-      assert.deepEqual(w.children.map((c) => c.className.split(' ')[0]), ['cv-tab', 'cv-tabx'], 'the tab, and the × beside it');
-      assert.equal(w.firstChild.querySelector('button'), null, 'no button inside the tab\'s button');
-    }
-    assert.equal(xOf('/tmp/cb').getAttribute('aria-label'), 'Stop and close cb');
-    assert.ok(tabOf('/tmp/ca').parentNode.classList.contains('on'), 'the tab on screen shows its × for good');
-    // at rest: stopped at once
-    xOf('/tmp/cb').click();
-    await settle();
-    tick();
-    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb']);
-    assert.equal($('h3.cv-dlg-title'), null, 'nothing asked');
-    assert.equal(toasts.at(-1), 'Stopped. It is in Past sessions; Continue picks it up.');
-    assert.equal(tabOf('/tmp/cb'), undefined, 'its tab goes at once');
-    assert.equal(S.active, 'ca', 'the one on screen stays on screen');
-    cv._feed({ sid: 'cb', type: 'session.ended', reason: 'stopped' });   // as the engine then says
-    tick();
-    assert.equal(tabOf('/tmp/cb'), undefined);
-    // stopped is not gone: opened from Past sessions, it has its tab while it is on screen
-    const base = window.y3kCode.cmd;
-    window.y3kCode.cmd = async (o) => (o.cmd === 'session.list' ? (await base(o), { ok: true, sessions: [{ sid: 'cb', title: null, cwd: '/tmp/cb', started: Date.now(), live: false }] }) : base(o));
-    [...$$('button.cv-iconbtn')].find((b) => b.title === 'Past sessions').click();
-    await settle();
-    tick();
-    $('button.cv-histrow').click();
-    await settle();
-    tick();
-    assert.ok(tabOf('/tmp/cb')?.classList.contains('on'), 'the stopped session, on screen, in its tab');
-    assert.equal(xOf('/tmp/cb').getAttribute('aria-label'), 'Close cb');
-    xOf('/tmp/cb').click();
-    await settle();
-    tick();
-    assert.equal(tabOf('/tmp/cb'), undefined);
-    assert.equal(asked('session.stop').length, 1, 'nothing to stop: it had ended');
-    assert.equal(S.active, 'ca', 'back to the one that was on screen');
-    window.y3kCode.cmd = base;
-    // the one on screen: the newest other live session takes its place (and
-    // a second click while the first is being answered sends nothing more)
-    xOf('/tmp/ca').click();
-    xOf('/tmp/ca').click();
-    await settle();
-    tick();
-    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb', 'ca']);
-    assert.equal(S.active, 'cc');
-    assert.ok(tabOf('/tmp/cc').classList.contains('on'));
-    assert.equal(scrolled.at(-1), tabOf('/tmp/cc').parentNode, 'the tab now on screen is brought into view, × and all');
-    const seen = scrolled.length;
-    tick();
-    assert.equal(scrolled.length, seen, 'once, not on every pass');
-    // mid-turn: asked first, and Cancel stops nothing
-    cv._feed({ sid: 'cc', type: 'turn.started', t: Date.now() });
-    tick();
-    xOf('/tmp/cc').click();
-    await settle();
-    assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in cc?');
-    assert.equal($('p.cv-dlg-text').textContent, 'It is in the middle of a turn. What it has done to files stays done, and the session stays in Past sessions.');
-    assert.deepEqual([$('button.cv-dlg-no').textContent, $('button.cv-dlg-yes').textContent], ['Cancel', 'Stop']);
-    $('button.cv-dlg-no').click();
-    await settle();
-    tick();
-    assert.equal(asked('session.stop').length, 2, 'Cancel: it goes on');
-    assert.ok(tabOf('/tmp/cc'));
-    xOf('/tmp/cc').click();
-    await settle();
-    $('button.cv-dlg-yes').click();
-    await settle();
-    tick();
-    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb', 'ca', 'cc']);
-    assert.equal(S.active, null, 'none left running: the folders');
-    assert.equal($('div.cv-home').hidden, false);
-    // one that has ended: its × only takes it off the strip
-    cv._feed({ sid: 'cd', type: 'session.started', provider: 'claude', cwd: '/tmp/cd', mode: 'ask' });
-    tick();
-    cv._feed({ sid: 'cd', type: 'session.ended', reason: 'exited' });
-    tick();
-    assert.ok(tabOf('/tmp/cd')?.classList.contains('ended'), 'on screen, it stays to say it ended');
-    assert.equal(xOf('/tmp/cd').getAttribute('aria-label'), 'Close cd');
-    xOf('/tmp/cd').click();
-    await settle();
-    tick();
-    assert.equal(asked('session.stop').length, 3, 'an ended session is not stopped again');
-    assert.equal(tabOf('/tmp/cd'), undefined);
-    // a middle click on the tab closes it too (a left one is a click)
-    cv._feed({ sid: 'ce', type: 'session.started', provider: 'claude', cwd: '/tmp/ce', mode: 'ask' });
-    tick();
-    tabOf('/tmp/ce').dispatch('auxclick', { button: 2 });
-    await settle();
-    assert.equal(asked('session.stop').length, 3);
-    tabOf('/tmp/ce').dispatch('auxclick', { button: 1 });
-    await settle();
-    tick();
-    assert.equal(asked('session.stop').at(-1).sid, 'ce');
-    assert.equal(toasts.at(-1), 'Stopped. It is in Past sessions.', 'Continue is named only where there is something to continue');
-    // /clear stops the session it leaves; mid-turn, /new asks first
-    cv._feed({ sid: 'cf', type: 'session.started', provider: 'claude', cwd: '/tmp/cf', mode: 'ask' });
+    // at rest: stopped at once, said so, and the folders
+    cv._feed({ sid: 'cf', type: 'session.started', provider: 'claude', cwd: '/tmp/cf', mode: 'ask', providerSessionId: U(80) });
+    cv._feed({ sid: 'cf', type: 'message.user', text: 'look at cf' });
     tick();
     assert.equal(S.active, 'cf');
     let ta = $('textarea.cv-input');
@@ -2003,17 +1912,26 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     ta.dispatch('keydown', { key: 'Enter' });
     await settle();
     tick();
-    assert.equal(asked('session.stop').at(-1).sid, 'cf', '/clear stopped it');
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cf'], '/clear stopped it');
+    assert.equal($('h3.cv-dlg-title'), null, 'nothing asked');
+    assert.equal(toasts.at(-1), 'Stopped. Say more and it goes on from here.');
     assert.equal(S.active, null, 'and went to the folders');
-    assert.equal(tabOf('/tmp/cf'), undefined, 'leaving no tab behind to count toward the four');
+    assert.equal($('div.cv-home').hidden, false);
+    cv._feed({ sid: 'cf', type: 'session.ended', reason: 'stopped' });   // as the engine then says
+    tick();
+    assert.equal(S.active, null, 'the folders stay');
+    // mid-turn: /new asks first, and Cancel stops nothing
     cv._feed({ sid: 'cg', type: 'session.started', provider: 'claude', cwd: '/tmp/cg', mode: 'ask' });
     cv._feed({ sid: 'cg', type: 'turn.started', t: Date.now() });
     tick();
+    assert.equal(S.active, 'cg');
     ta = $('textarea.cv-input');
     ta.value = '/new';
     ta.dispatch('keydown', { key: 'Enter' });
     await settle();
     assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in cg?');
+    assert.equal($('p.cv-dlg-text').textContent, 'It is in the middle of a turn. What it has done to files stays done, and the conversation is kept.');
+    assert.deepEqual([$('button.cv-dlg-no').textContent, $('button.cv-dlg-yes').textContent], ['Cancel', 'Stop']);
     // Enter on the focused Cancel is Cancel, not the dialog's yes (review,
     // 2026-10-08: a keyboard user heard 'Cancel', pressed Enter, and it stopped)
     const enter = press($('button.cv-dlg-no'), 'Enter');
@@ -2023,21 +1941,153 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     $('button.cv-dlg-no').click();
     await settle();
     tick();
-    assert.notEqual(asked('session.stop').at(-1).sid, 'cg');
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cf'], 'Cancel: it goes on');
     assert.equal(S.active, 'cg', 'Cancel: still here, still working');
-    // a stop the engine refuses leaves the tab, and says why
+    // asked again, and Stop: stopped, and the folders
+    ta.value = '/new';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    $('button.cv-dlg-yes').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cf', 'cg']);
+    assert.equal(toasts.at(-1), 'Stopped.', 'nothing of the coder\'s to go on from: just stopped');
+    assert.equal(S.active, null, 'none left running: the folders');
+    assert.equal($('div.cv-home').hidden, false);
+    // a stop the engine refuses leaves it on screen, and says why
     const plain = window.y3kCode.cmd;
     window.y3kCode.cmd = async (o) => (o.cmd === 'session.stop' ? (await plain(o), { ok: false, error: 'That session is not running.' }) : plain(o));
-    cv._feed({ sid: 'cg', type: 'turn.ended', status: 'success' });
+    cv._feed({ sid: 'ch', type: 'session.started', provider: 'claude', cwd: '/tmp/ch', mode: 'ask' });
     tick();
-    xOf('/tmp/cg').click();
+    ta = $('textarea.cv-input');
+    ta.value = '/clear';
+    ta.dispatch('keydown', { key: 'Enter' });
     await settle();
     tick();
     assert.equal(toasts.at(-1), 'That session is not running.');
-    assert.ok(tabOf('/tmp/cg'), 'the tab stays');
+    assert.equal(S.active, 'ch', 'it stays');
     assert.ok(!toasts.some((m) => /—/.test(m)), 'no dashes for breaks in what it says');
     cv.close();
-    delete proto.scrollIntoView;
+    delete window.y3kCode;
+  });
+
+  // ONE CONVERSATION, FOREVER (2026-10-29): opened, the room continues the
+  // newest conversation the engine holds; a line said to one that has ended
+  // continues it first; one that fills up is compacted, with what to keep.
+  await ok('the view: opened with nothing running, it continues the newest conversation the engine holds, on its own; never a second opinion (2026-10-29)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    let listed;
+    const list = new Promise((resolve) => { listed = resolve; });
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') { await list; return { ok: true, sessions: [
+        { sid: 'asd', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(81), live: false, aside: true },
+        { sid: 'old1', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(80), live: false },
+        { sid: 'old0', provider: 'claude', cwd: '/tmp/zero', providerSessionId: U(79), live: false },
+      ] }; }
+      if (o.cmd === 'session.resume') return { ok: true, sid: 'cont1' };
+      return { ok: true };
+    };
+    const cv = await viewWith('continue', { toast: () => {} });
+    const S = cv._state;
+    cv.open();
+    await settle();
+    tick();
+    // while it is picked up: not the folders, a quiet line
+    assert.equal(asked('session.list').length, 1);
+    assert.equal($('div.cv-home').hidden, false);
+    assert.equal($('div.cv-home div.th-shimmer')?.textContent, 'Picking up where we were…', 'not the folders while it is picked up');
+    assert.equal($('button.cv-folderrow'), null);
+    listed();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.resume').map((o) => [o.sid, o.providerSessionId, o.cwd, o.provider]), [['old1', U(80), '/tmp/one', 'claude']], 'the newest that is not a second opinion');
+    assert.equal(S.active, 'cont1');
+    cv._feed({ sid: 'cont1', type: 'session.started', provider: 'claude', cwd: '/tmp/one', mode: 'ask', prior: 'old1', providerSessionId: U(80) });
+    tick();
+    assert.equal(S.active, 'cont1');
+    assert.equal($('div.cv-home').hidden, true, 'not the folders');
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: with no conversation to continue, the folders ask where it begins (2026-10-29)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('firsttime', { toast: () => {} });
+    cv.open();
+    await settle();
+    tick();
+    assert.equal(asked('session.list').length, 1, 'asked');
+    assert.equal(asked('session.resume').length, 0, 'nothing to continue');
+    assert.equal($('div.cv-home').hidden, false, 'the folders');
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: a line said to a conversation that has ended continues it first, then goes on from there (2026-10-29)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => { await base(o); return o.cmd === 'session.resume' ? { ok: true, sid: 'ce2' } : { ok: true }; };
+    const cv = await viewWith('goeson', { toast: () => {} });
+    const S = cv._state;
+    cv.open();
+    await settle();
+    tick();
+    cv._feed({ sid: 'ce1', type: 'session.started', provider: 'claude', cwd: '/tmp/ce', mode: 'ask', providerSessionId: U(80) });
+    cv._feed({ sid: 'ce1', type: 'message.user', text: 'before' });
+    cv._feed({ sid: 'ce1', type: 'session.ended', reason: 'stopped' });
+    tick();
+    const ta = $('textarea.cv-input');
+    assert.equal(ta.disabled, false, 'the box stays open');
+    assert.equal(ta.placeholder, 'Say more — it goes on from here…');
+    assert.equal($('button.cv-send').disabled, false);
+    ta.value = 'and after';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.resume').map((o) => [o.sid, o.providerSessionId, o.cwd]), [['ce1', U(80), '/tmp/ce']], 'continued first');
+    assert.deepEqual(asked('session.send').map((o) => [o.sid, o.text]), [['ce2', 'and after']], 'then the line, to the continued one');
+    assert.equal(S.active, 'ce2');
+    assert.equal(ta.value, '', 'sent');
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: a conversation that fills up is compacted on its own, at rest, once, told what to keep (2026-10-29)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('compact', { toast: () => {} });
+    cv.open();
+    await settle();
+    tick();
+    cv._feed({ sid: 'cp', type: 'session.started', provider: 'claude', cwd: '/tmp/cp', mode: 'ask', providerSessionId: U(80) });
+    cv._feed({ sid: 'cp', type: 'session.state', state: 'idle' });
+    cv._feed({ sid: 'cp', type: 'usage.context', used: 150000, limit: 200000 });
+    tick();
+    await settle();
+    assert.equal(asked('session.send').length, 0, '75%: not yet');
+    cv._feed({ sid: 'cp', type: 'turn.started', t: Date.now() });
+    cv._feed({ sid: 'cp', type: 'usage.context', used: 170000, limit: 200000 });
+    tick();
+    await settle();
+    assert.equal(asked('session.send').length, 0, '85% mid-turn: not now');
+    cv._feed({ sid: 'cp', type: 'turn.ended', status: 'success', t: Date.now() });
+    cv._feed({ sid: 'cp', type: 'session.state', state: 'idle' });
+    tick();
+    await settle();
+    const sent = asked('session.send');
+    assert.equal(sent.length, 1, 'at rest: compacted');
+    assert.equal(sent[0].sid, 'cp');
+    assert.match(sent[0].text, /^\/compact Keep what matters to continuing this one conversation/);
+    assert.match(sent[0].text, /how this person likes to work and what they have asked for; and what has passed between us/);
+    cv._feed({ sid: 'cp', type: 'usage.context', used: 172000, limit: 200000 });
+    cv._feed({ sid: 'cp', type: 'session.state', state: 'idle' });
+    tick();
+    await settle();
+    assert.equal(asked('session.send').length, 1, 'asked once; the coder takes a moment to do it');
+    cv.close();
     delete window.y3kCode;
   });
 
@@ -2054,11 +2104,18 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     await settle();
     tick();
     cv._feed({ type: 'workspace.recent', folders: [{ path: '/tmp/f5', name: 'f5', mode: 'ask' }] });
+    cv._feed({ sid: 'm0', type: 'session.started', provider: 'claude', cwd: '/tmp/m0', mode: 'ask' });   // the one on screen
     for (const [k, title] of [['m1', 'fix the tests'], ['m2', null], ['m3', 'write docs'], ['m4', 'refactor']]) cv._feed({ sid: k, type: 'session.started', provider: 'claude', cwd: '/tmp/' + k, mode: 'ask', title });
     cv._feed({ sid: 'm3', type: 'turn.started', t: Date.now() });
     tick();
-    $('button.cv-new').click();   // "+": to the folders, for a fifth
+    // to the folders, for a fifth: /clear on the one on screen (the way there now)
+    const ta = $('textarea.cv-input');
+    ta.value = '/clear';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
     tick();
+    assert.equal(cv._state.active, null);
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['m0']);
     $('button.cv-folderrow').click();
     await settle();
     tick();
@@ -2073,20 +2130,20 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     cv._feed({ sid: 'm4', type: 'turn.started', t: Date.now() });
     tick();
     assert.equal([...$$('div.cv-fullrow')][3].querySelector('i.cv-live').className, 'cv-live run');
-    // Stop on one mid-turn asks first, as a tab's × does; Cancel stops nothing
+    // Stop on one mid-turn asks first, as /new does; Cancel stops nothing
     [...$$('div.cv-fullrow')][2].querySelector('button.btn').click();
     await settle();
     assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in m3?');
     $('button.cv-dlg-no').click();
     await settle();
     tick();
-    assert.equal(asked('session.stop').length, 0);
+    assert.equal(asked('session.stop').length, 1);
     assert.equal($$('div.cv-fullrow').length, 4);
-    // Stop on one at rest: the same stop as a tab's ×; then there is room, and the refusal goes
+    // Stop on one at rest: the same stop as /clear; then there is room, and the refusal goes
     [...$$('div.cv-fullrow')][0].querySelector('button.btn').click();
     await settle();
     tick();
-    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['m1']);
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['m0', 'm1']);
     assert.equal($('div.cv-full'), null);
     assert.equal($('div.cv-note.err'), null);
     assert.equal(cv._state.active, null, 'still on the folders, to choose it again');
@@ -2101,7 +2158,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     tick();
     assert.equal($('div.cv-full'), null, 'one ended on its own: room, no list');
     assert.equal($('div.cv-note.err'), null, 'and no refusal that is out of date');
-    assert.equal(asked('session.stop').length, 1);
+    assert.equal(asked('session.stop').length, 2);
     cv.close();
     delete window.y3kCode;
   });
@@ -2158,11 +2215,11 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       seen('visible');
       assert.equal(timers.size, 1);
       // a session at rest on screen: no clock; back to the working one: the clock
-      tabOf('/tmp/w2').click();
+      cv._show('w2');
       tick();
       assert.equal(timers.size, 0, 'the session on screen is at rest: stopped');
       assert.equal($('div.cv-working'), null);
-      tabOf('/tmp/w1').click();
+      cv._show('w1');
       tick();
       assert.equal(timers.size, 1);
       // the turn lands: the clock stops, the line goes, its summary comes
@@ -2221,7 +2278,7 @@ await ok('the stylesheet: a rise only on entry, a pane frosted only at the top t
   assert.match(code, /\.th-shimmer \{[^}]*animation: cv-breathe/);
   assert.ok(!/@keyframes cv-shimmer/.test(code), 'the shimmer is not a moving background');
   const still = ':root:is([data-gfx="smooth"], [data-motion="less"])';
-  for (const sel of [' .cv-orbit::before', ' .code-root .pm-pulse::after', ' .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live)']) assert.ok(code.includes(still + sel), sel);
+  for (const sel of [' .cv-orbit::before', ' .code-root .pm-pulse::after', ' .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live)']) assert.ok(code.includes(still + sel), sel);
   assert.match(code, /\.cv-scroll \{ contain: strict; \}/);
   assert.match(code, /content-visibility: auto; contain-intrinsic-size: auto 160px;/);
   assert.match(code, /body\.code-shifting #stage \{ opacity: 0; \}/);
@@ -2265,15 +2322,10 @@ await ok('liquid glass: every action its own panel, drawn not blurred, settling 
   assert.match(lg, /\.cv-pane \.cv-send\.stop \{[^}]*rgba\(255, 81, 71/);
 });
 
-await ok('the stylesheet: a tab\'s × off the other tabs under a pointer, on every tab where nothing hovers, with a thumb\'s reach; the turn\'s light stills with the rest (2026-10-08)', () => {
+await ok('the stylesheet: no tab strip, no "+", no × (one conversation, forever; 2026-10-29); the turn\'s light stills with the rest (2026-10-08)', () => {
   const css = read('styles.css');
-  assert.match(css, /\n\.cv-tabx \{[^}]*opacity: 0; pointer-events: none;/, 'the × is shown on every tab under a pointer');
-  assert.match(css, /\n\.cv-tabwrap:is\(:hover, :focus-within, \.on\) > \.cv-tabx \{ opacity: 1; pointer-events: auto; \}/);
-  assert.match(css, /@media \(hover: none\) \{\s*\.cv-tabwrap > \.cv-tab \{ padding-right: 32px; \}\s*\.cv-tabwrap > \.cv-tabx \{ opacity: 1; pointer-events: auto; \}/, 'no hover, no ×');
-  assert.match(css, /\n\.cv-tabx \{[^}]*width: 20px; height: 20px;/);
-  const touch = css.slice(css.indexOf('/* ===== A FINGER IS NOT A CURSOR'));
-  assert.match(touch, /\.cv-tabx::before \{ content: ''; position: absolute; inset: -12px;/, '20px of bead and 12px each side: 44px to land on');
-  assert.match(touch, /\.cv-tabs \{ gap: 8px; padding: 7px 0; margin: -7px 0; \}/, 'the scroller clips the reach, or one tab\'s reach lands on the next');
+  for (const gone of ['.cv-tabs', '.cv-tab ', '.cv-tab.', '.cv-tabx', '.cv-tabwrap', '.cv-new', '.cv-tabdot']) assert.ok(!css.includes(gone), gone + ' is gone');
+  assert.ok(!/cv-tab|cv-new|renderTabs|closeTab|Past sessions/.test(read('src/code/code-view.js')), 'and nothing draws one');
   // the turn's light is the running light, which Smooth, less motion and reduced motion still
   assert.match(read('src/code/code-view.js'), /work\.dot = h\('i\.cv-live\.run'\)/);
   assert.match(css, /\n\.cv-live\.ask \{ background: #ffbd2e; \}/);

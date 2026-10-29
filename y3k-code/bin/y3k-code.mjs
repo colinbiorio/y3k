@@ -187,7 +187,7 @@ async function start() {
       keepFresh();
     }, PRE_TTL + 1000).unref?.();
   } else if (pairing.list().length) {
-    // Already paired: open y3k Code itself, not a pairing link — the browser
+    // Already paired: open y3kode itself, not a pairing link — the browser
     // that paired before still holds its token, and a fresh code tab every
     // start just left a second room open beside the first.
     const code = pairing.issueCode();

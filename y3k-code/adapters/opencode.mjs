@@ -15,7 +15,7 @@
 //     the environment are removed, and titles use the chosen model: nothing
 //     goes to a provider the person did not choose
 //   - modes: ask, plan, accept edits. OpenCode's only other setting approves
-//     everything, which y3k Code never offers — so no "auto" here
+//     everything, which y3kode never offers — so no "auto" here
 
 import { randomBytes } from 'node:crypto';
 import { spawnChild, stopChild, childEnv, resolveBin, run } from '../proc.mjs';
