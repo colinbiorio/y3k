@@ -134,6 +134,14 @@ await ok('first person: in the dreamed world, the scene, the thought, and the wo
   assert.ok(!lineOf({ thought: 'I turn.', action: 'left' }).includes('left'));
 });
 
+await ok('the world answering is kept with its words: who answered, and what, within the line', () => {
+  assert.equal(lineOf({ thought: 'She is pouring.', say: 'Thank you, Odile.', scene: 'her painted house', answer: 'Odile: \u201cMind the brim, it\u2019s full.\u201d' }),
+    'In the dreamed world, her painted house: She is pouring. I said: "Thank you, Odile." Odile answered: "Mind the brim, it\u2019s full."');
+  assert.equal(lineOf({ thought: 'Quiet.', answer: 'Odile: \u201cHm.\u201d' }), 'In the dreamed world: Quiet.', 'an answer to nothing it said is not kept');
+  const long = lineOf({ thought: 'w '.repeat(300), say: 's'.repeat(300), scene: 'c'.repeat(200), answer: 'Odile: \u201c' + 'a'.repeat(280) + '\u201d' });
+  assert.ok(long.length <= 500 && long.includes(`I said: "${'s'.repeat(300)}"`) && long.includes('Odile answered'), long.length);
+});
+
 await ok('clean and capped: control characters go, whitespace folds, each part is cut, the whole fits the journal\'s 500 — the scene gives way, then the thought, at a word; the words it said are never cut', () => {
   const ctl = String.fromCharCode(0, 7, 0x1f, 0x7f, 0x85, 0x2028, 0x2029);
   const l = lineOf({ thought: `a lit${ctl}doorway\n\n and\t I  go`, say: `hel${ctl}lo`, scene: ` a \r\n corridor ` });
@@ -176,8 +184,8 @@ await ok('a moment is new when its thought is: a move in human mode brings none 
 
 await ok('what goes to the record is the moment\'s words, capped as the door caps them, and never the picture', () => {
   const body = momentBody({ n: 1, thought: 't', say: 's', action: 'f'.repeat(80), scene: 'sc', frame: '/9j/AAAA', sees: 'x', status: 'awake', intention: 'i' });
-  assert.deepEqual(body, { thought: 't', say: 's', action: 'f'.repeat(60), scene: 'sc' });
-  assert.deepEqual(momentBody(null), { thought: '', say: '', action: '', scene: '' });
+  assert.deepEqual(body, { thought: 't', say: 's', action: 'f'.repeat(60), scene: 'sc', answer: '' });
+  assert.deepEqual(momentBody(null), { thought: '', say: '', action: '', scene: '', answer: '' });
   const big = momentBody({ thought: 'x'.repeat(700), say: 'y'.repeat(400), scene: 'z'.repeat(300) });
   assert.deepEqual([big.thought.length, big.say.length, big.scene.length], [600, 300, 200]);
 });

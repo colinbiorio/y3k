@@ -181,7 +181,7 @@ export function newIn(m, seen) {
 // as the door caps them, and never its picture.
 export function momentBody(m) {
   const s = (v, n) => String(v ?? '').slice(0, n);
-  return { thought: s(m?.thought, 600), say: s(m?.say, 300), action: s(m?.action, 60), scene: s(m?.scene, 200) };
+  return { thought: s(m?.thought, 600), say: s(m?.say, 300), action: s(m?.action, 60), scene: s(m?.scene, 200), answer: s(m?.answer, 300) };
 }
 
 // ITS LINES, ONE AFTER ANOTHER. speak(text, { onEnd }) → stop(), or null
