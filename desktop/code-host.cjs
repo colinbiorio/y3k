@@ -1,5 +1,5 @@
 // ============================================================================
-// code-host.cjs — y3k Code's engine, hosted by the desktop app.
+// code-host.cjs — y3kode's engine, hosted by the desktop app.
 //
 // The engine (../y3k-code, packed into the app's resources) runs in an Electron
 // UTILITY PROCESS: not in the window, so pressing ⌘R to pick up a new deploy

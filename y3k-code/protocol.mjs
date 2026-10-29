@@ -1,4 +1,4 @@
-// The one language between the y3k Code screen and the engine on the person's
+// The one language between the y3kode screen and the engine on the person's
 // machine. Every adapter (Claude Code, Codex, Gemini, OpenCode) is translated
 // INTO these events, and the screen speaks only these commands — so the page
 // never needs to know which vendor's CLI is running, and a new vendor is a new

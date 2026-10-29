@@ -150,7 +150,7 @@ await ok('the home folder and hidden folders are refused', async () => {
 
 console.log('\na session (recorded Read → Edit):');
 
-const start = await cmd({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask', handoff: { name: 'Orion', handle: 'orion', note: 'Colin is building y3k Code.' } });
+const start = await cmd({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask', handoff: { name: 'Orion', handle: 'orion', note: 'Colin is building y3kode.' } });
 const sid = start.sid;
 
 await ok('starts with the person\'s own sign-in', async () => {

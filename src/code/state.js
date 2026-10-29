@@ -233,7 +233,7 @@ function answerOf(S, g, sid, now) {
   if (end) a.state = end.status === 'interrupted' ? 'stopped' : 'failed';
   else if (s.state === 'ended') a.state = a.text ? 'done' : 'failed';
   else if (sum) a.state = 'done';
-  else if (s.waiting > 0) a.state = a.plan ? 'done' : 'waiting';   // a plan proposed is the answer; its card waits in its own tab
+  else if (s.waiting > 0) a.state = a.plan ? 'done' : 'waiting';   // a plan proposed is the answer; its card waits in its own session
   else if (s.state === 'running') { a.state = writing ? 'writing' : 'thinking'; a.live = writingRate(s, now); }
   else if (s.state === 'idle') a.state = a.text ? 'done' : 'thinking';
   // (else starting: the tool has not taken the question yet)

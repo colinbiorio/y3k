@@ -1886,7 +1886,7 @@ function kommandPane() {
       // from before that is replaced by hand: the newest app on the desktop,
       // the setup command again in a terminal. Update is offered only when the
       // site offers this account a version to update to (/api/code/setup: shut
-      // while y3k Code is narrowed to the founder, CODE_ROLLOUT), so the button
+      // while y3kode is narrowed to the founder, CODE_ROLLOUT), so the button
       // never leads to "the site did not offer a version".
       const desktop = () => typeof window.y3kCode?.cmd === 'function';
       const https = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : null);

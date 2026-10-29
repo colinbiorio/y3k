@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// y3k Code in the REAL desktop app (Electron), against a local site, with the
+// y3kode in the REAL desktop app (Electron), against a local site, with the
 // fake `claude` on PATH. Needs Electron (ELECTRON_BIN, or desktop/node_modules)
 // and a display (run under xvfb-run on Linux).
 //

@@ -271,7 +271,7 @@ const EFFORT = process.env.EFFORT || 'xhigh';
 // attribution header (see BRAIN_PROVIDERS.openrouter). Env-gated because this
 // repo bakes in no canonical domain — unset in dev, and the header isn't sent.
 const SITE_URL = (process.env.SITE_URL || '').trim();
-// Who sees y3k Code (CODE.md): 'all' (the default — every account, the same
+// Who sees y3kode (CODE.md): 'all' (the default — every account, the same
 // app for everyone; Colin, 2026-10-11), 'founder' (narrowed again, to stage
 // something before it is everyone's), or 'off'. The site never talks to
 // anyone's engine either way; this only shows or hides the glyph and opens the doors.
@@ -290,7 +290,7 @@ const SINCE = new Date().toISOString();
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'all';
 const codeNoteCap = createNoteCap();
 const codeVoiceCap = createVoiceCap();
-// Whether y3k Code is open to this account (sessionUser or publicProfile: both
+// Whether y3kode is open to this account (sessionUser or publicProfile: both
 // carry `founder`). One rule for every Code door, so they cannot drift apart.
 const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_ROLLOUT === 'founder' && user.founder === true));
 // The engine, handed over (code-download.mjs): the folder it is packed from,
@@ -417,7 +417,7 @@ const RATE_CLASSES = {
   walk: { max: RATE_WALK_MAX, sourceMax: RATE_WALK_SOURCE_MAX, accounts: walkAccountHits, flood: walkFloodHits, guests: walkHits },
   eye: { max: RATE_EYE_MAX, sourceMax: RATE_EYE_SOURCE_MAX, accounts: eyeAccountHits, flood: eyeFloodHits, guests: eyeHits },
 };
-// DOWNLOADS: THE PAID CEILING, ON A COUNT OF THEIR OWN. The y3k Code engine
+// DOWNLOADS: THE PAID CEILING, ON A COUNT OF THEIR OWN. The y3kode engine
 // (/api/code/engine.tgz, and the /code/dl/<token>/ link in the command people
 // paste) spends nothing upstream: it is a 63KB file already packed in memory
 // (code-download.mjs; 2ms warm). A terminal fetches it once, so the tight
@@ -897,7 +897,7 @@ function send(res, status, body, headers = {}) {
 // Render's edge that is x-forwarded-proto / x-forwarded-host (leftmost entry),
 // else the Host header — the same reading auth.mjs uses for its OAuth
 // redirects. null unless it is exactly a scheme and a host[:port], because the
-// y3k Code setup writes it into a command someone pastes into a terminal, and
+// y3kode setup writes it into a command someone pastes into a terminal, and
 // a Host header with a space in it would be a flag in that command.
 function publicOrigin(req) {
   const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() || 'http';
@@ -907,7 +907,7 @@ function publicOrigin(req) {
   return `${proto}://${host}`;
 }
 
-// The y3k Code engine as an npm tarball (code-download.mjs packs it in memory
+// The y3kode engine as an npm tarball (code-download.mjs packs it in memory
 // and repacks only when a file in y3k-code/ changes). Its ETag is the sha256 of
 // the bytes; it is already gzip, so it never gets a Content-Encoding.
 // THE MODEL CATALOG behind /api/brain/catalog: asked of OpenRouter at most
@@ -4462,7 +4462,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       }
     }
 
-    // --- y3k Code × the presence (code-handoff.mjs, CODE.md) -------------------
+    // --- y3kode × the presence (code-handoff.mjs, CODE.md) -------------------
     // Two small doors, and the only two between the site and a coding session.
     // The site never talks to anyone's engine; these only carry a note one way
     // and a line the other, both read by the person before they travel.
@@ -4586,7 +4586,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       return json(200, { text: said.speech, mood: said.mood, form: said.form });
     }
 
-    // --- y3k Code, handed over (code-download.mjs) -----------------------------
+    // --- y3kode, handed over (code-download.mjs) -----------------------------
     // The founder typed `y3k-code` into his computer and nothing was there: the
     // engine was never published, and the only way in was a clone of this repo.
     // These three doors hand it over, to whoever the rollout lets in, as one
@@ -5079,7 +5079,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // gigabyte of node_modules it installs beside itself, and certainly not a
     // built .dmg left in dist/. The download lives on a GitHub release.
     if (/^desktop(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
-    // The y3k Code engine (CODE.md) runs on the person's own machine, and its
+    // The y3kode engine (CODE.md) runs on the person's own machine, and its
     // source is never served from here — the same rule as desktop/ for the same
     // reason. What leaves is only the packed tarball, through the gated doors
     // above (/api/code/engine.tgz and /code/dl/<token>/y3k-code.tgz).

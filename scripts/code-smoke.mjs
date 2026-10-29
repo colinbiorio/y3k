@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// y3k Code, end to end in a real browser: the site (temp data, founder signed
+// y3kode, end to end in a real browser: the site (temp data, founder signed
 // in), the engine (in this process, with the fake `claude` and every "yes on
 // your computer" answered yes), and Chromium. It pairs through the link the
 // engine opens, picks a folder, chooses a mode, and then checks what the
@@ -201,7 +201,7 @@ try {
   // orion writes the coder a note; it waits, editable, for the first message
   await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 10000 });
   const noteShown = await page.inputValue('.cv-notecard .cv-noteta');
-  check('orion writes Claude a note, cleaned, for you to read first', /Colin is building y3k Code/.test(noteShown) && !/<<|HACKED|\[tender/.test(noteShown), noteShown);
+  check('orion writes Claude a note, cleaned, for you to read first', /Colin is building y3kode/.test(noteShown) && !/<<|HACKED|\[tender/.test(noteShown), noteShown);
   await page.fill('.cv-notecard .cv-noteta', noteShown + ' (edited)');
   await shot('3a-note');
   await page.fill('.cv-input', "Use the Edit tool to change the word 'world' to 'y3k' in hello.txt.");
@@ -296,7 +296,7 @@ try {
   await page.waitForSelector('.cv-diffs .df-add', { timeout: 8000 });
   check('the changes drawer shows the file\'s diff', (await page.textContent('.cv-diffs .df-add .df-code')) === 'y3k');
   await shot('4b-changes');
-  await page.click('.cv-iconbtn[title="What y3k Code did on this computer"]');
+  await page.click('.cv-iconbtn[title="What y3kode did on this computer"]');
   await page.waitForSelector('.cv-actrow', { timeout: 8000 });
   check('the activity drawer reads the local record', /Allowed Edit/.test(await page.textContent('.cv-drawer')));
   await page.click('.cv-iconbtn[title="Connectors"]');
@@ -426,7 +426,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 10000 });
   const shelf = JSON.parse(readFileSync(join(tmp, 'data', '.clippings.json'), 'utf8'));
   const lines = Object.values(shelf).flat().map((c) => c.x);
-  check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3k Code (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
+  check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3kode (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
 
   // --- RENDERING: smooth, flicker-free, keeps your typing ----------------------------
   // Made-up events go in through the view's own path (the controller's _feed),

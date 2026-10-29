@@ -96,7 +96,7 @@ function bridgeMay({ frameUrl, isMainFrame } = {}, home) {
 // it. So a link is read against exactly two spellings, never parsed for
 // anything else:
 //
-//   y3k://code    open (or bring back) the window on y3k Code
+//   y3k://code    open (or bring back) the window on y3kode
 //   y3k://        just bring the window forward
 //
 // and everything else — a path, a query, a folder, a command, a pairing code, a

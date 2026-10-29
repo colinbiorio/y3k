@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Drive the REAL opencode binary through the y3k Code engine, against a stand-in
+// Drive the REAL opencode binary through the y3kode engine, against a stand-in
 // model on 127.0.0.1 (test/fakes/openai-compat.mjs, reached as "Ollama") — so
 // no model provider is called and no key is needed. Checks: the edit is a diff
 // on the card first, the command is on the card first, nothing changes without

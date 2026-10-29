@@ -55,7 +55,7 @@ const OFFLINE = `data:text/html;charset=utf-8,${encodeURIComponent(`
 </div>`)}`;
 
 let win = null;
-let code = null; // y3k Code's engine host, started the first time the page asks
+let code = null; // y3kode's engine host, started the first time the page asks
 let pendingLink = null; // a y3k:// link that arrived before there was a window
 
 function open() {
@@ -193,7 +193,7 @@ function menu() {
         { type: 'separator' },
         { label: 'Developer tools', accelerator: mac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => win?.webContents.toggleDevTools() },
         { type: 'separator' },
-        // One press stops every coding tool y3k Code started, whatever the page is doing.
+        // One press stops every coding tool y3kode started, whatever the page is doing.
         { label: 'Stop every coding session', click: () => code?.stopAll() },
         { label: 'Stop the orb using this computer', click: () => code?.own({ cmd: 'computer.stop' }) },
       ],
@@ -267,7 +267,7 @@ else {
     app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-  // Nothing y3k Code started outlives the app: hold the quit until the engine
+  // Nothing y3kode started outlives the app: hold the quit until the engine
   // has stopped every tool (it gives up waiting after a few seconds).
   let stopped = false;
   app.on('before-quit', (e) => {

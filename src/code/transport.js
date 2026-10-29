@@ -1,4 +1,4 @@
-// How the y3k Code screen reaches the engine on the person's own computer.
+// How the y3kode screen reaches the engine on the person's own computer.
 //
 //  - In the y3k desktop app: the local bridge (window.y3kCode, from the preload),
 //    no network at all.
@@ -110,7 +110,7 @@ export async function findEngine() {
 }
 
 // The engine this browser is paired with, wherever it is now listening. The
-// token goes only to ports that already answered as y3k Code — never to
+// token goes only to ports that already answered as y3kode — never to
 // whatever else might be listening on one of the ten.
 //   { engine }         an engine knows this token: connect there
 //   { refused: true }  an engine answered with the token and said "not paired"

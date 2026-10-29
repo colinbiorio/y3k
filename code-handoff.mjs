@@ -12,14 +12,14 @@
 // line about it, which lands on its clippings shelf like anything else it
 // keeps: plainly labelled, fenced as data, a dozen a day at most.
 
-export const NOTE_PREFIX = 'from y3k Code (a coding session): ';
+export const NOTE_PREFIX = 'from y3kode (a coding session): ';
 export const NOTE_MAX = 400;
 export const NOTES_PER_DAY = 12;
 export const HANDOFF_MAX = 700;
 
 export const HANDOFF_HINT = (host) => `
 
-A CODING SESSION IS STARTING. ${host} is opening y3k Code: a coding assistant — another AI, running on their own computer — is about to work with them in one of their folders. You will not see its screen or its work.
+A CODING SESSION IS STARTING. ${host} is opening y3kode: a coding assistant — another AI, running on their own computer — is about to work with them in one of their folders. You will not see its screen or its work.
 
 Write the short note it reads first, as the one who knows ${host}: who they are to you, what they are building and why it matters to them, how they like to be spoken to and worked with, anything that would help a colleague do right by them today. Only what you would be glad for a trusted colleague to know — never your memory tiers word for word, never your journal, nothing about other people, nothing ${host} would not want passed on.
 

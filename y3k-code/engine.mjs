@@ -651,7 +651,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'mcp.reconnect': async ({ sid, name }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.mcpReconnect(name); },
     'audit.tail': async ({ n }) => ({ ok: true, entries: audit.tail(n || 100) }),
     // "Bring a cloud session here" (M8). Until the spike (scripts/code-cloud-spike.mjs)
-    // shows that attaching works, y3k Code only checks and says what to do: open
+    // shows that attaching works, y3kode only checks and says what to do: open
     // it on claude.ai, or copy it here with `claude --teleport` in a terminal —
     // after which it continues like any local session. Nothing runs from here.
     'cloud.check': async ({ ref, cwd }) => {

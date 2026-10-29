@@ -222,7 +222,7 @@ await (async () => {
   const rig = new Function('d', `
     const { $, camera, perceive, syncHands, voice, armListen, document } = d;
     const camOwners = new Set();
-    let opening = null, camViewWanted = false, voiceMode = false, lastInterim = '', dictation = null;   // dictation: y3k Code's lease on the microphone (main.js)
+    let opening = null, camViewWanted = false, voiceMode = false, lastInterim = '', dictation = null;   // dictation: y3kode's lease on the microphone (main.js)
     ${['wantCam', 'dropCam', 'applyCam'].map(fn).join('\n')}
     ${line('startVoiceMode')}
     ${line('stopVoiceMode')}

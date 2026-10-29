@@ -4453,56 +4453,6 @@ body.in-code .home-panel-head { display: none; }
 /* --- toolbar --- */
 .cv-bar { padding: 10px 12px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; gap: 8px; }
 .cv-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.cv-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-/* At phone width the ring, plan bars and tools left the strip no room at all
-   (0px at 375 wide), so no tab, and no tab's x, could be reached. The strip
-   takes a line of its own there. */
-@media (max-width: 560px) {
-  .cv-row { flex-wrap: wrap; row-gap: 6px; }
-  .cv-row > .cv-tabs { flex: 1 0 100%; order: 2; }
-}
-.cv-tabs::-webkit-scrollbar { display: none; }
-.cv-tab { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px;
-  border: 1px solid transparent; background: none; color: #8b93a1; cursor: pointer; white-space: nowrap; flex: none;
-  max-width: 220px; transition: background 0.15s ease, color 0.15s ease; }
-.cv-tab:hover { background: rgba(255, 255, 255, 0.05); color: #e7e9ee; }
-.cv-tab.on { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.08); color: #fff; }
-.cv-tabname { overflow: hidden; text-overflow: ellipsis; }
-.cv-tabdot { width: 7px; height: 7px; border-radius: 50%; background: #4dd865; opacity: 0.55; flex: none; }
-.cv-tab.run .cv-tabdot { opacity: 1; animation: cv-pulse 1.4s ease-in-out infinite; }
-.cv-tab.ask .cv-tabdot { background: #ffbd2e; opacity: 1; animation: cv-pulse 1.1s ease-in-out infinite; }
-.cv-tab.ended .cv-tabdot { background: #6b7280; }
-/* something happened in a session you are not looking at */
-.cv-tab.unread:not(.on) .cv-tabdot { opacity: 1; }
-.cv-new { padding: 0 9px; }
-/* CLOSING A SESSION FROM ITS TAB (code-view.js closeTab, 2026-10-08). The ×
-   sits beside the tab button, over its right end: a round bead of glass,
-   shown on the tab on screen, on the one under the pointer or the keyboard,
-   and on every tab where nothing hovers (its touch reach is with the others,
-   under A FINGER IS NOT A CURSOR). A tab keeps room for it wherever it shows
-   for good, so it never covers the name there; on another tab it shows only
-   while you are on that tab. */
-.cv-tabwrap { position: relative; display: inline-flex; flex: none; }
-.cv-tabwrap.on > .cv-tab { padding-right: 32px; }
-.cv-tabx { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0;
-  display: grid; place-items: center; border-radius: 50%; cursor: pointer; color: #aeb5c2;
-  border: 1px solid rgba(220, 225, 235, 0.12);
-  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05) 60%), rgba(14, 16, 22, 0.78);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 2px 6px -2px rgba(0, 0, 0, 0.6);
-  opacity: 0; pointer-events: none; transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease; }
-.code-root .cv-tabx .ic { width: 11px; height: 11px; }
-.cv-tabwrap:is(:hover, :focus-within, .on) > .cv-tabx { opacity: 1; pointer-events: auto; }
-.cv-tabx:hover, .cv-tabx:focus-visible { color: #fff; border-color: rgba(220, 225, 235, 0.3);
-  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1) 60%), rgba(30, 33, 42, 0.86); }
-@media (hover: none) {
-  .cv-tabwrap > .cv-tab { padding-right: 32px; }
-  .cv-tabwrap > .cv-tabx { opacity: 1; pointer-events: auto; }
-}
-.cv-meters { display: flex; align-items: center; gap: 12px; flex: none; }
-.cv-iconbtn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: none;
-  background: none; color: #a8afbb; cursor: pointer; }
-.cv-iconbtn:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
-.cv-iconbtn:disabled { opacity: 0.35; cursor: default; }
 /* THE MICROPHONE in the composer: lit while it listens (a slow pulse, the
    same breath the tab dots use), ringed while it is hands-free. */
 .cv-pane .cv-mic.on { color: #fff; background: rgba(255, 81, 71, 0.22); animation: cv-pulse 1.4s ease-in-out infinite; }
@@ -5149,13 +5099,13 @@ body.in-code .home-panel-head { display: none; }
 @keyframes cv-orbit { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .code-root, .code-root .it, .cv-drawer { animation: none; }
-  .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live), .code-root .pm-pulse::after, .cv-orbit::before, #nav-code.needs-you::after { animation: none; }
+  .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live), .code-root .pm-pulse::after, .cv-orbit::before, #nav-code.needs-you::after { animation: none; }
 }
 /* The smooth mode, and "less motion" chosen in Settings, are reduced motion
    too (gfx.js sets these on <html>): the same list, stilled. (Pseudo-elements
    cannot go inside :is(), so they are listed one by one.) */
 :root:is([data-gfx="smooth"], [data-motion="less"]) :is(.code-root, .code-root .it, .cv-drawer),
-:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live),
+:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live),
 :root:is([data-gfx="smooth"], [data-motion="less"]) .code-root .pm-pulse::after,
 :root:is([data-gfx="smooth"], [data-motion="less"]) .cv-orbit::before,
 :root:is([data-gfx="smooth"], [data-motion="less"]) #nav-code.needs-you::after { animation: none; }
@@ -5190,7 +5140,7 @@ body.in-code .home-panel-head { display: none; }
   .mt-limits { display: none; }
 }
 
-/* y3k Code × the presence: its note, its words, the line back. Its colour is
+/* y3kode × the presence: its note, its words, the line back. Its colour is
    the site's own violet-rose, so what the presence says never reads as the
    coder's. */
 .or-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block;
@@ -5215,7 +5165,7 @@ body.in-code .home-panel-head { display: none; }
 .cv-pane .pass:hover { color: #ffc3e0; background: rgba(255, 158, 207, 0.08); }
 .cv-tell .or-dot { width: 11px; height: 11px; }
 
-/* y3k Code: the git chip, changes, connectors, activity */
+/* y3kode: the git chip, changes, connectors, activity */
 .cv-pane .cv-gitbtn { border: none; background: none; cursor: pointer; padding: 0 0 0 6px; }
 .cv-pane .cv-gitbtn:hover { color: #e7e9ee; }
 .cv-gitn { font-size: 0.66rem; padding: 0 6px; border-radius: 999px; background: rgba(255, 189, 46, 0.16); color: #ffd47a; margin-left: 2px; }
@@ -5344,7 +5294,6 @@ body.in-code .home-panel-head { display: none; }
 
 /* the toolbar: a strip of glass inside it, its pills one layer up */
 .cv-bar { margin: 8px 8px 0; border-radius: 18px; border-bottom: 0; background: var(--lg-2); box-shadow: var(--lg-lip); }
-.cv-tab.on { background: var(--lg-3); border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 10px -6px rgba(0, 0, 0, 0.7); }
 .cv-chip, .cv-sel { background: var(--lg-3); border-color: rgba(255, 255, 255, 0.09); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
 .cv-modes { background: rgba(0, 0, 0, 0.26); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4); }
 .cv-pane .cv-mode.on { background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 70%);
@@ -5551,8 +5500,6 @@ body.in-code .home-panel-head { display: none; }
      scroller clips what reaches past it, so it takes 7px more above and below
      (given back by its margin: nothing moves); the tabs stand 8px apart, so
      one tab's reach never lands on the next. */
-  .cv-tabs { gap: 8px; padding: 7px 0; margin: -7px 0; }
-  .cv-tabx::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
 }
 
 /* ===== THE ROOM BEHIND THE GLASS (2026-10-06) ===============================

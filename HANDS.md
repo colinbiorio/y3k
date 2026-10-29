@@ -95,7 +95,7 @@ stage's hands act on a stranger's instructions, and fails.
 - `desktop/` — the Electron window, its allowlist permission policy
   (`policy.cjs`), and ad-hoc signing. Its "window, not a copy" rule changes in
   exactly one place: **the local bridge**, shared plumbing between the page and
-  a process on the person's own machine. y3k Code (CODE.md) rides it first, as
+  a process on the person's own machine. y3kode (CODE.md) rides it first, as
   the person's own coding tool; hands would ride it later, under these lines.
   Nothing on the bridge lets orion's turns reach an engine command.
 - `y3k-code/brain.mjs` — runs the official `claude` binary on the person's own

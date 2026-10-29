@@ -2,7 +2,7 @@
 // THE LOCAL BRIDGE — the one thing this window adds to the page (CODE.md,
 // HANDS.md, README "The one exception").
 //
-// It puts a single small object on the page, `window.y3kCode`, so y3k Code can
+// It puts a single small object on the page, `window.y3kCode`, so y3kode can
 // reach the Code engine running on THIS machine without a network port or a
 // pairing code. Three functions, JSON in and out, nothing else:
 //

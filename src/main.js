@@ -551,7 +551,7 @@ body.setEyeSource(() => perceive.snapshot().head);
 // is recognised rather than a list of ids somebody has to maintain.
 const reach = createReach({
   onWords: (x, y) => history.onWords(x, y),
-  // A hold on y3k Code's composer is Code's microphone (the dictation lease),
+  // A hold on y3kode's composer is Code's microphone (the dictation lease),
   // not the room's: the words are for the coder, through the composer.
   onMic: (hit) => {
     if (hit?.closest?.('.cv-input, .cv-planinput')) { window.dispatchEvent(new CustomEvent('y3k:code-mic')); return; }
@@ -741,7 +741,7 @@ function setCamView(on) {
 // out of the camera button. The browser will ask for permission the first time
 // and refuse quietly ever after if it was denied; applyTracking handles both.
 applyTracking();
-// THE DICTATION LEASE. While y3k Code holds it, what the microphone hears goes
+// THE DICTATION LEASE. While y3kode holds it, what the microphone hears goes
 // to Code's composer and nowhere else: not to the presence as a turn, not to
 // the caption, not to the room. The orb still listens (its mood says so —
 // the person is talking, and the body should look like it is hearing them),
@@ -835,7 +835,7 @@ const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), 
 let currentMood = 'calm';
 let busy = false;
 // Messages sent while a turn was running, answered when it settles, oldest
-// first: { text, image, private }, private when it came from y3k Code (never
+// first: { text, image, private }, private when it came from y3kode (never
 // published, even to your own room). Written only by queueMessage.
 let queued = [];
 let replySpeaker = null;   // the reply speaking now, so leaving the room can cut it off
@@ -877,7 +877,7 @@ const windows = createWindows({ getViewing: () => document.body.classList.contai
 // one. The orb resolves which memory was hit and lights it; the window says
 // what it was.
 body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
-// --- y3k Code's links to the rest of the house --------------------------------
+// --- y3kode's links to the rest of the house --------------------------------
 // src/code never calls the site or touches the orb itself; these six are the
 // only ways it does, each one a thing the person chose (CODE.md):
 //   companion()   whose note it would be — the presence you host
@@ -1447,7 +1447,7 @@ $('nav-life')?.addEventListener('click', () => {
 });
 $('nav-settings').addEventListener('click', () => settings.open());
 
-// --- y3k Code: the laptop on the right rail -----------------------------------
+// --- y3kode: the laptop on the right rail -----------------------------------
 // Shown whenever the site's CODE_ROLLOUT lets this account see it — to everyone,
 // guests too, on 'all': a guest's click says to sign in, like every other glyph
 // on the rail — and not on a touch-only device outside the desktop app (there
@@ -1606,7 +1606,7 @@ function escapeHtml(s) {
 // line inherited the picture and the privacy of whatever was held before it.
 // Lines of the same kind run together into one message (the newest picture
 // kept), so three quick lines are answered once rather than as three speeches
-// back to back. A private y3k Code line and a public one never share an entry,
+// back to back. A private y3kode line and a public one never share an entry,
 // so neither can go out as the other.
 function queueMessage(text, image, priv) {
   const last = queued[queued.length - 1];
@@ -1821,7 +1821,7 @@ function goLiveAndPublish(gen, hosting, r) {
   social.publishTurn(hosting, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, speech: r.speech, paint: r.paint });
 }
 
-// `private`: said from y3k Code — answered like any turn, but never published,
+// `private`: said from y3kode — answered like any turn, but never published,
 // not even the words to your own room (CODE.md, line 6).
 async function handle(text, attachedImage, { private: priv = false } = {}) {
   if (busy) return;
@@ -1837,7 +1837,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // Steer-by-chat: if the presence is awake, remember what you said so its next
   // autonomous beat can weigh it (follow a URL you mentioned, or not — its call).
   // The chat turn itself still happens right now: it turns toward you and replies.
-  // Never a y3k Code line: the beat that reads the aside runs on its own and can
+  // Never a y3kode line: the beat that reads the aside runs on its own and can
   // post to the feed, and what is said from Code is never published (CODE.md).
   if (hosting && !priv && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
   // Streaming: viewers see both sides — the host's words, then the turn. Only
@@ -1849,7 +1849,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room
-  // wrote itself, and not a line said to y3k Code, whose box is its own. The
+  // wrote itself, and not a line said to y3kode, whose box is its own. The
   // same when nothing was sent because the attached picture did not fit beside
   // the conversation (brain.js `unsent`): the words wait for a smaller one.
   if ((r?.why === 'offline' || r?.unsent) && !priv && text && !text.startsWith('(')) {
@@ -1860,13 +1860,13 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // nothing chosen to think on: the one-click key, in place of the line that
   // says so (runReply left that line unsaid when the card could show)
   if (r?.nobrain && !priv) showWake();
-  // A reply to y3k Code is private as the line it answers (see codeLink.talk).
+  // A reply to y3kode is private as the line it answers (see codeLink.talk).
   if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech, private: priv } }));
   if (roomGen === gen && r?.invite && !r.local && !r.seeded) showInvite(r.invite);
   // While awake, the turn-toward reply is part of its stream of thought too —
   // log it to the Monologue window (and mirror it, like an autonomous thought),
   // and into the waking's thread so the next beat knows the conversation happened.
-  // A reply to y3k Code stays in the window on this screen: the thread feeds
+  // A reply to y3kode stays in the window on this screen: the thread feeds
   // the beats, and the mirror is on air.
   if (roomGen === gen && hosting && tend.isAlive() && r?.speech && !r.seeded && !r.local) {
     windows.monoAppend(r.speech);

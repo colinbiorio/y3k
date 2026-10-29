@@ -15,7 +15,7 @@
 // Tier B (a local copy) is interactive by design and stays in a terminal:
 //   cd <a clean clone of the session's repository>
 //   claude --teleport <session id>
-// after which y3k Code can continue it like any local session (Past sessions →
+// after which y3kode can continue it like any local session (Past sessions →
 // the teleported one, or session.resume with its id).
 
 import { spawn } from 'node:child_process';

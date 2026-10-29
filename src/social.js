@@ -72,7 +72,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // the page opens on it, and asks nothing of this computer
   const lifeWatch = (() => { try { return new URL(location.href).searchParams.get('life') || ''; } catch { return ''; } })();
   const lifeView = createLifeView({ toast: toastOnce, ...(life || {}), ...(lifeWatch ? { watch: lifeWatch } : {}) });
-  // y3k Code is loaded only when someone opens it: most visitors never will,
+  // y3kode is loaded only when someone opens it: most visitors never will,
   // and none of it should weigh on the first paint.
   let codeView = null;
   function openCode() {

@@ -1,6 +1,6 @@
 // Claude Code, driven through the UNMODIFIED `claude` binary — not the Agent SDK —
 // in its long-lived streaming mode, answering its permission prompts from the
-// y3k Code screen.
+// y3kode screen.
 //
 // Why the binary and not the SDK: the binary is the Claude Code the person
 // installed and signed into. y3kode drives it as it is — on their own `claude`
@@ -65,7 +65,7 @@ export async function authStatus(bin, env) {
 }
 
 // The folders every session is kept out of, whatever mode: keys, cloud
-// credentials, and y3k Code's own settings.
+// credentials, and y3kode's own settings.
 export function denyRules(configDir) {
   const home = homedir();
   const dirs = ['.ssh', '.aws', '.gnupg', '.config/gcloud', '.kube', '.docker'].map((d) => join(home, d));

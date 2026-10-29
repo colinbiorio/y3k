@@ -2160,13 +2160,13 @@ ok('what is said while a turn runs is held in order: same kind joined, private n
   r.input.value = 'wait'; r.rig.sendChat();
   r.input.value = 'actually, tell me about X'; r.rig.sendChat();
   assert.deepEqual(r.rig.queued, [{ text: 'wait\nactually, tell me about X', image: null, private: false }], 'the second line overwrote the first');
-  r.rig.queueMessage('a line from y3k Code', null, true);    // codeLink.talk
+  r.rig.queueMessage('a line from y3kode', null, true);    // codeLink.talk
   r.rig.queueMessage('a spoken line', null, false);          // a voice transcript
   r.rig.busy = false;
   while (r.rig.flushQueued());
   assert.deepEqual(r.handled, [
     { text: 'wait\nactually, tell me about X', image: null, private: false },
-    { text: 'a line from y3k Code', image: null, private: true },
+    { text: 'a line from y3kode', image: null, private: true },
     { text: 'a spoken line', image: null, private: false },
   ], 'the held lines were dropped, merged across privacy, or answered out of order');
   // a spoken line after a typed one with a picture: one message, the picture
