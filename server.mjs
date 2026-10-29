@@ -1652,11 +1652,17 @@ function lifeMomentLine(b) {
   if (!thought && !say) return '';
   if (thought && !/[.!?…]["'”’)]*$/.test(thought)) thought += '.';
   const said = say ? ` I said: "${say}"` : '';
-  scene = cut(scene, 500 - said.length - 23);          // 23: "In the dreamed world, " and the colon
+  // THE WORLD ANSWERS (lucid, 2026-10-28): who answered what it said, so the
+  // presence remembers the people it met there, not only its own words
+  const answer = part(b?.answer, 300);
+  const who = /^(.{1,80}?): [\u201c"](.*)[\u201d"]$/.exec(answer);
+  let heard = !say || !answer ? '' : who ? ` ${who[1]} answered: "${who[2]}"` : ` The world answered: ${answer}`;
+  heard = heard ? cut(heard, Math.max(0, 500 - said.length - 23 - 48)) : '';
+  scene = cut(scene, 500 - said.length - heard.length - 23);          // 23: "In the dreamed world, " and the colon
   const head = `In the dreamed world${scene ? `, ${scene}` : ''}:`;
-  const room = 500 - head.length - 1 - said.length;    // for the thought, after the space that follows the colon
+  const room = 500 - head.length - 1 - said.length - heard.length;    // for the thought, after the space that follows the colon
   thought = room >= 24 ? cut(thought, room) : '';
-  return `${head}${thought ? ` ${thought}` : ''}${said}`;
+  return `${head}${thought ? ` ${thought}` : ''}${said}${heard}`;
 }
 
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the

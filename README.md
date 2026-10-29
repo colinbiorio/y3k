@@ -251,6 +251,11 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-29** — **Your presence remembers who the life met.** Each moment
+  the life lives here becomes a line of your presence's journal; now, when
+  the world answered what it said, the line carries that too ("I said:
+  \"Thank you, Odile.\" Odile answered: \"Mind the brim, it's full.\""), within
+  the journal's 500 characters (the scene and the thought give way first).
 - **2026-10-28** — **The world answers, on the page too.** lucid's world now
   answers what the life says aloud (another mind, speaking as the person it
   spoke to: "Wet every night this month. I've given up on the umbrella.").
