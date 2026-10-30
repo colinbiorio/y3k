@@ -1160,4 +1160,10 @@ ok('every ${} in the shader interpolates something real', () => {
   }
 });
 
+// The presence's room (2026-10-30): a block like every other — never spoken.
+ok('<<room: …>> never reaches the voice', () => {
+  assert.equal(scrubTags('[tender] Come, it is colder here. <<room: snowy taiga, eclipse>>'), 'Come, it is colder here.');
+  assert.equal(scrubTags('cut off <<room: snowy ta'), 'cut off', 'a truncated room block is spoken');
+});
+
 console.log(`\n${passed} checks passed.`);

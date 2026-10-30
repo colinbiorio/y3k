@@ -148,6 +148,17 @@ export function applyBodyBlock(b) {
   if (b.follow) body.setFollow(b.follow);        // one slot with the flights; at and home end it
   if (b.face) body.setFace(b.face.dir, b.face.t);   // LAST: a yaw face stops the turn said before it
 }
+// THE ROOM THE PRESENCE CHOSE — <<room: snowy taiga>>, or background/taiga,
+// eclipse typed (tags.mjs parseRoom / parseKommand): lands exactly as picking
+// it in Settings → Room would, and stays in this browser, the same way the
+// kommand always has. Either half may be missing; nothing is set for it.
+export function applyRoom(r) {
+  if (!r || typeof r !== 'object') return;
+  const patch = {};
+  if (typeof r.env === 'string' && r.env) patch.env = r.env;
+  if (r.eclipse === true || r.eclipse === false) patch.eclipse = r.eclipse;
+  if (Object.keys(patch).length) settings.setRoom(patch);
+}
 const score = createScore((st) => {
   if (st.end) { body.setFlash(0); body.restoreMorph(); return; }
   body.setMorphSeconds(st.seconds);
@@ -1768,7 +1779,7 @@ async function runReply(call, onSettled, { wake = false } = {}) {
     return null;
   }
 
-  const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null, score: scoreSteps = null, body: bodyBlock = null } = result || {};
+  const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null, score: scoreSteps = null, body: bodyBlock = null, room = null } = result || {};
 
   currentMood = mood;
   if (morph) body.setMorph(morph);         // the pace, before anything retargets
@@ -1778,6 +1789,7 @@ async function runReply(call, onSettled, { wake = false } = {}) {
   if (scheme) body.setScheme(scheme);      // ...its chosen palette
   if (paint) body.paintColors(paint);      // ...or the colors it painted
   if (liquid) body.setLiquid(liquid);      // ...and the room it is standing in
+  if (room) applyRoom(room);               // ...or the room it moved to (and the eclipse)
   // The stream applies a shape the moment it is parsed, so the body moves while
   // it is still speaking. This is for the path that does not stream - the
   // non-streaming fallback - and it must not fire otherwise or the morph would
@@ -1846,7 +1858,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // mode in every tab, so a second tab or device sent each private line to the
   // stream another one had open (and kept that stream alive by doing it).
   if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
-  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting }), undefined, { wake: !priv });
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting, room: body.room?.() }), undefined, { wake: !priv });
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room
@@ -1994,7 +2006,7 @@ function applyKommand(text) {
   if (k.shape !== undefined) body.setShape(k.shape);   // null: home
   if (k.body) applyBodyBlock(k.body);
   if (k.liquid) body.setLiquid(k.liquid);
-  if (k.room) settings.setRoom({ env: k.room });
+  if (k.room || k.eclipse != null) applyRoom({ env: k.room || null, eclipse: k.eclipse ?? null });
   return k;
 }
 

@@ -237,7 +237,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // One metered turn in the presence's own voice. Standalone message: the
   // server supplies identity + tiers + clippings (+ the audience when live).
   async function tendCall(userText, mode, extra) {
-    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(),
+    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(), room: body.room?.(),   // the room on screen, for the readout
       ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}),
       ...keyFields() };   // the key, and the rung chosen here (brain.js)
     return fetch('/api/brain', {
@@ -283,6 +283,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     import('./main.js').then((m) => {
       m.scoreFor().cancel();
       if (r.body) m.applyBodyBlock(r.body);
+      if (r.room) m.applyRoom(r.room);     // <<room: ...>> in a beat moves the room as a turn does
       if (r.score) m.scoreFor().start(r.score, performance.now());
     });
     if (r.speech) showCaption(r.speech, 'y3k');

@@ -793,6 +793,40 @@ function roomOf(v) {
   return hits.length === 1 ? hits[0].id : null;
 }
 
+// --- The room itself: where the presence chooses to be --------------------------
+// <<room: snowy taiga>> — silent, after the spoken words, like every block. The
+// presence could already move the room's LIQUID and its own body around the
+// room, and the person could type background/snowy taiga; the presence had no
+// word for which room it is in. Now it has the same one: the name is read by
+// roomOf, the kommand's own lookup, so a room means one place whoever says it
+// (LANGUAGE.md, line 6). Forgiving the way a presence block has to be: the
+// whole payload is tried first (deep space), then its words one by one, so a
+// reason written after the name ('taiga — it is quiet there') still lands on
+// the first word that is a room, and a name the rooms do not have is nothing,
+// dropped in silence — a hallucinated room can never empty the screen.
+//   'eclipse' / 'no eclipse' are the one other thing in the block: the dark
+// disc behind the body (Settings → Room's Eclipse), hung or taken down. Returns
+// { env, eclipse } with either half null, or null when nothing in it is ours.
+// Linear like every pattern here: the spaces after the colon go to one
+// quantifier (see the top of this file).
+const ROOM_BLOCK = /<<\s*room\s*[:=]\s*(?!\s)([^>]{1,80}?)(?:(?<!\s)\s*)?>>/i;
+export function parseRoom(s) {
+  const m = ROOM_BLOCK.exec(String(s || ''));
+  if (!m) return null;
+  let text = m[1].toLowerCase();
+  let eclipse = null;
+  if (/\bno\s+eclipse\b/.test(text)) { eclipse = false; text = text.replace(/\bno\s+eclipse\b/g, ' '); }
+  else if (/\beclipse\b/.test(text)) { eclipse = true; text = text.replace(/\beclipse\b/g, ' '); }
+  const name = text.replace(/[^a-z0-9_\s-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let env = name ? roomOf(name) : null;
+  // word by word, skipping the small ones: 'the' is a word of "above the
+  // clouds", and "the stormy sea" must not land there
+  if (!env && name) for (const w of name.split(' ')) { if (w.length < 4) continue; env = roomOf(w); if (env) break; }
+  if (!env && eclipse === null) return null;
+  return { env, eclipse };
+}
+export function stripRoom(s) { return String(s || '').replace(ROOM_BLOCK, ''); }
+
 // text -> null (not a kommand) | { ok: false, why } | { ok: true, said, ...what to do }
 // `now.shape` is the body's current shape spec, so moves typed on their own
 // (spin/3) turn the form it already has rather than a sphere.
@@ -883,9 +917,22 @@ function readKommand(raw, now) {
       continue;
     }
     if (key === 'room') {
-      const id = roomOf(values.join(' '));
-      if (!id) return { ok: false, why: 'there is no room called ' + tidy(values.join(' ')) + ' — try ' + ENVIRONMENTS.map((e) => e.name).join(', ') };
-      out.room = id; echo([tidy(values.join(' '))]);
+      // THE ECLIPSE RIDES THE SAME KEY, in the words the presence's block reads:
+      // background/taiga, eclipse hangs the dark disc behind the body there;
+      // background/eclipse alone keeps the room; no eclipse takes it down.
+      let eclipse = null;
+      const rest = [];
+      for (const v of values) {
+        const t = tidy(v);
+        if (t === 'eclipse') eclipse = true;
+        else if (t === 'no eclipse') eclipse = false;
+        else rest.push(v);
+      }
+      const id = rest.length ? roomOf(rest.join(' ')) : null;
+      if (!id && rest.length) return { ok: false, why: 'there is no room called ' + tidy(rest.join(' ')) + ' — try ' + ENVIRONMENTS.map((e) => e.name).join(', ') };
+      if (id) out.room = id;
+      if (eclipse !== null) out.eclipse = eclipse;
+      echo(values.map(tidy));
       continue;
     }
     // EVERY WORD AFTER A KEY HAS TO BE READ. The parsers below step over what
@@ -1651,7 +1698,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
         // liquid block does not collide today (none of mercury/glass/water/
         // light/easy/heavy ends in three hex characters at a word boundary);
         // this strip is what keeps that true of the next word anyone adds.
-        const region = stripBody(stripScore(stripLiquid(stripShape(post.slice(paintAt)))));
+        const region = stripRoom(stripBody(stripScore(stripLiquid(stripShape(post.slice(paintAt))))));
         const a = parsePaint(region);
         if (a.length && onPaint) onPaint(a);
         // Whatever survives once every control block is scrubbed is speech that
@@ -1662,7 +1709,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
         if (tail) onText(tail);
       }
 
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), score: parseScore(post), body: parseBody(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), noticed: parseNoticed(post), journal: parseJournal(post), invite: parseInvite(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), score: parseScore(post), body: parseBody(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), noticed: parseNoticed(post), journal: parseJournal(post), invite: parseInvite(post), room: parseRoom(post) };
     },
   };
 }
