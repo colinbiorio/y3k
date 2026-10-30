@@ -10,6 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
+import { waitForVersion } from '../own-brain.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf, usdText } from './render/meters.js';
@@ -50,7 +51,7 @@ export function createCodeView(opts = {}) {
 // `link` (from main.js) is how Code reaches the rest of the house — the
 // presence's note, the line back, talking to the presence, the orb. src/code
 // itself never calls the site.
-function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null, link = null } = {}) {
+function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null, link = null, waitFor = waitForVersion } = {}) {
   const S = createState();
   let transport = null;
   let root = null;
@@ -191,6 +192,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const reload = reloadLive;
     reloadLive = false;
     hello = r;
+    offerUpdate(r);
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
     // sessions still running in the engine come back with their transcripts
@@ -969,10 +971,62 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const banners = [];
     for (const [, c] of S.consent) banners.push(ob.consentNote(c, transport));
     if (S.conn === 'reconnecting') banners.push(h('div.cv-note', 'Reconnecting to y3kode on this computer…'));
+    // A NEWER y3kode (offerUpdate): said here, where the person is, with the
+    // update one press away — asked on the computer first, as every update is
+    if (updating) banners.push(h('div.cv-note.cv-update', updating === 'asking' ? 'Updating y3kode — if this computer asks, say yes there…' : `y3kode is restarting with ${offer?.version || 'the new version'}; the conversation comes back with it…`));
+    else if (offer) {
+      const go = h('button.cv-link', { type: 'button' }, 'update y3kode');
+      go.addEventListener('click', () => doUpdate());
+      const later = h('button.cv-link', { type: 'button' }, 'not now');
+      later.addEventListener('click', () => { pref(UPDATE_LATER, offer.version); offer = null; renderChrome(); });
+      banners.push(h('div.cv-note.cv-update', `y3kode ${hello?.version || ''} is answering, and ${offer.version} is out. `, go, ' · ', later));
+    }
     if (viewingSid && s) banners.push(h('div.cv-note', 'A past session, read-only. ', resumeButton(s)));
     swap(ui.banner, banners);
     ui.banner.hidden = !banners.length;
     root?.classList.toggle('has-session', !!s);
+  }
+
+  // A NEWER y3kode, OFFERED HERE (2026-10-30). The engine's hello says whether
+  // it can update itself (`update`), and the site says which version it
+  // offers this account (/api/code/setup: `engine`, with a token — link.setup,
+  // the same the life tab and Settings use). Newer than the one answering,
+  // it is offered in a banner under the toolbar; "not now" puts that version
+  // away for this browser. The update itself is y3kode's own (engine.update:
+  // asked on the computer, downloaded from this site, restarted), and then the
+  // page waits for the new version to answer; the connection comes back on
+  // its own, and the hello that follows picks the conversation up where it
+  // was (continueLast). An engine that cannot update itself (the desktop app
+  // from before, a hand-run tarball) is left to Settings → Brain.
+  const UPDATE_LATER = 'y3k-code:update-later';
+  let offer = null;       // { version, token }: the site's newer y3kode
+  let updating = '';      // '' | 'asking' | 'restarting'
+  async function offerUpdate(r) {
+    if (!r?.update || !link?.setup) { offer = null; return; }
+    const setup = await link.setup().catch(() => null);
+    if (!root || hello !== r) return;
+    const v = typeof setup?.engine === 'string' ? setup.engine : '';
+    if (!v || !setup?.token || versionAtLeast(r.version, v) || pref(UPDATE_LATER) === v) { offer = null; return; }
+    offer = { version: v, token: setup.token };
+    renderChrome();
+  }
+  async function doUpdate() {
+    if (updating || !offer) return;
+    const { version, token } = offer;
+    updating = 'asking'; renderChrome();
+    const r = await cmd({ cmd: 'engine.update', token, version }).catch(() => null);
+    if (!root) return;
+    if (r?.ok && r.restarting) {
+      updating = 'restarting'; renderChrome();
+      const back = await waitFor(r.version || version, { cmd: (o) => cmd(o).catch(() => null) });
+      if (!root) return;
+      updating = ''; offer = null; renderChrome();
+      toast(back ? `y3kode ${r.version || version} is here.` : 'y3kode did not come back yet — it reconnects on its own in a moment.');
+      return;
+    }
+    updating = ''; renderChrome();
+    if (r?.ok && r.current) { offer = null; renderChrome(); toast(`y3kode is already ${r.current}`); return; }
+    toast(r?.code === 'declined' ? 'Not updated: the computer said no.' : refusedWhy(r, 'y3kode could not update'));
   }
 
   function lastLimits() {
@@ -3434,6 +3488,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the conversation as Markdown (/export), and the engine's hello, for the tests
     _markdown: (sid) => conversationMarkdown(S.sessions.get(sid)),
     _hello: (patch) => (patch ? (hello = { ...(hello || {}), ...patch }) : hello),
+    _offer: () => (offer ? { ...offer } : null),
     _state: S,
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them
