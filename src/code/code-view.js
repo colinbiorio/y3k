@@ -115,13 +115,27 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   });
 
   // --- connection ---------------------------------------------------------------
+  // THE FIRST HELLO IS A RESET. A page with nothing yet asks the stream for
+  // everything after 0, and the engine answers with all its ring holds — since
+  // it started: every session begun and ended since, every reading of the
+  // window. Taken as they came (2026-10-29), the first session begun was the
+  // one put on screen — one stopped seconds after it started that morning,
+  // "Stopped. Continue it" over a live conversation the hello had not read
+  // yet — and a reading of 88% from before an earlier compaction asked the
+  // live conversation to compact again, on every load. So until the first
+  // hello has read the live sessions from disk, everything from the stream is
+  // held, then played as history (late): known, never the one on screen,
+  // never acted on. (The desktop bridge hands its backlog over before it says
+  // 'connected', so the hold begins before the transport does.)
   function connect() {
     if (transport) return;
+    let first = true;
+    const hold = () => { if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); } };
     const handlers = {
       onEvent,
       onStatus: (st) => {
         S.conn = st;
-        if (st === 'connected') { downAt = 0; refreshHello(); }
+        if (st === 'connected') { downAt = 0; refreshHello(first); first = false; }
         if (st === 'unpaired') { transport?.close(); transport = null; forgetPairing(); }
         // A blip (an engine restart) is back within a second; home says
         // "isn't running" only once it has been gone for 3.
@@ -130,9 +144,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       },
       onReset: () => { refreshHello(true); },
     };
-    if (hasDesktopBridge()) { transport = createDesktop(handlers); S.conn = 'connecting'; return; }
+    if (hasDesktopBridge()) { hold(); transport = createDesktop(handlers); S.conn = 'connecting'; return; }
     const saved = savedPairing();
-    if (saved?.token) { transport = createCompanion({ ...saved, ...handlers }); S.conn = 'connecting'; return; }
+    if (saved?.token) { hold(); transport = createCompanion({ ...saved, ...handlers }); S.conn = 'connecting'; return; }
     S.conn = 'off';
   }
 
@@ -214,15 +228,61 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     home.continuing = true;   // (the folders are not shown while it is picked up: renderHome)
     continuing = (async () => {
       const r = await cmd({ cmd: 'session.list' });
-      const last = (r?.sessions || []).find((x) => x && x.providerSessionId && !x.live && !x.aside && x.provider && x.cwd);
-      if (!last) return false;
-      const got = await cmd({ cmd: 'session.resume', provider: last.provider, cwd: last.cwd, providerSessionId: last.providerSessionId, sid: last.sid });
-      if (!got?.ok || !got.sid) return false;
-      viewingSid = null;
-      if (!S.active) { S.active = got.sid; schedule('engine'); }
-      return true;
+      const rows = (r?.sessions || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && x.provider && x.cwd);
+      // newest first; one the coder has no transcript of is passed over for
+      // the one before it (LOST, below) — each tried once, a few at most
+      const tried = new Set();
+      for (const last of rows) {
+        if (tried.size >= 4) break;
+        if (lost.has(last.providerSessionId) || tried.has(last.providerSessionId)) continue;
+        tried.add(last.providerSessionId);
+        const got = await cmd({ cmd: 'session.resume', provider: last.provider, cwd: last.cwd, providerSessionId: last.providerSessionId, sid: last.sid });
+        if (!got?.ok || !got.sid) return false;
+        viewingSid = null;
+        if (!S.active) { S.active = got.sid; schedule('engine'); }
+        if (!noTranscript(await settled(got.sid))) return true;
+        markLost(last.providerSessionId);
+        if (S.active === got.sid) { S.active = null; schedule('engine'); }
+      }
+      return false;
     })().catch(() => false).finally(() => { continuing = null; home.continuing = false; if (ui) redrawHome(); });
     return continuing;
+  }
+
+  // LOST: a conversation the coder has no transcript of — one stopped before
+  // its first word, or gone from its history — resumed, ends at once ("No
+  // conversation found with session ID"), and the engine's index then holds
+  // one more row pointing at it, so it would be picked again, forever
+  // (2026-10-29: two from 13:48 that morning, over a live day's work). Marked
+  // here and in the browser's storage, and passed over from then on; the room
+  // goes on to the one before it.
+  const lost = new Set((() => { try { return JSON.parse(pref('y3k-code:lost') || '[]'); } catch { return []; } })().filter((x) => typeof x === 'string'));
+  function markLost(id) { lost.add(id); pref('y3k-code:lost', JSON.stringify([...lost].slice(-50))); }
+  const noTranscript = (s) => s?.ended?.reason === 'crashed' && /no conversation found/i.test(String(s.ended.detail || ''));
+  // A session just resumed, until it is ready or has ended (a few seconds at
+  // most; one with no transcript is gone within one).
+  const settling = new Map();   // sid → done
+  function settled(sid, ms = 4000) {
+    const s = S.sessions.get(sid);
+    if (s?.ready || s?.ended) return Promise.resolve(s);
+    return new Promise((resolve) => {
+      const done = () => { clearTimeout(t); settling.delete(sid); resolve(S.sessions.get(sid) || null); };
+      const t = setTimeout(done, ms);
+      t.unref?.();
+      settling.set(sid, done);
+    });
+  }
+  // After Continue it, or a line said to one that had ended: one that turns
+  // out lost gives the room to the one before it, and the words back to the box.
+  function watchResumed(sid, providerSessionId, text = '') {
+    settled(sid).then((got) => {
+      if (!noTranscript(got)) return;
+      markLost(providerSessionId);
+      toast('Claude Code has no transcript of that one; picking up the conversation before it.');
+      if (text && !draft) setDraft(text);
+      if (S.active === sid) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); }
+      continueLast();
+    });
   }
 
   // ...AND IT NEVER FILLS UP. A conversation that lasts has to make room for
@@ -233,15 +293,24 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // that matter, how the person works, and what has passed between us. Once,
   // then not again for COMPACT_AGAIN_MS: a compaction that lands shows as the
   // 'compact' line, and the window's percent falls with the next reply.
-  const COMPACT_AT = 80, COMPACT_AGAIN_MS = 10 * 60 * 1000;
+  const COMPACT_AT = 80, COMPACT_AGAIN_MS = 10 * 60 * 1000, COMPACT_FRESH_MS = 60 * 1000;
   const COMPACT_FOCUS = 'Keep what matters to continuing this one conversation: what we are building and why; the decisions made and their reasons; what is open and what comes next; the file paths, commands, names and numbers that matter; how this person likes to work and what they have asked for; and what has passed between us. Drop tool output, resolved errors and superseded attempts.';
-  const compacted = new Map();   // sid → when it was last asked to
-  function maybeCompact(s) {
+  // sid → when it was last asked to: here, and in the browser's storage, so a
+  // second page of the room (another tab, one reloaded) does not ask again
+  const compacted = new Map();
+  const lastAsked = (s) => { const m = /^(\w+):(\d+)$/.exec(pref('y3k-code:compacted') || ''); return Math.max(compacted.get(s.sid) || 0, m && m[1] === s.sid ? Number(m[2]) : 0); };
+  // `e`: the word that brought it here. Only a fresh one counts: one played
+  // back — the stream's backlog on a fresh page, a gap after a sleep — is
+  // history, and the window has moved on since (2026-10-29: a reading of 88%
+  // from before a compaction asked for another, on every load).
+  function maybeCompact(s, e) {
     if (!s || s.state !== 'idle' || s.closing || viewingSid) return;
+    if (e?.t && Date.now() - e.t > COMPACT_FRESH_MS) return;
     const p = s.usage?.context?.percent;
     if (!(p >= COMPACT_AT)) return;
-    if (Date.now() - (compacted.get(s.sid) || 0) < COMPACT_AGAIN_MS) return;
+    if (Date.now() - lastAsked(s) < COMPACT_AGAIN_MS) return;
     compacted.set(s.sid, Date.now());
+    pref('y3k-code:compacted', `${s.sid}:${Date.now()}`);
     cmd({ cmd: 'session.send', sid: s.sid, text: '/compact ' + COMPACT_FOCUS })
       .then((r) => { if (!r?.ok) toast(r?.error || 'could not compact the conversation'); }).catch(() => {});
   }
@@ -358,6 +427,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const wasUnread = !!was?.unread;
     const out = apply(S, e, { replay: late });
     if (kept && (have.has(e.sid) || e.type === 'session.started')) have.set(e.sid, Math.max(have.get(e.sid) || 0, e.seq || 0));
+    if (settling.has(e.sid) && (e.type === 'session.ready' || e.type === 'session.ended')) settling.get(e.sid)();
     if (out.engine) engineDirty = true;
     if (forVoice(e)) {
       const s = S.sessions.get(e.sid);
@@ -365,7 +435,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       const b = it?.blocks.find((x) => x.i === (e.block | 0));
       if (it && b && it.parentUid == null) voicer.block({ item: it, block: b, where: s.cwd ? folderName(s.cwd) : '' });
     }
-    if (out.sid && !S.active && !viewingSid && e.type === 'session.started') S.active = out.sid;
+    // (a start played back — the stream's backlog, a file — never takes the screen)
+    if (out.sid && !S.active && !viewingSid && e.type === 'session.started' && !late) S.active = out.sid;
     if (e.type === 'session.started' && out.sid) home.wantsFolders = false;
     const here = !!out.sid && out.sid === currentSession()?.sid;
     // A session not on screen changes only its own state: its state, its question,
@@ -387,7 +458,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (e.type === 'subagent.progress' && e.taskId) agentDirty.add(e.taskId);
     } else if (out.sid && out.changed.length && !wasUnread) tabsDirty = true;
     onNeedsYou(needsYou(S));
-    if (!late && (e.type === 'usage.context' || e.type === 'turn.ended' || e.type === 'session.state')) maybeCompact(S.sessions.get(e.sid));
+    if (!late && (e.type === 'usage.context' || e.type === 'turn.ended' || e.type === 'session.state')) maybeCompact(S.sessions.get(e.sid), e);
     if (e.type === 'turn.ended' && !late && globalThis.document?.visibilityState === 'hidden') tab.done = true;
     markTab();
     reactTo(e);
@@ -2119,11 +2190,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s.providerSessionId) return null;
     const b = h('button.cv-link', { type: 'button' }, 'Continue it');
     b.addEventListener('click', async () => {
+      if (lost.has(s.providerSessionId)) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); continueLast(); return; }
       const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
       if (!r.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
       viewingSid = null;
       S.active = r.sid;
       rebuildTranscript(); renderChrome();
+      watchResumed(r.sid, s.providerSessionId);
     });
     return b;
   }
@@ -2219,12 +2292,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // ONE CONVERSATION: a line said to a session that has ended continues it
     // first — the coder's own session, resumed — and then goes on from there.
     if (s.state === 'ended' && s.providerSessionId && !viewingSid && text !== '/clear' && text !== '/new') {
+      // (one known lost: the one before it instead, the words kept in the box)
+      if (lost.has(s.providerSessionId)) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); continueLast(); return; }
       const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
       if (!r?.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
       const sid = r.sid || s.sid;
       viewingSid = null;
       S.active = sid;
       rebuildTranscript(); renderChrome();
+      watchResumed(sid, s.providerSessionId, text);
       s = S.sessions.get(sid) || { ...s, sid, state: 'idle', items: [] };
     }
     // A fresh start, from the folders. Claude Code's /clear ends the
