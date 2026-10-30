@@ -1858,7 +1858,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // mode in every tab, so a second tab or device sent each private line to the
   // stream another one had open (and kept that stream alive by doing it).
   if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
-  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting, room: body.room?.() }), undefined, { wake: !priv });
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, room: body.room?.(), presence: hosting }), undefined, { wake: !priv });
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room
