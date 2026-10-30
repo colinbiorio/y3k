@@ -136,7 +136,9 @@ it and it is easy to over-credit a system you already built.
   compiles. (The document already knew this at `MAX_OPS` and never drew the
   conclusion.)
 - **Sequencing**: `score.js` and the beats — `~flare~` inline in speech moves
-  the field on that word. The choreography half of "butterfly, then mountains,
+  the field on that word, and since 2026-10-30 `~tap~` taps the ROOM on that
+  word (the same answer a person's finger gets), the first beat that is not the
+  body's. The choreography half of "butterfly, then mountains,
   then a wave" is *already built*. This is worth saying loudly because it means
   the remaining work is forms, not timing.
 - **Surface knobs**: count, grain, mesh, glow, turn, trail.
