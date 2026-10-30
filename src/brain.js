@@ -533,7 +533,7 @@ export async function respond(text, image, paint, presence) {
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
         history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech), t: Date.now() });
-        return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null };
+        return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null, room: r.room && typeof r.room === 'object' ? r.room : null };
       }
       // the provider's reason, when the server could name it (whyLine)
       if (known(r.why)) return unanswered(r.why, r.provider);
@@ -607,7 +607,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     const dec = new TextDecoder();
 
     let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let anchors = null; let shape = null; let invite = null;
-    let morph = null; let liquid = null; let score = null; let bodyBlock = null; let speed = null;
+    let morph = null; let liquid = null; let score = null; let bodyBlock = null; let speed = null; let room = null;
     let gotMood = false; let gotDone = false; let errored = false; let why = null; let provider = null;
     for (;;) {
       let chunk;
@@ -636,7 +636,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
         else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
         else if (ev === 'text') { speech += p.text; onText?.(p.text); }
 
-        else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; if (p.speed && typeof p.speed === 'object') speed = p.speed; }
+        else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; if (p.room && typeof p.room === 'object') room = p.room; if (p.speed && typeof p.speed === 'object') speed = p.speed; }
         // the provider's reason, as a word from a fixed list (server.mjs upstreamRefused)
         else if (ev === 'error') { errored = true; why = known(p.why) ? p.why : null; provider = typeof p.provider === 'string' ? p.provider : null; }
       }
@@ -661,7 +661,8 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     // nothing at all — the dance path worked only because tend.js reads the raw
     // /api/brain JSON and never comes through here.
     // speed: how fast it wrote, measured upstream (speed.mjs; src/speed.js shows it)
-    return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite, speed };
+    // room: the one it chose to be in — <<room: snowy taiga>> — read on the done event like the score and the body
+    return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite, speed, room };
   } finally {
     clearTimeout(watch);
     clearTimeout(limit);
@@ -675,7 +676,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 // asking again can fix (see streamRequest's `again`); otherwise it keeps what
 // went out, or says why it did not answer.
 
-export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence, room } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await ownReady());
@@ -697,6 +698,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
+      if (room) body.room = room;             // the room on this screen, so the readout can name it (honest senses)
       Object.assign(body, keyFields());   // the key, and the rung chosen here
       // A PICTURE THE PERSON ATTACHED IS NEVER DROPPED IN SILENCE (audit,
       // 2026-10-08). The picture is made to fit before it is attached

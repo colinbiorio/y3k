@@ -114,6 +114,13 @@ it and it is easy to over-credit a system you already built.
 
   Entering a room now puts the body words back: `worn` had recorded them since
   the first day and `body.wear()` had never read them.
+- **The room** (2026-10-30): `<<room: snowy taiga>>` — which of the thirteen
+  rooms the presence stands in, and `eclipse` / `no eclipse` behind it. The
+  kommand's own lookup, so a room is one place whoever names it (line 6 again:
+  the person types `background/taiga`, the presence says `<<room: taiga>>`, and
+  they end in one place). The page tells the brain which room is on screen with
+  every turn, so the readout is the room the person sees, never the one asked
+  for.
 - **THE RENDERER COMPILES NOTHING AT RUNTIME, and this document did not say so
   when it was first written** — which sent the whole arc toward codegen to pay
   for a stall the architecture does not have. Every `ShaderMaterial` in

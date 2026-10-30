@@ -2025,7 +2025,7 @@ ok('a kommand is not a message: it lands before the chat path sees it', () => {
   assert.ok(rk.includes('score.cancel()'), 'the kommand runner no longer cancels a running score');
   assert.ok(rk.indexOf('score.cancel()') < rk.indexOf('body.setShape'), 'a running score would overwrite the kommand just typed');
   for (const [kind, call] of [['shape', 'body.setShape(k.shape)'], ['body', 'applyBodyBlock(k.body)'], ['liquid', 'body.setLiquid(k.liquid)'], ['over', 'score.start(k.score'],
-    ['color', 'body.paintColors(k.color.paint)'], ['palette', 'body.setScheme(k.color.scheme)'], ['mood', 'body.setMood(k.mood)'], ['posture', 'body.setForm(k.posture)'], ['pace', 'body.setMorph(k.pace)'], ['background', 'settings.setRoom({ env: k.room })']])
+    ['color', 'body.paintColors(k.color.paint)'], ['palette', 'body.setScheme(k.color.scheme)'], ['mood', 'body.setMood(k.mood)'], ['posture', 'body.setForm(k.posture)'], ['pace', 'body.setMorph(k.pace)'], ['background', 'applyRoom({ env: k.room || null, eclipse: k.eclipse ?? null })']])
     assert.ok(rk.includes(call), kind + ' is parsed and then not applied');
   assert.ok(/showCaption\(k\.ok \? k\.said : k\.why/.test(rk), 'a refused kommand says nothing back');
 });

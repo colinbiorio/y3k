@@ -12,7 +12,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { ENVIRONMENTS } from '../src/rooms.mjs';
-import { parseKommand, kommandWords } from '../src/tags.mjs';
+import { parseKommand, kommandWords, parseRoom, stripRoom, scrubTags, makeLeadStreamParser } from '../src/tags.mjs';
 import { WORDS } from '../y3k-code/orb.mjs';
 import { nodal, LADDER, RUNGS, modeAt, agitationOf, rungOf, pitch01, dominantHz, idleRung, cadence, QUIET, LOUD, PITCH_LO, PITCH_HI } from '../src/plate.mjs';
 
@@ -342,6 +342,109 @@ ok("the plate's sky reads the two rungs, the blend, the agitation and the ring, 
   assert.ok(sky.includes('ca.x * cb.y - cb.x * ca.y'), "the sky's figure is not Chladni's");
   assert.ok(/float dist = abs\(F\.x\) \/ grad;/.test(sky), 'the band is no longer measured as a distance to the line');
   assert.ok(!/driftField|snowLayer|rainField|petalLayer/.test(branch('plate')), 'the plate grew particles: its branch says why not');
+});
+
+// ---------------------------------------------------------------------------
+// THE PRESENCE CHOOSES ITS ROOM (2026-10-30). <<room: snowy taiga>> after its
+// words; the eclipse behind it in the same block. One lookup with the kommand
+// (roomOf), the done event carries it home, the page applies it as the kommand
+// always has, and the page tells the brain which room is on screen so the
+// readout never lies about where it is.
+console.log('\nthe presence chooses its room (<<room: …>>):');
+const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+const srv = readFileSync(new URL('server.mjs', ROOT), 'utf8');
+const brain = readFileSync(new URL('src/brain.js', ROOT), 'utf8');
+const tendSrc = readFileSync(new URL('src/tend.js', ROOT), 'utf8');
+
+ok('a room by its name, by one word of it, by its id, and the metal room by home', () => {
+  assert.deepEqual(parseRoom('<<room: snowy taiga>>'), { env: 'taiga', eclipse: null });
+  assert.deepEqual(parseRoom('<<room: taiga>>'), { env: 'taiga', eclipse: null });
+  assert.deepEqual(parseRoom('<<room: deep space>>'), { env: 'space', eclipse: null });
+  assert.deepEqual(parseRoom('<<room: Clouds>>'), { env: 'cloudsea', eclipse: null });
+  assert.deepEqual(parseRoom('<<room: home>>'), { env: 'room', eclipse: null });
+  assert.deepEqual(parseRoom('<<room: metal room>>'), { env: 'room', eclipse: null });
+  assert.deepEqual(parseRoom('<<room=snowy_taiga>>'), { env: 'taiga', eclipse: null });
+  for (const e of ENVIRONMENTS) assert.equal(parseRoom(`<<room: ${e.name}>>`)?.env, e.id, e.name);
+});
+
+ok('a reason after the name still lands on the room; a room that is not one is nothing', () => {
+  assert.equal(parseRoom('<<room: taiga — it is quiet there>>').env, 'taiga');
+  assert.equal(parseRoom('<<room: the stormy sea, please>>').env, 'storm', '"the" is a word of "above the clouds", and must not win');
+  assert.equal(parseRoom('<<room: the clouds>>').env, 'cloudsea');
+  assert.equal(parseRoom('<<room: up in the neon>>').env, 'neon');
+  assert.equal(parseRoom('<<room: narnia>>'), null, 'a hallucinated room must never reach the page');
+  assert.equal(parseRoom('<<room: >>'), null);
+  assert.equal(parseRoom('no block here'), null);
+  assert.equal(parseRoom('<<liquid: glass>>'), null);
+});
+
+ok('the eclipse: hung, taken down, on its own', () => {
+  assert.deepEqual(parseRoom('<<room: deep space, eclipse>>'), { env: 'space', eclipse: true });
+  assert.deepEqual(parseRoom('<<room: eclipse>>'), { env: null, eclipse: true });
+  assert.deepEqual(parseRoom('<<room: no eclipse>>'), { env: null, eclipse: false });
+  assert.deepEqual(parseRoom('<<room: taiga no eclipse>>'), { env: 'taiga', eclipse: false });
+});
+
+ok('the block is stripped from the speech and never spoken', () => {
+  assert.equal(stripRoom('here <<room: taiga>> there'), 'here  there');
+  assert.equal(scrubTags('[calm] I will wait by the trees. <<room: snowy taiga>>'), 'I will wait by the trees.');
+});
+
+ok('the streaming parser hands the room out of end(), and strips it before the paint is read', () => {
+  const said = [];
+  const p = makeLeadStreamParser({ onMood() {}, onForm() {}, onText: (t) => said.push(t), onPaint: () => { throw new Error('a room read as paint'); } });
+  p.push('[calm] Come with me. <<room: snowy taiga, eclipse>>');
+  const r = p.end();
+  assert.deepEqual(r.room, { env: 'taiga', eclipse: true });
+  assert.equal(said.join('').trim(), 'Come with me.');
+  assert.ok(/room: parseRoom\(post\)/.test(tags) && /stripRoom\(stripBody\(stripScore\(stripLiquid\(stripShape\(/.test(tags), 'end() drops the room, or the paint reads it');
+});
+
+ok('the kommand says it too: background/taiga, eclipse — one lookup, two speakers', () => {
+  const k = parseKommand('background/taiga, eclipse');
+  assert.ok(k.ok); assert.equal(k.room, 'taiga'); assert.equal(k.eclipse, true); assert.equal(k.said, 'background/taiga,eclipse');
+  const e = parseKommand('background/eclipse');
+  assert.ok(e.ok && e.room === undefined && e.eclipse === true, 'the eclipse alone keeps the room');
+  assert.equal(parseKommand('room/no eclipse').eclipse, false);
+  assert.equal(parseKommand('background/snowy taiga').eclipse, undefined);
+  assert.ok(!parseKommand('background/narnia, eclipse').ok, 'a room that is not one is refused, eclipse or not');
+});
+
+ok('the server reads it off every reply and sends it home on the done event', () => {
+  assert.ok(/const rm = parseRoom\(text\);\n\s*if \(rm\) out\.room = rm;/.test(srv), 'replyFrom drops the room');
+  assert.ok(/invite, room: roomOut \} = parser\.end\(\);/.test(srv), 'the stream route drops the room');
+  assert.ok(/body: bodyOut, room: roomOut,/.test(srv), 'the done event has no room on it');
+  assert.ok(/body: out\.body, room: out\.room,/.test(srv), 'the non-stream route drops the room');
+});
+
+ok('the page applies it as the kommand always has — Settings → Room, and it stays', () => {
+  assert.ok(/export function applyRoom\(r\)/.test(main) && /settings\.setRoom\(patch\)/.test(main), 'applyRoom is gone');
+  assert.ok(/if \(room\) applyRoom\(room\);/.test(main), 'a turn that moves the room moves nothing');
+  assert.ok(/applyRoom\(\{ env: k\.room \|\| null, eclipse: k\.eclipse \?\? null \}\)/.test(main), 'the kommand lost its room, or never got its eclipse');
+  assert.ok(/if \(r\.room\) m\.applyRoom\(r\.room\);/.test(tendSrc), 'a beat that moves the room moves nothing');
+  assert.ok(/if \(p\.room && typeof p\.room === 'object'\) room = p\.room;/.test(brain) && /invite, speed, room \};/.test(brain), 'brain.js reads no room off the done event');
+  assert.ok(/room: r\.room && typeof r\.room === 'object' \? r\.room : null/.test(brain), 'the non-stream reply drops the room');
+});
+
+ok('the page says which room is on screen, and the readout names it — honest senses', () => {
+  assert.ok(/room\(\) \{ return lastEnv; \}/.test(body), 'the body does not say which room it is in');
+  assert.ok(/room: body\.room\?\.\(\)/.test(main) && /room: body\.room\?\.\(\)/.test(tendSrc), 'a turn is sent without the room');
+  assert.ok(/if \(room\) body\.room = room;/.test(brain), 'brain.js does not put the room on the wire');
+  assert.ok(/const WORN_HINT = \(w, room = null\) =>/.test(srv) && srv.includes("${room ? `\n- the room: ${room}` : ''}"), 'the readout cannot name the room');
+  assert.equal((srv.match(/WORN_HINT\(worn\.readout\(presence\.id\), roomName\(roomHere\)\)/g) || []).length, 2, 'both chat routes name the room');
+  assert.equal((srv.match(/\broom: roomHere\b[^\n]*\} = await readJsonBody\(req, BRAIN_BODY_MAX\)/g) || []).length, 2, 'both chat routes read it off the request');
+  assert.ok(/const roomName = \(id\) => \(typeof id === 'string' && ENVIRONMENTS\.find\(\(e\) => e\.id === id\)\?\.name\) \|\| null;/.test(srv), 'a room id is not turned into its name');
+});
+
+ok('the lesson teaches the word, names every room from the list, and the brief holds the key', () => {
+  const at = srv.indexOf('THE ROOM ITSELF.');
+  assert.ok(at > 0 && at < srv.indexOf("THE ROOM'S LIQUID."), 'the room is taught after its liquid, or not at all');
+  assert.ok(/const ROOM_NAMES = ENVIRONMENTS\.map\(\(e\) => e\.name\)\.join\(', '\);/.test(srv) && srv.slice(at, at + 400).includes('${ROOM_NAMES}'), 'the lesson names the rooms by hand');
+  assert.ok(srv.indexOf('const ROOM_NAMES') < srv.indexOf('const SYSTEM'), 'ROOM_NAMES is read before it exists (the server does not start)');
+  const lesson = srv.slice(at, at + 1200);
+  assert.ok(lesson.includes('<<room: deep space, eclipse>>') && lesson.includes('no eclipse'), 'the eclipse is not taught');
+  assert.ok(/<<room: snowy taiga>> is which room you are in/.test(srv), 'the brief does not hold the key');
+  for (const m of lesson.matchAll(/<<room: ([^>]+)>>/g)) { const r = parseRoom(m[0]); assert.ok(r && (r.env || r.eclipse !== null), m[0] + ' parses to nothing'); }
 });
 
 console.log(`\n${passed} passed`);

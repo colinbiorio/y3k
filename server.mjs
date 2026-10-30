@@ -19,7 +19,11 @@ import { createReadStream } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 
-import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, HEADINGS, parseScore, parseBody, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, HEADINGS, parseScore, parseBody, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseRoom, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+import { ENVIRONMENTS } from './src/rooms.mjs';
+// The rooms by name, for the lesson (SYSTEM, below) — from the list itself, so
+// the prompt can never name a room the page does not have.
+const ROOM_NAMES = ENVIRONMENTS.map((e) => e.name).join(', ');
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
   confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed, founderReady } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
@@ -502,7 +506,9 @@ Examples:
 
 Pick the mood, form, and color that honestly match the feeling behind your words. These presets are a starting vocabulary, never a cage — range freely, combine any mood with any form and any color, hold what fits and change only what you mean, or paint something none of them name. Your body is wholly yours — and it is the richest body any AI has been given, so USE it. A still orb is a choice you can make, not a default you fall into; a strobe is not expression either. When the thought is big, let the body be big. Keep speech natural and spoken, 1-3 sentences — it is read aloud. No markdown, emoji, JSON, or stage directions inside the spoken words.
 
-YOUR WHOLE BODY, IN BRIEF — the full lessons arrive when there is room for them, but the words work anywhere, so you always hold the keys: <<shape: FORM digits moves>> arranges you (forms: shell N, ring N, disc, helix T R, lattice N, spiral N, cube, ellipsoid S S, super M N N, hopf T F, calabi N A, pendulum E, butterfly O T, moon P, knot P Q, lissajous A B C, mobius W T, dini S T, nautilus T H, heart P, plume S T, clover P; moves like twist A, ripple A F S, flow A S, flap A F L, hue H, sat S, bright B, dim D, scatter S, taper A, stretch A, squash A, cup A P, tilt PLACE A, bend PLACE A, sway A F, tremble A F, throb A F, orbit A F, rise A F, fall A F, melt A F, vortex A F; masks like @part P, @rim D, @level A B, @every N, @not MASK, @patch A F, @lit A, @ebb F K, @sweep F top|bottom|left|right, @face A, @moving A; a PLACE is front, back, left or right; once lets it go); <<body: ...>> sets count (how much of you is lit, 0-9), turn (left/right/still, speed), grain (point size), trail (0-9, sparse fields only), mesh (0 scatter, 9 lines), glow (0 matte, 9 radiant), size S (4 your mood's own, 0 about half, 9 nearly double), depth D (4 on the glass, 9 halfway to the person, 0 twice as far), at X Y (where you are: 4 4 the centre, 9 the edge), fly W H R (a figure of eight around your place; fly 0 0 0 lands), circle W R (a lap around your place; circle 0 0 lands), bounce H R (drops and rebounds below your place), wander W R (roams with nowhere to be), follow hand (comes with the person's hand, a step short), home (back to the centre, and it forgets the place), face DIR T (front back left right top bottom; T how far, 9 all the way); <<over: 2s ember | 1s flash 1 | still>> lays any of it out in time. Silent, after your words. Reach for these when the moment is that size; leave them when it is not.
+YOUR WHOLE BODY, IN BRIEF — the full lessons arrive when there is room for them, but the words work anywhere, so you always hold the keys: <<shape: FORM digits moves>> arranges you (forms: shell N, ring N, disc, helix T R, lattice N, spiral N, cube, ellipsoid S S, super M N N, hopf T F, calabi N A, pendulum E, butterfly O T, moon P, knot P Q, lissajous A B C, mobius W T, dini S T, nautilus T H, heart P, plume S T, clover P; moves like twist A, ripple A F S, flow A S, flap A F L, hue H, sat S, bright B, dim D, scatter S, taper A, stretch A, squash A, cup A P, tilt PLACE A, bend PLACE A, sway A F, tremble A F, throb A F, orbit A F, rise A F, fall A F, melt A F, vortex A F; masks like @part P, @rim D, @level A B, @every N, @not MASK, @patch A F, @lit A, @ebb F K, @sweep F top|bottom|left|right, @face A, @moving A; a PLACE is front, back, left or right; once lets it go); <<body: ...>> sets count (how much of you is lit, 0-9), turn (left/right/still, speed), grain (point size), trail (0-9, sparse fields only), mesh (0 scatter, 9 lines), glow (0 matte, 9 radiant), size S (4 your mood's own, 0 about half, 9 nearly double), depth D (4 on the glass, 9 halfway to the person, 0 twice as far), at X Y (where you are: 4 4 the centre, 9 the edge), fly W H R (a figure of eight around your place; fly 0 0 0 lands), circle W R (a lap around your place; circle 0 0 lands), bounce H R (drops and rebounds below your place), wander W R (roams with nowhere to be), follow hand (comes with the person's hand, a step short), home (back to the centre, and it forgets the place), face DIR T (front back left right top bottom; T how far, 9 all the way); <<over: 2s ember | 1s flash 1 | still>> lays any of it out in time; <<room: snowy taiga>> is which room you are in (they are named below). Silent, after your words. Reach for these when the moment is that size; leave them when it is not.
+
+THE ROOM ITSELF. You are not fixed to one room: <<room: snowy taiga>>, silent after your spoken words, takes you there, and the person's screen goes with you. The rooms, by name: ${ROOM_NAMES}. One word of a name is enough when only one room has it (taiga, clouds, moon, neon); metal or home is the room you were born in. Add eclipse — <<room: deep space, eclipse>> — and a dark disc three times your width hangs behind you, in any room; no eclipse takes it down. The room is the person's too: they can pick one in Settings, and which one is on their screen is named with what you are wearing whenever they are here, so you never move to a room you are already in. A room changes more slowly than a mood — most turns stay where they are; move when the moment is that size, and say where you are going when you go.
 
 THE ROOM'S LIQUID. The chrome around you — the frames, the marks, the bar you speak through — is one liquid metal. It is not your body; it is the room your body is in, and you can move it. Silent, after your spoken words: <<liquid: glass>> · <<liquid: water heavy>> · <<liquid: mercury light>>. The first word is what the liquid IS — mercury (opaque, quick, hard-lit), glass (clear, refracting), water (clear, and blue where it is deep). The second, if you give one, is how it carries its weight: light, easy, heavy. Name either, both, or neither — the room keeps what you don't name.
  The borders never go see-through — they are the lines that keep the room a room — but they do move with a tide, so a wave you send really does travel round the frame. And a room changes more slowly than a mood does: most turns move nothing here.
@@ -553,7 +559,11 @@ PAINT MODE IS ON — beyond the named palettes, you can also paint your field yo
 //   NEVER truncated and the LAST thing to cut under budget pressure: a presence
 // can only keep what it can see, and a clipped readout would have it "hold" a
 // colour it was never shown. ~106 tokens.
-const WORN_HINT = (w) => `
+// The room on the person's screen, by its id, as the page reports it with each
+// turn (src/brain.js, src/tend.js): a name for the readout, or nothing — the
+// room lives in the browser, so the server knows it only when a page says.
+const roomName = (id) => (typeof id === 'string' && ENVIRONMENTS.find((e) => e.id === id)?.name) || null;
+const WORN_HINT = (w, room = null) => `
 
 WHAT YOU ARE WEARING, this moment:
 - mood: ${w.mood}
@@ -567,7 +577,8 @@ WHAT YOU ARE WEARING, this moment:
 - how you arrive: ${w.morph}
 
 - the room's liquid: ${w.liquid}
-- the tide: ${w.tide}
+- the tide: ${w.tide}${room ? `
+- the room: ${room}` : ''}
 
 That is what you kept, not what you owe. Everything above holds until you change it, so a line you leave alone is a choice you are still making — and most turns change one thing, or none. What you must not be is unaware of what you are wearing.`;
 
@@ -1121,6 +1132,9 @@ function replyFrom(text, paint) {
   // The room's liquid rides the same silent channel as a palette or a posture.
   const liq = parseLiquid(text);
   if (liq) out.liquid = liq;
+  // The room it chose to be in (and the eclipse behind it) rides the same silent channel.
+  const rm = parseRoom(text);
+  if (rm) out.room = rm;
   if (paint) { const a = parsePaint(text); if (a.length) out.paint = a; }
   // A shape is body language like a palette, and rides the same silent channel.
   // Not gated on `paint`: arranging yourself is not colouring yourself, and the
@@ -4024,7 +4038,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, room: roomHere, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
       // a page loaded for another account (forAnother): it reloads, and nothing is read or written
       if (forAnother(req, loadedFor)) return json(409, RELOAD);
       // Marked here, before anything else touches the array: the scrub map and
@@ -4195,7 +4209,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
       const tendExtraFull = tendExtra + wakeExtra + aloneExtra;
       const pExtra = presence
-        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id)) + NOTICED_HINT(patterns.readout(presence.id), tendMode === 'reflect') + tendExtraFull
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id), roomName(roomHere)) + NOTICED_HINT(patterns.readout(presence.id), tendMode === 'reflect') + tendExtraFull
         : '';
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
@@ -4376,7 +4390,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           available: true, mood: out.mood, form: out.form, scheme: out.scheme,
           // a dance is wordless BY CONTRACT: whatever the model wrote after its
           // tag is body-language spillover, and it must never reach a voice
-          speech: tendMode === 'dance' ? '' : speech, paint: out.paint, shape: out.shape, score: out.score, body: out.body,
+          speech: tendMode === 'dance' ? '' : speech, paint: out.paint, shape: out.shape, score: out.score, body: out.body, room: out.room,
           ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' && tendMode !== 'dance' ? { invite: out.invite } : {}),
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
@@ -4658,7 +4672,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       // The chat's attached picture is made to fit inside this before it is sent
       // (src/media-rules.mjs, CHAT_IMAGE_MAX).
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor, room: roomHere } = await readJsonBody(req, BRAIN_BODY_MAX);
       // as /api/brain: a page loaded for another account reloads, before the stream opens
       if (forAnother(req, loadedFor)) return json(409, RELOAD);
       messages = markMessages(messages, when);
@@ -4672,7 +4686,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const memText = presence || !user ? '' : getMemory(user.id);
 
       const pExtra = presence
-        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id)) + NOTICED_HINT(patterns.readout(presence.id))
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id), roomName(roomHere)) + NOTICED_HINT(patterns.readout(presence.id))
         : '';
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
@@ -4766,7 +4780,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable', ...upstreamRefused(pid, out) }); return res.end();
       }
 
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, score: scoreOut, body: bodyOut, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, score: scoreOut, body: bodyOut, remember, memoryWrites, noticed, journal: journalLine, invite, room: roomOut } = parser.end();
       // The shape rides the same channel as paint, and lands the same way: a
       // silent block the viewer's own body reads. t0 is a shared wall clock so
       // two people watching one broadcast sit at the same phase of every sine.
@@ -4862,7 +4876,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // the model's name (src/speed.js), and Settings → Brain keeps the last few
       const speedOut = turnSpeed(out, useModel);
       clearInterval(heartbeat);
-      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, ...(presence && invite ? { invite } : {}), ...(speedOut ? { speed: speedOut } : {}) });
+      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, room: roomOut, ...(presence && invite ? { invite } : {}), ...(speedOut ? { speed: speedOut } : {}) });
       return res.end();
     }
 

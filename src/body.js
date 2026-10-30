@@ -4412,6 +4412,10 @@ export function createBody(container) {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
     setRoom, // settings → Room: environment / brightness / grooves / tint / glow
+    // The room on screen, by its id — what the page tells the brain with each
+    // turn, so the readout names the room the person is looking at and never
+    // one the presence asked for and did not get.
+    room() { return lastEnv; },
     envThumbnails: (n) => envs.thumbnails(n), // settings → Room: a photo of each world (one task; kept for compatibility)
     // The same photographs, one world a frame, cached for the page:
     // -> Promise<Array<{ id, url }>>. What the Room tab should use.

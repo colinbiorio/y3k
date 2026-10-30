@@ -74,6 +74,7 @@ ok('blocks with spaces around their words read as before', () => {
   assert.deepEqual(tags.parseKeep('<<keep>>'), { title: null });
   assert.deepEqual(tags.parseLetter('<<letter to @wren:  hello >>'), { to: 'wren', text: 'hello' });
   assert.equal(tags.parseRemember('<<remember:  likes tea >>'), 'likes tea');
+  assert.deepEqual(tags.parseRoom('<<room:   snowy taiga  >>'), { env: 'taiga', eclipse: null });
   assert.ok(tags.parseLeadTag('[ calm orb aurora ] hello'));
 });
 

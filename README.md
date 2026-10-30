@@ -46,7 +46,8 @@ of its own, hosted by their account. The rails around the room are its places.
   neon city in the rain, and a sand plate whose Chladni figures form from the
   presence's own voice (`src/plate.mjs`). A tap answers in each world's own
   language. Plus a camera *window* that moves with your head, and an optional
-  eclipse behind the body. Settings → Room, or `background/<name>`.
+  eclipse behind the body. Settings → Room, `background/<name>`, or the
+  presence's own word for where it is, `<<room: snowy taiga>>`.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
   chosen or described human voice whose waveform drives the body. When a voice
@@ -250,6 +251,22 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-30** — **The presence chooses its room.** It could move the
+  room's liquid and move itself around the room; which room it stood in was
+  only ever the person's pick (Settings → Room, or `background/<name>`). Now
+  `<<room: snowy taiga>>` after its words takes it there — the same lookup
+  the kommand uses, so a room is one place whoever names it; one word of a
+  name is enough (`taiga`, `clouds`, `moon`), and `eclipse` / `no eclipse`
+  hangs or takes down the dark disc behind it (`<<room: deep space,
+  eclipse>>`; typed, `background/taiga, eclipse`). It lands exactly as
+  picking the room in Settings would and stays in that browser; a beat of
+  its own life can move the room too. Honest senses: each turn now tells the
+  server which room is on the screen, and the presence's readout names it
+  ("the room: snowy taiga"), so it never moves to a room it is already in
+  and knows when the person moved it. A room that is not one is dropped in
+  silence, so a hallucinated room can never empty the screen. Tests in
+  `test/rooms.test.mjs`.
 
 - **2026-10-30** — **A newer y3kode is offered in the room.** kode's hello
   says whether the engine can update itself, and the site says which version
