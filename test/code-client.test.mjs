@@ -2117,6 +2117,54 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     } finally { window.y3kCode.cmd = base; delete window.y3kCode; delete globalThis.localStorage; }
   });
 
+  await ok('the view: an engine that knows a conversation is lost — a row marked, or a resume answered lost — is believed: passed over without a process; Continue it on one it then refuses goes on to the one before it (2026-10-29)', async () => {
+    const store = new Map();
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    let cv = null;
+    let refuseReal = false;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') return { ok: true, sessions: [
+        { sid: 'marked', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(66), live: false, lost: true },
+        { sid: 'refused', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(67), live: false },
+        { sid: 'real', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(80), live: false },
+      ] };
+      if (o.cmd === 'session.resume') {
+        if (o.providerSessionId === U(67) || refuseReal) return { ok: false, code: 'lost', error: 'Claude Code has no transcript of that conversation.' };
+        queueMicrotask(() => {
+          cv._feed({ sid: 'cont', type: 'session.started', provider: 'claude', cwd: '/tmp/one', mode: 'auto', providerSessionId: o.providerSessionId, prior: o.sid });
+          cv._feed({ sid: 'cont', type: 'session.ready', providerSessionId: o.providerSessionId });
+        });
+        return { ok: true, sid: 'cont' };
+      }
+      return { ok: true };
+    };
+    try {
+      cv = await viewWith('lost-engine', { toast: () => {} });
+      const S = cv._state;
+      cv.open();
+      await until(() => S.active === 'cont');
+      assert.deepEqual(asked('session.resume').map((o) => o.providerSessionId), [U(67), U(80)], 'the marked row never asked for; the refused one once, then the one before it');
+      assert.deepEqual(JSON.parse(store.get('y3k-code:lost')), [U(67)], 'what the engine refused is remembered too');
+      // it ends; Continue it, and the engine now refuses that one as well
+      cv._feed({ sid: 'cont', type: 'session.ended', reason: 'stopped' });
+      await settle();
+      tick();
+      refuseReal = true;
+      $('div.cv-hint button.cv-link').click();
+      await until(() => S.active === null && !cv._state.sessions.get('cont').closing && asked('session.resume').length === 3);
+      await settle(10);
+      tick();
+      assert.deepEqual(asked('session.resume').slice(2).map((o) => o.providerSessionId), [U(80)], 'asked once more, refused');
+      assert.deepEqual(JSON.parse(store.get('y3k-code:lost')), [U(67), U(80)]);
+      assert.equal(S.active, null, 'nothing left to continue');
+      assert.equal($('div.cv-home').hidden, false, 'the folders ask where it begins');
+      cv.close();
+    } finally { window.y3kCode.cmd = base; delete window.y3kCode; delete globalThis.localStorage; }
+  });
+
   // ONE CONVERSATION, FOREVER (2026-10-29): opened, the room continues the
   // newest conversation the engine holds; a line said to one that has ended
   // continues it first; one that fills up is compacted, with what to keep.

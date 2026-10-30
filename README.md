@@ -261,7 +261,9 @@ build. Read the one for the part you are touching.
   minute never asks to compact, and a browser asks once per conversation; and
   a conversation Claude Code has no transcript of ("No conversation found") is
   marked lost in the browser and passed over for the one before it, instead
-  of being picked again forever (`src/code/code-view.js`).
+  of being picked again forever; an engine that knows already (0.3.9: a row
+  marked `lost`, a resume answered `lost`) is believed without a process
+  (`src/code/code-view.js`).
 - **2026-10-29** — **One conversation, forever.** Colin: "no new chats -- no
   separate history -- no different contexts and chats -- just one
   conversation forever … it keeps a thread alive. our friendship doesn't have

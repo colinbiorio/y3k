@@ -230,13 +230,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       const r = await cmd({ cmd: 'session.list' });
       const rows = (r?.sessions || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && x.provider && x.cwd);
       // newest first; one the coder has no transcript of is passed over for
-      // the one before it (LOST, below) — each tried once, a few at most
+      // the one before it (LOST, below) — each tried once, a few at most. An
+      // engine that knows already (0.3.9: the row marked `lost`, or a resume
+      // answered `lost` before anything is spawned) is believed.
       const tried = new Set();
       for (const last of rows) {
         if (tried.size >= 4) break;
-        if (lost.has(last.providerSessionId) || tried.has(last.providerSessionId)) continue;
+        if (last.lost || lost.has(last.providerSessionId) || tried.has(last.providerSessionId)) continue;
         tried.add(last.providerSessionId);
         const got = await cmd({ cmd: 'session.resume', provider: last.provider, cwd: last.cwd, providerSessionId: last.providerSessionId, sid: last.sid });
+        if (got?.code === 'lost') { markLost(last.providerSessionId); continue; }
         if (!got?.ok || !got.sid) return false;
         viewingSid = null;
         if (!S.active) { S.active = got.sid; schedule('engine'); }
@@ -259,6 +262,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   const lost = new Set((() => { try { return JSON.parse(pref('y3k-code:lost') || '[]'); } catch { return []; } })().filter((x) => typeof x === 'string'));
   function markLost(id) { lost.add(id); pref('y3k-code:lost', JSON.stringify([...lost].slice(-50))); }
   const noTranscript = (s) => s?.ended?.reason === 'crashed' && /no conversation found/i.test(String(s.ended.detail || ''));
+  // The one before it instead: the room empties (the folders stay away while
+  // it is picked up) and continueLast goes on from the newest not lost.
+  function goOnBefore(id) { if (id) markLost(id); S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); continueLast(); }
   // A session just resumed, until it is ready or has ended (a few seconds at
   // most; one with no transcript is gone within one).
   const settling = new Map();   // sid → done
@@ -277,11 +283,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function watchResumed(sid, providerSessionId, text = '') {
     settled(sid).then((got) => {
       if (!noTranscript(got)) return;
-      markLost(providerSessionId);
       toast('Claude Code has no transcript of that one; picking up the conversation before it.');
       if (text && !draft) setDraft(text);
-      if (S.active === sid) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); }
-      continueLast();
+      goOnBefore(providerSessionId);
     });
   }
 
@@ -2190,8 +2194,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s.providerSessionId) return null;
     const b = h('button.cv-link', { type: 'button' }, 'Continue it');
     b.addEventListener('click', async () => {
-      if (lost.has(s.providerSessionId)) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); continueLast(); return; }
+      if (lost.has(s.providerSessionId)) { goOnBefore(); return; }
       const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
+      if (r?.code === 'lost') { goOnBefore(s.providerSessionId); return; }
       if (!r.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
       viewingSid = null;
       S.active = r.sid;
@@ -2293,8 +2298,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // first — the coder's own session, resumed — and then goes on from there.
     if (s.state === 'ended' && s.providerSessionId && !viewingSid && text !== '/clear' && text !== '/new') {
       // (one known lost: the one before it instead, the words kept in the box)
-      if (lost.has(s.providerSessionId)) { S.active = null; viewingSid = null; rebuildTranscript(); renderChrome(); continueLast(); return; }
+      if (lost.has(s.providerSessionId)) { goOnBefore(); return; }
       const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
+      if (r?.code === 'lost') { goOnBefore(s.providerSessionId); return; }
       if (!r?.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
       const sid = r.sid || s.sid;
       viewingSid = null;
