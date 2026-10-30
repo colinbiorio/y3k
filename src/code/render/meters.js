@@ -21,10 +21,25 @@ function ringState(ctx) {
   return { p, title, cls: 'mt-ctx ' + (p == null ? 'none' : tone(p)), dash: `${((p || 0) / 100) * C} ${C}`, num: p == null ? '—' : `${p}%` };
 }
 
+// DYED UNIMAT (2026-10-29): the ring's stroke is a chrome gradient in its
+// tone — light at the top, the colour, dark at the foot, a catch of light —
+// not a flat colour. One gradient per tone, in the ring's own user space
+// (0→24) so the dash of an arc takes it whole; the stylesheet picks by tone.
+const TONES = {
+  'mt-g-ok': ['#f0fff1', '#9be8a0', '#4fb866', '#c5f2c9'],
+  'mt-g-warm': ['#fff6d6', '#ffbd2e', '#d08a0a', '#ffdd93'],
+  'mt-g-hot': ['#ffe1dd', '#ff5147', '#c4231b', '#ffb3ad'],
+};
+const toneDefs = () => s('defs', {}, ...Object.entries(TONES).map(([id, c]) =>
+  s('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 24, gradientUnits: 'userSpaceOnUse' },
+    s('stop', { offset: 0, 'stop-color': c[0] }), s('stop', { offset: 0.42, 'stop-color': c[1] }),
+    s('stop', { offset: 0.66, 'stop-color': c[2] }), s('stop', { offset: 1, 'stop-color': c[3] }))));
+
 export function contextRing(ctx) {
   const st = ringState(ctx);
   const el = h('div', { title: st.title },
     s('svg', { viewBox: '0 0 24 24', width: 22, height: 22, 'aria-hidden': 'true' },
+      toneDefs(),
       s('circle', { cx: 12, cy: 12, r: R, fill: 'none', 'stroke-width': 3, class: 'mt-track' }),
       s('circle', { cx: 12, cy: 12, r: R, fill: 'none', 'stroke-width': 3, class: 'mt-fill', 'stroke-dasharray': st.dash, transform: 'rotate(-90 12 12)', 'stroke-linecap': 'round' })),
     h('span.mt-num', st.num));

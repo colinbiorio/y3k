@@ -251,6 +251,28 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **The fresh look.** Colin, 2026-10-29: the orb is the main
+  focus of the screen, the commands pop up around it, each bubble its own
+  translucent unimat, the top bar centred with a thin liquid ring, the glyphs
+  dyed unimat. kode has no pane any more. The orb keeps the whole window and
+  the centre, and the room is laid around it: the coder's bubbles on the left,
+  yours on the right, each keeping off the orb by its own width (`--orb-px`,
+  written by the body from the same disc the hands use) and popping up from
+  its side; enlarge it past half the window and they go over it, a column at
+  the centre (`html.orb-big`). The orb turns under the mouse between them, and
+  a wheel over it still scrolls the conversation. The toolbar is one centred
+  capsule under the top bar, in the bars' glass with the house's liquid ring;
+  its glyphs, modes, context ring and personality slider are poured in their
+  colours (the pink tell-orion orb stays as it was), and the glyph buttons are
+  beads of the same dark glass. The composer is the site's own chat bar while
+  a session is on screen, so there is one bar to talk from everywhere on the
+  site, and the room ends above it wherever it stands (measured, like the
+  life's column). Narrow: the orb is a band across the top, the toolbar one
+  row swiped sideways, the floor scrolls under a finger. Built from the
+  uncommitted work in the kode conversation's own worktree (`/tmp/body-look`,
+  `claude/fresh-look`), lifted whole and finished here; that worktree is
+  untouched, and its diff is now on main.
+
 - **2026-10-29** — **The thread holds on a fresh page.** Opened again, kode
   used to put the first session its engine remembered on screen — one stopped
   seconds after it started that morning, "Stopped. Continue it" — over the

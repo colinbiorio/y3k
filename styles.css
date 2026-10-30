@@ -2459,7 +2459,7 @@ body:not(.nav-collapsed-bottom) .chat-menu::before { visibility: hidden; }
    questions, the world and the life keep it). Delayed by the bar's own 0.4s
    fade. The think-glow behind the bar holds still meanwhile: a blurred
    rainbow turning at opacity 0 is a filter re-run every frame for nobody. */
-body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-twenty):not(.in-world):not(.in-life) .chat-menu::before {
+body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-twenty):not(.in-world):not(.in-life):not(.in-code) .chat-menu::before {
   visibility: hidden; transition: opacity 0.3s ease, visibility 0s linear 0.4s; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
@@ -3782,14 +3782,15 @@ body.panel-open.in-code:not(.gated) .home-brand { opacity: 1; pointer-events: au
 /* (folded, the name goes with the bar: anywhere else it floats in the room
    above the orb, but in y3kode the room under the top bar is the coder's pane) */
 body.panel-open.in-code.nav-collapsed-top .home-brand { opacity: 0; pointer-events: none; }
-/* …and the chat bar only while the bottom bar is open (Colin: "keep the chat
-   bar but only when the nav bar is expanded — no floating chat bar in
-   y3kode — just the one when you hit the arrow"). Folded, it goes with the
-   bar instead of floating in its stadium over the coder. What the presence
-   says back is captioned over its own column, beside the orb. */
-body.panel-open.in-code:not(.nav-collapsed-bottom):not(.gated) #chat { opacity: 1; pointer-events: auto; }
-body.panel-open.in-code #caption { opacity: 1; z-index: 35; left: calc(100% - var(--hole-r) - var(--code-orb-w) / 2);
-  max-width: calc(var(--code-orb-w) - 28px); bottom: calc(var(--hole-b) + 28px); }
+/* …and the chat bar, whatever the bottom bar does: since 2026-10-29 it IS
+   the coder's composer while a session is on screen (THE FRESH LOOK, at the
+   end of this file; body.kode-chat), so folded it floats in its stadium as it
+   does everywhere else on the site. (Colin's 2026-10-20 rule — "no floating
+   chat bar in y3kode" — was about a second bar over the coder's own composer;
+   there is one composer now, and it is this bar.) What the presence says back
+   is captioned where it always is, under the orb at the centre. */
+body.panel-open.in-code:not(.gated) #chat { opacity: 1; pointer-events: auto; }
+body.panel-open.in-code #caption { opacity: 1; z-index: 35; }
 
 /* a refusal the person needs to read, inside a settings pane */
 .set-pane .warn { color: #ffb4a2; background: rgba(255,120,90,0.08);
@@ -4397,7 +4398,10 @@ body { --code-orb-w: clamp(240px, 26vw, 400px); --cv-inset: 14px; }
    size the column gives it, through an off-axis frustum, and the sky is one
    picture from edge to edge. */
 #orb-frame { position: fixed; display: none; pointer-events: none; visibility: hidden; }
-body.in-code #orb-frame { display: block; inset: 0 var(--hole-r) 0 auto; width: var(--code-orb-w); }
+/* WIDE: NO FRAME (2026-10-29, THE FRESH LOOK at the end of this file). The
+   orb keeps the whole window and its place at the centre, and the room is
+   laid around it. The frame is laid out only on a narrow screen, as a band
+   across the top (the media rule further down). */
 body.in-code #stage { transition: opacity 0.2s ease; }
 /* ENTERING OR LEAVING, the body moves from the centre to its column (or back),
    and the renderer refits its seat on the next frame. social.showView hides the
@@ -4410,9 +4414,6 @@ body.in-code #stage { transition: opacity 0.2s ease; }
 body.code-shifting #stage { opacity: 0; }
 body:is(.code-shifting, .code-settling) #stage { transition: opacity 0.2s ease; }
 body.in-code #home { display: none; }
-/* The top and bottom fold grips sit centred on their bars — which in Code is
-   the middle of the pane. They move over the orb's column instead. */
-body.in-code :is(.nav-collapse-top, .nav-collapse-bottom) { left: calc(100% - var(--hole-r) - var(--code-orb-w) / 2); }
 body.in-code .home-panel-head { display: none; }
 .nav-btn[hidden] { display: none; }
 #nav-code { position: relative; }
@@ -4455,9 +4456,9 @@ body.in-code .home-panel-head { display: none; }
 .cv-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 /* THE MICROPHONE in the composer: lit while it listens (a slow pulse, the
    same breath the tab dots use), ringed while it is hands-free. */
-.cv-pane .cv-mic.on { color: #fff; background: rgba(255, 81, 71, 0.22); animation: cv-pulse 1.4s ease-in-out infinite; }
-.cv-pane .cv-mic.loop { box-shadow: 0 0 0 2px rgba(255, 81, 71, 0.55); }
-.cv-pane .cv-mic.loop.on { background: rgba(255, 81, 71, 0.34); }
+:is(.cv-pane, .cv-composer) .cv-mic.on { color: #fff; background: rgba(255, 81, 71, 0.22); animation: cv-pulse 1.4s ease-in-out infinite; }
+:is(.cv-pane, .cv-composer) .cv-mic.loop { box-shadow: 0 0 0 2px rgba(255, 81, 71, 0.55); }
+:is(.cv-pane, .cv-composer) .cv-mic.loop.on { background: rgba(255, 81, 71, 0.34); }
 .cv-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cv-chip, .cv-sel { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 0.8rem; color: #cfd4dc; max-width: 100%; }
@@ -4987,13 +4988,13 @@ body.in-code .home-panel-head { display: none; }
 /* grows with its text in CSS where it can (code-view.js measures elsewhere) */
 @supports (field-sizing: content) { .cv-input, .cv-planinput { field-sizing: content; } }
 .cv-input::placeholder, .cv-planinput::placeholder { color: #6b7280; }
-.cv-pane .cv-send { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; flex: none;
+:is(.cv-pane, .cv-composer) .cv-send { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; flex: none;
   background: #eef0f4; color: #0b0d12; transition: transform 0.08s ease, background 0.15s ease; }
-.cv-pane .cv-send:hover { background: #fff; }
-.cv-pane .cv-send:active { transform: scale(0.94); }
-.cv-pane .cv-send:disabled { opacity: 0.3; cursor: default; }
-.cv-pane .cv-send.stop { background: #ff5147; color: #fff; }
-.cv-pane .cv-send .ic { width: 18px; height: 18px; }
+:is(.cv-pane, .cv-composer) .cv-send:hover { background: #fff; }
+:is(.cv-pane, .cv-composer) .cv-send:active { transform: scale(0.94); }
+:is(.cv-pane, .cv-composer) .cv-send:disabled { opacity: 0.3; cursor: default; }
+:is(.cv-pane, .cv-composer) .cv-send.stop { background: #ff5147; color: #fff; }
+:is(.cv-pane, .cv-composer) .cv-send .ic { width: 18px; height: 18px; }
 .cv-hint { max-width: 900px; width: 100%; margin: 0 auto; font-size: 0.72rem; padding: 0 6px; }
 .cv-attach { display: flex; gap: 8px; max-width: 900px; width: 100%; margin: 0 auto; }
 .cv-att { position: relative; width: 54px; height: 54px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); }
@@ -5132,7 +5133,7 @@ body.in-code .home-panel-head { display: none; }
 }
 /* Narrow: the orb becomes a band across the top instead of a column. */
 @media (max-width: 900px) {
-  body.in-code #orb-frame { inset: 0 0 auto 0; width: auto; height: calc(var(--hole-t) + 150px); }
+  body.in-code #orb-frame { display: block; inset: 0 0 auto 0; width: auto; height: calc(var(--hole-t) + 150px); }
   .code-root { top: calc(var(--hole-t) + 150px); right: 0; }
   .code-root .cv-pane { top: 8px; right: calc(var(--hole-r) + 8px); left: calc(var(--hole-l) + 8px); bottom: calc(var(--hole-b) + 8px); }
   .cv-modecards { grid-template-columns: 1fr; }
@@ -5279,7 +5280,7 @@ body.in-code .home-panel-head { display: none; }
 .code-root .it.pm::after, .code-root .it.qs::after, .code-root .it.pl::after,
 .cv-composer::after, .cv-todos::after, .cv-note::after, .cv-notecard::after,
 .cv-card::after, .cv-modecard::after, .cv-prov::after,
-.cv-whoface::after, .cv-pane .cv-send::after, .code-root .btn::after {
+.cv-whoface::after, :is(.cv-pane, .cv-composer) .cv-send::after, .code-root .btn::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 1;
   background: var(--lg-rim);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
@@ -5377,26 +5378,26 @@ body.in-code .home-panel-head { display: none; }
 .cv-waitpics > .cv-attach { flex: none; width: auto; margin: 0; }
 
 /* send and stop: beads of glass — clear with a white arrow, red to stop */
-.cv-pane .cv-send { position: relative; width: 38px; height: 38px; color: #fff;
+:is(.cv-pane, .cv-composer) .cv-send { position: relative; width: 38px; height: 38px; color: #fff;
   background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.13) 55%, rgba(255, 255, 255, 0.07));
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.28), 0 8px 18px -8px rgba(0, 0, 0, 0.8);
   transition: transform 0.18s var(--lg-ease), background 0.2s ease, box-shadow 0.2s ease; }
-.cv-pane .cv-send:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.2) 55%, rgba(255, 255, 255, 0.1)); }
-.cv-pane .cv-send:active { transform: scale(0.9); }
-.cv-pane .cv-send:disabled { opacity: 0.35; }
-.cv-pane .cv-send.stop { color: #fff;
+:is(.cv-pane, .cv-composer) .cv-send:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.2) 55%, rgba(255, 255, 255, 0.1)); }
+:is(.cv-pane, .cv-composer) .cv-send:active { transform: scale(0.9); }
+:is(.cv-pane, .cv-composer) .cv-send:disabled { opacity: 0.35; }
+:is(.cv-pane, .cv-composer) .cv-send.stop { color: #fff;
   background: radial-gradient(120% 120% at 30% 16%, rgba(255, 186, 178, 0.9), rgba(255, 81, 71, 0.68) 55%, rgba(196, 38, 30, 0.6));
   box-shadow: inset 0 1px 1px rgba(255, 220, 215, 0.7), inset 0 -3px 6px rgba(80, 0, 0, 0.35), 0 8px 18px -8px rgba(0, 0, 0, 0.8), 0 0 18px -4px rgba(255, 81, 71, 0.6);
   --lg-rim: linear-gradient(150deg, rgba(255, 220, 215, 0.9), rgba(255, 120, 110, 0.3) 40%, rgba(255, 160, 150, 0.5)); }
-.cv-pane .cv-send.stop:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 200, 192, 0.95), rgba(255, 96, 86, 0.75) 55%, rgba(206, 46, 38, 0.66)); }
-.cv-pane .cv-send > .ic { position: relative; z-index: 2; animation: lg-pop 0.3s var(--lg-ease); }
+:is(.cv-pane, .cv-composer) .cv-send.stop:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 200, 192, 0.95), rgba(255, 96, 86, 0.75) 55%, rgba(206, 46, 38, 0.66)); }
+:is(.cv-pane, .cv-composer) .cv-send > .ic { position: relative; z-index: 2; animation: lg-pop 0.3s var(--lg-ease); }
 @keyframes lg-pop { from { transform: scale(0.4) rotate(-30deg); opacity: 0; } to { transform: none; opacity: 1; } }
 :root[data-motion="less"] .cv-pane .cv-send > .ic { animation: none; }
 
 /* WHO ANSWERS (render/maker.js): the maker's mark in a bead of glass, the
    model under it. Pressed, the mark turns away and a small orb turns in —
    the presence, alone, with no hands on the computer — and back. */
-.cv-pane .cv-who { position: relative; display: inline-flex; flex-direction: column; align-items: center; gap: 3px; flex: none; align-self: flex-end;
+:is(.cv-pane, .cv-composer) .cv-who { position: relative; display: inline-flex; flex-direction: column; align-items: center; gap: 3px; flex: none; align-self: flex-end;
   width: 58px; padding: 0 0 1px; margin-right: 2px; border: 0; background: none; cursor: pointer; color: #cfd4dc; }
 .cv-whoface { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
   background: var(--lg-3); box-shadow: var(--lg-lip), 0 6px 14px -8px rgba(0, 0, 0, 0.75);
@@ -5421,7 +5422,7 @@ body.in-code .home-panel-head { display: none; }
   --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.8), rgba(255, 158, 207, 0.2) 40%, rgba(200, 180, 255, 0.5)); }
 .cv-whoname { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.62rem !important; line-height: 1.15; color: #aab1bd; }
 .cv-who.orion .cv-whoname { color: #ffc3e0; }
-.cv-pane .cv-who:focus-visible { outline: 1px solid rgba(220, 225, 235, 0.5); outline-offset: 2px; border-radius: 12px; }
+:is(.cv-pane, .cv-composer) .cv-who:focus-visible { outline: 1px solid rgba(220, 225, 235, 0.5); outline-offset: 2px; border-radius: 12px; }
 :root[data-motion="less"] .cv-who.orion .cv-whoorb::before { animation: none; }
 :root[data-motion="less"] .code-root .it.tl.orbcall.st-running .or-dot { animation: none; }
 
@@ -5517,10 +5518,14 @@ body.in-code .home-panel-head { display: none; }
    12.3 → 20.3 fps in Electron, and a streaming reply repaints the pane every
    frame). Smooth turns it solid, as it does every pane. */
 .code-root { background: transparent; }
-.cv-pane { background: var(--lg-1), linear-gradient(180deg, rgba(14, 16, 22, 0.66), rgba(8, 9, 13, 0.76)); }
-html[data-glass="all"] .cv-pane { background: var(--lg-1), linear-gradient(180deg, rgba(16, 18, 25, 0.5), rgba(8, 9, 13, 0.6));
-  -webkit-backdrop-filter: blur(22px) saturate(1.25); backdrop-filter: blur(22px) saturate(1.25); }
-html[data-gfx="smooth"] .cv-pane { background: var(--lg-1), linear-gradient(180deg, #171a21, #0b0d11); }
+/* 2026-10-29, THE FRESH LOOK (the block at the end of this file): there is no
+   pane any more — the glass is each bubble's own, and the same rules follow it
+   there: a dark base so the words hold against a bright sky, the real frost
+   only at the top tier, solid in smooth. */
+.cv-pane { background: none; }
+html[data-glass="all"] .code-root .it:is(.as, .us, .tl, .or, .pm, .qs, .pl) { background-color: rgba(14, 16, 22, 0.56) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.25); backdrop-filter: blur(16px) saturate(1.25); }
+html[data-gfx="smooth"] .code-root .it:is(.as, .us, .tl, .or, .pm, .qs, .pl) { background-color: #13161d !important; }
 
 /* WHAT YOU AGREE TO BY PRESSING THE BUTTON (src/consent.js; Colin, 2026-10-25):
    a note and three answers, over everything, on any screen. */
@@ -5535,3 +5540,190 @@ html[data-gfx="smooth"] .cv-pane { background: var(--lg-1), linear-gradient(180d
 .consent-terms { display: inline-block; margin-top: 12px; font-size: 0.78rem; color: var(--muted); }
 :root[data-motion="less"] .consent-scrim { animation: none; }
 @media (max-width: 560px) { .consent-acts { flex-direction: column-reverse; } .consent-acts button { width: 100%; } }
+
+/* ===== THE FRESH LOOK (2026-10-29) ============================================
+   Colin: "we want the orb to still be the main focus of the screen -- chat,
+   of course should be visible, but the chat shouldn't be separate from the
+   chat bar … the top bar should be centered, it should get a thin liquid
+   metal border … unimat dyed glyphs -- except for the 'tell orion' pink
+   glowing orb - i like that … now that the orb is centered again, we want
+   the commands to pop up around the orb, not in front of it, unless the size
+   is enlarged, be spatially aware … each individual bubble pops up, no
+   background behind it … the background of the bubble … a really translucent
+   unimat … make it look tuff af like the rest of the site."
+
+   So: NO PANE. The orb keeps the whole window and the centre (its frame is
+   laid out only on a narrow screen, as the band above). The room is laid over
+   it and takes no pointer of its own — only its bubbles, its bar, its dock
+   and its panels do — so the orb turns under the mouse between them, and a
+   wheel over it still scrolls the conversation (code-view.js onWheel). The
+   bubbles keep off the orb by --cv-gap, a strip the orb's own width (--orb-px,
+   written by body.js from the same disc the hands use) and a little: the
+   coder's on the left, the person's on the right, in order down the page.
+   Enlarge the orb past half the window and they overlap its edge, as asked.
+   Each bubble is one piece of translucent unimat — a dark base so the words
+   hold, a chrome hairline, the frost at the top tier — and pops up from the
+   orb's side. The toolbar is one centred capsule under the top bar in the
+   bars' own glass, with the house's thin liquid ring (mercury-mount.js
+   liquid; the chrome hairline where there is no WebGL); its glyphs, modes,
+   ring and slider are dyed unimat; the pink tell-orion orb is left as it is.
+   The composer is the site's own chat bar (body.kode-chat: code-view.js
+   renderDock moves it there), themed as the bar is. */
+body { --cv-gap: clamp(180px, calc(var(--orb-px, 40vh) + 48px), 50vw); }
+
+/* the room over the whole window, taking the pointer only where there is
+   something to press or read */
+.code-root { right: 0; }
+.code-root, .cv-pane, .cv-main, .cv-scroll, .cv-list { pointer-events: none; }
+.code-root > :not(.cv-pane), .cv-pane > :not(.cv-main), .cv-main > :not(.cv-scroll), .cv-list > * { pointer-events: auto; }
+.cv-pane { left: var(--hole-l); right: var(--hole-r); top: var(--hole-t); bottom: var(--hole-b);
+  border-radius: 0; border: 0; background: none; box-shadow: none; }
+.cv-pane::after { display: none; }
+.cv-banner, .cv-cmpstrip { max-width: 760px; width: 100%; margin-left: auto; margin-right: auto; }
+
+/* THE TOOLBAR: one capsule, centred, in the bars' own glass, a thin chrome
+   line until the liquid ring takes its edge (liquid-ringed) */
+.cv-barwrap { position: relative; display: flex; justify-content: center; flex: none; padding: 10px 12px 0; }
+.cv-bar { position: relative; margin: 0; max-width: 100%; padding: 6px 10px; border-radius: 999px; border-bottom: 0;
+  flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px;
+  background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45); }
+html[data-glass="all"] .cv-bar { -webkit-backdrop-filter: blur(26px) saturate(1.3); backdrop-filter: blur(26px) saturate(1.3); }
+.cv-bar::after { background: var(--metal-line); opacity: 0.9; }
+.cv-row, .cv-controls { display: contents; }
+.cv-meters { order: 2; display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+
+/* GLYPHS DYED UNIMAT: the bar's and the composer's strokes take the chrome
+   every glyph on the site is cut from (#merc-ink, index.html: the same
+   gradient, lighter at the foot, for a hairline) */
+.cv-bar .ic, .cv-composer .ic, .cv-dock .ic { stroke: url(#merc-ink); }
+.cv-modes { position: relative; border-color: transparent; background: rgba(0, 0, 0, 0.34); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5); }
+.cv-modes::after { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; opacity: 0.55;
+  background: var(--metal-line);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.cv-mode { color: #aeb6c2; }
+.cv-pane .cv-mode.on { color: #0b0d12; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35); background-image: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 rgba(0, 0, 0, 0.28), 0 2px 8px -2px rgba(0, 0, 0, 0.6); }
+/* each mode's colour poured as metal: light, the colour, its shadow, a catch of light */
+.cv-mode.on.m-ask { background: linear-gradient(180deg, #ffffff, #d9dde4 42%, #a3abb7 62%, #dfe3ea); }
+.cv-mode.on.m-plan { background: linear-gradient(180deg, #e6efff, #8fb8ff 42%, #5a86dd 62%, #b9d0ff); }
+.cv-mode.on.m-acceptEdits { background: linear-gradient(180deg, #f3eaff, #c9a2ff 42%, #9466df 62%, #dbc5ff); }
+.cv-mode.on.m-auto { background: linear-gradient(180deg, #fff3cf, #ffbd2e 42%, #d58d0c 62%, #ffd98c); }
+/* the context ring and the plan bars, in their tone's metal (render/meters.js TONES) */
+.mt-track { stroke: rgba(255, 255, 255, 0.12); }
+.mt-fill { stroke: url(#mt-g-ok); }
+.mt-ctx.warm .mt-fill { stroke: url(#mt-g-warm); } .mt-ctx.hot .mt-fill { stroke: url(#mt-g-hot); }
+.mt-barfill { background: linear-gradient(180deg, #e9ffe9, #9be8a0 45%, #4fb866); }
+.mt-lim.warm .mt-barfill { background: linear-gradient(180deg, #fff1c9, #ffbd2e 45%, #d08a0a); }
+.mt-lim.hot .mt-barfill { background: linear-gradient(180deg, #ffd9d4, #ff5147 45%, #c4231b); }
+/* the personality slider, poured in its violet */
+.cv-persona-range { -webkit-appearance: none; appearance: none; width: 86px; height: 4px; border-radius: 4px; outline: none;
+  background: linear-gradient(90deg, #f1ecff, #c8b6ff 50%, #7d69d8); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.08); }
+.cv-persona-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; border: 0; cursor: pointer;
+  background: radial-gradient(circle at 35% 30%, #fff, #c8b6ff 45%, #6c5bd0); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.45); }
+.cv-persona-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; border: 0; cursor: pointer;
+  background: radial-gradient(circle at 35% 30%, #fff, #c8b6ff 45%, #6c5bd0); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.45); }
+.cv-persona-range::-moz-range-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #f1ecff, #c8b6ff 50%, #7d69d8); }
+.cv-persona-range:focus-visible { box-shadow: 0 0 0 3px rgba(200, 182, 255, 0.35); }
+/* (.cv-tell .or-dot: the pink orb, untouched) */
+/* THE GLYPH BUTTONS (the bar's drawers, the composer's picture and
+   microphone) are beads of the same dark glass, so the chrome stroke reads;
+   plain they were the page's white buttons, and a chrome glyph on white is no
+   glyph at all. */
+.code-root .cv-iconbtn, .cv-composer .cv-iconbtn { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 12px;
+  cursor: pointer; flex: none; color: #e7e9ee; background: var(--lg-3); box-shadow: var(--lg-lip), 0 6px 14px -8px rgba(0, 0, 0, 0.75);
+  transition: transform 0.18s var(--lg-ease), background 0.2s ease, box-shadow 0.2s ease; }
+.code-root .cv-iconbtn:hover, .cv-composer .cv-iconbtn:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07)); }
+.code-root .cv-iconbtn:active, .cv-composer .cv-iconbtn:active { transform: scale(0.92); }
+.code-root .cv-iconbtn .ic, .cv-composer .cv-iconbtn .ic { width: 16px; height: 16px; }
+.cv-cmpstrip .cv-iconbtn, .cv-cmphead .cv-iconbtn { width: 26px; height: 26px; border-radius: 9px; }
+/* THE ROOM ENDS ABOVE THE CHAT BAR. With the composer in the bar, the pane's
+   bottom follows the bar's top (and, narrow, the a^r mark's and the fold
+   grip's): code-view.js measureChat writes --kode-room-bottom on the room. */
+body.kode-chat .cv-pane { bottom: max(var(--hole-b), var(--kode-room-bottom, 0px)); }
+
+/* THE BUBBLES: around the orb, each one piece of translucent unimat */
+.cv-list { max-width: none; padding: 14px 18px 26px; gap: 12px; }
+.cv-list > .it, .cv-list > .cv-older { max-width: calc(50% - var(--cv-gap) / 2); }
+.cv-list > .it:not(.us), .cv-list > .cv-older { align-self: flex-start; transform-origin: 100% 50%; }
+.cv-list > .it.us { align-self: flex-end; transform-origin: 0% 50%; }
+.code-root .it:is(.as, .us, .tl, .or, .pm, .qs, .pl) { background-color: rgba(14, 16, 22, 0.74) !important;   /* under every tint's own gradient */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 14px 34px -18px rgba(0, 0, 0, 0.8); }
+.code-root .it:is(.as, .us, .tl, .or, .pm, .qs, .pl)::after { background: var(--metal-line); opacity: 0.5; }
+.code-root .it.sys { align-self: flex-start; }
+.code-root .it.enter { animation: cv-pop 0.32s var(--lg-ease); }
+@keyframes cv-pop { from { opacity: 0; transform: scale(0.78); } 60% { opacity: 1; } to { opacity: 1; transform: none; } }
+.cv-cmp { background-color: rgba(14, 16, 22, 0.82); }
+
+/* ENLARGED (html.orb-big — body.js publishOrbPx, the orb past half the
+   window's width): there is no room beside it, so the bubbles go over it, a
+   column at the centre, the coder's still to the left and yours to the right */
+html.orb-big .cv-list { padding-left: max(18px, 12%); padding-right: max(18px, 12%); }
+html.orb-big .cv-list > .it, html.orb-big .cv-list > .cv-older { max-width: min(760px, 84%); }
+html.orb-big .cv-dock { max-width: none; }
+
+/* the dock (the turn's line, the todos, the agents): bottom left, the coder's side */
+.cv-dock { padding: 6px 18px 10px; align-items: flex-start; max-width: calc(50% - var(--cv-gap) / 2 + 18px); margin: 0; }
+.cv-strip { max-width: none; }
+
+/* THE FOLDERS AND THE DRAWERS: panels in the bars' glass, over the orb */
+.cv-home { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100% - 24px)); max-height: calc(100% - 24px);
+  border-radius: 22px; flex: none;
+  background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45); }
+.cv-home::after { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; opacity: 0.9;
+  background: var(--metal-line);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+html[data-glass="all"] .cv-home, html[data-glass="all"] .cv-drawer { -webkit-backdrop-filter: blur(26px) saturate(1.3); backdrop-filter: blur(26px) saturate(1.3); }
+.cv-home[hidden] { display: none; }
+.cv-drawer { border-radius: 22px 0 0 22px; }
+
+/* THE COMPOSER IS THE CHAT BAR (body.kode-chat; code-view.js renderDock).
+   Out of the pane it brings its own light and its own words' colour. */
+.cv-composer { color: #e7e9ee; font-size: 0.95rem;
+  --lg-1: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  --lg-2: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.028));
+  --lg-3: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045));
+  --lg-rim: linear-gradient(150deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.14) 22%, rgba(255, 255, 255, 0.035) 50%, rgba(255, 255, 255, 0.09) 76%, rgba(255, 255, 255, 0.32));
+  --lg-lip: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 14px 24px -18px rgba(255, 255, 255, 0.22), inset 0 -12px 22px -18px rgba(0, 0, 0, 0.5);
+  --lg-drop: 0 16px 34px -20px rgba(0, 0, 0, 0.75);
+  --lg-ease: cubic-bezier(0.2, 0.9, 0.25, 1.08); }
+.cv-composer[hidden] { display: none; }
+.cv-composer button { font: inherit; color: inherit; }
+.cv-composer .ic { width: 16px; height: 16px; flex: none; }
+.cv-composer .muted { color: #8b93a1; }
+body.kode-chat :is(#chat-form, #brain-toggle, #chat-dance, #chat-camera, #chat-voice) { display: none; }
+body.kode-chat #chat { width: min(780px, calc(100vw - var(--hole-l) - var(--hole-r) - 24px)); height: auto; min-height: 74px; }
+body.kode-chat .chat-menu { width: 100%; padding: 6px 10px; }
+body.kode-chat .chat-menu > .cv-composer { flex: 1; max-width: none; margin: 0; padding: 4px 4px 4px 6px; background: none; border: 0; box-shadow: none; }
+body.kode-chat .chat-menu > .cv-composer::after { display: none; }   /* the bar's own ring frames it */
+body.kode-chat .chat-menu > .cv-composer:focus-within { box-shadow: none; }
+
+/* narrow: the band on top, one column under it (the media rule above keeps
+   the band and the pane's insets) */
+@media (max-width: 900px) {
+  body { --cv-gap: 0px; }
+  .cv-list > .it, .cv-list > .cv-older { max-width: none; }
+  .cv-list > .it.us { max-width: min(78%, 640px); }
+  .cv-dock { max-width: none; }
+  .cv-home { width: calc(100% - 16px); }
+  /* the toolbar: one row under the band, swiped sideways (wrapped, it was a
+     215px oval on a phone, over the words) */
+  .cv-barwrap { padding: 8px 8px 0; }
+  .cv-bar { flex-wrap: nowrap; justify-content: flex-start; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 6px 12px; }
+  .cv-bar::-webkit-scrollbar { display: none; }
+  .cv-bar :is(.cv-row, .cv-controls) > *, .cv-bar .cv-meters { flex: none; }
+  /* the room under the band is all floor — there is no orb to turn there —
+     so a finger on it scrolls the conversation */
+  .cv-main, .cv-scroll, .cv-list { pointer-events: auto; }
+  /* the composer in the chat bar: the words first; the model is on the bar */
+  body.kode-chat .chat-menu > .cv-composer { flex-wrap: nowrap; }
+  body.kode-chat .cv-composer .cv-who { display: none; }
+  body.kode-chat .cv-composer .cv-iconbtn { width: 30px; height: 30px; }
+  /* the pane ends above the chat bar, the a^r mark and the fold grip, whatever
+     their height here (code-view.js measureChat) */
+  .code-root .cv-pane { bottom: max(calc(var(--hole-b) + 8px), var(--kode-room-bottom, 0px)); }
+}

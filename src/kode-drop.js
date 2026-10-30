@@ -21,11 +21,15 @@ export const hasFiles = (e) => Array.from(e?.dataTransfer?.types || []).includes
 //   e      the drag event; only its target is read
 //   state  { inCode }: whether kode is open (body.in-code)
 // The chat bar is #chat and everything inside it, walked up from the target
-// (a text node under the pointer included). With the bottom bar folded the chat
-// bar takes no pointer in kode (styles.css), so nothing under it is the target.
+// (a text node under the pointer included) — except the coder's own composer,
+// which lives in the chat bar since 2026-10-29 (code-view.js renderDock,
+// body.kode-chat): a picture let go on it is the coder's.
 export function dropTarget(e, state) {
   if (!state?.inCode) return 'chat';
-  for (let n = e?.target || null; n; n = n.parentNode) if (n.id === 'chat') return 'chat';
+  for (let n = e?.target || null; n; n = n.parentNode) {
+    if (n.classList?.contains?.('cv-composer')) return 'kode';
+    if (n.id === 'chat') return 'chat';
+  }
   return 'kode';
 }
 

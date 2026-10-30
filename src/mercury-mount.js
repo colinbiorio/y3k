@@ -161,6 +161,14 @@ function ring(host, opts) {
   if (host.classList) host.classList.add('liquid-ringed');
   return true;
 }
+// THE SAME LIQUID, FOR A SCREEN BUILT LATER. kode's toolbar is made when the
+// room opens, long after mountAppMercury ran, and nothing inside .code-root is
+// ever ringed on its own (SKIP_WITHIN): it asks for its thin ring here, by
+// name (window.Y3K.liquid, main.js), and gives it back when the room closes.
+export const liquid = {
+  ring: (host, opts) => ring(host, opts),
+  unring: (key) => unring(key),
+};
 function unring(key) {
   const h = RINGED.get(key);
   if (h) { h.destroy(); RINGED.delete(key); }
@@ -386,8 +394,9 @@ export function mountAppMercury() {
     const b = document.body.classList;
     const shown = b.contains('in-home') && !b.contains('gated') && !b.contains('viewing')
       && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-twenty') || b.contains('in-world') || b.contains('in-life')
-        // y3kode keeps the chat bar only while the bottom bar is open (2026-10-20)
-        || (b.contains('in-code') && !b.contains('nav-collapsed-bottom')));
+        // y3kode's composer lives in the chat bar now (2026-10-29): it is there
+        // whatever the bottom bar does, as everywhere else on the site
+        || b.contains('in-code'));
     if (shown) { hideAt = 0; return true; }
     if (!hideAt) hideAt = performance.now() + 420;   // 0.4s + a frame of slack
     return performance.now() < hideAt;

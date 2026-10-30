@@ -243,7 +243,7 @@ await ok('Esc closes the view before anything else and stops nothing; the strip 
   assert.match(view, /\['\/compare', 'their answers side by side \(Esc closes\)'\],/);
   assert.match(view, /x\.addEventListener\('click', \(\) => endCompare\(g\)\);/, 'the strip\'s × ends the comparison');
   assert.match(between('function endCompare(g) {', 'function openCompareView('), /closeCompare\(S, g\.id\);/);
-  assert.match(view, /ui\.pane\.append\(ui\.bar, ui\.cmp, ui\.banner, ui\.main, ui\.dock\);/, 'the strip sits under the toolbar');
+  assert.match(view, /ui\.pane\.append\(ui\.barWrap, ui\.cmp, ui\.banner, ui\.main, ui\.dock\);/, 'the strip sits under the toolbar');
   assert.match(read('package.json'), /node test\/compare-view\.test\.mjs/, 'in the chain');
   const css = read('styles.css');
   assert.match(css, /\.cv-cmpcols \{ flex: 1; min-height: 0; display: grid; grid-auto-flow: column;/);
@@ -310,7 +310,7 @@ console.log('\nthe screen:');
     const strip = $('div.cv-cmpstrip');
     assert.equal(strip.hidden, false);
     assert.equal(strip.querySelector('span.cv-cmplab').textContent + strip.querySelector('span.cv-cmpq').textContent + strip.querySelector('span.cv-cmpn').textContent, `comparing: ${Q} · 3 answering`);
-    assert.equal(strip.previousSibling, $('div.cv-bar'), 'right under the toolbar');
+    assert.equal(strip.previousSibling, $('div.cv-barwrap'), 'right under the toolbar');
     assert.ok($('button.cv-cmpopen'), 'with a button that opens the view');
     assert.ok(!$('div.cv-cmp'), 'the view is not open by itself');
   });

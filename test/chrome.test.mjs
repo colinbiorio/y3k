@@ -152,15 +152,17 @@ ok('the portal is a tree and life a moon, each poured in unimat at its end of th
   assert.ok(/top: calc\(var\(--hole-t\) - var\(--rail-w\) \+ \(var\(--rail-w\) - var\(--portal-d\)\) \/ 2\);/.test(life), 'life does not fold with the top bar');
 });
 
-ok('y3kode keeps the name, the tree and the moon on top, and the chat bar only while the bottom bar is open', () => {
+ok('y3kode keeps the name, the tree and the moon on top, and the chat bar whatever the bottom bar does (it is the coder\'s composer since 2026-10-29)', () => {
   assert.ok(/body\.panel-open:is\(\.in-code, \.in-life\):not\(\.gated\):not\(\.viewing\) :is\(#portal, #nav-life\) \{ opacity: 1; pointer-events: auto; \}/.test(css), 'the tree and the moon leave y3kode');
   assert.ok(/body\.panel-open\.in-code:not\(\.gated\) \.home-brand \{ opacity: 1; pointer-events: auto; \}/.test(css), 'the name leaves y3kode');
   assert.ok(/body\.panel-open\.in-code\.nav-collapsed-top \.home-brand \{ opacity: 0; pointer-events: none; \}/.test(css), 'the name floats over the coder when the bar folds');
-  assert.ok(/body\.panel-open\.in-code:not\(\.nav-collapsed-bottom\):not\(\.gated\) #chat \{ opacity: 1; pointer-events: auto; \}/.test(css), 'no chat bar in y3kode with the bar open');
+  assert.ok(/body\.panel-open\.in-code:not\(\.gated\) #chat \{ opacity: 1; pointer-events: auto; \}/.test(css), 'the chat bar is the coder\'s composer in y3kode, folded bar or not (THE FRESH LOOK)');
+  assert.ok(!/body\.panel-open\.in-code:not\(\.nav-collapsed-bottom\)/.test(css), 'the chat bar must not go with the bottom bar in y3kode again: it is the one composer');
   assert.ok(!/body\.panel-open\.in-code\.nav-collapsed-bottom[^{]*#chat \{ opacity: 1/.test(css), 'a floating chat bar in y3kode');
   // and the metal follows the same rules: a canvas poured for nobody costs every frame
   assert.ok(/\(b\.contains\('in-code'\) && !b\.contains\('nav-collapsed-top'\)\)/.test(mount), 'the name pours in y3kode with its bar folded');
-  assert.ok(/\(b\.contains\('in-code'\) && !b\.contains\('nav-collapsed-bottom'\)\)/.test(mount), 'the chat pours in y3kode with its bar folded');
+  assert.ok(/\|\| b\.contains\('in-code'\)\);/.test(mount), 'the chat pours in y3kode whatever the bar does (it is the coder\'s composer)');
+  assert.ok(!/\(b\.contains\('in-code'\) && !b\.contains\('nav-collapsed-bottom'\)\)/.test(mount), 'the chat must not go with the bottom bar in y3kode again');
 });
 
 console.log('\nwhat the review of 2026-10-02 found:');

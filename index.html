@@ -158,6 +158,15 @@
         <stop offset="0.8" stop-color="#767f8c"/>
         <stop offset="1" stop-color="#33383f"/>
       </linearGradient>
+      <!-- The same chrome for a 16px stroke (kode's glyphs): the falloff of
+           #merc goes to near-black at the foot of a 24-unit box, which on a
+           hairline icon reads as half an icon. Lighter at the foot. -->
+      <linearGradient id="merc-ink" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#ffffff"/>
+        <stop offset="0.4" stop-color="#e9edf2"/>
+        <stop offset="0.7" stop-color="#b6bec9"/>
+        <stop offset="1" stop-color="#8d96a3"/>
+      </linearGradient>
       <!-- Real mercury is built from the SILHOUETTE, not painted on: melt the
            edge with turbulence, then treat the shape's alpha as a height map —
            a bright silver body, lit from above (diffuse) with a hot specular,

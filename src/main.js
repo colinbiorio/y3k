@@ -31,7 +31,7 @@ import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
-import { mountAppMercury, pourModelMark, thinkModelMark } from './mercury-mount.js';
+import { mountAppMercury, pourModelMark, thinkModelMark, liquid } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
@@ -2590,7 +2590,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, syncHands, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, liquid, camera, settings, social, music, perceive, reach, syncHands, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

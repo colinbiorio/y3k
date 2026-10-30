@@ -98,7 +98,12 @@ await ok('the room: in-code class, lit glyph, loaded only when opened, orb colum
   // runs behind the pane with no seam, and the far plane stops clipping the
   // dome. The stage must never be shrunk to the column again.
   assert.ok(!/body\.in-code #stage \{ inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\)/.test(css), 'the stage is shrunk to the column again — the sky breaks at the pane and the dome clips (the black void)');
-  assert.match(css, /body\.in-code #orb-frame \{ display: block; inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\); \}/, 'the orb has no frame in Code');
+  // 2026-10-29, THE FRESH LOOK: wide, the orb keeps the whole window and the
+  // centre, with no frame at all; only a narrow screen frames it, as a band
+  // across the top (the media rule), and the room is laid around it (--cv-gap).
+  assert.ok(!/body\.in-code #orb-frame \{ display: block; inset: 0 var\(--hole-r\) 0 auto;/.test(css), 'the orb is framed into a column on a wide screen again — it keeps the centre');
+  assert.match(css, /body\.in-code #orb-frame \{ display: block; inset: 0 0 auto 0; width: auto; height: calc\(var\(--hole-t\) \+ 150px\); \}/, 'narrow, the orb has no band across the top');
+  assert.match(css, /body \{ --cv-gap: clamp\(180px, calc\(var\(--orb-px, 40vh\) \+ 48px\), 50vw\); \}/, 'the bubbles do not keep off the orb by its own width');
   assert.match(read('index.html'), /<div id="orb-frame" aria-hidden="true"><\/div>/, 'the frame element is gone');
   assert.match(read('src/body.js'), /getElementById\('orb-frame'\)/, 'body.js no longer measures the frame');
   assert.match(css, /\.code-root \{ position: fixed;[^}]*z-index: 31;/);
@@ -2460,8 +2465,11 @@ await ok('the stylesheet: a rise only on entry, a pane frosted only at the top t
   // data-glass="all", never in the base rule, solid in smooth.
   const pane = code.slice(code.indexOf('.cv-pane {'), code.indexOf('}', code.indexOf('.cv-pane {')));
   assert.ok(!/backdrop-filter/.test(pane), 'the pane blurs at every tier — gfx.js measured that at 12 → 20 fps');
-  assert.match(code, /html\[data-glass="all"\] \.cv-pane \{[^}]*backdrop-filter: blur/, 'the pane is not frosted at the top tier');
-  assert.match(code, /html\[data-gfx="smooth"\] \.cv-pane \{ background: var\(--lg-1\), linear-gradient\(180deg, #171a21, #0b0d11\); \}/, 'the pane is not solid in smooth');
+  // 2026-10-29, THE FRESH LOOK: there is no pane — the glass is each bubble's
+  // own, under the same rules (the frost at the top tier only, solid in smooth).
+  assert.match(code, /\.cv-pane \{ background: none; \}/, 'the pane paints a ground behind the bubbles again');
+  assert.match(code, /html\[data-glass="all"\] \.code-root \.it:is\(\.as, \.us, \.tl, \.or, \.pm, \.qs, \.pl\) \{[^}]*backdrop-filter: blur/, 'the bubbles are not frosted at the top tier');
+  assert.match(code, /html\[data-gfx="smooth"\] \.code-root \.it:is\(\.as, \.us, \.tl, \.or, \.pm, \.qs, \.pl\) \{ background-color: #13161d !important; \}/, 'the bubbles are not solid in smooth');
   // and the last word on the ground is the room's: the liquid-glass block
   // paints its own still ground, and this rule, after it, takes it away
   const last = code.lastIndexOf('.code-root { background: transparent; }');
@@ -2512,8 +2520,9 @@ await ok('liquid glass: every action its own panel, drawn not blurred, settling 
   // the glint is not the item's settling: enter() waits for the item's own animation
   assert.match(read('src/code/code-view.js'), /e\.target !== el \|\| e\.pseudoElement/);
   // send is a clear bead, stop a red one
-  assert.match(lg, /\.cv-pane \.cv-send \{[^}]*radial-gradient/);
-  assert.match(lg, /\.cv-pane \.cv-send\.stop \{[^}]*rgba\(255, 81, 71/);
+  // (…in the pane, and in the site's chat bar, where the composer lives since 2026-10-29)
+  assert.match(lg, /:is\(\.cv-pane, \.cv-composer\) \.cv-send \{[^}]*radial-gradient/);
+  assert.match(lg, /:is\(\.cv-pane, \.cv-composer\) \.cv-send\.stop \{[^}]*rgba\(255, 81, 71/);
 });
 
 await ok('the stylesheet: no tab strip, no "+", no × (one conversation, forever; 2026-10-29); the turn\'s light stills with the rest (2026-10-08)', () => {

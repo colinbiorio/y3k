@@ -123,7 +123,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // drawn in its new frame ('y3k:orb-resized', or 500ms if it never says),
     // then fades back in (code-settling, 0.2s) — the same both ways.
     const b = document.body;
-    if ((v === 'code') !== b.classList.contains('in-code')) {
+    // THE ORB STAYS PUT ON A WIDE SCREEN (2026-10-29, the fresh look): its
+    // frame is laid out only on a narrow one, as a band across the top, so
+    // only there is there a jump to hide. Wide, nothing moves and nothing fades.
+    const framed = typeof matchMedia === 'function' && matchMedia('(max-width: 900px)').matches;
+    if (framed && (v === 'code') !== b.classList.contains('in-code')) {
       const gen = String((Number(b.dataset.codeShift) || 0) + 1);
       b.dataset.codeShift = gen;
       b.classList.remove('code-settling');
