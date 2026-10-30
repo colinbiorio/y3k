@@ -133,14 +133,14 @@ await ok('go to sleep reaches a life another hand lives on this computer only wh
   assert.equal(JSON.parse(rf(join(dir, 'life', 'door.json'), 'utf8')).who, 'stop');
   rmSync(dir, { recursive: true, force: true });
 });
-await ok('the terms carry the field, and the engine is 0.3.8', () => {
+await ok('the terms carry the field, and the engine is 0.3.9', () => {
   const legal = read('legal.html');
   assert.match(legal, /id="terms-life"/);
   assert.match(legal, /A life, if you begin one\./);
   assert.match(legal, /allow it once or always; pressing it is agreeing to this/);
   assert.match(legal, /<h2 id="terms">7\. Terms of use<\/h2>/);
-  assert.equal(VERSION, '0.3.8');
-  assert.equal(JSON.parse(read('y3k-code/package.json')).version, '0.3.8');
+  assert.equal(VERSION, '0.3.9');
+  assert.equal(JSON.parse(read('y3k-code/package.json')).version, '0.3.9');
 });
 
 console.log('\nthe plan\'s limit, named (y3k-code/brain.mjs, src/brain.js):');
