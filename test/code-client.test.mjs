@@ -1902,6 +1902,67 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     } finally { delete window.y3kCode; }
   });
 
+  // A NEWER y3kode, OFFERED IN THE ROOM (2026-10-30).
+  await ok('the view: a newer y3kode the site offers is said under the toolbar with "update y3kode" (engine.update with the site\'s token, then the page waits for the new version) and "not now" (that version put away); an engine that is current, or cannot update itself, is offered nothing', async () => {
+    const asked = bridge();
+    const plain = window.y3kCode.cmd;
+    let version = '0.3.8', able = true;
+    window.y3kCode.cmd = async (o) => {
+      const r = await plain(o);
+      if (o.cmd === 'engine.hello') return { ok: true, name: 'y3k-code', version, update: able, providers: [], recent: [], sessions: [] };
+      if (o.cmd === 'engine.update') return { ok: true, restarting: true, version: o.version };
+      return r;
+    };
+    const toasts = [], waited = [];
+    const link = { companion: () => null, setup: async () => ({ token: 'tok-1', engine: '0.3.10' }) };
+    // the browser's store for "not now" (the view's pref): a stand-in where node has none
+    const hadStore = 'localStorage' in globalThis;
+    if (!hadStore) { const m = new Map(); globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); } }; }
+    let cv = await viewWith('update-offer', { toast: (m) => toasts.push(m), link, waitFor: async (v) => { waited.push(v); return true; } });
+    cv.open();
+    await settle(); tick();
+    assert.deepEqual(cv._offer(), { version: '0.3.10', token: 'tok-1' }, 'the newer version is on offer');
+    const note = $('div.cv-note.cv-update');
+    assert.ok(note && /0\.3\.8 is answering, and 0\.3\.10 is out/.test(note.textContent), 'said under the toolbar: ' + note?.textContent);
+    note.querySelectorAll('button')[0].click();
+    await settle(); tick();
+    assert.deepEqual(asked('engine.update').map((o) => [o.token, o.version]), [['tok-1', '0.3.10']], 'the update is the engine\'s own, with the site\'s token');
+    assert.deepEqual(waited, ['0.3.10'], 'then the page waits for the new version');
+    assert.equal(cv._offer(), null);
+    assert.equal(toasts.at(-1), 'y3kode 0.3.10 is here.');
+    cv.close();
+    // not now: that version is put away for this browser
+    cv = await viewWith('update-later', { toast: () => {}, link, waitFor: async () => true });
+    cv.open();
+    await settle(); tick();
+    assert.ok($('div.cv-note.cv-update'));
+    $('div.cv-note.cv-update').querySelectorAll('button')[1].click();
+    tick();
+    assert.equal(cv._offer(), null);
+    assert.equal(localStorage.getItem('y3k-code:update-later'), '0.3.10');
+    cv.close();
+    cv = await viewWith('update-later2', { toast: () => {}, link, waitFor: async () => true });
+    cv.open();
+    await settle(); tick();
+    assert.equal(cv._offer(), null, 'put away stays put away');
+    assert.equal($('div.cv-note.cv-update'), null);
+    cv.close();
+    localStorage.removeItem('y3k-code:update-later');
+    // current, or unable: nothing offered
+    version = '0.3.10';
+    cv = await viewWith('update-current', { toast: () => {}, link, waitFor: async () => true });
+    cv.open(); await settle(); tick();
+    assert.equal(cv._offer(), null, 'current: nothing offered');
+    cv.close();
+    version = '0.3.8'; able = false;
+    cv = await viewWith('update-unable', { toast: () => {}, link, waitFor: async () => true });
+    cv.open(); await settle(); tick();
+    assert.equal(cv._offer(), null, 'unable: nothing offered');
+    cv.close();
+    delete window.y3kCode;
+    if (!hadStore) delete globalThis.localStorage;
+  });
+
   // THE ROOM'S OWN COMMANDS (2026-10-30): what a terminal answers itself.
   await ok('the view: the room answers its own commands (/help /status /model /thinking /mode /stop /exit /export), sends the coder\'s own as typed, and `!` runs a line in the folder\'s shell on y3kode 0.3.10 — or says to update', async () => {
     const asked = bridge();

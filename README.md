@@ -251,6 +251,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **A newer y3kode is offered in the room.** kode's hello
+  says whether the engine can update itself, and the site says which version
+  it offers this account; newer than the one answering, it is said under the
+  toolbar — "y3kode 0.3.8 is answering, and 0.3.10 is out · update y3kode ·
+  not now" — where the person already is, instead of only on the life tab
+  and in Settings → Brain. The update is y3kode's own (`engine.update`: asked
+  on the computer, downloaded from this site, restarted); the page then waits
+  for the new version to answer, the connection comes back on its own, and
+  the hello that follows picks the conversation up where it was. "Not now"
+  puts that version away for this browser. An engine that cannot update
+  itself is left to Settings.
+
 - **2026-10-30** — **Everything a terminal does, in the room (y3kode 0.3.10).**
   Colin: "every single thing that is possible from inside a traditional
   coding terminal like claude code or codex, is also present" — with the one
