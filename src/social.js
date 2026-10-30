@@ -85,6 +85,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       if (view === 'code') codeView.open();
     }).catch(() => toastOnce?.('code could not load — reload and try again.'));
   }
+  // A LINE FOR KODE FROM ANYWHERE ON THE SITE (main.js askKode, 2026-10-30):
+  // the room is opened and the line said in it once it is on screen — to the
+  // coder, in the mode chosen there (code-view.js sayFromSite).
+  async function kodeSay(text) {
+    if (view !== 'code') showView('code');
+    for (let i = 0; i < 100 && !codeView; i++) await new Promise((r) => setTimeout(r, 50));
+    return codeView ? codeView.say(text) : false;
+  }
   // An amber dot on the laptop while a coding session waits for an answer,
   // wherever you are in the house.
   const onNeedsYou = (on) => $('nav-code')?.classList.toggle('needs-you', !!on);
@@ -1581,5 +1589,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   const codeBusy = () => !!codeView?.busy();
-  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), twentyHear: (t) => twenty.hear(t), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), twentyHear: (t) => twenty.hear(t), kodeSay, codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }

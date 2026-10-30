@@ -1965,6 +1965,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     const ended = s.state === 'ended' || !!viewingSid;
     const running = s.state === 'running' || s.state === 'waiting';
+    // a line said from elsewhere on the site, waiting for a conversation (sayFromSite)
+    if (pendingSay && !ended) { const t = pendingSay; pendingSay = null; talkTo = 'coder'; setDraft(t); send(s, d.ta); }
     const comp = companion();
     const toOrion = talkTo === 'orion' && !!comp;
 
@@ -2340,6 +2342,26 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     chatWatch = () => { ro?.disconnect(); mo?.disconnect(); bar.removeEventListener('transitionend', onEnd); window.removeEventListener('resize', measureChat); };
   }
   function unwatchChat() { chatWatch?.(); chatWatch = null; }
+  // A LINE FROM ELSEWHERE ON THE SITE (main.js askKode → social.kodeSay,
+  // 2026-10-30): the person said it in the chat bar outside the room and
+  // said yes to the card that asked. Said here as if typed in the composer —
+  // to the coder, in the mode already chosen (nothing here changes it) —
+  // after the room has picked up where it was, if it is still doing that.
+  // With no conversation on screen yet (pairing, the folders) it waits in
+  // pendingSay for the first one, and goes with it (renderDock).
+  let pendingSay = null;
+  async function sayFromSite(text) {
+    const t = String(text || '').trim();
+    if (!t || !root) return false;
+    if (continuing) await continuing.catch(() => false);
+    const s = currentSession();
+    if (s) renderDock();
+    if (!s || !dockUi?.ta || s.state === 'ended') { pendingSay = t; renderDock(); return true; }
+    talkTo = 'coder';
+    setDraft(t);
+    await send(s, dockUi.ta);
+    return true;
+  }
   function onWheel(e) {
     if (!ui || ui.scroll.hidden || !e.deltaY) return;
     if (!e.target?.closest?.('#stage')) return;
@@ -3251,6 +3273,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     needsYou: () => needsYou(S),
     // for the site: is anything running (the broadcast lock asks this)
     busy: () => liveSessions(S).length > 0,
+    // a line said to the conversation from elsewhere on the site (social.kodeSay)
+    say: (text) => sayFromSite(text),
     _state: S,
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them
