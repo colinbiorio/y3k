@@ -2059,7 +2059,7 @@ export function createBody(container) {
         const src = followSources[flying.src];
         let s = null;
         try { s = src ? src() : null; } catch { s = null; }
-        const held = !!(pinches[0] || pinches[1] || handPush.held);
+        const held = !!(pinches[0] || pinches[1] || handPush.held || dragging);   // ...or the pointer dragging it: follow pointer, and a drag takes hold of it too
         if (!held && s && s.ok && Number.isFinite(s.x) && Number.isFinite(s.y)) {
           const f = frameRect();   // the body's pane on screen (see frameRect)
           const sx = ((s.x - f.cx) / (f.w / 2)) * (win.halfW || 2.4) * depthK(z);
