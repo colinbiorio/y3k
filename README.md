@@ -251,6 +251,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-29** — **The thread holds on a fresh page.** Opened again, kode
+  used to put the first session its engine remembered on screen — one stopped
+  seconds after it started that morning, "Stopped. Continue it" — over the
+  live conversation it had not finished reading, and to ask that conversation
+  to compact again from an 88% reading played back from before an earlier
+  compaction, on every load. A fresh page now holds the engine's stream until
+  its first hello has read the live sessions from disk; a reading older than a
+  minute never asks to compact, and a browser asks once per conversation; and
+  a conversation Claude Code has no transcript of ("No conversation found") is
+  marked lost in the browser and passed over for the one before it, instead
+  of being picked again forever; an engine that knows already (0.3.9: a row
+  marked `lost`, a resume answered `lost`) is believed without a process
+  (`src/code/code-view.js`).
 - **2026-10-29** — **A conversation Claude Code has no transcript of is not
   taken again.** A session stopped seconds after it started that morning,
   before its first turn, never got a transcript, so `claude --resume` of it

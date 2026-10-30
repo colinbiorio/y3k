@@ -1831,7 +1831,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     } finally { offline(); globalThis.fetch = realFetch; }
   });
 
-  await ok('the view: a live session that streamed in ahead of its start (the desktop app, its ring rolled) is read from its file, keeping its streamed words and the lines to the presence', async () => {
+  await ok('the view: a live session that streamed in ahead of its start (the desktop app, its ring rolled) is held until the first hello has read its file, then keeps its streamed words and the lines to the presence', async () => {
     let push = null;
     let answerHello = null;
     const sent = [];
@@ -1858,8 +1858,19 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       const S = cv._state;
       await until(() => answerHello);
       tick();
-      assert.equal(S.sessions.get(sid).cwd, '', 'bare: no folder, no history');
-      // opened, and a line said to the presence there, before the hello is answered
+      // (2026-10-29: the backlog is held until the first hello has read the
+      // live sessions — nothing bare on screen ahead of its folder and history)
+      assert.equal(S.sessions.get(sid), undefined, 'held: nothing of it before the hello');
+      answerHello();
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant'], 'its history, then the reply only ever streamed');
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.'], 'the streamed words, never in its file');
+      assert.equal(s.waiting, 1);
+      assert.equal(sent.filter((o) => o.cmd === 'session.load').length, 1, 'read once');
+      // opened, and a line said to the presence there
       cv._show(sid);
       tick();
       $('button.cv-who').click();
@@ -1867,16 +1878,10 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       ta.value = 'what is this repo?';
       ta.dispatch('keydown', { key: 'Enter' });
       $('button.cv-who').click();
-      answerHello();
-      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
-      await settle(20);
+      await settle();
       tick();
-      const s = S.sessions.get(sid);
-      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'orion'], 'its history, then what the page had');
-      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.'], 'the streamed words, never in its file');
+      assert.equal(s.items.at(-1).kind, 'orion', 'what the page had, after its history');
       assert.equal(s.items.at(-1).text, 'what is this repo?');
-      assert.equal(s.waiting, 1);
-      assert.equal(sent.filter((o) => o.cmd === 'session.load').length, 1, 'read once');
       // what streams on goes in after it, once
       push(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: ' Mostly.', seq: 133 }));
       push(live({ type: 'message.end', id: 'g1', seq: 134 }));
@@ -1969,6 +1974,195 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.ok(!toasts.some((m) => /—/.test(m)), 'no dashes for breaks in what it says');
     cv.close();
     delete window.y3kCode;
+  });
+
+  // THE THREAD HOLDS ON A FRESH PAGE (2026-10-29): the stream's backlog is
+  // held until the first hello has read the live sessions; a reading played
+  // back never asks to compact; a conversation the coder has no transcript of
+  // is passed over for the one before it.
+  await ok('the view: a fresh page holds the stream until its first hello has read the live session: one begun and stopped hours before never takes the screen, and a reading played back never asks to compact (2026-10-29)', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = null;
+    const sent = [];
+    eng.auto['session.send'] = (c) => { sent.push(c); return { ok: true }; };
+    const ghost = '3e2b933128f0474d';
+    try {
+      const cv = await viewWith('first-hello', { toast: () => {} });
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      const S = cv._state;
+      // the engine answers `after=0` with all its ring holds, oldest first: a
+      // session begun and stopped at once that morning, then the live one's
+      // day — its window at 88% before the compaction that brought it to 15
+      const old = Date.now() - 3 * 3600 * 1000;
+      const ring = (e) => ({ v: 1, epoch: EPOCH, t: old, ...e });
+      const day = [
+        { sid, type: 'usage.context', used: 176000, limit: 200000, seq: 110 },
+        { sid, type: 'turn.ended', status: 'success', seq: 111 },
+        { sid, type: 'session.state', state: 'idle', seq: 112 },
+        { sid, type: 'usage.context', used: 30000, limit: 200000, seq: 113 },
+      ];
+      eng.send(ring({ sid: ghost, type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'auto', providerSessionId: U(66), seq: 3 }));
+      eng.send(ring({ sid: ghost, type: 'session.ended', reason: 'stopped', seq: 8 }));
+      for (const e of [...onDisk, ...day]) eng.send(ring(e));
+      await settle(10);
+      assert.equal(S.sessions.size, 0, 'nothing taken before the hello has read the live sessions');
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'idle' }] });
+      eng.cmds = eng.cmds.filter((c) => c.cmd !== 'engine.hello');
+      await until(() => eng.waiting('session.load').length);
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: [...onDisk, ...day] });
+      eng.cmds = [];
+      await until(() => S.active === sid);
+      await settle(20);
+      tick();
+      assert.equal(S.active, sid, 'the live conversation is the one on screen');
+      assert.equal(S.sessions.get(ghost)?.state, 'ended', 'the one stopped that morning is known, not shown');
+      assert.equal(S.sessions.get(sid).usage.context.percent, 15, 'the newest reading');
+      assert.equal(sent.length, 0, 'nothing asked from a reading played back');
+      assert.ok(!/Stopped\. Continue it/.test(room().textContent), 'not "Stopped"');
+      // a fresh reading at rest, later: asked
+      eng.send(live({ type: 'usage.context', used: 170000, limit: 200000, seq: 114 }));
+      eng.send(live({ type: 'session.state', state: 'idle', seq: 115 }));
+      await until(() => sent.length === 1);
+      assert.equal(sent[0].sid, sid);
+      assert.match(sent[0].text, /^\/compact /);
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a reading older than a minute never asks to compact; a second page of the room does not ask again within ten minutes (2026-10-29)', async () => {
+    const store = new Map();
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    try {
+      const asked = bridge();
+      const cv = await viewWith('compact-fresh', { toast: () => {} });
+      cv.open();
+      await settle();
+      tick();
+      cv._feed({ sid: 'cf', type: 'session.started', provider: 'claude', cwd: '/tmp/cf', mode: 'ask', providerSessionId: U(80) });
+      const old = Date.now() - 2 * 60 * 1000;
+      cv._feed({ sid: 'cf', type: 'usage.context', used: 176000, limit: 200000, t: old });
+      cv._feed({ sid: 'cf', type: 'session.state', state: 'idle', t: old });
+      tick();
+      await settle();
+      assert.equal(asked('session.send').length, 0, '88% two minutes ago: history, not acted on');
+      cv._feed({ sid: 'cf', type: 'usage.context', used: 176000, limit: 200000, t: Date.now() });
+      cv._feed({ sid: 'cf', type: 'session.state', state: 'idle', t: Date.now() });
+      tick();
+      await settle();
+      assert.equal(asked('session.send').length, 1, 'a fresh reading at rest: asked');
+      assert.match(store.get('y3k-code:compacted') || '', /^cf:\d+$/, 'remembered for the browser');
+      cv.close();
+      // the same conversation in another page (a reload, a second tab)
+      const asked2 = bridge();
+      const cv2 = await viewWith('compact-fresh2', { toast: () => {} });
+      cv2.open();
+      await settle();
+      tick();
+      cv2._feed({ sid: 'cf', type: 'session.started', provider: 'claude', cwd: '/tmp/cf', mode: 'ask', providerSessionId: U(80) });
+      cv2._feed({ sid: 'cf', type: 'usage.context', used: 176000, limit: 200000, t: Date.now() });
+      cv2._feed({ sid: 'cf', type: 'session.state', state: 'idle', t: Date.now() });
+      tick();
+      await settle();
+      assert.equal(asked2('session.send').length, 0, 'asked once for the browser; the coder takes a moment');
+      cv2.close();
+    } finally { delete globalThis.localStorage; delete window.y3kCode; }
+  });
+
+  await ok('the view: a conversation Claude Code has no transcript of is passed over for the one before it, and never picked again (2026-10-29)', async () => {
+    const store = new Map();
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    let cv = null;
+    // the engine's index, newest first: a resume that crashed, the one it
+    // resumed (stopped twelve seconds after it started, before a first word,
+    // so Claude Code wrote no transcript), and the day's real conversation
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') return { ok: true, sessions: [
+        { sid: 'crash1', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(66), live: false, resumeOf: 'ghost' },
+        { sid: 'ghost', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(66), live: false },
+        { sid: 'real', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(80), live: false },
+      ] };
+      if (o.cmd === 'session.resume') {
+        const sid = o.providerSessionId === U(66) ? 'crash2' : 'cont';
+        queueMicrotask(() => {
+          cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/one', mode: 'auto', providerSessionId: o.providerSessionId, prior: o.sid });
+          if (sid === 'crash2') cv._feed({ sid, type: 'session.ended', reason: 'crashed', exitCode: 1, detail: `No conversation found with session ID: ${o.providerSessionId}` });
+          else cv._feed({ sid, type: 'session.ready', providerSessionId: o.providerSessionId });
+        });
+        return { ok: true, sid };
+      }
+      return { ok: true };
+    };
+    try {
+      cv = await viewWith('lost', { toast: () => {} });
+      const S = cv._state;
+      cv.open();
+      await until(() => asked('session.resume').length === 2 && S.active === 'cont');
+      assert.deepEqual(asked('session.resume').map((o) => [o.sid, o.providerSessionId]), [['crash1', U(66)], ['real', U(80)]], 'the lost one once, then the one before it');
+      assert.equal(S.sessions.get('crash2')?.state, 'ended');
+      assert.deepEqual(JSON.parse(store.get('y3k-code:lost')), [U(66)], 'remembered for the browser');
+      await settle();
+      tick();
+      assert.equal($('div.cv-home').hidden, true, 'the conversation, not the folders');
+      cv.close();
+      // the room opened again: the lost one is not tried at all
+      cv = await viewWith('lost2', { toast: () => {} });
+      cv.open();
+      await until(() => asked('session.resume').length === 3);
+      assert.deepEqual(asked('session.resume').slice(2).map((o) => o.providerSessionId), [U(80)]);
+      cv.close();
+    } finally { window.y3kCode.cmd = base; delete window.y3kCode; delete globalThis.localStorage; }
+  });
+
+  await ok('the view: an engine that knows a conversation is lost — a row marked, or a resume answered lost — is believed: passed over without a process; Continue it on one it then refuses goes on to the one before it (2026-10-29)', async () => {
+    const store = new Map();
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    let cv = null;
+    let refuseReal = false;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') return { ok: true, sessions: [
+        { sid: 'marked', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(66), live: false, lost: true },
+        { sid: 'refused', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(67), live: false },
+        { sid: 'real', provider: 'claude', cwd: '/tmp/one', providerSessionId: U(80), live: false },
+      ] };
+      if (o.cmd === 'session.resume') {
+        if (o.providerSessionId === U(67) || refuseReal) return { ok: false, code: 'lost', error: 'Claude Code has no transcript of that conversation.' };
+        queueMicrotask(() => {
+          cv._feed({ sid: 'cont', type: 'session.started', provider: 'claude', cwd: '/tmp/one', mode: 'auto', providerSessionId: o.providerSessionId, prior: o.sid });
+          cv._feed({ sid: 'cont', type: 'session.ready', providerSessionId: o.providerSessionId });
+        });
+        return { ok: true, sid: 'cont' };
+      }
+      return { ok: true };
+    };
+    try {
+      cv = await viewWith('lost-engine', { toast: () => {} });
+      const S = cv._state;
+      cv.open();
+      await until(() => S.active === 'cont');
+      assert.deepEqual(asked('session.resume').map((o) => o.providerSessionId), [U(67), U(80)], 'the marked row never asked for; the refused one once, then the one before it');
+      assert.deepEqual(JSON.parse(store.get('y3k-code:lost')), [U(67)], 'what the engine refused is remembered too');
+      // it ends; Continue it, and the engine now refuses that one as well
+      cv._feed({ sid: 'cont', type: 'session.ended', reason: 'stopped' });
+      await settle();
+      tick();
+      refuseReal = true;
+      $('div.cv-hint button.cv-link').click();
+      await until(() => S.active === null && !cv._state.sessions.get('cont').closing && asked('session.resume').length === 3);
+      await settle(10);
+      tick();
+      assert.deepEqual(asked('session.resume').slice(2).map((o) => o.providerSessionId), [U(80)], 'asked once more, refused');
+      assert.deepEqual(JSON.parse(store.get('y3k-code:lost')), [U(67), U(80)]);
+      assert.equal(S.active, null, 'nothing left to continue');
+      assert.equal($('div.cv-home').hidden, false, 'the folders ask where it begins');
+      cv.close();
+    } finally { window.y3kCode.cmd = base; delete window.y3kCode; delete globalThis.localStorage; }
   });
 
   // ONE CONVERSATION, FOREVER (2026-10-29): opened, the room continues the
