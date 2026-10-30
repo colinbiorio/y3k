@@ -51,8 +51,8 @@ command-line tool and turns what it does into one stream the page can draw.
    exception is the short, factual note about a session that the person chooses
    to send back to their presence.
 7. **Trust is granted on the machine, not in the page.** Pairing the site with the
-   engine, trusting a folder, adding a connector and installing a tool are
-   confirmed in a native dialog (desktop) or in the engine's own terminal or
+   engine, trusting a folder, adding a connector, installing a tool and running a
+   line in a folder's shell (`!`, 2026-10-30) are confirmed in a native dialog (desktop) or in the engine's own terminal or
    local page (companion). A compromised web page can ask; it cannot say yes.
    For pairing, running the start command the page copied (`… --pair <code>`)
    in the person's own terminal IS that yes: it is typed on the machine, by
