@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine, handoffBlock } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows } from '../y3k-code/adapters/claude.mjs';
+import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows, hasTranscript, projectDirName, transcriptHome, NO_TRANSCRIPT } from '../y3k-code/adapters/claude.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = join(ROOT, 'test', 'fakes', 'claude.mjs');
@@ -31,6 +31,9 @@ writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
 const env = {
   ...process.env,
   FAKE_CLAUDE_LOG: LOG,
+  // the fake's own ~/.claude: it keeps transcripts there, as the real CLI does,
+  // and the engine looks there before continuing a conversation (hasTranscript)
+  CLAUDE_CONFIG_DIR: join(base, 'claude'),
   CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent-session', CLAUDE_CODE_REMOTE: 'true',
   ANTHROPIC_API_KEY: 'sk-ant-should-not-pass', OPENAI_API_KEY: 'sk-other-provider',
 };
@@ -123,6 +126,31 @@ await ok('the plan\'s windows: only those Claude Code names, and a model\'s by t
   assert.deepEqual(w.map((x) => [x.kind, x.label || null]), [['five_hour', null], ['seven_day', null], ['seven_day_opus', null], ['seven_day_model', 'Atlas']]);
   assert.deepEqual(planWindows(null), []);
   assert.deepEqual(planWindows({ model_scoped: 'nope' }), []);
+});
+
+console.log('\nwhat Claude Code remembers:');
+
+await ok('a transcript is looked for where Claude Code keeps it — this folder\'s, then any folder\'s — and "cannot tell" is not "no"', () => {
+  const cfg = join(base, 'claude-elsewhere');
+  const cwd = '/Users/someone/y3k-code/p-vs-np';
+  const ID3 = 'abcdef01-2345-4678-8abc-def012345678';
+  assert.equal(projectDirName(cwd), '-Users-someone-y3k-code-p-vs-np', 'as Claude Code names the folder');
+  assert.equal(projectDirName('/private/tmp/a b.c_d/.claude/worktrees/x-1'), '-private-tmp-a-b-c-d--claude-worktrees-x-1');
+  assert.equal(transcriptHome({ HOME: '/h' }), join('/h', '.claude'));
+  assert.equal(transcriptHome({ HOME: '/h', CLAUDE_CONFIG_DIR: '/c' }), '/c', 'a settings folder of their own');
+  const e = { HOME: '/nowhere', CLAUDE_CONFIG_DIR: cfg };
+  assert.equal(hasTranscript({ cwd, id: ID1, env: e }), null, 'no transcripts folder at all: it cannot tell');
+  mkdirSync(join(cfg, 'projects', projectDirName(cwd)), { recursive: true });
+  assert.equal(hasTranscript({ cwd, id: ID1, env: e }), false);
+  writeFileSync(join(cfg, 'projects', projectDirName(cwd), `${ID1}.jsonl`), '{"type":"user"}\n');
+  writeFileSync(join(cfg, 'projects', projectDirName(cwd), `${ID3}.jsonl`), '{"type":"user"}\n');
+  assert.equal(hasTranscript({ cwd, id: ID1, env: e }), true);
+  assert.equal(hasTranscript({ cwd, id: ID3.toUpperCase(), env: e }), true, 'the id as written, whatever its case');
+  assert.equal(hasTranscript({ cwd: '/Users/someone/elsewhere', id: ID1, env: e }), true, 'one kept under another folder counts: Claude Code looks there too');
+  assert.equal(hasTranscript({ cwd, id: ID2, env: e }), false);
+  assert.equal(hasTranscript({ cwd, id: '--dangerously-skip-permissions', env: e }), false, 'nothing flag-shaped is looked for');
+  assert.ok(NO_TRANSCRIPT.test(`No conversation found with session ID: ${ID2}`), 'what the CLI says before it exits 1');
+  assert.ok(!NO_TRANSCRIPT.test("error: unknown option '--effort'"));
 });
 
 console.log('\nfolders:');
@@ -478,10 +506,21 @@ chmodSync(NOREWIND, 0o755);
 const events6 = [];
 const engine6 = createEngine({ store, consent: fixedConsent(true), env, bins: { claude: NOREWIND } });
 engine6.subscribe((e) => events6.push(e));
+const wait6 = (pred, ms = 10000) => new Promise((resolve, reject) => {
+  const f = events6.find(pred); if (f) return resolve(f);
+  const t = setTimeout(() => { un(); reject(new Error('timed out; last: ' + events6.slice(-6).map((e) => e.type).join(', '))); }, ms);
+  const un = engine6.subscribe((e) => { if (pred(e)) { clearTimeout(t); un(); resolve(e); } });
+});
 
 await ok('a Claude Code that cannot go back says so, with the fix — and the session it was asked of goes on', async () => {
   const s6 = await engine6.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
   assert.equal(s6.ok, true, s6.error);
+  // a turn first: Claude Code writes a conversation down from its first
+  // message, and one it has no transcript of is refused as lost, not spawned
+  await engine6.handle({ cmd: 'session.send', sid: s6.sid, text: 'edit it' });
+  const p6 = await wait6((e) => e.type === 'permission.request' && e.sid === s6.sid);
+  await engine6.handle({ cmd: 'permission.answer', sid: s6.sid, requestId: p6.requestId, decision: 'deny' });
+  await wait6((e) => e.type === 'turn.ended' && e.sid === s6.sid);
   const r = await engine6.handle({ cmd: 'session.rewind', sid: s6.sid, at: ID2, cut: 1 });
   assert.equal(r.ok, false);
   assert.equal(r.code, 'not-started');

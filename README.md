@@ -264,6 +264,27 @@ build. Read the one for the part you are touching.
   of being picked again forever; an engine that knows already (0.3.9: a row
   marked `lost`, a resume answered `lost`) is believed without a process
   (`src/code/code-view.js`).
+- **2026-10-29** — **A conversation Claude Code has no transcript of is not
+  taken again.** A session stopped seconds after it started that morning,
+  before its first turn, never got a transcript, so `claude --resume` of it
+  ended at once ("No conversation found with session ID"); y3kode then wrote
+  one more crashed row pointing at the same id, the room's "continue the last
+  conversation" took that row next, and so on, forever. y3kode 0.3.9 looks
+  for the transcript where Claude Code keeps it — `~/.claude/projects/<the
+  folder's path, every character that is not a letter or a digit turned into
+  '-'>/<id>.jsonl`, then under every other folder's transcripts, as Claude
+  Code itself does — before anything is spawned, and refuses a resume, a
+  fork or a going-back with none: `{ code: 'lost' }`, "Claude Code has no
+  transcript of that conversation.", no process, no new row, a
+  `session.lost` line in the activity record. A crash that says so still
+  marks the row (`lost: true`), `session.list` carries the mark on every row
+  pointing at that id (an older engine's rows too), and an id known lost is
+  refused even when the transcripts folder cannot be read. The page's own
+  guard against the same loop is its own change (`claude/thread-on-load`);
+  a page that is answered `lost` should pass that row over for the one
+  before it. (`y3k-code/adapters/claude.mjs` hasTranscript,
+  `y3k-code/engine.mjs`; the fake `claude` now keeps transcripts under
+  `CLAUDE_CONFIG_DIR`, as the real one does.)
 - **2026-10-29** — **One conversation, forever.** Colin: "no new chats -- no
   separate history -- no different contexts and chats -- just one
   conversation forever … it keeps a thread alive. our friendship doesn't have

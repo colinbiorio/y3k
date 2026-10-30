@@ -11,7 +11,9 @@
 // once the file at $FAKE_CLAUDE_GATE exists (so a test can look in between).
 // FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
 // authentication_failed and ends in the real CLI's synthetic "API Error: 401".
-import { readFileSync, writeFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
+// With CLAUDE_CONFIG_DIR set it keeps transcripts there as the real CLI does,
+// and a --resume of an id it has no transcript of fails the real CLI's way.
+import { readFileSync, writeFileSync, appendFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +54,30 @@ const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, '..', 'fixtures', 'code', 'claude-2.1.283-edit-allow.ndjson');
 const sessionId = args[args.indexOf('--session-id') + 1] || args[args.indexOf('--resume') + 1] || '00000000-0000-4000-8000-000000000009';
 const cwdJson = JSON.stringify(process.cwd()).slice(1, -1);
+// WHAT CLAUDE CODE REMEMBERS, kept as the real one keeps it (y3k-code/adapters/
+// claude.mjs hasTranscript): one <id>.jsonl per conversation under
+// <config>/projects/<the working folder, every character that is not a letter
+// or a digit turned into '-'>, written from the first message; `--resume` of
+// an id with no transcript under any folder ends at once, before a word of
+// output, the real CLI's way. Only with a settings folder of the test's own
+// (CLAUDE_CONFIG_DIR): the person's ~/.claude is never touched.
+const CONFIG = process.env.CLAUDE_CONFIG_DIR || null;
+const projectsDir = CONFIG ? join(CONFIG, 'projects') : null;
+const transcript = CONFIG ? join(projectsDir, process.cwd().replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`) : null;
+const resumeId = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
+if (CONFIG && resumeId) {
+  let dirs = [];
+  try { dirs = readdirSync(projectsDir); } catch { /* none written yet */ }
+  if (!dirs.some((d) => existsSync(join(projectsDir, d, `${resumeId}.jsonl`)))) {
+    process.stderr.write(`No conversation found with session ID: ${resumeId}\n`);
+    process.exit(1);
+  }
+}
+const remember = (text) => {
+  if (!transcript) return;
+  mkdirSync(dirname(transcript), { recursive: true });
+  appendFileSync(transcript, JSON.stringify({ type: 'user', sessionId, cwd: process.cwd(), message: { role: 'user', content: text } }) + '\n');
+};
 const lines = readFileSync(FIXTURE, 'utf8').split('\n').filter(Boolean)
   .map((l) => l.split('/tmp/repo').join(cwdJson).split('00000000-0000-4000-8000-000000000001').join(sessionId));
 const ev = lines.map((l) => JSON.parse(l));
@@ -70,6 +96,7 @@ let interrupted = false;
 async function turn(text) {
   turns++;
   interrupted = false;
+  remember(text);
   if (process.env.FAKE_CLAUDE_SCENARIO === 'signedout') {
     const err = 'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.';
     for (const attempt of [1, 2]) out({ type: 'system', subtype: 'api_retry', attempt, max_retries: 10, retry_delay_ms: 500, error_status: 401, error: 'authentication_failed', session_id: sessionId });
