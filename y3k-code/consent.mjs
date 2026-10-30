@@ -11,7 +11,7 @@
 import { createInterface } from 'node:readline';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
-export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update', 'computer.control', 'life.run'];
+export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update', 'computer.control', 'shell.run', 'life.run'];
 
 // A character a terminal or a dialog acts on instead of printing: an escape
 // sequence or a carriage return can erase the line just written and print
@@ -55,6 +55,9 @@ export function describe(kind, d = {}) {
       'It will see your main screen and move the mouse, click and type for you, one step at a time, with its cursor shown on the screen as it goes. Press Esc at any time to stop it. Asked again after ten idle minutes.'].join('\n');
     case 'life.run': return ['Start a life on this computer?',
       'lucid runs here: Claude, on your own Claude sign-in, looks at a dreamed picture and decides what to do, about once every few seconds, and SD-Turbo dreams the next picture on this computer\'s graphics chip. Each moment uses your Claude plan. It rests when you stop it, or when no page has looked at it for ten minutes.'].join('\n');
+    // the terminal's own line (0.3.10): what will run, where — the page asked,
+    // this computer says yes, every time
+    case 'shell.run': return `Run this in ${shown(d.folder)}?\n  ${shown(d.command)}`;
     default: return `${kind}: ${spelled(JSON.stringify(d))}`;
   }
 }
@@ -73,6 +76,7 @@ export function title(kind) {
     'engine.update': 'Update y3kode?',
     'computer.control': 'Your orb, on this computer?',
     'life.run': 'A life, on this computer?',
+    'shell.run': 'Run a line in the folder\'s shell?',
   }[kind] || 'Allow this?';
 }
 

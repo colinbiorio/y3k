@@ -491,6 +491,21 @@ export function renderItem(it, ctx) {
     case 'turn-end':
       if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
       return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
+    // the room's own lines (state.js local.note, local.shell)
+    case 'note':
+      return h('div.it.sys.cv-localnote', it.title ? h('b.cv-notetitle', it.title) : null, markdown(it.text || ''));
+    case 'shell': {
+      const running = it.status === 'running';
+      const send = h('button.cv-link', { type: 'button', title: 'put this line and its output in the composer' }, 'to the coder');
+      send.addEventListener('click', () => { if (typeof CustomEvent === 'function') send.dispatchEvent(new CustomEvent('y3k:shell-to-coder', { bubbles: true, detail: it })); });
+      return h('div.it.sys.cv-shell' + (running ? '.running' : it.error || it.code ? '.st-error' : ''),
+        h('div.cv-shellcmd', h('span.cv-shelldollar', '$ '), it.command),
+        it.output ? h('pre.cv-shellout', it.output) : running ? h('div.th-live', h('span.th-shimmer', 'running… (if this computer asks, say yes there)')) : null,
+        it.error ? h('div.cv-shellerr', it.error) : null,
+        running ? null : h('div.cv-shellfoot',
+          h('span.muted', [it.code === 0 ? 'done' : it.code == null ? '' : `exit ${it.code}`, it.ms ? `${(it.ms / 1000).toFixed(1)}s` : '', it.truncated ? 'cut at 64KB' : ''].filter(Boolean).join(' · ')),
+          send));
+    }
     case 'notice':
       // signed out: the fix, as steps, with the two things to type set apart
       if (it.code === 'signed-out') {

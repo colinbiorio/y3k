@@ -625,6 +625,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     window.Y3K?.liquid?.ring?.(ui.barWrap, { trackTarget: ui.bar, framePx: 2, seed: 71.3, visibleWhen: () => !!root });
     window.addEventListener('wheel', onWheel, { passive: true });
     watchChat();
+    root.addEventListener('y3k:shell-to-coder', (e) => shellToCoder(e.detail));
     // (on a narrow screen the orb's band is hidden while it resizes by
     // social.showView, in the same task that moves it — body.code-shifting)
     follow();
@@ -1120,7 +1121,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // and the coder reads the file when it gets to it, as Claude Code's @ does.
   const SLASH_MAX = 60;
   const slash = { el: null, items: [], sel: 0, key: '', closedFor: null, kind: 'slash', at: null, seq: 0 };
-  function slashCommands(s) { return (s && S.commands?.[s.provider]) || []; }
+  // …and the room's own commands (LOCAL_MENU, below) stand in the same menu,
+  // beside the coder's: what a terminal answers itself. One the coder has
+  // too (/context, /usage) is listed once, as the coder's, and answered here.
+  function slashCommands(s) {
+    if (!s) return [];
+    const own = S.commands?.[s.provider] || [];
+    const taken = new Set(own.flatMap((c) => [c.name, ...(c.aliases || [])].map((n) => String(n).toLowerCase())));
+    return [...own, ...LOCAL_MENU.filter((c) => !taken.has(c.name) && !(c.aliases || []).some((a) => taken.has(a)))];
+  }
   function updateSlash() {
     const s = currentSession(), ta = dockUi?.ta;
     if (!s || !ta || (talkTo === 'orion' && companion()) || ta.value === slash.closedFor) { closeSlash(); return; }
@@ -1736,6 +1745,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       ['/', 'its commands'],
       ['/compare …', 'ask every coder here at once, side by side'],
       ['/compare', 'their answers side by side (Esc closes)'],
+      ['/status · /export · /model · /thinking · /mode', 'the room\'s own commands (/help lists them)'],
+      ['/mcp · /git · /context · /usage · /stop · /exit', 'what the toolbar does, typed'],
+      ['! <line>', 'run it in the folder\'s shell, the output here'],
       ['@', 'a file in this folder'],
       ['Shift+Tab', 'the next mode'],
       ['Esc', 'stop it · decline · close a menu'],
@@ -2445,6 +2457,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       else toast('Nothing to compare yet. /compare <question> asks every coder here at once.');
       return;
     }
+    // THE ROOM'S OWN COMMANDS (localCommand, below): answered here, never sent
+    if (!attachments.length && await localCommand(s, text)) { setDraft(''); recall.i = -1; renderDock(); return; }
     const asked = COMPARE.exec(text);
     if (asked && !attachments.length) {
       setDraft(''); recall.i = -1; renderDock();
@@ -2477,6 +2491,148 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // as they were (session.start aside). → whether this coder got it
   const COMPARE = /^\/compare\s+([\s\S]+)$/i;
   const COMPARE_VIEW = /^\/compare\s*$/i;
+
+  // --- THE ROOM'S OWN COMMANDS (2026-10-30) -----------------------------------------
+  // Everything a terminal answers itself — Claude Code's /help, /status,
+  // /model, /export, /cost, /mcp and the rest — kode answers in its own way:
+  // the toolbar's pickers, its drawers and panels, a note in the
+  // conversation, a file. They stand in the "/" menu beside the coder's own
+  // commands (slashCommands), and in the keys card. What is not one of these
+  // goes to the coder as typed (/compact, /init, the person's own commands).
+  // `!` is the terminal's own line: run in the folder's shell by the engine
+  // (shell.run, y3kode 0.3.10), its output shown here, and handed to the coder
+  // only when the person presses "to the coder".
+  const SHELL_ENGINE = '0.3.10';
+  const LOCAL_MENU = [
+    { name: 'help', description: 'the keys, and the room\'s own commands', builtin: true, local: true },
+    { name: 'status', description: 'this conversation: tool, model, thinking, mode, folder, context', builtin: true, local: true },
+    { name: 'export', description: 'save this conversation as Markdown', builtin: true, local: true },
+    { name: 'model', hint: '<name>', description: 'change the model', builtin: true, local: true },
+    { name: 'thinking', hint: '<level>', description: 'how hard it thinks: low · medium · high · xhigh · max', builtin: true, local: true, aliases: ['effort'] },
+    { name: 'mode', hint: '<mode>', description: 'ask · plan · accept edits · auto', builtin: true, local: true },
+    { name: 'context', description: 'what fills the context window', builtin: true, local: true },
+    { name: 'usage', description: 'your plan\'s limits, and the cost', builtin: true, local: true, aliases: ['limits', 'cost'] },
+    { name: 'mcp', description: 'connectors (/connectors too)', builtin: true, local: true },
+    { name: 'tools', description: 'coding tools and keys', builtin: true, local: true },
+    { name: 'activity', description: 'what y3kode did on this computer', builtin: true, local: true },
+    { name: 'git', description: 'the folder\'s changes', builtin: true, local: true, aliases: ['diff', 'changes'] },
+    { name: 'stop', description: 'stop what it is doing', builtin: true, local: true },
+    { name: 'exit', description: 'end this session (it stays in the history)', builtin: true, local: true, aliases: ['quit'] },
+  ];
+  const versionAtLeast = (have, want) => {
+    const a = String(have || '').split('.').map(Number), b = String(want || '').split('.').map(Number);
+    for (let i = 0; i < 3; i++) { const x = a[i] || 0, y = b[i] || 0; if (x !== y) return x > y; }
+    return true;
+  };
+  // a line of the room's own in the conversation (state.js local.*)
+  function roomLine(s, e) {
+    const out = apply(S, { sid: s.sid, ...e }, { replay: true });
+    for (const it of out.changed) dirty.add(it);
+    frame(); scrollToBottom();
+  }
+  async function localCommand(s, text) {
+    const t = String(text || '').trim();
+    if (t.startsWith('!')) { await runShell(s, t.slice(1).trim()); return true; }
+    const m = /^\/([a-z][\w-]*)(?:\s+([\s\S]*))?$/i.exec(t);
+    if (!m) return false;
+    const name = m[1].toLowerCase(), arg = (m[2] || '').trim();
+    // a command the coder has itself (/context, /usage as Claude Code reports
+    // them) is the coder's: sent as typed, answered in its own words
+    const own = new Set((S.commands?.[s.provider] || []).flatMap((c) => [c.name, ...(c.aliases || [])].map((n) => String(n).toLowerCase())));
+    if (own.has(name)) return false;
+    switch (name) {
+      case 'help': showKeys(true); return true;
+      case 'status': roomLine(s, { type: 'local.note', text: statusText(s) }); return true;
+      case 'export': exportConversation(s); return true;
+      case 'model': {
+        if (!arg) { toast('/model <name> — the names are in the toolbar\'s picker'); return true; }
+        const r = await cmd({ cmd: 'session.setModel', sid: s.sid, model: arg });
+        if (!r?.ok) toast(refusedWhy(r, 'could not change the model')); else schedule('meta');
+        return true;
+      }
+      case 'thinking': case 'effort': {
+        if (!arg) { toast('/thinking low · medium · high · xhigh · max'); return true; }
+        const r = await cmd({ cmd: 'session.setEffort', sid: s.sid, effort: arg.toLowerCase() });
+        if (!r?.ok) toast(refusedWhy(r, 'could not change the thinking')); else schedule('meta');
+        return true;
+      }
+      case 'mode': {
+        const want = { ask: 'ask', plan: 'plan', accept: 'acceptEdits', 'accept edits': 'acceptEdits', acceptedits: 'acceptEdits', edits: 'acceptEdits', auto: 'auto' }[arg.toLowerCase()];
+        if (!want) { toast('/mode ask · plan · accept edits · auto'); return true; }
+        await setMode(s, want);
+        return true;
+      }
+      case 'context': togglePanel(bar?.ring || null, true); return true;
+      case 'usage': case 'limits': case 'cost': togglePanel(bar?.bars || bar?.ring || null, true); return true;
+      case 'mcp': case 'connectors': toggleDrawer('connectors'); return true;
+      case 'tools': toggleDrawer('providers'); return true;
+      case 'activity': toggleDrawer('activity'); return true;
+      case 'git': case 'diff': case 'changes': toggleDrawer('changes'); return true;
+      case 'stop':
+        if (s.state === 'running' || s.state === 'waiting') await interrupt(s); else toast('Nothing is running.');
+        return true;
+      case 'exit': case 'quit': await stopSession(s); return true;
+      default: return false;
+    }
+  }
+  function statusText(s) {
+    const ctx = s.usage?.context;
+    const line = (k, v) => (v ? `**${k}** ${v}` : null);
+    return [
+      line('y3kode', [hello?.version, hello?.platform].filter(Boolean).join(' · ')),
+      line('tool', [AGENT_NAME[s.provider] || s.provider, s.version].filter(Boolean).join(' ')),
+      line('model', [prettyModel(s.model) || s.model, s.effort ? `thinking ${s.effort}` : null].filter(Boolean).join(' · ')),
+      line('mode', MODE_INFO[s.mode]?.long || s.mode),
+      line('folder', [s.cwd, s.branch ? `branch ${s.branch}` : null, s.git?.files?.length ? `${s.git.files.length} changed` : null].filter(Boolean).join(' · ')),
+      line('context', ctx?.percent != null ? `${ctx.percent}% of the window` : 'not read yet'),
+      line('turns', String(s.usage?.turns || 0)),
+      line('session', [s.sid, s.providerSessionId].filter(Boolean).join(' · ')),
+    ].filter(Boolean).join('  \n');
+  }
+  // the conversation as Markdown: both sides, the tools as one line each, the
+  // presence's words marked as its own
+  function conversationMarkdown(s) {
+    if (!s) return '';
+    const out = [`# kode — ${s.title || s.cwd || s.sid}`, '', [AGENT_NAME[s.provider] || s.provider, prettyModel(s.model) || s.model, s.cwd].filter(Boolean).join(' · '), ''];
+    for (const it of s.items) {
+      if (it.kind === 'user') out.push(`**You:** ${it.text || ''}${it.images ? ` _(+${it.images} image${it.images > 1 ? 's' : ''})_` : ''}`, '');
+      else if (it.kind === 'assistant') { for (const b of it.blocks || []) if (b.kind === 'text' && b.text) out.push(b.text, ''); }
+      else if (it.kind === 'tool') out.push(`> ${it.title || it.name || 'tool'}${it.status && it.status !== 'ok' && it.status !== 'running' ? ` (${it.status})` : ''}`, '');
+      else if (it.kind === 'orion') out.push(`**${it.who === 'you' ? 'You → ' : ''}${it.name || 'presence'}:** ${it.text || ''}`, '');
+      else if (it.kind === 'shell') out.push('```', `$ ${it.command}`, it.output || '', '```', '');
+      else if (it.kind === 'note') out.push(`_${String(it.text || '').replace(/\*\*/g, '')}_`, '');
+    }
+    return out.join('\n');
+  }
+  function exportConversation(s) {
+    const md = conversationMarkdown(s);
+    if (typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') { toast('This browser cannot save a file.'); return; }
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '');
+    const name = `kode-${String(s.title || s.cwd?.split('/').pop() || 'conversation').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'conversation'}-${stamp}.md`;
+    const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+    const a = h('a', { href: url, download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`Saved ${name}`);
+  }
+  // `!`: the terminal's own line, run by the engine in the folder's shell
+  let shellSeq = 0;
+  async function runShell(s, command) {
+    if (!command) { toast('! <line> runs it in the folder\'s shell — ! git log -3'); return; }
+    if (!versionAtLeast(hello?.version, SHELL_ENGINE)) { toast(`y3kode ${hello?.version || ''} cannot run a shell line — update y3kode (${SHELL_ENGINE})`); return; }
+    const id = `${Date.now().toString(36)}${(shellSeq++).toString(36)}`;
+    roomLine(s, { type: 'local.shell', id, command });
+    const r = await cmd({ cmd: 'shell.run', cwd: s.cwd, command }).catch(() => null);
+    if (!r?.ok) { roomLine(s, { type: 'local.shell.done', id, output: '', error: refusedWhy(r, 'could not run it') }); return; }
+    roomLine(s, { type: 'local.shell.done', id, output: r.output, code: r.code, error: r.error || null, ms: r.ms, truncated: !!r.truncated });
+  }
+  // "to the coder" on a shell line: the line and its output into the composer
+  function shellToCoder(it) {
+    if (!it || !dockUi?.ta) return;
+    const body = String(it.output || '').trim();
+    setDraft(`I ran \`${it.command}\` in the folder${it.code != null && it.code !== 0 ? ` (exit ${it.code})` : ''}:\n\n\`\`\`\n${body.slice(0, 20000)}\n\`\`\`\n`);
+    dockUi.ta.focus?.({ preventScroll: true });
+  }
   const readyIn = async (sid, ms = 60000) => {
     for (let t = 0; t < ms; t += 250) {
       const x = S.sessions.get(sid);
@@ -3275,6 +3431,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     busy: () => liveSessions(S).length > 0,
     // a line said to the conversation from elsewhere on the site (social.kodeSay)
     say: (text) => sayFromSite(text),
+    // the conversation as Markdown (/export), and the engine's hello, for the tests
+    _markdown: (sid) => conversationMarkdown(S.sessions.get(sid)),
+    _hello: (patch) => (patch ? (hello = { ...(hello || {}), ...patch }) : hello),
     _state: S,
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them
@@ -3337,7 +3496,9 @@ export function slashMatches(cmds, q) {
     if (n.startsWith(t)) return 1;
     if ((c.aliases || []).some((a) => String(a).toLowerCase().startsWith(t))) return 2;
     if (n.includes(t)) return 3;
-    if (String(c.description || '').toLowerCase().includes(t)) return 4;
+    // (the room's own commands answer to their names and aliases only: a
+    // description that merely contains the letters would crowd the coder's)
+    if (!c.local && String(c.description || '').toLowerCase().includes(t)) return 4;
     return -1;
   };
   return (cmds || []).map((c) => [rank(c), c]).filter(([r]) => r >= 0)

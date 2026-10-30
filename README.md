@@ -251,6 +251,29 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **Everything a terminal does, in the room (y3kode 0.3.10).**
+  Colin: "every single thing that is possible from inside a traditional
+  coding terminal like claude code or codex, is also present" — with the one
+  difference kept: one conversation, forever. kode now answers a terminal's
+  own commands itself, and they stand in the "/" menu beside the coder's:
+  `/help` (the keys, and these), `/status` (tool, model, thinking, mode,
+  folder and branch, context, turns, session), `/export` (the conversation
+  saved as Markdown — both sides, the tools as one line each, the presence's
+  words marked as its own), `/model <name>`, `/thinking <level>`, `/mode
+  <mode>`, `/context`, `/usage` (`/cost`), `/mcp`, `/tools`, `/activity`,
+  `/git` (`/diff`), `/stop`, `/exit`. A command the coder reports as its own
+  (Claude Code's `/context`, `/usage`) stays the coder's, listed once and
+  sent as typed; so does everything else (`/compact`, `/init`, the person's
+  own commands and skills). And `! <line>` is the terminal's own line: y3kode
+  0.3.10 runs it in the trusted folder's own shell (`shell.run`) and the room
+  shows the line and its output in a bubble of its own, handed to the coder
+  only when "to the coder" is pressed, which puts both in the composer. It
+  keeps CODE.md's line 7 — a page can ask, never say yes: every line is a
+  question on the computer first (the desktop's dialog, the engine's terminal
+  or its approval page), then audited; a minute and 64KB at most, the process
+  tree killed at the cap. An older y3kode says to update. The keys card (`?`)
+  lists them all.
+
 - **2026-10-30** — **kode from anywhere.** The chat bar is the coder's own
   composer in the room (the fresh look, below); now a line said anywhere else
   on the site that names kode (`kode: …`, `/kode …`, `hey kode …`, `@kode …`)
