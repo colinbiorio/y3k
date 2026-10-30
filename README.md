@@ -252,6 +252,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **It taps its own world.** A seventh beat, and the first
+  that is the room's rather than the body's: `~tap~` inline in the presence's
+  speech taps the room it stands in on that word, exactly as a person's
+  finger does — a meteor in deep space, lightning on the stormy sea, a blow
+  that rings the sand plate, a gust of petals, and in the metal room a panel
+  lit behind the body where it stands — with a small knock felt in the field.
+  Never spoken, never shown, like every beat; `~tap 0~` is silence. Tests in
+  `test/beats.test.mjs`.
+
 - **2026-10-30** — **It comes to your pointer.** `follow hand` needed the
   camera; `follow pointer` needs nothing — the presence (or you, typed:
   `follow/pointer`) has the body come to the mouse, or to a finger on the

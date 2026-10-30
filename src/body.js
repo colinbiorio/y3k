@@ -3580,12 +3580,18 @@ export function createBody(container) {
   const BEAT_ATTACK = 0.35;  // per 60Hz frame: ~50ms to the peak
   const BEAT_RELEASE = 0.045;// per 60Hz frame: ~1.1s back to nothing
   function beat(name, n) {
-    const b = BEATS[String(name || '').toLowerCase()];
+    const key = String(name || '').toLowerCase();
+    const b = BEATS[key];
     if (!b) return false;
     // 0-9 around a nominal 5, the same scale every shape argument uses. A beat
     // written as 0 is silence, and is honoured as silence.
     const g = Math.max(0, Math.min(9, n == null ? 5 : +n)) / 5;
     if (!g) return true;
+    // ~tap~ IS THE ROOM'S (2026-10-30): the same answer the person's tap gets,
+    // on the word — every other world's own (tapPanel hands it to envs.tap),
+    // and in the metal room a panel lit behind the body, where its centre is.
+    // The knock below is all it does to the field.
+    if (key === 'tap') { const o = api.orbPx(); tapPanel(o.x, o.y); }
     // Beats ACCUMULATE: three flares in a sentence build, they do not reset to
     // one flare. Bounded so a reply full of them cannot drive the field past
     // what a mood could have asked for on its own.

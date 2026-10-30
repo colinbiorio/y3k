@@ -141,6 +141,23 @@ ok('BEATS ARE TAUGHT ONLY WHERE THE REPLY STREAMS', () => {
   }
 });
 
+// 2026-10-30: ~tap~, the room's beat — the presence taps the room it stands
+// in, on the word, and the room answers as it does a person's finger.
+ok('~tap~ is the room\'s: the splitter answers to it, the field gets only a knock, and body.js hands it to the room', () => {
+  assert.deepEqual(run(['Watch the sky. ~tap~ There.']), { text: 'Watch the sky. There.', beats: ['tap:5'] });
+  assert.deepEqual(run(words('a ~tap 9~ b')).beats, ['tap:9']);
+  assert.equal(scrubTags('a ~tap 7~ b'), 'a b', 'a tap is spoken');
+  assert.ok(BEATS.tap.amp > 0 && BEATS.tap.amp <= 0.1 && BEATS.tap.val > 0 && BEATS.tap.val <= 0.1 && Object.keys(BEATS.tap).length === 2, 'the knock is more than a knock');
+  const src = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  const at = src.indexOf('  function beat(name, n) {');
+  const beatFn = src.slice(at, src.indexOf('\n  }', at));
+  assert.ok(/if \(key === 'tap'\) \{ const o = api\.orbPx\(\); tapPanel\(o\.x, o\.y\); \}/.test(beatFn), 'a tap never reaches the room');
+  assert.ok(beatFn.indexOf("key === 'tap'") > beatFn.indexOf('if (!g) return true;'), 'a tap written as 0 still taps');
+  assert.ok(/if \(lastEnv !== 'room'\) \{ envs\.tap\(\); return; \}/.test(src), 'tapPanel no longer hands every other world its own tap');
+  const hint = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+  assert.ok(/~tap~ taps the room you stand in/.test(hint) && /a panel lit behind you in the metal room/.test(hint), 'the lesson does not say what a tap is');
+});
+
 console.log('\nthe transient never becomes the state:');
 
 ok('every beat is a bounded offset, and the pairs really do oppose', () => {

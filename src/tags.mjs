@@ -1085,10 +1085,11 @@ export function kommandWords() {
 // and "~approximately~" are not beat names, so they are never touched. Unknown
 // words fall on the floor in silence, the same bargain the shape block makes.
 //
-// Six verbs in three opposed pairs. The pairing is the point — a language in
-// which you can say the opposite of a thing is richer than a list of the same
-// length, and the presence supplies the feeling; these only say what the body
-// DOES. Values are additive offsets on the eased state, never a new state.
+// Six verbs in three opposed pairs, and a seventh that is the room's. The
+// pairing is the point — a language in which you can say the opposite of a
+// thing is richer than a list of the same length, and the presence supplies
+// the feeling; these only say what the body DOES. Values are additive offsets
+// on the eased state, never a new state.
 export const BEATS = {
   flare:  { amp:  0.20, val:  0.15, size:  0.5, radius:  0.04 },  // brighter, wider — it lands on you
   hush:   { amp: -0.09, val: -0.20, size: -0.5 },                 // the held breath, the dimming
@@ -1096,6 +1097,12 @@ export const BEATS = {
   draw:   { amp: -0.04, radius: -0.09, size: -0.4, speed: 0.20 }, // breathing in, gathering
   shiver: { freq:  1.8, speed:  0.45, amp:  0.06 },               // a tremor through it
   snap:   { glitch: 0.75, freq: 1.2, speed: 0.8 },                // a break in the signal
+  // THE ROOM'S, NOT THE BODY'S (2026-10-30): ~tap~ is the presence tapping the
+  // room it stands in, on the word — the same answer the person's finger gets
+  // (environments.js tap(): a meteor, bubbles, lightning, a blow that rings the
+  // sand plate; in the metal room a panel lit behind the body). body.js beat()
+  // hands it to the room; what is here is only the knock felt in the field.
+  tap:    { amp: 0.08, val: 0.06 },
 };
 export const BEAT_NAMES = Object.keys(BEATS);
 // A runaway reply must never become work: past this many the rest fall silently.
