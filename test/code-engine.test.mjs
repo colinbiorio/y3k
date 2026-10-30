@@ -6,7 +6,7 @@
 // (terminal and approval page, first answer wins).
 import assert from 'node:assert';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,9 +46,14 @@ ok('only known commands, only known fields, only the four modes', () => {
   assert.equal(validateCommand([]).ok, false);
 });
 
-ok('nothing in the protocol runs a command or skips permissions', () => {
+ok('nothing in the protocol skips permissions, and the one command that runs a line (shell.run, 0.3.10) asks on this computer first, every time', () => {
   const all = JSON.stringify({ COMMANDS, EVENTS });
-  assert.ok(!/bypass|dangerous|exec\b|shell\./i.test(all));
+  assert.ok(!/bypass|dangerous|exec\b/i.test(all));
+  assert.deepEqual(Object.keys(COMMANDS).filter((c) => /shell\./.test(c)), ['shell.run'], 'no other way to a shell');
+  const src = readFileSync(new URL('../y3k-code/engine.mjs', import.meta.url), 'utf8');
+  const run = src.slice(src.indexOf("'shell.run': async"), src.indexOf("'git.diff': async"));
+  assert.ok(run.indexOf("if (!(await ask('shell.run', { folder: t.real, command: c.slice(0, 400) }))) return { ok: false, code: 'declined', error: 'Not run.' };") > 0, 'the line runs without a yes on the machine');
+  assert.ok(run.indexOf('const t = trusted(cwd);') < run.indexOf("await ask('shell.run'") && run.indexOf("await ask('shell.run'") < run.indexOf('spawnChild('), 'trusted, then asked, then run');
 });
 
 console.log('\nthe event stream:');
@@ -708,6 +713,35 @@ await aok('workspace.files: a trusted folder\'s file names, matched to what is t
   assert.deepEqual((await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'src/c' })).files.slice(0, 2), ['src/code/', 'src/code/view.js']);
   assert.equal((await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'x'.repeat(201) })).ok, false, 'a long query is refused, not cut');
 });
+
+// THE TERMINAL'S OWN LINE (2026-10-30, 0.3.10): shell.run runs a line in a
+// trusted folder's own shell and answers its output and exit code; a folder
+// not trusted is refused, an empty line is refused, every line is audited.
+{
+  const repo = realpathSync(mkdtempSync(join(base, 'shell-')));
+  const none = join(base, 'no-such-bin');
+  const engine = createEngine({ store: createStore(join(base, 'cfg-shell')), consent: fixedConsent(true), env: process.env, bins: { claude: none, codex: none, gemini: none, opencode: none } });
+  const refused = await engine.handle({ cmd: 'shell.run', cwd: repo, command: 'echo hi' });
+  assert.equal(refused.ok, false); assert.equal(refused.code, 'untrusted');
+  assert.equal((await engine.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+  const r = await engine.handle({ cmd: 'shell.run', cwd: repo, command: 'echo hi && pwd' });
+  assert.equal(r.ok, true, r.error); assert.equal(r.code, 0); assert.ok(r.output.includes('hi\n') && r.output.includes(repo), r.output);
+  assert.ok(r.ms >= 0 && !r.truncated);
+  const bad = await engine.handle({ cmd: 'shell.run', cwd: repo, command: 'echo oops 1>&2; exit 3' });
+  assert.equal(bad.ok, true); assert.equal(bad.code, 3); assert.ok(bad.output.includes('oops'), 'stderr comes too');
+  assert.equal((await engine.handle({ cmd: 'shell.run', cwd: repo, command: '   ' })).ok, false, 'nothing to run');
+  assert.ok(engine.audit.tail(50).some((a) => a.kind === 'shell' && a.command === 'echo hi && pwd'), 'audited');
+  assert.equal(validateCommand({ cmd: 'shell.run', cwd: repo, command: 'x', extra: 1 }).ok, false, 'no other field');
+  passed += 1; console.log('  ✓ shell.run: a line in the trusted folder\'s own shell, its output and exit code back; refused untrusted, refused empty, audited (0.3.10)');
+  // …and nothing runs where this computer says no
+  const shyStore = createStore(join(base, 'cfg-shell-no'));
+  shyStore.setFolder(repo, { trusted: true, trustedAt: Date.now(), lastUsed: Date.now(), name: 'shell', isGit: false });
+  const shy = createEngine({ store: shyStore, consent: fixedConsent(false), env: process.env, bins: { claude: none, codex: none, gemini: none, opencode: none } });
+  const no = await shy.handle({ cmd: 'shell.run', cwd: repo, command: 'echo never' });
+  assert.equal(no.ok, false); assert.equal(no.code, 'declined', JSON.stringify(no));
+  assert.ok(!shy.audit.tail(50).some((a) => a.kind === 'shell'), 'nothing audited as run');
+  passed += 1; console.log('  ✓ shell.run: a no on this computer runs nothing');
+}
 
 rmSync(base, { recursive: true, force: true });
 console.log(`\n${passed} checks passed.`);

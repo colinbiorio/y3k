@@ -1002,7 +1002,10 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     press(ta, 'Tab');
     assert.equal(ta.value, '/usage ');
     type('/');
-    assert.equal(names().length, 4, 'a bare slash lists them all');
+    // 2026-10-30: the coder's four, and the room's own twelve beside them
+    // (the two the coder has too — /context, /usage — are listed once, as its)
+    assert.equal(names().length, 16, 'a bare slash lists them all');
+    assert.ok(names().includes('/status') && names().includes('/export') && !names().includes('/connectors'), 'the room\'s own, by name');
     press(ta, 'Escape');
     await settle();
     assert.equal(names().length, 0, 'Esc closes the menu');
@@ -1897,6 +1900,64 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       assert.equal($$('div.cv-list > div.it.or').length, 1);
       cv.close();
     } finally { delete window.y3kCode; }
+  });
+
+  // THE ROOM'S OWN COMMANDS (2026-10-30): what a terminal answers itself.
+  await ok('the view: the room answers its own commands (/help /status /model /thinking /mode /stop /exit /export), sends the coder\'s own as typed, and `!` runs a line in the folder\'s shell on y3kode 0.3.10 — or says to update', async () => {
+    const asked = bridge();
+    const plain = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => { const r = await plain(o); return o.cmd === 'shell.run' ? { ok: true, code: 0, output: 'hi\n', ms: 12 } : r; };
+    const toasts = [];
+    const cv = await viewWith('local-cmds', { toast: (m) => toasts.push(m) });
+    const S = cv._state;
+    cv.open();
+    await settle();
+    tick();
+    cv._feed({ sid: 'lc', type: 'session.started', provider: 'claude', cwd: '/tmp/lc', mode: 'ask', model: 'claude-fable-5-1', providerSessionId: U(90) });
+    cv._feed({ sid: 'lc', type: 'session.state', state: 'idle' });
+    cv._feed({ sid: 'lc', type: 'message.user', text: 'hello there' });
+    cv._feed({ sid: 'lc', type: 'message.delta', id: 'r1', block: 0, kind: 'text', text: 'Hi.' });
+    cv._feed({ sid: 'lc', type: 'message.end', id: 'r1' });
+    tick();
+    assert.equal(S.active, 'lc');
+    const say = async (text) => { const ta = $('textarea.cv-input'); ta.value = text; ta.dispatch('keydown', { key: 'Enter' }); await settle(); tick(); };
+    const sent = () => asked('session.send').map((o) => o.text);
+    await say('/help');
+    assert.ok($('div.cv-keys'), '/help shows the keys');
+    assert.deepEqual(sent(), [], 'nothing went to the coder');
+    await say('/status');
+    const note = [...$$('div.cv-list > div.it.cv-localnote')].at(-1);
+    assert.ok(note && /Fable 5\.1/.test(note.textContent) && /\/tmp\/lc/.test(note.textContent) && /ask/i.test(note.textContent), 'the status names the model, the folder and the mode: ' + note?.textContent);
+    await say('/model claude-opus-5-5');
+    assert.deepEqual(asked('session.setModel').map((o) => o.model), ['claude-opus-5-5']);
+    await say('/thinking MAX');
+    assert.deepEqual(asked('session.setEffort').map((o) => o.effort), ['max']);
+    await say('/mode accept edits');
+    assert.deepEqual(asked('session.setMode').map((o) => o.mode), ['acceptEdits']);
+    await say('/stop');
+    assert.equal(toasts.at(-1), 'Nothing is running.');
+    assert.deepEqual(asked('session.interrupt'), []);
+    const md = cv._markdown('lc');
+    assert.ok(/\*\*You:\*\* hello there/.test(md) && /\nHi\.\n/.test(md), '/export has both sides: ' + md);
+    // the coder's own commands still go to it, as typed
+    await say('/compact keep the names');
+    assert.deepEqual(sent(), ['/compact keep the names']);
+    // `!`: on an engine before 0.3.10, a word; on 0.3.10, the line runs and its output is drawn
+    cv._hello({ version: '0.3.9' });
+    await say('! ls');
+    assert.match(toasts.at(-1), /update y3kode \(0\.3\.10\)/);
+    assert.deepEqual(asked('shell.run'), []);
+    cv._hello({ version: '0.3.10' });
+    await say('! echo hi');
+    assert.deepEqual(asked('shell.run').map((o) => [o.cwd, o.command]), [['/tmp/lc', 'echo hi']]);
+    const sh = [...$$('div.cv-list > div.it.cv-shell')].at(-1);
+    assert.ok(sh && /\$ echo hi/.test(sh.textContent) && sh.querySelector('pre.cv-shellout')?.textContent === 'hi\n' && /done/.test(sh.textContent), 'the line and its output, drawn: ' + sh?.textContent);
+    assert.deepEqual(sent(), ['/compact keep the names'], 'the output never went to the coder on its own');
+    assert.ok(/```\n\$ echo hi\nhi\n\n```/.test(cv._markdown('lc')), 'and it is in the export');
+    await say('/exit');
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['lc']);
+    cv.close();
+    delete window.y3kCode;
   });
 
   // 2026-10-08: four sessions is never a dead end. The engine had

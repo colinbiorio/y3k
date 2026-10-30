@@ -572,6 +572,27 @@ export function apply(S, e, { replay = false } = {}) {
     case 'git.status': s.git = { branch: e.branch, ahead: e.ahead | 0, behind: e.behind | 0, files: e.files || [] }; s.branch = e.branch; out.meta = true; break;
     // Said to or by the presence from the Code screen. Local to this page —
     // never sent to the engine, never on the coder's transcript.
+    // THE ROOM'S OWN LINES (2026-10-30; code-view.js localCommand): a note the
+    // room answers itself (/status), and a shell line (`!`) with its output —
+    // kept with the conversation on screen, never sent to the coder.
+    case 'local.note': {
+      const it = item('note', { text: String(e.text || ''), title: e.title || null });
+      s.items.push(it); touch(it);
+      break;
+    }
+    case 'local.shell': {
+      const it = item('shell', { id: e.id, command: String(e.command || ''), output: '', status: 'running', code: null, error: null, ms: 0, truncated: false });
+      s.byKey.set('sh:' + e.id, it);
+      s.items.push(it); touch(it);
+      break;
+    }
+    case 'local.shell.done': {
+      const it = s.byKey.get('sh:' + e.id);
+      if (!it) break;
+      Object.assign(it, { output: String(e.output || ''), status: e.error ? 'failed' : 'done', code: e.code ?? null, error: e.error || null, ms: e.ms || 0, truncated: !!e.truncated });
+      touch(it);
+      break;
+    }
     case 'local.orion': {
       const it = item('orion', { who: e.who, text: e.text, name: e.name || null });
       s.items.push(it); touch(it);

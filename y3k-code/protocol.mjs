@@ -88,6 +88,8 @@ export const COMMANDS = {
   'session.fork': { sid: S(64) },
   'session.rewind': { sid: S(64), at: S(64, false), cut: N(), model: S(120, false) },
   'session.toolOutput': { sid: S(64), callId: S(200) },
+  // the terminal's own line (0.3.10): a shell command in a trusted folder, its output back to the page
+  'shell.run': { cwd: S(4096), command: S(4000) },
   'permission.answer': { sid: S(64), requestId: S(200), decision: S(10), scope: S(10, false), message: S(4000, false) },
   'question.answer': { sid: S(64), requestId: S(200), answers: O(true) },
   'mcp.list': {},

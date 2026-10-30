@@ -5663,6 +5663,21 @@ html.orb-big .cv-list { padding-left: max(18px, 12%); padding-right: max(18px, 1
 html.orb-big .cv-list > .it, html.orb-big .cv-list > .cv-older { max-width: min(760px, 84%); }
 html.orb-big .cv-dock { max-width: none; }
 
+/* THE ROOM'S OWN LINES (2026-10-30): a note it answers itself (/status) and a
+   shell line (!) with its output, in the bubbles' glass on the coder's side */
+.code-root .it.sys:is(.cv-localnote, .cv-shell) { align-self: flex-start; border-radius: 14px; padding: 9px 13px; font-size: 0.84rem; line-height: 1.45;
+  background-color: rgba(14, 16, 22, 0.74); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 14px 34px -18px rgba(0, 0, 0, 0.8); }
+.code-root .it.sys:is(.cv-localnote, .cv-shell)::after { background: var(--metal-line); opacity: 0.5; }
+.cv-localnote { max-width: min(100%, 640px); color: #d9dde5; }
+.cv-localnote .cv-notetitle { display: block; margin-bottom: 4px; color: #e7e9ee; }
+.cv-localnote p { margin: 0 0 6px; } .cv-localnote p:last-child { margin: 0; }
+.cv-shell { max-width: min(100%, 720px); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem; }
+.cv-shellcmd { color: #e7e9ee; white-space: pre-wrap; word-break: break-word; }
+.cv-shelldollar { color: #9be8a0; } .cv-shell.st-error .cv-shelldollar { color: #ff8a80; }
+.cv-shellout { margin: 6px 0 0; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #cfd4dc; font: inherit; }
+.cv-shellerr { margin-top: 4px; color: #ffb4a2; }
+.cv-shellfoot { display: flex; gap: 10px; align-items: center; margin-top: 6px; font-size: 0.72rem; font-family: inherit; }
+
 /* the dock (the turn's line, the todos, the agents): bottom left, the coder's side */
 .cv-dock { padding: 6px 18px 10px; align-items: flex-start; max-width: calc(50% - var(--cv-gap) / 2 + 18px); margin: 0; }
 .cv-strip { max-width: none; }

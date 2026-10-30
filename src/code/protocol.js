@@ -26,7 +26,7 @@ export const COMMANDS = [
   'github.repos', 'github.clone', 'session.start', 'session.send', 'session.interrupt',
   'session.stop', 'session.setMode', 'session.setModel', 'session.setEffort', 'session.contextUsage',
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork', 'session.rewind',
-  'session.toolOutput', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
+  'session.toolOutput', 'shell.run', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',
   'audit.tail', 'orb.done', 'brain.complete', 'brain.partial', 'computer.status', 'computer.look', 'computer.act', 'computer.stop',
   'life.status', 'life.start', 'life.state', 'life.do', 'life.stop', 'engine.update',

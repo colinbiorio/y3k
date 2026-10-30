@@ -28,15 +28,17 @@ import { createComputer } from './computer.mjs';
 import { createLife } from './life.mjs';
 import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
-import { spawnChild } from './proc.mjs';
+import { spawnChild, killTree } from './proc.mjs';
 
-export const VERSION = '0.3.9';   // 0.2: brain.complete — your presence thinking on your own sign-in
+const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
+export const VERSION = '0.3.10';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
                                   // 0.3.3: brain.complete says how fast it wrote (speed: the stream's own clock, brain.mjs speedOf); session.start aside (kode's /compare); the orb tool names all twelve rooms (orb.mjs)
                                   // 0.3.4: life.* — lucid on this computer, for the site's life mode (life.mjs)
                                   // 0.3.5: subagents and background shells as Claude Code shows them: type, doing, tool uses, tokens, time; a background task's card held open until it is done (adapters/claude.mjs)
+                                  // 0.3.10: shell.run — the page's `!`, a line in the trusted folder's own shell
                                   // 0.3.9: a resume of a conversation Claude Code has no transcript of is refused before anything is spawned (code 'lost'); a crash that says so marks the index row, and session.list carries `lost` (adapters/claude.mjs hasTranscript)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
@@ -545,6 +547,49 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (t.error) return { ok: false, error: t.error };
       const st = await gitStatus(t.real);
       return st.error ? { ok: false, error: st.error } : { ok: true, ...st };
+    },
+    // THE TERMINAL'S OWN LINE (2026-10-30; the page's `!`, y3kode 0.3.10). A
+    // shell command run in a folder the person trusted, as their terminal
+    // would run it — their own shell, on their own machine — and its output
+    // back to the page, which shows it and never hands it to the coder unless
+    // the person sends it on. Asked on this computer first, every line
+    // (consent.mjs 'shell.run': a page can ask, never say yes — CODE.md, line
+    // 7); audited like everything; a minute at most; 64KB of output at most;
+    // the process tree killed at the cap. The coder's modes are the coder's:
+    // this is the person typing in their own folder, and saying yes where the
+    // folder is.
+    'shell.run': async ({ cwd, command }) => {
+      const t = trusted(cwd);
+      if (t.error) return { ok: false, error: t.error, code: t.code };
+      const c = String(command || '').trim();
+      if (!c) return { ok: false, error: 'Nothing to run.' };
+      // a page can ask; this computer says yes (CODE.md, line 7) — every line
+      if (!(await ask('shell.run', { folder: t.real, command: c.slice(0, 400) }))) return { ok: false, code: 'declined', error: 'Not run.' };
+      audit.write('shell', { cwd: t.real, command: c.slice(0, 400) });
+      const win = platform() === 'win32';
+      const sh = win ? (env.ComSpec || 'cmd.exe') : (env.SHELL || '/bin/sh');
+      const args = win ? ['/d', '/s', '/c', c] : ['-c', c];
+      const start = Date.now();
+      return new Promise((resolve) => {
+        let out = '', truncated = false, done = false, timer = null;
+        const finish = (code, error) => {
+          if (done) return;
+          done = true; clearTimeout(timer);
+          resolve({ ok: true, code, output: out, truncated, ms: Date.now() - start, ...(error ? { error } : {}) });
+        };
+        let child;
+        try { child = spawnChild(sh, args, { cwd: t.real, env, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { return finish(null, String(e?.message || e)); }
+        const take = (d) => {
+          if (truncated) return;
+          out += String(d);
+          if (out.length > SHELL_MAX) { out = out.slice(0, SHELL_MAX); truncated = true; }
+        };
+        child.stdout?.setEncoding('utf8').on('data', take);
+        child.stderr?.setEncoding('utf8').on('data', take);
+        timer = setTimeout(() => { try { killTree(child); } catch { /* gone */ } finish(null, `Stopped after ${SHELL_MS / 1000}s.`); }, SHELL_MS);
+        child.on('error', (e) => finish(null, String(e?.message || e)));
+        child.on('exit', (code, signal) => finish(code, signal ? `killed by ${signal}` : null));
+      });
     },
     'git.diff': async ({ cwd, path, staged }) => {
       const t = trusted(cwd);
