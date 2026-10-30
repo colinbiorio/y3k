@@ -4038,7 +4038,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl, room: roomHere } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, room: roomHere, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
       // a page loaded for another account (forAnother): it reloads, and nothing is read or written
       if (forAnother(req, loadedFor)) return json(409, RELOAD);
       // Marked here, before anything else touches the array: the scrub map and

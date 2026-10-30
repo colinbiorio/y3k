@@ -432,7 +432,7 @@ ok('the page says which room is on screen, and the readout names it — honest s
   assert.ok(/if \(room\) body\.room = room;/.test(brain), 'brain.js does not put the room on the wire');
   assert.ok(/const WORN_HINT = \(w, room = null\) =>/.test(srv) && srv.includes("${room ? `\n- the room: ${room}` : ''}"), 'the readout cannot name the room');
   assert.equal((srv.match(/WORN_HINT\(worn\.readout\(presence\.id\), roomName\(roomHere\)\)/g) || []).length, 2, 'both chat routes name the room');
-  assert.equal((srv.match(/room: roomHere \} = await readJsonBody/g) || []).length, 2, 'both chat routes read it off the request');
+  assert.equal((srv.match(/\broom: roomHere\b[^\n]*\} = await readJsonBody\(req, BRAIN_BODY_MAX\)/g) || []).length, 2, 'both chat routes read it off the request');
   assert.ok(/const roomName = \(id\) => \(typeof id === 'string' && ENVIRONMENTS\.find\(\(e\) => e\.id === id\)\?\.name\) \|\| null;/.test(srv), 'a room id is not turned into its name');
 });
 
