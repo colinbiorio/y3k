@@ -607,6 +607,20 @@ remoteEye.onArrive(() => syncHands());
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
 body.setFollowSource('hand', handView.hand);   // 'follow hand': the lead hand's index tip, pulled each frame
+// 'follow pointer' (2026-10-30): the person's mouse, or their finger on the
+// glass — the same contract as the hand's source ({ x, y, ok } in window
+// pixels, pulled each frame by the body) with no camera at all. ok once the
+// pointer has been seen; it goes when the pointer leaves the window or the
+// window loses focus, and the body holds where it is, as it does for a lost
+// hand. A finger that lifts leaves its last place standing, so a tap on the
+// glass says "come here" and the body comes.
+const pointerAt = { x: 0, y: 0, ok: false };
+const pointerSeen = (e) => { pointerAt.x = e.clientX; pointerAt.y = e.clientY; pointerAt.ok = true; };
+window.addEventListener('pointermove', pointerSeen, { passive: true });
+window.addEventListener('pointerdown', pointerSeen, { passive: true });
+window.addEventListener('pointerout', (e) => { if (!e.relatedTarget) pointerAt.ok = false; }, { passive: true });   // out of the window, not merely off an element
+window.addEventListener('blur', () => { pointerAt.ok = false; });
+body.setFollowSource('pointer', () => pointerAt);
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.
@@ -1858,7 +1872,7 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // mode in every tab, so a second tab or device sent each private line to the
   // stream another one had open (and kept that stream alive by doing it).
   if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
-  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting, room: body.room?.() }), undefined, { wake: !priv });
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, room: body.room?.(), presence: hosting }), undefined, { wake: !priv });
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room

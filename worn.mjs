@@ -194,6 +194,7 @@ function placeWords(b) {
   }
   // a flight is AROUND the place, so both are said — and never a position,
   // which the presence did not choose and would read as a fault
+  if (b.follow === 'pointer') return 'following the pointer — the person\'s mouse, or their finger on the glass';
   if (b.follow) return `following the ${b.follow} — if there is one`;
   if (b.circle && b.circle[0]) return `circling ${b.circle[0]} wide at ${b.circle[1]}, around ${where}`;
   if (b.bounce && b.bounce[0]) return `bouncing ${b.bounce[0]} at ${b.bounce[1]}, below ${where}`;

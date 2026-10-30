@@ -110,7 +110,9 @@ it and it is easy to over-credit a system you already built.
   path, each AROUND wherever the body was put: `fly W H R` the figure of eight,
   `circle W R` a lap, `bounce H R` a ball on the floor of its reach,
   `wander W R` a walk with nowhere to be, and `follow hand`, which comes with
-  the person across the room and stops a step short.
+  the person across the room and stops a step short — and since 2026-10-30
+  `follow pointer`, the same with the mouse or a finger on the glass, the first
+  follow that needs no camera (`mouse`, `cursor`, `touch` are the one word).
 
   Entering a room now puts the body words back: `worn` had recorded them since
   the first day and `body.wear()` had never read them.

@@ -472,10 +472,15 @@ export function parseRemember(s) {
 // Named 'body', not 'field': 'field' is FORMS[0] and already means a posture in
 // the lead tag (the same collision the shape block avoids).
 export const TURNS = ['left', 'right', 'still'];
-// What a body can follow. Only the hand: 'follow eye' waits on applyEye polling
-// at gain 0 and is not a word until it works — a source that is not here parses
-// to nothing rather than to a promise.
-export const FOLLOWS = ['hand'];
+// What a body can follow. The hand, through the camera; and the POINTER — the
+// person's mouse, or their finger on the glass — through the page, with no
+// camera at all (2026-10-30: the surest way to come to where the person is,
+// and the first follow that works for everyone). mouse, cursor and touch are
+// the pointer by other names, read back as the one word. 'follow eye' waits
+// on applyEye polling at gain 0 and is not a word until it works — a source
+// that is not here parses to nothing rather than to a promise.
+export const FOLLOWS = ['hand', 'pointer'];
+const FOLLOW_WORDS = { mouse: 'pointer', cursor: 'pointer', touch: 'pointer' };
 const BODY_BLOCK = /<<\s*body\s*[:=]\s*(?!\s)([\s\S]{0,120}?)>>/i;
 // Read the body words out of any run of tokens: count D, turn DIR [S], grain D, trail D.
 // `odd`, when given, collects every word passed over: a presence's stray word
@@ -531,7 +536,7 @@ function bodyWords(words, out, odd) {
     // step short. A flight in worn's sense — one slot, and a place or home ends
     // it. It lives inside <<body: ...>> only; <<follow: N>> is a world verb and
     // the two never meet.
-    if (w === 'follow' && FOLLOWS.includes(words[i + 1] || '')) { out.follow = words[++i]; continue; }
+    if (w === 'follow' && (FOLLOWS.includes(words[i + 1] || '') || Object.prototype.hasOwnProperty.call(FOLLOW_WORDS, words[i + 1] || ''))) { const src = words[++i]; out.follow = FOLLOW_WORDS[src] || src; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -1009,7 +1014,7 @@ function readKommand(raw, now) {
 
 // The words a score step may hold outside a shape or a liquid: the ones
 // parseScore and bodyWords read, and the words those take after them.
-const SCORE_WORDS = new Set([...SCHEMES, ...MOODS, ...FORMS, 'flash', 'hold', ...BODY_KEYS, ...TURNS, ...FOLLOWS, ...Object.keys(NAMED_DIR)]);
+const SCORE_WORDS = new Set([...SCHEMES, ...MOODS, ...FORMS, 'flash', 'hold', ...BODY_KEYS, ...TURNS, ...FOLLOWS, ...Object.keys(FOLLOW_WORDS), ...Object.keys(NAMED_DIR)]);
 
 // /over/2s,shape,ring,4/1s,still — a score, step by step, in the long hand.
 function scoreKommand(raw) {

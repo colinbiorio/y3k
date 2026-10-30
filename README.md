@@ -252,6 +252,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **It comes to your pointer.** `follow hand` needed the
+  camera; `follow pointer` needs nothing — the presence (or you, typed:
+  `follow/pointer`) has the body come to the mouse, or to a finger on the
+  glass, across the room and stop a step short, like a cat; `mouse`, `cursor`
+  and `touch` are the same word. The pointer is a source like the hand (window
+  pixels, pulled each frame): it is held where it was last seen, so a tap on
+  the glass says "come here" and the body comes; it goes when the pointer
+  leaves the window or the window loses focus, and the body holds where it is.
+  A drag takes hold of a following body the way a pinch does (the target
+  freezes, and it resumes on release), so you can still spin it. The readout
+  says "following the pointer"; `at` or `home` end it. Both lessons teach it.
+  Tests in `test/shapes.test.mjs`.
+
 - **2026-10-30** — **The presence chooses its room.** It could move the
   room's liquid and move itself around the room; which room it stood in was
   only ever the person's pick (Settings → Room, or `background/<name>`). Now

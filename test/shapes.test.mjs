@@ -1750,7 +1750,7 @@ ok('follow hand: comes with you across the room, and stops a step short', () => 
   assert.deepEqual(parseBody('<<body: at 7 5 follow hand>>'), { at: [7, 5], follow: 'hand' });
   assert.equal(parseScore('<<over: 2s shape ring 4 follow hand>>')[0].follow, 'hand', 'a shape sub-block eats follow in a score');
   assert.ok(/const AFTER = '[^']*\|follow\b/.test(tagsSrc), 'follow is not in the score\'s AFTER list');
-  assert.ok(/export const FOLLOWS = \['hand'\];/.test(tagsSrc), 'what can be followed is not one list');
+  assert.ok(/export const FOLLOWS = \['hand', 'pointer'\];/.test(tagsSrc), 'what can be followed is not one list');
   // routed after the flights and before the face — one slot with them — and the hand handed over as a source
   assert.ok(/if \(b\.follow\) body\.setFollow\(b\.follow\);/.test(mainSrc), 'follow is parsed and dropped');
   assert.ok(mainSrc.indexOf('if (b.follow) body.setFollow(') > mainSrc.indexOf('if (b.wander) body.setFlight(') && mainSrc.indexOf('if (b.follow) body.setFollow(') < mainSrc.indexOf('if (b.face) body.setFace('), 'follow is applied out of the order worn assumes');
@@ -1763,7 +1763,7 @@ ok('follow hand: comes with you across the room, and stops a step short', () => 
   const arm = aim.slice(aim.indexOf("else if (flying.kind === 'follow') {"));
   assert.ok(arm.length > 100, 'aimOffset has no follow arm');
   assert.ok(/try \{ s = src \? src\(\) : null; \} catch \{ s = null; \}/.test(arm), 'the source is not a pull through try/catch — a broken tracker would be a broken frame');
-  assert.ok(/const held = !!\(pinches\[0\] \|\| pinches\[1\] \|\| handPush\.held\);/.test(arm), 'the target does not freeze while a hand has hold of it');
+  assert.ok(/const held = !!\(pinches\[0\] \|\| pinches\[1\] \|\| handPush\.held \|\| dragging\);/.test(arm), 'the target does not freeze while a hand, or the pointer, has hold of it');
   assert.ok(/const stand = 1\.3 \* \(uniforms\.uRadius\.value \+ uniforms\.uAmp\.value\);/.test(arm), 'the standoff is not a step short of the hand');
   assert.ok(/sx - \(dx \/ L\) \* stand/.test(arm) && /sy - \(dy \/ L\) \* stand/.test(arm), 'the standoff is not measured back along the line from the body');
   assert.ok(/flying\.last = \[Math\.max\(-rx, Math\.min\(rx, tx\)\), Math\.max\(-ry, Math\.min\(ry, ty\)\)\];/.test(arm), 'a followed hand can lead the body off the glass');
@@ -1788,6 +1788,33 @@ ok('follow hand: comes with you across the room, and stops a step short', () => 
   assert.ok(/return `following the \$\{b\.follow\} — if there is one`;/.test(wornSrc), 'the readout does not say it is following');
   assert.ok(/follow hand \(comes with the person's hand, a step short\)/.test(srv), 'the brief does not teach follow');
   assert.ok(srv.indexOf('follow hand comes with the person\'s hand across the room and stops a step short') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach follow in the body paragraph');
+});
+
+// 2026-10-30: the pointer — the mouse, or a finger on the glass — the first
+// follow that needs no camera, so it works for everyone.
+ok('follow pointer: comes with the mouse, or a finger on the glass, with no camera', () => {
+  assert.deepEqual(parseBody('<<body: follow pointer>>'), { follow: 'pointer' });
+  for (const w of ['mouse', 'cursor', 'touch']) assert.deepEqual(parseBody(`<<body: follow ${w}>>`), { follow: 'pointer' }, w + ' is the pointer by another name');
+  assert.equal(parseBody('<<body: follow eye>>'), null, 'follow eye is still not here');
+  assert.deepEqual(parseBody('<<body: at 2 5 follow pointer>>'), { at: [2, 5], follow: 'pointer' });
+  assert.equal(parseScore('<<over: 2s shape ring 4 follow mouse>>')[0].follow, 'pointer', 'a shape sub-block eats follow in a score, or the alias is lost there');
+  assert.ok(/const FOLLOW_WORDS = \{ mouse: 'pointer', cursor: 'pointer', touch: 'pointer' \};/.test(tagsSrc));
+  assert.ok(/\.\.\.FOLLOWS, \.\.\.Object\.keys\(FOLLOW_WORDS\), /.test(tagsSrc), 'a score step saying follow mouse is refused as a kommand');
+  for (const k of ['follow/pointer', 'follow/mouse', 'follow/cursor']) { const r = parseKommand(k); assert.ok(r && r.ok && r.body.follow === 'pointer', k); }
+  // the page is the source: window pixels, seen on move and on touch, gone when the pointer leaves the window or the window loses focus
+  assert.ok(/const pointerAt = \{ x: 0, y: 0, ok: false \};/.test(mainSrc) && /body\.setFollowSource\('pointer', \(\) => pointerAt\);/.test(mainSrc), 'the pointer is never handed to the body as a source');
+  assert.ok(/window\.addEventListener\('pointermove', pointerSeen, \{ passive: true \}\);/.test(mainSrc) && /window\.addEventListener\('pointerdown', pointerSeen, \{ passive: true \}\);/.test(mainSrc), 'a touch is not a pointer');
+  assert.ok(/window\.addEventListener\('pointerout', \(e\) => \{ if \(!e\.relatedTarget\) pointerAt\.ok = false; \}/.test(mainSrc), 'a pointer that left the window is still followed');
+  assert.ok(/window\.addEventListener\('blur', \(\) => \{ pointerAt\.ok = false; \}\);/.test(mainSrc));
+  assert.ok(mainSrc.indexOf("body.setFollowSource('pointer'") > mainSrc.indexOf("body.setFollowSource('hand'"), 'the pointer source is registered before the hand\'s (or the hand\'s is gone)');
+  // a drag takes hold of a following body as a pinch does: the target freezes, and it resumes on release
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  const arm = aim.slice(aim.indexOf("else if (flying.kind === 'follow') {"));
+  assert.ok(/const held = !!\(pinches\[0\] \|\| pinches\[1\] \|\| handPush\.held \|\| dragging\);/.test(arm), 'a drag on a following body does not freeze it — the body backs away from the finger that is spinning it');
+  // read back as the word, and taught in both lessons
+  assert.ok(/if \(b\.follow === 'pointer'\) return 'following the pointer — the person\\'s mouse, or their finger on the glass';/.test(wornSrc), 'the readout does not say it is following the pointer');
+  assert.ok(/or follow pointer \(with their mouse or their finger on the glass — no camera needed\)/.test(srv), 'the brief does not teach follow pointer');
+  assert.ok(srv.indexOf('follow pointer does the same with their mouse, or their finger on the glass') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach follow pointer');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
@@ -1955,7 +1982,7 @@ ok('a word past what a key takes is refused by name, and a key said in full stil
   no('count/more', 'needs a number');
   no('at/7', 'like at/7,5');
   const yes = (k) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); return r; };
-  for (const k of ['size/8', 'depth/9', 'glow/3', 'grain/2', 'trail/4', 'mesh/5', 'count/3', 'turn/left,4', 'turn/still', 'face/top,5', 'follow/hand',
+  for (const k of ['size/8', 'depth/9', 'glow/3', 'grain/2', 'trail/4', 'mesh/5', 'count/3', 'turn/left,4', 'turn/still', 'face/top,5', 'follow/hand', 'follow/pointer',
     'at/7,5', 'fly/5,3,3', 'circle/3,4', 'bounce/3,4', 'wander/3,4', '/home', 'size/big'])
     yes(k);
   assert.deepEqual(yes('/body/size,8/depth,9/face,top,5/turn,right,6/at,7,5/fly,5,3,3').body,
