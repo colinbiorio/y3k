@@ -6,7 +6,7 @@
 // (terminal and approval page, first answer wins).
 import assert from 'node:assert';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -153,6 +153,112 @@ await aok('a running command\'s output is live only; the session on disk keeps i
   await engine.handle({ cmd: 'session.stop', sid: st.sid });
   engine.shutdown();
 });
+
+// A CONVERSATION CLAUDE CODE HAS NO TRANSCRIPT OF (2026-10-29). A session
+// stopped before its first turn never got one, and `claude --resume` of it
+// ends at once ("No conversation found with session ID"); the engine then
+// wrote a new crashed row pointing at the same id, the room's "continue the
+// last conversation" took that row next, and so on, forever. Now the
+// transcript is looked for where Claude Code keeps it before anything is
+// spawned, a crash that says so marks the row, and the list carries the mark.
+console.log('\na conversation Claude Code has no transcript of:');
+{
+  const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fakes', 'claude.mjs');
+  const none = join(base, 'not-installed');
+  const repo = realpathSync(mkdtempSync(join(base, 'lost-')));
+  writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
+  const claudeHome = join(base, 'claude-home');   // the fake's own ~/.claude: its transcripts go there
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, FAKE_CLAUDE_LOG: join(base, 'lost-fake.log') };
+  const bins = { claude: FAKE, codex: none, gemini: none, opencode: none };
+  const U = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const engine = createEngine({ store: createStore(join(base, 'cfg-lost')), consent: fixedConsent(true), env, bins });
+  const events = [];
+  engine.subscribe((e) => {
+    events.push(e);
+    if (e.type === 'permission.request') engine.handle({ cmd: 'permission.answer', sid: e.sid, requestId: e.requestId, decision: 'allow' });
+  });
+  const until = async (list, pred) => {
+    for (let i = 0; i < 400 && !list.some(pred); i++) await tick(20);
+    assert.ok(list.some(pred), 'waited in vain; last: ' + list.slice(-5).map((e) => e.type + (e.reason ? ':' + e.reason : '')).join(', '));
+    return list.find(pred);
+  };
+  const spawns = (eng) => eng.audit.tail(1000).filter((a) => a.kind === 'session.spawn').length;
+  const rows = async (eng) => (await eng.handle({ cmd: 'session.list' })).sessions;
+  assert.equal((await engine.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+  // the conversation before: one that had a turn, so Claude Code wrote it down…
+  const first = await engine.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  assert.equal(first.ok, true, first.error);
+  await engine.handle({ cmd: 'session.send', sid: first.sid, text: 'change world to y3k' });
+  await until(events, (e) => e.type === 'turn.ended' && e.sid === first.sid);
+  await engine.handle({ cmd: 'session.stop', sid: first.sid });
+  await until(events, (e) => e.type === 'session.ended' && e.sid === first.sid);
+  // …and one stopped seconds after it started, before its first turn
+  const quick = await engine.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  assert.equal(quick.ok, true, quick.error);
+  await engine.handle({ cmd: 'session.stop', sid: quick.sid });
+  await until(events, (e) => e.type === 'session.ended' && e.sid === quick.sid);
+
+  await aok('one stopped before its first turn is refused before anything is spawned; the rows pointing at it are marked', async () => {
+    const before = spawns(engine), were = (await rows(engine)).length;
+    const r = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: quick.sid });
+    assert.deepEqual(r, { ok: false, code: 'lost', error: 'Claude Code has no transcript of that conversation.' });
+    assert.equal(spawns(engine), before, 'nothing was spawned');
+    const now = await rows(engine);
+    assert.equal(now.length, were, 'no row was added');
+    assert.equal(now.find((x) => x.sid === quick.sid).lost, true, 'the row it would have continued is marked');
+    assert.equal(now.find((x) => x.sid === first.sid).lost, undefined, 'the one before it is not');
+    assert.ok(engine.audit.tail(50).some((a) => a.kind === 'session.lost' && a.providerSessionId === quick.providerSessionId && a.why === 'no transcript'), 'written down');
+    assert.equal((await engine.handle({ cmd: 'session.fork', sid: quick.sid })).code, 'lost', 'nor forked');
+    assert.equal((await engine.handle({ cmd: 'session.rewind', sid: quick.sid, at: U(7), cut: 1 })).code, 'lost', 'nor gone back to');
+    assert.equal(spawns(engine), before);
+  });
+
+  await aok('one Claude Code wrote down is continued as before', async () => {
+    const before = spawns(engine);
+    const r = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: first.sid });
+    assert.equal(r.ok, true, r.error);
+    assert.equal(r.providerSessionId, first.providerSessionId, 'the coder\'s own session, resumed');
+    assert.equal(spawns(engine), before + 1);
+    assert.equal((await until(events, (e) => e.type === 'session.started' && e.sid === r.sid)).prior, first.sid);
+    await engine.handle({ cmd: 'session.stop', sid: r.sid });
+    await until(events, (e) => e.type === 'session.ended' && e.sid === r.sid);
+    assert.equal((await rows(engine)).find((x) => x.sid === r.sid).lost, undefined);
+  });
+
+  // An engine that cannot tell (no transcripts folder it can read) still
+  // spawns — and the crash says what the look would have.
+  await aok('a crash that says "No conversation found" marks the row, and the next pick passes it over', async () => {
+    const dir = join(base, 'cfg-lost-blind');
+    const blind = createEngine({ store: createStore(dir), consent: fixedConsent(true), env: { ...env, CLAUDE_CONFIG_DIR: join(base, 'claude-home-empty') }, bins });
+    const got = [];
+    blind.subscribe((e) => got.push(e));
+    assert.equal((await blind.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+    const seed = await blind.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });   // (the folder's mode, for the resumes below)
+    assert.equal(seed.ok, true, seed.error);
+    await blind.handle({ cmd: 'session.stop', sid: seed.sid });
+    await until(got, (e) => e.type === 'session.ended' && e.sid === seed.sid);
+    const r = await blind.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, providerSessionId: U(1) });
+    assert.equal(r.ok, true, r.error);   // it could not tell: spawned, as before
+    const ended = await until(got, (e) => e.type === 'session.ended' && e.sid === r.sid);
+    assert.equal(ended.reason, 'crashed');
+    assert.match(ended.detail, /No conversation found with session ID/);
+    assert.equal(ended.lost, true, 'the event says so');
+    const row = (await rows(blind)).find((x) => x.sid === r.sid);
+    assert.equal(row.lost, true);
+    assert.equal(row.endReason, 'crashed');
+    assert.ok(blind.audit.tail(50).some((a) => a.kind === 'session.lost' && a.providerSessionId === U(1) && a.why === 'crashed'));
+    // a row an older engine wrote, pointing at the same id, carries the mark too
+    appendFileSync(join(dir, 'sessions', 'index.jsonl'), JSON.stringify({ sid: 'deadbeefdeadbeef', provider: 'claude', cwd: repo, providerSessionId: U(1), started: 1 }) + '\n');
+    assert.equal((await rows(blind)).find((x) => x.sid === 'deadbeefdeadbeef').lost, true, 'known lost: the id, not the row');
+    const spawned = spawns(blind), were = (await rows(blind)).length;
+    const again = await blind.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, providerSessionId: U(1) });
+    assert.equal(again.code, 'lost', 'not taken again');
+    assert.equal(spawns(blind), spawned, 'nothing spawned');
+    assert.equal((await rows(blind)).length, were, 'no row added');
+    blind.shutdown();
+  });
+  engine.shutdown();
+}
 
 console.log('\nthe store and the record:');
 

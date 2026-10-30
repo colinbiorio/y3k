@@ -21,6 +21,7 @@
 // or --tools is ever passed, and neither is anything that skips permissions.
 
 import { randomUUID } from 'node:crypto';
+import { readdirSync, statSync } from 'node:fs';
 import { resolve as resolvePath, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, ndjson, resolveBin, run, tempFile } from '../proc.mjs';
@@ -83,6 +84,38 @@ const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,119}$/;
 export const isSessionId = (s) => typeof s === 'string' && SESSION_ID.test(s);
 export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
+
+// WHAT CLAUDE CODE REMEMBERS. Its transcript of a conversation lives in its own
+// settings folder (~/.claude, or CLAUDE_CONFIG_DIR), under projects/, one
+// folder per working folder — the folder's path with every character that is
+// not a letter or a digit turned into '-' (/Users/colin/y3k-code/p-vs-np →
+// -Users-colin-y3k-code-p-vs-np) — as <session id>.jsonl, written from the
+// first message. A session stopped before its first turn never gets one, and
+// Claude Code throws old ones away (cleanupPeriodDays, 30 by default).
+// `claude --resume` of an id with no transcript ends at once, before a word
+// of output: "No conversation found with session ID: …", exit 1 — and on
+// 2026-10-29 the engine then wrote a crashed row pointing at the same id,
+// which the room's "continue the last conversation" took again, forever. So
+// it is looked for first: under this folder's transcripts, then, as Claude
+// Code itself does, under every other folder's; and a resume with none is
+// refused before anything is spawned (engine.mjs, code 'lost'). Best-effort:
+// null when it cannot tell (no transcripts folder, or one it cannot read),
+// never a guess.
+export const NO_TRANSCRIPT = /No conversation found with session ID/i;
+export const projectDirName = (cwd) => String(cwd).replace(/[^a-zA-Z0-9]/g, '-');
+export const transcriptHome = (env = process.env) => env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude');
+export function hasTranscript({ cwd, id, env = process.env } = {}) {
+  if (!isSessionId(id)) return false;
+  const projects = join(transcriptHome(env), 'projects');
+  const file = `${String(id).toLowerCase()}.jsonl`;
+  const has = (dir) => { try { return statSync(join(dir, file)).isFile(); } catch { return false; } };
+  let dirs;
+  try { dirs = readdirSync(projects); } catch { return null; }
+  if (has(join(projects, projectDirName(cwd)))) return true;
+  if (dirs.length > 5000) return null;   // too many to look through: not known, not "no"
+  for (const d of dirs) if (has(join(projects, d))) return true;
+  return false;
+}
 
 // The model's time on one turn, from the process's running total of it
 // (duration_api_ms, onResult below): what the total grew by, or, when it went
@@ -687,8 +720,12 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     for (const f of files) f.remove();
     files = [];
     setState('ended');
-    emit({ type: 'session.ended', reason, exitCode: exitCode ?? null, detail: detail || null });
-    audit?.write('session.ended', { sid, reason, exitCode });
+    // a resume of a conversation Claude Code has no transcript of ends here,
+    // before a word of output — said as such, so the engine marks its index
+    // (NO_TRANSCRIPT; the look that comes before any spawn is hasTranscript)
+    const lost = reason === 'crashed' && !!opts.resumeId && NO_TRANSCRIPT.test(detail || '');
+    emit({ type: 'session.ended', reason, exitCode: exitCode ?? null, detail: detail || null, ...(lost ? { lost: true } : {}) });
+    audit?.write('session.ended', { sid, reason, exitCode, ...(lost ? { lost: true } : {}) });
   }
 
   function send({ text, attachments = [] }) {

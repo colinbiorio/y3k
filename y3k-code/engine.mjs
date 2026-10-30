@@ -30,13 +30,14 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.8';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.9';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
                                   // 0.3.3: brain.complete says how fast it wrote (speed: the stream's own clock, brain.mjs speedOf); session.start aside (kode's /compare); the orb tool names all twelve rooms (orb.mjs)
                                   // 0.3.4: life.* — lucid on this computer, for the site's life mode (life.mjs)
                                   // 0.3.5: subagents and background shells as Claude Code shows them: type, doing, tool uses, tokens, time; a background task's card held open until it is done (adapters/claude.mjs)
+                                  // 0.3.9: a resume of a conversation Claude Code has no transcript of is refused before anything is spawned (code 'lost'); a crash that says so marks the index row, and session.list carries `lost` (adapters/claude.mjs hasTranscript)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -178,6 +179,20 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return [...bySid.values()];
   }
 
+  // LOST: a conversation the coder has no transcript of — one stopped before
+  // its first turn never got one, and Claude Code throws old ones away.
+  // Resuming it ends at once ("No conversation found with session ID"), and
+  // on 2026-10-29 that wrote one more crashed row pointing at the same id on
+  // every try, which the room's "continue the last conversation" took next,
+  // forever. So every row pointing at such an id is marked, session.list
+  // carries the mark for the page to pass over, and a resume of it is refused
+  // before anything is spawned (startSession, code 'lost').
+  const lostIds = (rows = indexRead()) => new Set(rows.filter((r) => r.lost && r.providerSessionId).map((r) => r.providerSessionId));
+  function markLost(providerSessionId, fields = {}) {
+    for (const r of indexRead()) if (r.providerSessionId === providerSessionId && !r.lost) indexWrite({ sid: r.sid, lost: true });
+    audit.write('session.lost', { providerSessionId, ...fields });
+  }
+
   function sessionEmitter(s) {
     const persist = (e) => {
       if (NOT_PERSISTED.has(e.type)) return;
@@ -210,7 +225,12 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   function onEnded(s, ev) {
-    indexWrite({ sid: s.sid, ended: now(), endReason: ev.reason });
+    // crashed resuming a conversation the coder has no transcript of (the
+    // adapter says so: lost): this row is marked — its own id never got a
+    // transcript either — and so is every row pointing at the id it resumed
+    const lost = ev.lost === true && !!s.resumeId;
+    indexWrite({ sid: s.sid, ended: now(), endReason: ev.reason, ...(lost ? { lost: true } : {}) });
+    if (lost) markLost(s.resumeId, { sid: s.sid, provider: s.provider, cwd: s.cwd, why: 'crashed', detail: String(ev.detail || '').slice(0, 300) });
     orb.close(s.sid);
     setTimeout(() => sessions.delete(s.sid), 0);
   }
@@ -303,6 +323,17 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (model && model !== 'default' && !A.isModel(model)) return { ok: false, error: 'Unknown model.' };
     if (effort && !A.EFFORTS.includes(effort)) return { ok: false, error: 'Unknown effort.' };
     if (!A.CAPS.modes.includes(chosen)) return { ok: false, error: `${p.label} cannot work in that mode here.`, code: 'mode-unavailable' };
+    // A conversation the coder has no transcript of cannot be continued: said
+    // now, before anything is spawned, and every row pointing at it marked
+    // (markLost), so the page passes it over for the one before it. When the
+    // transcripts cannot be looked at, what is known lost still counts.
+    if (resumeId) {
+      const has = typeof A.hasTranscript === 'function' ? A.hasTranscript({ cwd: t.real, id: resumeId, env }) : null;
+      if (has === false || (has == null && lostIds().has(resumeId))) {
+        markLost(resumeId, { provider, cwd: t.real, resumeOf: isSid(resumeOf) ? resumeOf : null, why: has === false ? 'no transcript' : 'known lost' });
+        return { ok: false, code: 'lost', error: `${p.label} has no transcript of that conversation.` };
+      }
+    }
     if (!detected[provider]) await detectOne(provider);
     const d = detected[provider];
     if (!d?.installed) return { ok: false, error: `${p.label} is not installed on this computer.`, code: 'not-installed', install: installCommand(provider) };
@@ -312,7 +343,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (why) return why;
 
     const sid = newSid();
-    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false,
+    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false, resumeId: resumeId || null,
       prior: isSid(resumeOf) ? resumeOf : null, priorCut: Number.isInteger(priorCut) && priorCut >= 0 ? priorCut : null };
     s.emit = sessionEmitter(s);
     const name = `y3k: ${t.rec.name || t.real.split(/[\\/]/).pop()}`;
@@ -543,8 +574,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'session.limits': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.limits(); },
     'session.list': async ({ cwd }) => {
       let rows = indexRead();
+      // (every row pointing at an id known lost carries the mark, an older
+      // engine's rows among them: the page passes them over)
+      const lost = lostIds(rows);
       if (cwd) { const info = inspectFolder(cwd, { configDir: store.dir }); rows = rows.filter((r) => r.cwd === info.real); }
-      rows = rows.map((r) => ({ ...r, live: sessions.has(r.sid) })).sort((a, b) => (b.started || 0) - (a.started || 0)).slice(0, 200);
+      rows = rows.map((r) => ({ ...r, live: sessions.has(r.sid), ...(r.lost || lost.has(r.providerSessionId) ? { lost: true } : {}) })).sort((a, b) => (b.started || 0) - (a.started || 0)).slice(0, 200);
       return { ok: true, sessions: rows };
     },
     'session.load': async ({ sid }) => loadSession(sid),
