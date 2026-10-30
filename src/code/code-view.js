@@ -55,6 +55,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let transport = null;
   let root = null;
   let ui = null;
+  let chatHost = null;   // the site's chat bar (#chat .chat-menu): the composer lives there while a session is on screen
+  let chatWatch = null;  // stops what measures the chat bar's top for the room (measureChat)
   // home.pairing: { status: probing|asking|error, port, code, msg } while this
   // browser pairs — drawn by renderHome like every other home screen, so
   // nothing that redraws home can paint over it.
@@ -593,6 +595,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     root = h('div.code-root', { role: 'region', 'aria-label': 'y3kode' });
     ui = {
       pane: h('div.cv-pane'),
+      barWrap: h('div.cv-barwrap'),
       bar: h('div.cv-bar'),
       cmp: h('div.cv-cmpstrip', { hidden: true, role: 'status' }),   // "comparing: … · 3 answering" (renderCompareStrip)
       banner: h('div.cv-banner'),
@@ -604,14 +607,26 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       drawer: h('div.cv-drawer', { hidden: true }),
     };
     ui.scroll.append(ui.list);
+    ui.barWrap.append(ui.bar);
     ui.main.append(ui.scroll, ui.homeEl, ui.drawer);
-    ui.pane.append(ui.bar, ui.cmp, ui.banner, ui.main, ui.dock);
+    ui.pane.append(ui.barWrap, ui.cmp, ui.banner, ui.main, ui.dock);
     root.append(ui.pane);
     // On BODY, like the world: the home panel carries transforms, and a
     // transformed ancestor quietly turns position:fixed into a small box.
     document.body.appendChild(root);
-    // (the orb's column is hidden while it resizes by social.showView, in the
-    // same task that moves it — see body.code-shifting there)
+    // THE FRESH LOOK (2026-10-29; styles.css, the block of that name): the orb
+    // keeps the centre and the room is laid around it. The composer lives in
+    // the site's own chat bar while a session is on screen (renderDock,
+    // body.kode-chat); the toolbar wears the house's thin liquid ring, asked
+    // for by name (mercury-mount.js liquid — nothing inside the room is ringed
+    // on its own); and a wheel over the orb, where the room takes no pointer,
+    // still scrolls the conversation (onWheel).
+    chatHost = document.querySelector('#chat .chat-menu');
+    window.Y3K?.liquid?.ring?.(ui.barWrap, { trackTarget: ui.bar, framePx: 2, seed: 71.3, visibleWhen: () => !!root });
+    window.addEventListener('wheel', onWheel, { passive: true });
+    watchChat();
+    // (on a narrow screen the orb's band is hidden while it resizes by
+    // social.showView, in the same task that moves it — body.code-shifting)
     follow();
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('y3k:chat', onChat);
@@ -640,6 +655,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     window.removeEventListener('dragover', onDragOver);
     window.removeEventListener('dragleave', onDragLeave);
     window.removeEventListener('drop', onDrop);
+    window.removeEventListener('wheel', onWheel);
+    unwatchChat();
+    window.Y3K?.liquid?.unring?.(ui.bar);
+    document.body.classList.remove('kode-chat');
+    if (dockUi?.box && chatHost && dockUi.box.parentNode === chatHost) dockUi.box.remove();
+    chatHost = null;
     lastReact = null;
     leave(root);
     root = null; ui = null;
@@ -1924,10 +1945,24 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function renderDock() {
     if (!ui) return;
     const s = currentSession();
-    if (!s) { ui.dock.hidden = true; workClock(); return; }
+    if (!s) {
+      ui.dock.hidden = true; workClock();
+      document.body.classList.remove('kode-chat');   // the chat bar is the presence's again (the folders)
+      if (dockUi?.box && chatHost && dockUi.box.parentNode === chatHost) dockUi.box.hidden = true;
+      return;
+    }
     if (mic.release && mic.target) stopMic();   // a session is on screen now: the planning card's microphone goes with the card
     ui.dock.hidden = false;
     const d = dockUi ||= buildDock();
+    // THE COMPOSER IS THE CHAT BAR: one bar to talk from, the coder's own row
+    // in it while a session is on screen (styles.css body.kode-chat hides the
+    // presence's). Where there is no chat bar (a page without one, the tests'
+    // stand-in document) it stays in the dock.
+    if (chatHost) {
+      if (d.box.parentNode !== chatHost) chatHost.appendChild(d.box);
+      d.box.hidden = false;
+      document.body.classList.add('kode-chat');
+    }
     const ended = s.state === 'ended' || !!viewingSid;
     const running = s.state === 'running' || s.state === 'waiting';
     const comp = companion();
@@ -2009,7 +2044,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · ? for shortcuts'))));
-    arrange(ui.dock, [d.strip.firstChild ? d.strip : null, d.chips.el, d.box, d.foot.el]);
+    arrange(ui.dock, [d.strip.firstChild ? d.strip : null, d.chips.el, chatHost ? null : d.box, d.foot.el]);
   }
 
   // THE TURN'S OWN LINE (2026-10-08). While the coder works, the head of the
@@ -2265,6 +2300,51 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     dragLight(way !== 'shut');
   }
   function onDragLeave(e) { if (!e.relatedTarget) dragLight(false); }
+  // A wheel over the orb — the stage, between the bubbles, where the room takes
+  // no pointer so the orb can be turned — still scrolls the conversation.
+  // THE ROOM ENDS ABOVE THE CHAT BAR (body.kode-chat; styles.css, THE FRESH
+  // LOOK). The bar's height is its own — the composer grows with its lines, a
+  // phone wraps it — so the pane's bottom is measured, not assumed: the bar's
+  // top (and, narrow, the a^r mark's and the fold grip's above it) from the
+  // room's own bottom, as --kode-room-bottom on the room. The life keeps its
+  // column off the bar the same way (life.js measure).
+  function measureChat() {
+    if (!root) return;
+    if (!document.body.classList.contains('kode-chat')) { root.style?.removeProperty?.('--kode-room-bottom'); return; }
+    const narrow = typeof matchMedia === 'function' && matchMedia('(max-width: 900px)').matches;
+    let top = Infinity;
+    for (const id of narrow ? ['chat', 'chat-air', 'nav-collapse-bottom'] : ['chat']) {
+      const el = document.getElementById(id);
+      const r = el?.getBoundingClientRect?.();
+      if (!r || !(r.height > 0) || r.top >= top) continue;
+      const cs = globalThis.getComputedStyle?.(el);
+      if (cs && (cs.opacity === '0' || cs.visibility === 'hidden' || cs.display === 'none')) continue;
+      top = r.top;
+    }
+    const bottom = root.getBoundingClientRect?.().bottom;
+    if (!Number.isFinite(top) || !(bottom > top)) { root.style?.removeProperty?.('--kode-room-bottom'); return; }
+    root.style?.setProperty?.('--kode-room-bottom', `${Math.round(bottom - top + 6)}px`);
+  }
+  function watchChat() {
+    if (chatWatch || !chatHost) return;
+    const bar = chatHost.closest?.('#chat') || chatHost;
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => measureChat()) : null;
+    ro?.observe(bar);
+    // the bars fold and unfold by a class on body, and the chat bar moves with
+    // them; body.kode-chat itself comes and goes the same way (renderDock)
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(() => measureChat()) : null;
+    mo?.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    const onEnd = (e) => { if (e.target === bar) measureChat(); };
+    bar.addEventListener('transitionend', onEnd);
+    window.addEventListener('resize', measureChat);
+    chatWatch = () => { ro?.disconnect(); mo?.disconnect(); bar.removeEventListener('transitionend', onEnd); window.removeEventListener('resize', measureChat); };
+  }
+  function unwatchChat() { chatWatch?.(); chatWatch = null; }
+  function onWheel(e) {
+    if (!ui || ui.scroll.hidden || !e.deltaY) return;
+    if (!e.target?.closest?.('#stage')) return;
+    ui.scroll.scrollTop += e.deltaY;
+  }
   function onDrop(e) {
     dragLight(false);
     if (!dropHere(e)) return;
@@ -2608,7 +2688,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const inField = !!e.target.closest?.('input, select, textarea, button, a, summary, .mt-ctx, .mt-limits') && !isComposer;
     // A key pressed outside the room (the Settings modal over it, a dropdown's
     // list, which lives on body) is not the room's to answer.
-    const away = e.target !== document.body && e.target !== document.documentElement && !root.contains(e.target);
+    const away = e.target !== document.body && e.target !== document.documentElement && !root.contains(e.target) && !e.target.closest?.('.cv-composer');
     if (e.key === 'Tab' && e.shiftKey && !inField && !away) {
       e.preventDefault();
       const i = MODES.indexOf(s.mode);

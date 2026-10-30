@@ -1868,6 +1868,32 @@ export function createBody(container) {
     const fw = Math.max(1, (framing.x1 - framing.x0) * w), fh = Math.max(1, (framing.y1 - framing.y0) * h);
     return { cx: c.left + ((framing.x0 + framing.x1) / 2) * w, cy: c.top + ((framing.y0 + framing.y1) / 2) * h, w: fw, h: fh };
   }
+  // THE ORB'S SIZE, FOR THE PAGE. --orb-px on <html> is its diameter in
+  // window pixels — the same disc orbPx() answers the hands with — so a layout
+  // can keep clear of it (kode lays its bubbles around the orb: styles.css,
+  // THE FRESH LOOK, --cv-gap). From cached numbers, no layout read: written
+  // only when it changes by a pixel, every eighth frame.
+  let orbPxSaid = 0, orbTick = 0, orbBigSaid = null;
+  function publishOrbPx() {
+    if (!(win.halfH > 0)) return;
+    const el = renderer.domElement;
+    const H = el.clientHeight || window.innerHeight || 0;
+    const fh = (framing.y1 - framing.y0) * H;
+    if (!(fh > 1)) return;
+    const S = 1 / depthK(offWorld.z);
+    const r = (uniforms.uRadius.value + uniforms.uAmp.value) * S;
+    const d = Math.round(((r / win.halfH) * (fh / 2)) * 2);
+    if (!(d > 0)) return;
+    // ENLARGED: past half the window's width there is no room beside it, so
+    // kode lays its bubbles over it, in a column at the centre (html.orb-big;
+    // styles.css, THE FRESH LOOK) — Colin: "only centering them over the orb
+    // body if it is enlarged".
+    const big = d > (window.innerWidth || 0) / 2;
+    if (big !== orbBigSaid) { orbBigSaid = big; document.documentElement.classList.toggle('orb-big', big); }
+    if (d === orbPxSaid) return;
+    orbPxSaid = d;
+    document.documentElement.style.setProperty('--orb-px', d + 'px');
+  }
   // Measure #orb-frame against the canvas. Returns true when the frame moved.
   function readFrame(W, H) {
     if (!framing.el) framing.el = document.getElementById('orb-frame');
@@ -3880,6 +3906,7 @@ export function createBody(container) {
     // The first frame drawn at a new size tells whoever is waiting (Code hides
     // the stage while the canvas reallocates, and shows it again on this).
     if (resizedPending || win.moved) { resizedPending = false; win.moved = false; window.dispatchEvent(new Event('y3k:orb-resized')); }
+    if (!(orbTick++ & 7)) publishOrbPx();   // --orb-px, for the page (above)
     // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
     // renderer.render(), so copying it earlier would hand the trail a one-frame
     // stale orientation — the trap the old pick rig avoided the same way, by running after a
