@@ -251,6 +251,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-30** — **kode from anywhere.** The chat bar is the coder's own
+  composer in the room (the fresh look, below); now a line said anywhere else
+  on the site that names kode (`kode: …`, `/kode …`, `hey kode …`, `@kode …`)
+  or reads as an ask for the coder — a verb of making or mending with a thing
+  of code (`src/kode-route.mjs`, pure) — is not sent anywhere until a card is
+  answered: *yes, in kode* takes it into kode and says it there, in the mode
+  already chosen there; *no, it is for orion* says it to the presence as
+  typed; Esc keeps it in the box. The card has no "always": nothing is coded
+  from elsewhere without a yes every time (Colin: "if the user isn't asking
+  for the ai to start coding, it shouldn't just start coding"). Only where
+  kode has been paired in this browser, or in the desktop app; anyone else is
+  talking to their presence. In the room itself nothing changes: in kode the
+  bar is the composer, and a line goes to the coder as it did. A line said
+  before the room has picked up where it was waits for it, and goes with it.
+  A consent card may now be asked without an "always" (`always: false`), and
+  its cancel button answers `false` where Esc answers `null`.
+
 - **2026-10-30** — **The fresh look.** Colin, 2026-10-29: the orb is the main
   focus of the screen, the commands pop up around it, each bubble its own
   translucent unimat, the top bar centred with a thin liquid ring, the glyphs

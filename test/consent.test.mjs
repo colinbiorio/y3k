@@ -49,7 +49,7 @@ await ok('a remembered kind answers always without a dialog; a consent needs a k
 await ok('the three answers are the three Colin named, and a cancel is nothing', () => {
   const src = read('src/consent.js');
   assert.match(src, /always = 'always allow', once = 'allow just this time', cancel = 'cancel'/);
-  assert.match(src, /bCancel\.addEventListener\('click', \(\) => done\(null\)\)/);
+  assert.match(src, /bCancel\.addEventListener\('click', \(\) => done\(false\)\)/);
   assert.match(src, /if \(answer === 'always'\) \{ try \{ store\.setItem\(KEY\(kind\), 'always'\)/, 'only always is remembered');
   assert.match(src, /legal\.html#terms/, 'it points at the terms');
   assert.match(read('styles.css'), /\.consent-scrim \{ position: fixed; inset: 0; z-index: 1200/);

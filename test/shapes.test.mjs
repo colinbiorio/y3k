@@ -2077,6 +2077,8 @@ const fnOf = (name) => {
 const makeChat = new Function('d', `
   const { body, voice, beatSplitter, scrubTags, settings, score, showCaption, setMoodTag, applyBodyBlock, armListen, handle, applyKommand, collapseTyping, chatInput, window, thinkModelMark } = d;
   let busy = false, roomGen = 0, currentMood = 'calm', voiceMode = false, replySpeaker = null, queued = [], hostAside = null, chatImageB64 = null;
+  // kode from anywhere (2026-10-30): no kode paired in this stand-in, so the chat bar never asks
+  const kodeHere = () => false, kodeLine = () => null, askKode = () => {};
   // as much of leaving home as these tests reach
   const myPresence = null, social = { isHosting: () => false }, tend = { stop() {} }, airden = { stop() {} }, windows = { resetAll() {} };
   const setBroadcastUI = () => {}, hideInvite = () => {}, document = { body: { classList: { remove() {} } } };

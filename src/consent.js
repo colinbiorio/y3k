@@ -41,7 +41,8 @@ export function consent({ kind, title, note, always = 'always allow', once = 'al
     const bOnce = el('button', 'login-alt consent-once', once); bOnce.type = 'button';
     const bAlways = el('button', 'create-go consent-always', always); bAlways.type = 'button';
     const terms = el('a', 'consent-terms', 'the terms say the same'); terms.href = '/legal.html#terms'; terms.target = '_blank'; terms.rel = 'noopener';
-    acts.append(bCancel, bOnce, bAlways);
+    acts.append(bCancel, bOnce);
+    if (always !== false) acts.append(bAlways);   // a question with no 'always' (kode from anywhere: a permission every time)
     card.append(h, p, acts, terms);
     scrim.append(card);
     const done = (answer) => {
@@ -50,7 +51,7 @@ export function consent({ kind, title, note, always = 'always allow', once = 'al
       resolve(answer);
     };
     const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } };
-    bCancel.addEventListener('click', () => done(null));
+    bCancel.addEventListener('click', () => done(false));   // the cancel button is an answer (false); Esc and the scrim are none (null)
     bOnce.addEventListener('click', () => done('once'));
     bAlways.addEventListener('click', () => done('always'));
     scrim.addEventListener('click', (e) => { if (e.target === scrim) done(null); });

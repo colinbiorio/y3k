@@ -37,6 +37,7 @@ import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
 import { shrinkPicture } from './picture.js';
 import { hasFiles, dropTarget } from './kode-drop.js';
+import { kodeLine } from './kode-route.mjs';
 import { createScore } from './score.js';
 // ?perf's meter starts itself as this import evaluates (before the liquid's
 // bake and the orb's build below); inert without ?perf.
@@ -46,7 +47,7 @@ import { createHandView } from './handview.js';
 import { createRemoteEye, createEyeSwitch, createLender, deviceName, renameDevice } from './remote-eye.js';
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
-import { takePairingFromHash, pendingPairing, hasDesktopBridge } from './code/transport.js';
+import { takePairingFromHash, pendingPairing, hasDesktopBridge, savedPairing } from './code/transport.js';
 
 // The conversation ring's newest line, and a word with airden before yours goes
 // in (src/airden.js): it shows its sentence whole first, so your words never
@@ -2022,6 +2023,38 @@ function computerLine(text) {
   return true;
 }
 
+// KODE FROM ANYWHERE ON THE SITE (Colin, 2026-10-30; src/kode-route.mjs).
+// The chat bar is the coder's own composer in the room (body.kode-chat); out
+// of it, a line that names kode or reads as an ask for the coder is not sent
+// anywhere until this card is answered — the coder never starts coding on a
+// line meant for the presence, and nothing is coded from elsewhere without
+// a yes every time (no 'always'). Yes takes it into kode and says it there,
+// in the mode chosen there; no says it to the presence as typed; Esc keeps
+// it in the box. Only where kode has been paired in this browser (or this
+// is the desktop app): anyone else is talking to their presence.
+function kodeHere() { try { return hasDesktopBridge() || !!savedPairing(); } catch { return false; } }
+async function askKode(text, line) {
+  const name = myPresence?.name || myPresence?.handle || 'your presence';
+  const said = line.text.length > 160 ? line.text.slice(0, 157) + '…' : line.text;
+  chatInput.value = ''; collapseTyping();
+  const a = await consent({ kind: 'kode-say', always: false,
+    title: 'Say it in kode?',
+    note: line.why === 'named' ? `“${said}” — to the coder, in kode, in the mode you chose there.`
+      : `“${said}” reads like something for the coder. Yes says it in kode, in the mode you chose there; no says it to ${name}.`,
+    once: 'yes, in kode', cancel: `no, it is for ${name}` });
+  if (a === null) { chatInput.value = text; autoGrow(chatInput); return; }   // Esc: as it was
+  if (a) {
+    showCaption(line.text, 'you');
+    if (!(await social.kodeSay(line.text))) toast('kode could not take it — open kode and say it there.');
+    return;
+  }
+  // no: the presence's, as any line
+  showCaption(text, 'you');
+  window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text } }));
+  if (busy) { queueMessage(text, null, false); return; }
+  handle(text, null);
+}
+
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text && !chatImageB64) return;
@@ -2031,6 +2064,15 @@ function sendChat() {
   // to be fixed, with the image beside it: wiping it lost what was typed.
   const k = text ? runKommand(text) : null;
   if (k) { if (k.ok) chatInput.value = ''; collapseTyping(); return; }
+  // A LINE FOR KODE (askKode, above): after the kommands — a kommand is the
+  // body's wherever it is typed — and before the life's and the game's.
+  // In the room with no conversation on screen (pairing, the folders) the
+  // line simply goes to kode: the person is already there.
+  if (text && !chatImageB64 && kodeHere()) {
+    const line = kodeLine(text);
+    if (line && document.body.classList.contains('in-code')) { chatInput.value = ''; collapseTyping(); showCaption(line.text, 'you'); social.kodeSay(line.text); return; }
+    if (line) { askKode(text, line); return; }
+  }
   // IN THE LIFE, THE CHAT BAR TALKS TO THE LIFE (Colin, 2026-10-25: "keep the
   // chat bar as the way to interact with the brain throughout the entire
   // site"): the one living in the dreamed world is the presence, so a line
