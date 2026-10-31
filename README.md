@@ -252,6 +252,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-31** — **The "/" menu, refitted.** Colin: "let's improve the
+  visibility and overall appearance of the backslash commands menu." Its rows
+  had been styled under the pane the composer left in the fresh look, so in
+  the chat bar every row had fallen back to the browser's own grey, centred
+  button — the name in white on grey, hint and description run together, the
+  whole thing laid over the orb. Now it is the room's own: dark unimat glass
+  with the metal hairline, standing beside the orb in the left column (its
+  right edge a half-gap from the centre, the same number the bubbles keep;
+  over the orb only when the orb is enlarged or the screen narrow), rising
+  from the chat bar. A row is two lines — the name in the code face poured in
+  chrome, its slash dim and the letters typed so far bold, the argument hint
+  beside it, what it does underneath — and the lit row is lit: frost, a
+  hairline, the name solid white, its description in full. A legend of the
+  keys (↑↓ · Tab completes · Return runs · Esc) stays under the rows while
+  the list scrolls. The "@" files list and the Esc Esc go-back list share the
+  glass; the "?" keys card stands in the same place, two columns, long keys
+  wrapping. Tests in `test/code-client.test.mjs`.
+
 - **2026-10-30** — **It taps its own world.** A seventh beat, and the first
   that is the room's rather than the body's: `~tap~` inline in the presence's
   speech taps the room it stands in on that word, exactly as a person's

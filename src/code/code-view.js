@@ -648,7 +648,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function close() {
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     if (dialog.el) closeDialog(false);
-    closeSlash(); slash.el = null;
+    closeSlash(); slash.el = null; slash.wrap = null;
     shortcuts.open = false; shortcuts.el = null;
     closePanel();
     closeCompareView(); cmp.key = null;
@@ -1174,7 +1174,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // @path in the box — a folder keeps the menu open so it can be walked into —
   // and the coder reads the file when it gets to it, as Claude Code's @ does.
   const SLASH_MAX = 60;
-  const slash = { el: null, items: [], sel: 0, key: '', closedFor: null, kind: 'slash', at: null, seq: 0 };
+  const slash = { el: null, wrap: null, items: [], sel: 0, key: '', closedFor: null, kind: 'slash', at: null, seq: 0, q: '' };
   // …and the room's own commands (LOCAL_MENU, below) stand in the same menu,
   // beside the coder's: what a terminal answers itself. One the coder has
   // too (/context, /usage) is listed once, as the coder's, and answered here.
@@ -1195,7 +1195,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (!items.length) { closeSlash(); return; }
       const key = 'slash|' + m[1] + '|' + items.length + '|' + (items[0]?.name || '');
       if (key !== slash.key) { slash.sel = 0; slash.key = key; }
-      slash.kind = 'slash'; slash.items = items;
+      slash.kind = 'slash'; slash.items = items; slash.q = m[1];
       drawSlash();
       return;
     }
@@ -1217,9 +1217,29 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       drawSlash();
     }).catch(() => {});
   }
+  // THE MENU'S GLASS IS A WRAP AROUND THE LIST (2026-10-31). The list itself
+  // (slash.el) holds nothing but rows — the tests and the keys walk its
+  // children — and scrolls; the wrap is the pane: the room's glass, the metal
+  // hairline, and under the rows a legend of the keys, which stays put while
+  // the list scrolls. The name's slash is drawn dim and the letters typed so
+  // far bold, so the eye finds what it is matching against.
+  function slashName(name) {
+    const q = slash.q || '';
+    const hit = q && name.toLowerCase().startsWith(q.toLowerCase()) ? name.slice(0, q.length) : '';
+    return h('span.cv-slashname', h('i', '/'), hit ? h('b', hit) : null, hit ? name.slice(hit.length) : name);
+  }
+  const SLASH_LEGENDS = {
+    slash: '↑↓ · Tab completes · Return runs · Esc',
+    at: '↑↓ · Return or Tab takes the file · Esc',
+    back: '↑↓ · Return goes back · Esc',
+  };
   function drawSlash() {
     if (!dockUi) return;
     slash.el ||= h('div.cv-slash', { role: 'listbox', 'aria-label': 'Commands' });
+    slash.wrap ||= h('div.cv-slashwrap', slash.el, h('div.cv-slashlegend'));
+    if (slash.el.parentNode !== slash.wrap) slash.wrap.prepend(slash.el);
+    put(slash.wrap, 'className', 'cv-slashwrap' + (slash.kind === 'at' ? ' cv-at' : slash.kind === 'back' ? ' cv-back' : ''));
+    put(slash.wrap.lastChild, 'textContent', SLASH_LEGENDS[slash.kind] || SLASH_LEGENDS.slash);
     clear(slash.el);
     put(slash.el, 'className', 'cv-slash' + (slash.kind === 'at' ? ' cv-at' : slash.kind === 'back' ? ' cv-back' : ''));
     put(slash.el, 'aria-label', slash.kind === 'back' ? 'Go back to before which message?' : slash.kind === 'at' ? 'Files' : 'Commands');
@@ -1232,7 +1252,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         : slash.kind === 'at'
         ? h('button.cv-slashrow.cv-atrow' + (i === slash.sel ? '.on' : ''), attrs, icon(c.path.endsWith('/') ? 'folder' : 'file'), h('span.cv-slashname', c.path))
         : h('button.cv-slashrow' + (i === slash.sel ? '.on' : ''), attrs,
-          h('span.cv-slashname', '/' + c.name),
+          slashName(c.name),
           c.hint ? h('span.cv-slashhint', c.hint) : null,
           h('span.cv-slashdesc', c.description || ''));
       // mousedown, so the composer keeps its focus and its caret
@@ -1240,13 +1260,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       row.addEventListener('click', (e) => { if (!e.detail) acceptSlash(i, false); });   // a hand's synthetic click (detail 0), not the mouse's second word
       slash.el.appendChild(row);
     });
-    if (slash.el.parentNode !== dockUi.box) dockUi.box.prepend(slash.el);
+    if (slash.wrap.parentNode !== dockUi.box) dockUi.box.prepend(slash.wrap);
     slash.el.children[slash.sel]?.scrollIntoView?.({ block: 'nearest' });
   }
   function closeSlash() {
     if (!slash.items.length && !slash.el?.parentNode) return;
-    slash.items = []; slash.key = ''; slash.at = null;
+    slash.items = []; slash.key = ''; slash.at = null; slash.q = '';
+    // the list leaves its wrap, so "is it open" stays one question of the list
     slash.el?.remove();
+    slash.wrap?.remove();
   }
   function acceptSlash(i, run) {
     const c = slash.items[i], ta = dockUi?.ta, s = currentSession();
@@ -2108,7 +2130,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (mic.on && micHere) put(d.ta, 'placeholder', mic.loop ? `Listening — hands-free, to ${toOrion ? comp.name : AGENT_NAME[s.provider] || 'the coder'}…` : 'Listening…');
     else if (mic.speaking && micHere) put(d.ta, 'placeholder', 'Reading the reply aloud — Esc or the microphone to stop');
     if (shortcuts.open && (ended || slash.items.length)) { shortcuts.open = false; shortcuts.el?.remove(); }
-    arrange(d.box, [slash.items.length ? slash.el : shortcuts.open ? shortcuts.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
+    arrange(d.box, [slash.items.length ? slash.wrap : shortcuts.open ? shortcuts.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);   // the menu's wrap, its list inside
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · ? for shortcuts'))));
