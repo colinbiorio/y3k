@@ -272,6 +272,15 @@ build. Read the one for the part you are touching.
   never a hidden one's). Tests in `test/reach.test.mjs`, including the bus
   run under a stub document.
 
+- **2026-10-31** — **The toolbar runs alongside the frame.** Colin: "make
+  the border more rectangular so that it runs directly alongside the outer
+  edges." The capsule was a pill floating in the room, 10-12px in from its
+  edges with fully round ends. Now it sits 5px in on three sides and its
+  corners are the frame's own radius less that gap, so its liquid ring runs
+  concentric with the frame's line: a band along the top of the room. The
+  ring takes the box's own corner radius, so one number in the stylesheet is
+  the ring's shape too.
+
 - **2026-10-31** — **The "/" menu, refitted.** Colin: "let's improve the
   visibility and overall appearance of the backslash commands menu." Its rows
   had been styled under the pane the composer left in the fresh look, so in

@@ -5613,9 +5613,16 @@ body { --cv-gap: clamp(180px, calc(var(--orb-px, 40vh) + 48px), 50vw); }
 .cv-banner, .cv-cmpstrip { max-width: 760px; width: 100%; margin-left: auto; margin-right: auto; }
 
 /* THE TOOLBAR: one capsule, centred, in the bars' own glass, a thin chrome
-   line until the liquid ring takes its edge (liquid-ringed) */
-.cv-barwrap { position: relative; display: flex; justify-content: center; flex: none; padding: 10px 12px 0; }
-.cv-bar { position: relative; margin: 0; max-width: 100%; padding: 6px 10px; border-radius: 999px; border-bottom: 0;
+   line until the liquid ring takes its edge (liquid-ringed).
+   ALONGSIDE THE FRAME (Colin, 2026-10-31: "make the border more rectangular
+   so that it runs directly alongside the outer edges"): the bar sits 5px in
+   from the room's edge on three sides, and its corners are the frame's own
+   radius less that gap (--nav-round), so its ring runs concentric with the
+   frame's line — a band along the top of the room, not a pill floating in
+   it. The liquid ring takes the box's own corner radius (mercury-buttons:
+   uRadius), so the radius here is the ring's. */
+.cv-barwrap { position: relative; display: flex; justify-content: center; flex: none; padding: 5px 5px 0; }
+.cv-bar { position: relative; margin: 0; max-width: 100%; padding: 6px 10px; border-radius: calc(var(--nav-round, 18px) - 5px); border-bottom: 0;
   flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px;
   background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45); }
@@ -5757,7 +5764,7 @@ body.kode-chat .chat-menu > .cv-composer:focus-within { box-shadow: none; }
   .cv-home { width: calc(100% - 16px); }
   /* the toolbar: one row under the band, swiped sideways (wrapped, it was a
      215px oval on a phone, over the words) */
-  .cv-barwrap { padding: 8px 8px 0; }
+  .cv-barwrap { padding: 5px 5px 0; }
   .cv-bar { flex-wrap: nowrap; justify-content: flex-start; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden;
     scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 6px 12px; }
   .cv-bar::-webkit-scrollbar { display: none; }
