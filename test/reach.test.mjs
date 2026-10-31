@@ -390,7 +390,10 @@ ok('a mark may reach a little for a small control, and never for a big one', () 
   assert.ok(/if \(near < bestD\) \{ bestD = near; best = el; \}/.test(src), 'the nearest control does not win — two lights could answer one point');
   assert.ok(/Math\.hypot\(Math\.max\(r\.left - x, 0, x - r\.right\), Math\.max\(r\.top - y, 0, y - r\.bottom\)\)/.test(src),
     'the ranking measures to the centre — a wide control would lose to a round one beside it');
-  assert.ok(/return best \|\| direct;/.test(src), 'finding nothing changes the answer');
+  // 2026-10-31: finding nothing, the rails are asked (a hand in a rail is on
+  // its nearest glyph — the test below); finding nothing there leaves the
+  // honest answer untouched.
+  assert.ok(/return best \|\| railGlyph\(x, y\) \|\| direct;/.test(src), 'finding nothing changes the answer');
   // and it is not re-run while the mark is still, which is the DWELL
   assert.ok(/p\.snapTo\?\.isConnected/.test(src), 'a remembered target that has left the page is still answered with');
 });
@@ -466,5 +469,160 @@ ok('the skeleton is drawn only while the preview shows, and only when the readin
   assert.ok(/if \(list\.length === skelN && a === skelA && b === skelB\) return;/.test(sk), 'the same reading is cleared and drawn again every frame');
   assert.ok(/skelN = -1;\s+\/\/ a resize cleared it/.test(sk), 'a resize clears the canvas and a still hand is never drawn back');
 });
+
+
+console.log('\nhands on the glyphs (2026-10-31):');
+
+ok('a contact made over a button presses it; opening the fingers is the click', () => {
+  // Colin, 2026-10-29: "let users use their hands on the nav bar glyphs". The
+  // bus could HOLD on one (a 600ms dwell fired it, the probe proved it); a
+  // pinch over one did nothing, because a contact only ever took hold of the
+  // DRAGGABLE things and a plain button got the dwell — which a pinch opened
+  // sooner than that never finished. So: formed over a button, the contact is
+  // the press; opened where it closed, the click.
+  assert.match(src, /const PRESSED_BY_CONTACT = 'button, \[role="button"\], a\[href\], summary';/, 'what a contact presses is not said by what it is');
+  const move = src.slice(src.indexOf('    move(key, x, y, now, fingers'), src.indexOf('    holdAt(key,'));
+  assert.match(move, /const formed = merged && !p\.merged;\n      p\.merged = merged;/, 'a contact is not told apart from one being carried — a contact slid onto a button would press it');
+  assert.ok(move.indexOf('p.merged = merged;') < move.indexOf('const el = at(x, y, p);'), 'the contact is noted after something may have returned — the frame it forms on can be missed');
+  assert.match(move, /if \(formed && two\(el, PRESSED_BY_CONTACT\)\) \{\n        p\.swipe = false; p\.grip = true; p\.from = \[x, y\];\n        p\.dwellFrom = 0; p\.dwellAt = \[x, y\]; p\.fired = true;/, 'the contact does not take hold of the button as the grip does, latched like a hold');
+  assert.ok(move.indexOf('if (merged && drags(el))') < move.indexOf('if (formed && two(el, PRESSED_BY_CONTACT))'), 'a window light would be pressed before the window could be dragged — the order is the policy');
+  assert.ok(move.indexOf('if (p.refused) { p.dwell = 0; return p; }') < move.indexOf('if (formed && two(el, PRESSED_BY_CONTACT))'), 'a contact presses the file picker');
+  assert.match(src, /p\.grip = false; p\.merged = false;\n    if \(why === 'gone'\) live\.delete\(p\.key\);/, 'a dropped pointer remembers a contact it no longer has');
+});
+
+ok('the rails reach for a hand in them: the nearest glyph, within a reach of its edge', () => {
+  // An 80px glyph is bigger than SNAP_MAX, so a mark got no help toward it,
+  // and the bar between glyphs is pointer-events:none — a hand resting in
+  // the gap, or drifting a few pixels off a glyph it was holding on, was on
+  // the room's canvas and the ring emptied.
+  assert.match(src, /const RAILS = '#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom';/, 'the four bars are not the rails');
+  assert.match(src, /const RAIL_REACH = 30;/);
+  assert.match(src, /return best \|\| railGlyph\(x, y\) \|\| direct;/, 'the rail reach comes before a small thing found by the probes, or not at all');
+  const rg = src.slice(src.indexOf('function railGlyph(x, y)'), src.indexOf('function at(x, y, p)'));
+  assert.match(rg, /if \(!\(rr\.width > 0\) \|\| x < rr\.left \|\| x > rr\.right \|\| y < rr\.top \|\| y > rr\.bottom\) continue;/, 'a glyph pulls a hand that is not in its rail');
+  assert.match(rg, /getComputedStyle\(g\)\.pointerEvents === 'none'\) continue;/, 'a folded rail\'s glyphs, which a mouse cannot press, are reached for');
+  assert.match(rg, /if \(g\.hidden\) continue;/, 'a hidden glyph (kode, before it is paired) is reached for');
+});
+
+// --- the bus run for real, under a stub of the little it asks of a document ---
+// Four things: what is under a point, where a thing is, whether it matches a
+// selector, and to take an event. (mini-dom's selector engine does not know
+// [role="button"] or input[type=file], which the bus asks of every element, so
+// the stub is its own: an element lists the selectors it answers to.)
+function stubDocument() {
+  const events = [];
+  class El {
+    constructor(tag, { id = '', sels = [], rect = [0, 0, 0, 0], hidden = false, pe = 'auto', parent = null, kids = [] } = {}) {
+      Object.assign(this, { tag, id, sels, rect, hidden, pe, parent, kids, tagName: tag.toUpperCase() });
+    }
+    matches(sel) { return sel.split(',').map((x) => x.trim()).some((x) => x === this.tag || this.sels.includes(x) || (!!this.id && x === '#' + this.id)); }
+    closest(sel) { for (let n = this; n; n = n.parent) if (n.matches(sel)) return n; return null; }
+    getBoundingClientRect() { const [left, top, width, height] = this.rect; return { left, top, width, height, right: left + width, bottom: top + height }; }
+    dispatchEvent(e) { events.push([this, e.type]); return true; }
+    querySelectorAll(sel) { return this.kids.filter((k) => k.matches(sel)); }
+    get isConnected() { return true; }
+  }
+  const doc = { body: new El('body'), documentElement: new El('html'), elementFromPoint: () => null, querySelectorAll: () => [] };
+  globalThis.document = doc;
+  globalThis.window = { dispatchEvent: (e) => { events.push(['window', e.type]); return true; } };
+  globalThis.getComputedStyle = (el) => ({ pointerEvents: el.pe, overflowY: 'visible' });
+  globalThis.PointerEvent = class { constructor(type, init = {}) { this.type = type; Object.assign(this, init); } };
+  globalThis.MouseEvent = globalThis.PointerEvent;
+  Object.defineProperty(globalThis, 'navigator', { value: { userActivation: { hasBeenActive: true } }, configurable: true });   // a getter-only property in Node
+  return { El, doc, events, count: (el, type) => events.filter(([e, t]) => e === el && t === type).length };
+}
+
+const { createReach } = await import('../src/reach.js');
+
+await (async () => {
+  const { El, doc, events, count } = stubDocument();
+  const room = new El('div', { rect: [0, 0, 1400, 900] });
+  const glyph = new El('button', { id: 'nav-feed', sels: ['.nav-btn'], rect: [6, 200, 80, 80] });
+  doc.elementFromPoint = (x, y) => (x >= 6 && x <= 86 && y >= 200 && y <= 280 ? glyph : room);
+  const reach = createReach({});
+  let t = 1000;
+
+  ok('a pinch tapped on a glyph: down when the fingers meet, the click when they open, once', () => {
+    reach.move('h', 46, 240, t, 1, false);              // a finger arrives, hand open
+    assert.equal(count(glyph, 'pointerdown'), 0, 'arriving pressed it');
+    reach.move('h', 46, 240, t += 50, 1, true);         // the fingertips meet over it
+    assert.equal(count(glyph, 'pointerdown'), 1, 'the contact did not press it');
+    assert.equal(count(glyph, 'click'), 0, 'clicked before the fingers opened');
+    assert.ok(reach.state('h').down && reach.state('h').grip, 'not held');
+    reach.move('h', 47, 241, t += 120, 1, true);        // held a moment, a pixel of drift
+    assert.equal(count(glyph, 'click'), 0);
+    reach.move('h', 47, 241, t += 80, 1, false);        // opened where they closed
+    assert.equal(count(glyph, 'pointerup'), 1);
+    assert.equal(count(glyph, 'click'), 1, 'opening the fingers is not the click');
+    assert.ok(!reach.state('h').down);
+    for (let i = 0; i < 30; i++) reach.move('h', 47 + (i % 2), 241, t += 50, 1, false);   // resting there afterwards, 1.5s
+    assert.equal(count(glyph, 'click'), 1, 'the hold fired after the tap had — two presses for one');
+    reach.move('h', 47, 241, t += 50, 1, true);          // a second tap...
+    reach.move('h', 47, 241, t += 100, 1, false);
+    assert.equal(count(glyph, 'click'), 2, '...is not a second press');
+    reach.end('h');
+  });
+
+  ok('a contact carried onto a glyph does not press it, and one that travelled does not click', () => {
+    events.length = 0;
+    reach.move('c', 700, 450, t += 50, 1, true);         // formed over the room
+    reach.move('c', 400, 350, t += 60, 1, true);
+    reach.move('c', 46, 240, t += 60, 1, true);          // carried onto the glyph
+    reach.move('c', 46, 240, t += 60, 1, true);
+    assert.equal(count(glyph, 'pointerdown'), 0, 'a contact slid onto the glyph pressed it');
+    reach.move('c', 46, 240, t += 60, 1, false);         // opened there
+    assert.equal(count(glyph, 'click'), 0, 'opening over it clicked it');
+    reach.end('c');
+    events.length = 0;
+    reach.move('d', 46, 240, t += 50, 1, false);
+    reach.move('d', 46, 240, t += 50, 1, true);          // formed over it (down)...
+    reach.move('d', 70, 260, t += 50, 1, true);          // ...then dragged 31px...
+    reach.move('d', 70, 260, t += 50, 1, false);         // ...and opened
+    assert.equal(count(glyph, 'pointerdown'), 1);
+    assert.equal(count(glyph, 'click'), 0, 'a contact that travelled clicked where it finished');
+    reach.end('d');
+  });
+
+  ok('a contact over the file picker, or the room, presses nothing', () => {
+    events.length = 0;
+    const picker = new El('button', { id: 'chat-upload', rect: [900, 840, 40, 40] });
+    doc.elementFromPoint = (x, y) => (x >= 900 && x <= 940 && y >= 840 ? picker : room);
+    reach.move('e', 920, 860, t += 50, 1, false);
+    reach.move('e', 920, 860, t += 50, 1, true);
+    reach.move('e', 920, 860, t += 50, 1, false);
+    assert.equal(count(picker, 'pointerdown') + count(picker, 'click'), 0, 'the picker, which needs a real click, was pressed by a contact');
+    assert.ok(reach.state('e').refused);
+    reach.end('e');
+    reach.move('f', 700, 450, t += 50, 1, false);
+    reach.move('f', 700, 450, t += 50, 1, true);
+    reach.move('f', 700, 450, t += 50, 1, false);
+    assert.equal(count(room, 'pointerdown') + count(room, 'click'), 0, 'the room took a press from a pinch');
+    reach.end('f');
+  });
+
+  ok('in a rail, a hand between two glyphs is on the nearer one — within the reach, and only while the rail is open', () => {
+    const rail = new El('nav', { id: 'home-nav', rect: [0, 0, 92, 900] });
+    const g1 = new El('button', { id: 'nav-profile', sels: ['.nav-btn'], rect: [6, 60, 80, 80], parent: rail });
+    const g2 = new El('button', { id: 'nav-feed', sels: ['.nav-btn'], rect: [6, 200, 80, 80], parent: rail });
+    rail.kids = [g1, g2];
+    doc.querySelectorAll = (sel) => (sel === reach._rails ? [rail] : []);
+    doc.elementFromPoint = () => room;                   // the bar is pointer-events:none: the room is under every point of it
+    reach.move('r1', 46, 150, t += 50, 1, false);        // 10px below the profile glyph, 50 above the feed
+    assert.equal(reach.state('r1').target, g1, 'the gap under a glyph is the room');
+    reach.move('r2', 46, 190, t += 50, 1, false);        // 10px above the feed glyph
+    assert.equal(reach.state('r2').target, g2);
+    reach.move('r3', 46, 170, t += 50, 1, false);        // 30 from each: beyond the reach
+    assert.equal(reach.state('r3').target, room, 'the reach is longer than it says');
+    reach.move('r4', 300, 150, t += 50, 1, false);       // out in the room, level with the gap
+    assert.equal(reach.state('r4').target, room, 'a glyph pulls a hand that is not in its rail');
+    g1.pe = 'none'; g2.pe = 'none';                      // the rail folded
+    reach.move('r5', 46, 150, t += 50, 1, false);
+    assert.equal(reach.state('r5').target, room, 'a folded rail\'s glyph, which a mouse cannot press, took the hand');
+    g1.pe = 'auto'; g2.pe = 'auto'; g1.hidden = true;     // kode's glyph, before it is paired
+    reach.move('r6', 46, 150, t += 50, 1, false);
+    assert.equal(reach.state('r6').target, room, 'a hidden glyph is reached for');
+    for (const k of ['r1', 'r2', 'r3', 'r4', 'r5', 'r6']) reach.end(k);
+  });
+})();
 
 console.log('\n' + passed + ' checks passed.\n');

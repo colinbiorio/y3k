@@ -252,6 +252,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-31** — **Hands on the glyphs: a pinch is a press.** Colin,
+  2026-10-29: "let users use their hands on the nav bar glyphs." They could
+  hold on one — a mark held still for six tenths of a second fired it, and a
+  synthetic hand sent through the whole camera path proved it — but a pinch
+  over one did nothing: a contact only ever took hold of the things that are
+  moved (the wordmark, the collapse arrows, a slider, a window), and a plain
+  button got the same dwell a lone finger gets, which a pinch opened sooner
+  than that never finished. So a contact that forms over a button — any
+  button, a link, a glyph — presses it the instant it forms and stays down
+  until the fingers open; opening them where they closed is the click. A
+  contact that travelled clicks nothing, one carried onto a button from
+  elsewhere presses nothing, and the file picker stays refused. The settings
+  line's "pinch to press" is true of every button now. And the rails reach
+  for a hand in them: a glyph is 80px, wider than a mark's own reach, and the
+  bar between glyphs was the room, so a hand in the gap, or drifting a few
+  pixels off a glyph it was holding on, was on nothing — inside a rail it is
+  now on the nearest glyph within 30px of its edge (never a folded rail's,
+  never a hidden one's). Tests in `test/reach.test.mjs`, including the bus
+  run under a stub document.
+
 - **2026-10-31** — **The "/" menu, refitted.** Colin: "let's improve the
   visibility and overall appearance of the backslash commands menu." Its rows
   had been styled under the pane the composer left in the fresh look, so in
