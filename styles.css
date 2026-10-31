@@ -4547,45 +4547,74 @@ body.in-code .home-panel-head { display: none; }
    catches the light at the top, the room's palettes for the parts. */
 .code-root .mt-ctx, .code-root .mt-limits { cursor: pointer; border-radius: 8px; }
 .code-root .mt-ctx:focus-visible, .code-root .mt-limits:focus-visible { outline: 1px solid rgba(220, 225, 235, 0.5); outline-offset: 3px; }
-/* THE SLASH MENU (code-view.js): the coder's commands, over the composer, in
-   the context panel's glass. Name in the code face, its argument hint dim,
-   one line of what it does; the lit row is the one Return would run. */
-.cv-slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20; max-height: min(340px, 46vh); overflow-y: auto;
-  padding: 6px; border-radius: 16px; display: flex; flex-direction: column; gap: 1px;
-  background: linear-gradient(180deg, rgba(34, 37, 46, 0.9), rgba(18, 20, 26, 0.95));
-  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
-  border: 1px solid rgba(220, 225, 235, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 24px 60px rgba(0, 0, 0, 0.55); animation: cx-in 0.14s ease-out both; }
-.cv-pane .cv-slashrow { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 10px; width: 100%; padding: 7px 10px;
-  border: 0; border-radius: 10px; background: none; color: #e7e9ee; text-align: left; cursor: pointer; font-size: 0.86rem; }
-.cv-pane .cv-slashrow:hover { background: rgba(255, 255, 255, 0.05); }
-.cv-pane .cv-slashrow.on { background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
-.cv-slashname { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace; color: #fff; white-space: nowrap; }
-.cv-slashhint { color: #7d8594; font-size: 0.78rem; white-space: nowrap; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
-.cv-slashdesc { color: #9aa0ab; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-/* "@": a file or folder per row, the icon first */
-.cv-pane .cv-slashrow.cv-atrow { grid-template-columns: auto 1fr; align-items: center; }
+/* THE SLASH MENU (code-view.js drawSlash), REFITTED 2026-10-31 — Colin:
+   "let's improve the visibility and overall appearance of the backslash
+   commands menu". Its rows were styled under the old pane
+   (.cv-pane .cv-slashrow) and the composer has lived in the chat bar since
+   the fresh look, so every row had fallen back to the browser's own grey,
+   centred button, the name in white on it, the hint and the description run
+   together. Now:
+   - the glass is a WRAP around the list (.cv-slashwrap): the room's dark
+     unimat, the metal hairline, and under the rows a legend of the keys that
+     stays while the list scrolls. The list (.cv-slash) holds rows and nothing
+     else, as the keys and the tests expect.
+   - it stands BESIDE the orb, not over it: in the left column, rising from
+     the chat bar, its right edge a half-gap from the centre — --cv-gap, the
+     number the bubbles keep (THE FRESH LOOK, below). Over the orb only when
+     the orb is enlarged or the screen is narrow, as the bubbles are. The
+     composer is centred on the screen, so its own 50% is the screen's.
+   - a row is two lines: the name in the code face poured in chrome, its
+     slash dim and the letters typed so far bold; the argument hint dim
+     beside it; what it does under them, one line — and in full on the lit
+     row, which is lit: frost, a hairline, the name solid white. */
+.cv-slashwrap, .cv-keys { position: absolute; z-index: 20; bottom: calc(100% + 14px);
+  left: calc(var(--hole-l, 0px) + 18px - 50vw + 50%);
+  width: clamp(300px, calc(50vw - var(--cv-gap, 0px) / 2 - var(--hole-l, 0px) - 30px), 520px);
+  border-radius: 18px; color: #e7e9ee; text-align: left; font-size: 0.86rem; line-height: 1.3;
+  background: rgba(14, 16, 22, 0.78);
+  backdrop-filter: blur(18px) saturate(1.25); -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 24px 60px rgba(0, 0, 0, 0.55); animation: cx-in 0.14s ease-out both; }
+.cv-slashwrap::after, .cv-keys::after { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: var(--metal-line); opacity: 0.7;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.cv-slashwrap { display: flex; flex-direction: column; padding: 6px; }
+.cv-slash { display: flex; flex-direction: column; gap: 1px; max-height: min(440px, 54vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.cv-slashlegend { padding: 7px 10px 3px; color: #7d8594; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-slash > .cv-slashrow { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-areas: 'name hint' 'desc desc';
+  column-gap: 10px; row-gap: 2px; align-items: baseline; width: 100%; margin: 0; padding: 7px 11px 8px;
+  border: 0; border-radius: 11px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cv-slash > .cv-slashrow:hover { background: rgba(255, 255, 255, 0.06); }
+.cv-slash > .cv-slashrow.on { background: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 0 0 1px rgba(220, 225, 235, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+.cv-slashname { grid-area: name; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  background: linear-gradient(180deg, #ffffff, #e9edf2 40%, #b6bec9 70%, #8d96a3);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.cv-slashname > i { font-style: normal; opacity: 0.55; }
+.cv-slashname > b { font-weight: 700; }
+.cv-slash > .cv-slashrow.on .cv-slashname { background: #fff; -webkit-background-clip: text; background-clip: text; }
+.cv-slashhint { grid-area: hint; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #7d8594; font-size: 0.76rem;
+  font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace; }
+.cv-slashdesc { grid-area: desc; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #9aa0ab; font-size: 0.78rem; }
+.cv-slash > .cv-slashrow.on .cv-slashdesc { white-space: normal; color: #c3c8d2; }
+/* "@": a file or folder per row, the icon first, one line */
+.cv-slash > .cv-slashrow.cv-atrow { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: none; align-items: center; }
 .cv-atrow .ic { color: #8b93a1; }
-.cv-atrow .cv-slashname { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-:root[data-gfx="smooth"] .cv-slash, :root[data-gfx="low"] .cv-slash { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
-:root[data-motion="less"] .cv-slash { animation: none; }
+.cv-atrow .cv-slashname { grid-area: auto; }
+:root[data-gfx="smooth"] .cv-slashwrap, :root[data-gfx="low"] .cv-slashwrap, :root[data-gfx="smooth"] .cv-keys, :root[data-gfx="low"] .cv-keys {
+  backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
+:root[data-motion="less"] .cv-slashwrap, :root[data-motion="less"] .cv-keys { animation: none; }
+@media (max-width: 900px) { .cv-slashwrap, .cv-keys { left: 0; width: 100%; } }
 /* THE KEYS ("?" in an empty composer, code-view.js keysCard): what each key
-   does here, in the slash menu's glass — the key in the code face, a plate. */
-.cv-keys { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20; max-height: min(380px, 52vh); overflow-y: auto;
-  padding: 12px 16px; border-radius: 16px; display: grid; gap: 7px 14px; align-items: baseline;
-  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
-  background: linear-gradient(180deg, rgba(34, 37, 46, 0.9), rgba(18, 20, 26, 0.95));
-  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
-  border: 1px solid rgba(220, 225, 235, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 24px 60px rgba(0, 0, 0, 0.55); animation: cx-in 0.14s ease-out both; }
+   does here, in the slash menu's glass and its place — the key in the code
+   face, a plate; two columns, the column being narrow now. */
+.cv-keys { max-height: min(440px, 54vh); overflow-y: auto; padding: 12px 14px; display: grid; gap: 6px 12px; align-items: baseline;
+  grid-template-columns: fit-content(48%) minmax(0, 1fr); }   /* a long key wraps rather than pushing the words out of the column */
 .cv-kbd { display: contents; }
-@media (max-width: 1199px) { .cv-keys { grid-template-columns: max-content minmax(0, 1fr); } }
-.cv-keys kbd { justify-self: start; padding: 1px 7px; border-radius: 6px; white-space: nowrap; color: #fff; font-size: 0.78rem;
+.cv-keys kbd { justify-self: start; padding: 1px 7px; border-radius: 6px; white-space: normal; overflow-wrap: anywhere; color: #fff; font-size: 0.78rem;
   font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(220, 225, 235, 0.14); }
 .cv-keys span { color: #9aa0ab; font-size: 0.82rem; }
-:root[data-gfx="smooth"] .cv-keys, :root[data-gfx="low"] .cv-keys { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
-:root[data-motion="less"] .cv-keys { animation: none; }
 /* GOING BACK (code-view.js goBack): ↶ beside each of your messages — on hover,
    and always (faintly) where nothing hovers; Esc Esc's list in the slash
    menu's glass, under its question; the line where a conversation goes on
@@ -4598,9 +4627,11 @@ body.in-code .home-panel-head { display: none; }
 .us-back:hover { color: #fff; border-color: rgba(220, 225, 235, 0.32); }
 @media (hover: none) { .us-back { opacity: 0.55; } }
 .cv-slash.cv-back::before { content: 'Go back to before…'; padding: 3px 10px 7px; color: #8b93a1; font-size: 0.74rem; }
-.cv-pane .cv-slashrow.cv-backrow { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.cv-slash > .cv-slashrow.cv-backrow { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: none; align-items: center; }
 .cv-backrow .ic { color: #8b93a1; }
-.cv-backrow .cv-slashname { font-family: inherit; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* your own words, as you wrote them: not the code face, not chrome */
+.cv-backrow .cv-slashname { grid-area: auto; font-family: inherit; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: #e7e9ee; }
+.cv-backrow .cv-slashdesc { grid-area: auto; }
 .code-root .it.sys.cv-priorline { align-self: stretch; display: flex; gap: 12px; padding: 2px 0; border-radius: 0; background: none; box-shadow: none; font-size: 0.74rem; }
 .code-root .it.sys.cv-priorline::after { display: none; }
 .cv-priorline > i { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(220, 225, 235, 0.24), transparent); }

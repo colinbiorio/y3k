@@ -104,6 +104,19 @@ await ok('the room: in-code class, lit glyph, loaded only when opened, orb colum
   assert.ok(!/body\.in-code #orb-frame \{ display: block; inset: 0 var\(--hole-r\) 0 auto;/.test(css), 'the orb is framed into a column on a wide screen again — it keeps the centre');
   assert.match(css, /body\.in-code #orb-frame \{ display: block; inset: 0 0 auto 0; width: auto; height: calc\(var\(--hole-t\) \+ 150px\); \}/, 'narrow, the orb has no band across the top');
   assert.match(css, /body \{ --cv-gap: clamp\(180px, calc\(var\(--orb-px, 40vh\) \+ 48px\), 50vw\); \}/, 'the bubbles do not keep off the orb by its own width');
+  // 2026-10-31, THE SLASH MENU REFITTED (Colin: "improve the visibility and
+  // overall appearance of the backslash commands menu"): its rows had been
+  // styled under the pane the composer left on 2026-10-30, so in the chat bar
+  // they were the browser's grey centred buttons. Styled where they are now;
+  // the glass on a wrap that stands beside the orb by --cv-gap, as the bubbles
+  // do; a row two lines; the lit row lit; narrow, the composer's width.
+  assert.ok(!/^\.cv-pane \.cv-slashrow/m.test(css), 'the menu rows are styled under a pane the composer is not in');
+  assert.match(css, /\.cv-slashwrap, \.cv-keys \{ position: absolute; z-index: 20; bottom: calc\(100% \+ 14px\);\n  left: calc\(var\(--hole-l, 0px\) \+ 18px - 50vw \+ 50%\);\n  width: clamp\(300px, calc\(50vw - var\(--cv-gap, 0px\) \/ 2 - var\(--hole-l, 0px\) - 30px\), 520px\);/, 'the menu does not stand beside the orb');
+  assert.match(css, /\.cv-slash > \.cv-slashrow \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\); grid-template-areas: 'name hint' 'desc desc';/, 'a row is not two lines');
+  assert.match(css, /\.cv-slash > \.cv-slashrow \{[^}]*text-align: left; cursor: pointer; \}/, 'a row is the browser\'s centred button');
+  assert.match(css, /\.cv-slash > \.cv-slashrow\.on \{ background: rgba\(255, 255, 255, 0\.11\);/, 'the lit row is not lit');
+  assert.match(css, /\.cv-slashwrap::after, \.cv-keys::after \{[^}]*background: var\(--metal-line\);/, 'the menu has no metal hairline');
+  assert.match(css, /@media \(max-width: 900px\) \{ \.cv-slashwrap, \.cv-keys \{ left: 0; width: 100%; \} \}/, 'narrow, the menu is not the composer\'s width');
   assert.match(read('index.html'), /<div id="orb-frame" aria-hidden="true"><\/div>/, 'the frame element is gone');
   assert.match(read('src/body.js'), /getElementById\('orb-frame'\)/, 'body.js no longer measures the frame');
   assert.match(css, /\.code-root \{ position: fixed;[^}]*z-index: 31;/);
@@ -982,6 +995,14 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     type('/co');
     assert.deepEqual(names(), ['/compact', '/context', '/code-review', '/usage'], 'name prefixes first (Claude Code\'s own before the rest), then an alias');
     assert.equal(lit(), 0);
+    // 2026-10-31: the list stands in its wrap — the glass, and under the rows
+    // a legend of the keys; the name's slash dim, the letters typed so far bold
+    const wrap = $('div.cv-slashwrap');
+    assert.ok(wrap?.parentNode && wrap.firstChild === $('div.cv-slash') && wrap.lastChild?.classList.contains('cv-slashlegend'), 'the menu has no glass of its own, or no legend');
+    assert.equal(wrap.lastChild.textContent, '↑↓ · Tab completes · Return runs · Esc');
+    const first = $('div.cv-slash').childNodes[0].childNodes[0];
+    assert.equal(first.querySelector('i')?.textContent, '/', 'the slash is not drawn dim');
+    assert.equal(first.querySelector('b')?.textContent, 'co', 'the typed letters are not bold');
     press(ta, 'ArrowDown'); press(ta, 'ArrowDown'); press(ta, 'ArrowUp');
     assert.equal(lit(), 1, 'the arrows move the lit row');
     press(ta, 'ArrowUp');
@@ -1009,6 +1030,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     press(ta, 'Escape');
     await settle();
     assert.equal(names().length, 0, 'Esc closes the menu');
+    assert.ok(!$('div.cv-slashwrap')?.parentNode, 'the glass stays after the menu closed');
     assert.equal(asked('session.interrupt').length, 0, 'and does not stop the coder');
     type('/c');
     assert.ok(names().length > 0, 'typing on opens it again');
@@ -3300,7 +3322,8 @@ console.log('\ny3kode\'s front door:');
     assert.ok(set.indexOf('confirmDialog') < set.indexOf("cmd({ cmd: 'session.setModel'"), 'the model changes before the question is answered');
     // the dialog has the keyboard while open, and is never left behind
     assert.match(cv, /function onKey\(e\) \{\n    if \(!root\) return;\n    if \(onDialogKey\(e\)\) return;/, 'the room\'s keys act behind an open question');
-    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closeSlash\(\); slash\.el = null;\n    shortcuts\.open = false; shortcuts\.el = null;\n    closePanel\(\);/, 'leaving Code can leave a question (or the slash menu, or the keys) open');
+    assert.match(cv, /arrange\(d\.box, \[slash\.items\.length \? slash\.wrap : shortcuts\.open \? shortcuts\.el : null,/, 'the composer is arranged around the list, not its glass — arrange() would pull the list out of its wrap and drop the wrap');
+  assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closeSlash\(\); slash\.el = null; slash\.wrap = null;\n    shortcuts\.open = false; shortcuts\.el = null;\n    closePanel\(\);/, 'leaving Code can leave a question (or the slash menu, or the keys) open');
     // and the adapter passes the resolved id along, for the match above
     assert.match(read('y3k-code/adapters/claude.mjs'), /resolved: m\.resolvedModel \|\| ''/, 'the resolved id is dropped');
   });
