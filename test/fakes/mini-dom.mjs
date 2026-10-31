@@ -86,6 +86,7 @@ class Element extends Node {
   get className() { return this.attrs.get('class') || ''; }
   set className(v) { this.attrs.set('class', String(v)); }
   get id() { return this.attrs.get('id') || ''; }
+  set id(v) { this.attrs.set('id', String(v)); }   // (consent.js names its title for aria-labelledby)
   get children() { return this.childNodes.filter((c) => c.nodeType === 1); }
   get childElementCount() { return this.children.length; }
   get firstElementChild() { return this.children[0] || null; }

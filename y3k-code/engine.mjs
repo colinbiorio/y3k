@@ -27,11 +27,12 @@ import { THINKERS, thinkWithClaude } from './brain.mjs';
 import { createComputer } from './computer.mjs';
 import { createLife } from './life.mjs';
 import { createUpdater } from './update.mjs';
+import { createKeeper } from './keep.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.10';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.11';   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -76,7 +77,7 @@ export function handoffBlock(h) {
 // (orb.mjs) is there. Null: no orb tool for the coders.
 // `update`: { site, root, restart({ dir, version }), fetchFn? } from a host that
 // can run a newer version in this one's place (update.mjs); null: it cannot.
-export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null } = {}) {
+export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null, keep = {} } = {}) {
   const bus = createBus();
   const audit = createAudit(store.auditDir);
   const sessions = new Map(); // sid → { sid, provider, cwd, adapter, coalescer, handoff, title, started, mode }
@@ -210,6 +211,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (ev.type === 'session.started' && s.prior) ev = { ...ev, prior: s.prior, priorCut: s.priorCut ?? null };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
+      keeper.onEvent(s, ev);
       // the models the client offered this plan: kept, so a screen with no
       // session open (Settings → Brain) can list them too (models.list)
       if (ev.type === 'provider.status' && ev.provider && Array.isArray(ev.models) && ev.models.length) {
@@ -264,6 +266,20 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   const computer = createComputer({ ask, emit, audit, tmpDir: (mkdirSync(join(store.tmpDir, 'computer'), { recursive: true }), join(store.tmpDir, 'computer')) });
   // a life in a dreamed world (lucid), shown in the site's life mode (life.mjs)
   const life = createLife({ ask, audit, env, config: () => store.config() });
+  // KEEP GOING (keep.mjs, 0.3.11): the switch in the room; while it is on the
+  // engine speaks for the person to the one conversation — when the plan's
+  // limit lifts, when nothing has been asked for a while, after a restart —
+  // and revives that conversation from the index when it is not live.
+  const keeper = createKeeper({ config: () => store.config(), setConfig: (k) => store.setConfig({ keep: k }), now, emit, notice, sessions, audit,
+    row: (sid) => { const r = isSid(sid) ? indexRead().find((x) => x.sid === sid && !x.lost) : null; return r ? { cwd: r.cwd, provider: r.provider } : null; },
+    revive: reviveFor, send: (s, text, attachments, handoff, auto) => send(s, text, attachments, handoff, auto), ...keep });
+  function reviveFor(k) {
+    const rows = indexRead();
+    const row = rows.find((r) => r.sid === k.sid && r.providerSessionId && !r.lost)
+      || rows.filter((r) => r.cwd === k.cwd && r.provider === k.provider && r.providerSessionId && !r.lost).sort((a, b) => (b.started || 0) - (a.started || 0))[0];
+    if (!row) return { ok: false, error: 'no conversation to pick up' };
+    return startSession({ provider: row.provider, cwd: row.cwd, resumeId: row.providerSessionId, resumeOf: row.sid });
+  }
 
   // --- your presence, on your own sign-in (brain.mjs) ---------------------------
   // One turn of thinking for the presence, through the client the person signed
@@ -381,6 +397,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       return { ok: false, error: String(err?.message || err) };
     }
     indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork });
+    if (isSid(resumeOf) && !fork) keeper.follow(resumeOf, sid);   // keep going keeps the conversation, under its new id
     emit({ type: 'workspace.recent', folders: recent() });
     return { ok: true, sid, providerSessionId: s.providerSessionId, mode: chosen, auth: auth.method };
   }
@@ -402,7 +419,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
 
   // The presence's note rides with the FIRST message only — the person has
   // read it by then, and may have changed it or left it out.
-  function send(s, text, attachments, handoff) {
+  function send(s, text, attachments, handoff, auto = null) {
     const first = !s.sentFirst;
     s.sentFirst = true;
     if (first && handoff) s.handoff = handoffBlock(handoff);
@@ -415,8 +432,10 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const imgs = (attachments || []).length;
     // The screen shows what the person typed; the note, if any, is shown by the
     // screen as its own card, from its own copy.
-    s.emit({ type: 'message.user', text, images: imgs, withNote: first && !!s.handoff });
-    audit.write('session.send', { sid: s.sid, chars: text.length, images: imgs, withNote: first && !!s.handoff });
+    // (a line the switch sent on the person's behalf says so: `auto`, drawn as
+    // its own in the room, never as the person's)
+    s.emit({ type: 'message.user', text, images: imgs, withNote: first && !!s.handoff, ...(auto ? { auto } : {}) });
+    audit.write('session.send', { sid: s.sid, chars: text.length, images: imgs, withNote: first && !!s.handoff, ...(auto ? { auto } : {}) });
     return s.adapter.send({ text: full, attachments });
   }
 
@@ -609,7 +628,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       return send(s, text, attachments, handoff);
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
-    'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); return s.adapter.stop(); },
+    'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); keeper.stopped(sid); return s.adapter.stop(); },
+    // KEEP GOING (0.3.11): the switch; on keeps the conversation on the screen
+    'keep.set': async ({ on, sid }) => keeper.set({ on: !!on, sid }),
     // The command gate holds a mode to MODES already; it is checked again here,
     // as startSession does, since each adapter turns it into its vendor's permissions.
     'session.setMode': async ({ sid, mode }) => { if (!MODES.includes(mode)) return { ok: false, error: 'Unknown mode.' }; const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
@@ -773,6 +794,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       senses: ['image'],
       // it can fetch a newer version of itself and restart on it (engine.update)
       update: updater.able,
+      // the switch (keep.mjs): on, which conversation, what it waits for
+      keep: keeper.status(),
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
     };
   }
@@ -797,6 +820,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   function shutdown() {
+    keeper.dispose();
     for (const s of sessions.values()) { try { s.adapter.stop(); } catch { /* ignore */ } }
     try { life.dispose(); } catch { /* ignore */ }   // the life is asked to rest first, like a coder
     const left = liveChildren();
@@ -804,6 +828,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   emit({ type: 'engine.hello', version: VERSION, protocol: PROTOCOL });
+  keeper.init();   // a switch left on goes on soon (its conversation revived if need be)
   detectAll().then((providers) => emit({ type: 'provider.status', providers })).catch(() => {});
 
   return {

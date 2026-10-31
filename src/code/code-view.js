@@ -18,6 +18,7 @@ import { mdStream } from './render/markdown.js';
 import { contextPanel } from './render/context-panel.js';
 import { makerOf, makerMark, modelName } from './render/maker.js';
 import { glassSelect } from '../glass-select.js';
+import { consent } from '../consent.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
 import {
@@ -192,6 +193,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const reload = reloadLive;
     reloadLive = false;
     hello = r;
+    if (r.keep) S.keep = r.keep;   // the switch (keep going), as the engine has it
     offerUpdate(r);
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
@@ -445,6 +447,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     // (a start played back — the stream's backlog, a file — never takes the screen)
     if (out.sid && !S.active && !viewingSid && e.type === 'session.started' && !late) S.active = out.sid;
+    // A CONTINUATION OF THE CONVERSATION ON SCREEN IS THE CONVERSATION: the
+    // engine revived it on its own (keep going, after a restart or an end),
+    // and the room follows it under its new id, as it follows its own resume.
+    if (out.sid && e.type === 'session.started' && !late && !viewingSid && e.prior && e.prior === S.active && S.active !== out.sid) showSession(out.sid);
     if (e.type === 'session.started' && out.sid) home.wantsFolders = false;
     const here = !!out.sid && out.sid === currentSession()?.sid;
     // A session not on screen changes only its own state: its state, its question,
@@ -819,7 +825,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!bar) {
       const right = toolButtons();
       bar = {
-        right, tools: [...right.children],
+        right, tools: [...right.children], keep: right.querySelector('.cv-keep'),
         ring: null, bars: null, cost: null, tell: slot(),
         row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
@@ -904,6 +910,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     arrange(bar.right, [s ? bar.ring : null, s || lim ? bar.bars : null, s ? bar.cost : null, bar.tell.el, ...bar.tools]);
     if (bar.bars && !bar.bars.hasAttribute('tabindex')) { bar.bars.tabIndex = 0; bar.bars.setAttribute('role', 'button'); }
+    if (bar.keep) { const on = !!S.keep?.on; bar.keep.classList.toggle('on', on); bar.keep.setAttribute('aria-pressed', String(on)); bar.keep.title = on ? KEEP_TITLE.on : KEEP_TITLE.off; }
     expanded();
     if (panel.open) renderPanel();
   }
@@ -954,13 +961,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // The toolbar's own buttons, made once with the bar.
   function toolButtons() {
     const right = h('div.cv-meters');
+    // KEEP GOING (0.3.11): the switch. On, the engine on this computer speaks
+    // for the person to this conversation — when the plan's limit lifts, when
+    // nothing has been asked for a while, after a restart — see toggleKeep.
+    const keep = h('button.cv-iconbtn.cv-keep', { type: 'button', title: KEEP_TITLE.off, 'aria-pressed': 'false' }, icon('loop'));
+    keep.addEventListener('click', () => toggleKeep());
     const keys = h('button.cv-iconbtn', { type: 'button', title: 'Coding tools and keys' }, icon('key'));
     keys.addEventListener('click', () => toggleDrawer('providers'));
     const plug = h('button.cv-iconbtn', { type: 'button', title: 'Connectors' }, icon('plug'));
     plug.addEventListener('click', () => toggleDrawer('connectors'));
     const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3kode did on this computer' }, icon('activity'));
     act.addEventListener('click', () => toggleDrawer('activity'));
-    right.append(plug, act, keys);
+    right.append(keep, plug, act, keys);
     return right;
   }
 
@@ -982,9 +994,62 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       banners.push(h('div.cv-note.cv-update', `y3kode ${hello?.version || ''} is answering, and ${offer.version} is out. `, go, ' · ', later));
     }
     if (viewingSid && s) banners.push(h('div.cv-note', 'A past session, read-only. ', resumeButton(s)));
+    // KEEP GOING: what the switch waits for, where the person is, with off one press away
+    if (S.keep?.on) {
+      const off = h('button.cv-link', { type: 'button' }, 'switch off');
+      off.addEventListener('click', () => toggleKeep());
+      banners.push(h('div.cv-note.cv-keepnote', keepLine(S.keep), ' · ', off));
+    }
     swap(ui.banner, banners);
     ui.banner.hidden = !banners.length;
     root?.classList.toggle('has-session', !!s);
+  }
+
+  // KEEP GOING (2026-10-31, y3kode 0.3.11). Colin: "a system that when a switch
+  // is turned on in the kode screen, you intelligently continue working as
+  // soon as rates refresh, and if you have nothing to work on, you have free
+  // reign to continue working, building, watching the life, etc." The switch is
+  // the person's word, given once (CODE.md, line 9): the engine on their
+  // computer keeps this conversation — when the plan's limit lifts it says "go
+  // on", when a turn has ended and nothing has been asked for five minutes it
+  // says "you have free reign", after a restart it picks the conversation up
+  // — and every line it sends is drawn as its own, never as the person's. It
+  // works with this page closed. Turning it on is a consent, in the site's
+  // own words (consent.js: always · just this time · cancel); off is one press.
+  const KEEP_ENGINE = '0.3.11';
+  const KEEP_TITLE = {
+    off: 'Keep going: when your plan\'s limit lifts, y3kode goes on by itself; with nothing left to do, it chooses what to work on',
+    on: 'Keeping going — y3kode goes on by itself when the limit lifts, and chooses when nothing is asked. Press to switch off',
+  };
+  const KEEP_NOTE = 'While this is on, y3kode on this computer keeps this conversation going by itself, spending your plan: when your '
+    + 'plan\'s limit lifts it tells the coder to go on from where it stopped; when a turn has ended and you have asked nothing for '
+    + 'five minutes, it tells the coder it has free reign — to choose what is worth doing next and do it — and after y3kode restarts '
+    + 'it picks the conversation up. Every line it sends is shown here as its own. It works with this page closed, in the mode chosen '
+    + 'here: in ask or plan it waits for you at the first question. One press switches it off.';
+  const at = (ms) => { try { return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
+  function keepLine(k) {
+    if (k.paused === 'errors') return 'Keep going paused: three turns of its own failed in a row. Say something to start it again';
+    if (k.paused === 'stopped') return 'Keep going paused: you stopped the conversation. It goes on when you say more';
+    if (k.paused === 'ended') return 'Keep going paused: the conversation could not be picked up';
+    const w = k.waiting;
+    if (w?.reason === 'limit') return `Keeping going · your plan's limit lifts at ${at(w.until)}; it goes on then`;
+    if (w?.reason === 'idle') return `Keeping going · nothing is waiting; it chooses what to do next at ${at(w.until)}`;
+    if (w?.reason === 'restart') return `Keeping going · y3kode restarted; it picks the conversation up at ${at(w.until)}`;
+    if (w?.reason === 'busy') return 'Keeping going · a turn is on; it looks again when that ends';
+    return 'Keeping going';
+  }
+  async function toggleKeep() {
+    const on = !!S.keep?.on;
+    if (on) { const r = await cmd({ cmd: 'keep.set', on: false }); if (!r?.ok) toast(r?.error || 'Could not switch it off.'); return; }
+    if (!versionAtLeast(hello?.version, KEEP_ENGINE)) { toast(`y3kode ${hello?.version || ''} cannot keep going — update y3kode (${KEEP_ENGINE})`); return; }
+    const s = currentSession();
+    if (!s || viewingSid) { toast('Open a conversation first: the switch keeps the one on the screen.'); return; }   // (one that has ended is still the conversation: the engine revives it)
+    const answer = await consent({ kind: 'kode-keep', title: 'Keep going on its own?', note: KEEP_NOTE, always: 'always allow', once: 'allow just this time', cancel: 'cancel' });
+    if (!answer) return;
+    const r = await cmd({ cmd: 'keep.set', on: true, sid: s.sid });
+    if (!r?.ok) { toast(r?.error || 'Could not switch it on.'); return; }
+    if (r.on !== undefined) S.keep = { on: !!r.on, sid: r.sid || s.sid, since: r.since || Date.now(), waiting: r.waiting || null, paused: r.paused || null, fails: r.fails | 0 };
+    renderChrome();
   }
 
   // A NEWER y3kode, OFFERED HERE (2026-10-30). The engine's hello says whether
@@ -3512,6 +3577,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     _hello: (patch) => (patch ? (hello = { ...(hello || {}), ...patch }) : hello),
     _offer: () => (offer ? { ...offer } : null),
     _state: S,
+    _keep: () => S.keep,
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them
     _feed: (e) => onEvent(e),

@@ -466,7 +466,9 @@ export function updateItem(it, el, ctx) {
 
 export function renderItem(it, ctx) {
   switch (it.kind) {
-    case 'user': return h('div.it.us', it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null, h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null, backButton(ctx, it));
+    case 'user': return h('div.it.us' + (it.auto ? '.auto' : ''),
+      it.auto ? h('div.us-note', 'keep going, on its own') : it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null,
+      h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null, backButton(ctx, it));
     case 'assistant': return assistant(it, ctx);
     case 'orion': return h('div.it.or.or-' + it.who,
       h('div.or-who', h('span.or-dot'), it.who === 'you' ? `you → ${it.name || ctx.companionName}` : (it.name || ctx.companionName), h('span.muted', ' · the coder does not see this')),

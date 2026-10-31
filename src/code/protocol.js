@@ -16,7 +16,7 @@ export const EVENTS = [
   'question.request', 'question.resolved', 'plan.proposed', 'todo.update', 'subagent.started', 'subagent.progress',
   'subagent.ended', 'usage.turn', 'usage.context', 'usage.limits', 'usage.cost', 'mode.changed',
   'model.changed', 'effort.changed', 'mcp.status', 'files.changed', 'git.status', 'compact',
-  'orb.move', 'computer.action', 'computer.stopped', 'raw',
+  'orb.move', 'computer.action', 'computer.stopped', 'keep.changed', 'raw',
 ];
 
 export const COMMANDS = [
@@ -24,7 +24,7 @@ export const COMMANDS = [
   'provider.setKey', 'provider.clearKey', 'models.list', 'workspace.pick', 'workspace.browse',
   'workspace.open', 'workspace.recent', 'workspace.forget', 'workspace.files', 'git.status', 'git.diff',
   'github.repos', 'github.clone', 'session.start', 'session.send', 'session.interrupt',
-  'session.stop', 'session.setMode', 'session.setModel', 'session.setEffort', 'session.contextUsage',
+  'session.stop', 'session.setMode', 'keep.set', 'session.setModel', 'session.setEffort', 'session.contextUsage',
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork', 'session.rewind',
   'session.toolOutput', 'shell.run', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',

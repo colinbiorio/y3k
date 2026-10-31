@@ -743,5 +743,118 @@ await aok('workspace.files: a trusted folder\'s file names, matched to what is t
   passed += 1; console.log('  ✓ shell.run: a no on this computer runs nothing');
 }
 
+// KEEP GOING (0.3.11, keep.mjs). Colin, 2026-10-31: "a system that when a
+// switch is turned on in the kode screen, you intelligently continue working
+// as soon as rates refresh, and if you have nothing to work on, you have free
+// reign". The switch lives in the engine (the page may be closed), speaks for
+// the person to the one conversation, marks every line it sends as its own,
+// and revives the conversation after the engine restarts.
+console.log('\nkeep going:');
+{
+  const { GO_ON, FREE_REIGN, RESTARTED, LIMIT_TEXT, limitUntil } = await import('../y3k-code/keep.mjs');
+  const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fakes', 'claude.mjs');
+  const none = join(base, 'not-installed');
+  const repo = realpathSync(mkdtempSync(join(base, 'keep-')));
+  writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(base, 'keep-claude-home'), FAKE_CLAUDE_LOG: join(base, 'keep-fake.log'), FAKE_CLAUDE_LIMIT_TURNS: '1', FAKE_CLAUDE_LIMIT_RESET_MS: '400' };
+  const bins = { claude: FAKE, codex: none, gemini: none, opencode: none };
+  const clocks = { graceMs: 100, idleMs: 300, retryMs: 500, restartMs: 200, busyMs: 150 };
+  const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 20 && !fn(); i++) await tick(20); assert.ok(fn(), 'timed out waiting'); };
+  const cfgDir = join(base, 'cfg-keep');
+
+  ok('what Claude Code says when the plan is full is recognised, and the wait is for the last full window', () => {
+    for (const t of ["You've hit your limit · resets 4pm (America/New_York)", 'Claude AI usage limit reached|1761900000', 'API Error: 429 rate_limit_error', "You've hit your usage limit. It resets at 2026-10-31T20:00:00.000Z."]) assert.ok(LIMIT_TEXT.test(t), t);
+    for (const t of ['Failed to authenticate. API Error: 401 OAuth access token has expired.', 'the file was not found', 'limited edition']) assert.ok(!LIMIT_TEXT.test(t), t);
+    assert.equal(limitUntil({ windows: [{ kind: 'five_hour', utilization: 1, resetsAt: 500 }, { kind: 'seven_day', utilization: 0.4, resetsAt: 900 }] }), 500, 'the full window, not the week');
+    assert.equal(limitUntil({ windows: [{ kind: 'five_hour', utilization: 1, resetsAt: 500 }, { kind: 'seven_day', utilization: 1, resetsAt: 900 }] }), 900, 'a full week waits for the week');
+    assert.equal(limitUntil({ windows: [{ kind: 'five_hour', utilization: 0.3, resetsAt: 500 }] }), null, 'nothing full, nothing to wait for');
+    assert.equal(limitUntil({ status: 'rejected', windows: [{ kind: 'five_hour', utilization: 0.97, resetsAt: 500 }] }), 500, 'refused is full, whatever the number says');
+  });
+
+  await aok('on: a turn ends and nothing is asked, it chooses; refused by the limit, it waits for the reset and goes on; the person speaking puts the clock back; off is off', async () => {
+    const engine = createEngine({ store: createStore(cfgDir), consent: fixedConsent(true), env, bins, keep: clocks });
+    const live = [];
+    engine.subscribe((e) => { live.push(e); if (e.type === 'permission.request') engine.handle({ cmd: 'permission.answer', sid: e.sid, requestId: e.requestId, decision: 'allow' }); });
+    assert.equal((await engine.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+    const st = await engine.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'auto' });
+    assert.equal(st.ok, true, st.error);
+    const ended = () => live.filter((e) => e.type === 'turn.ended' && e.sid === st.sid);
+    const autos = () => live.filter((e) => e.type === 'message.user' && e.auto === 'keep');
+    await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'hello' });   // the person's own turn, the recording
+    await until(() => ended().length >= 1);
+    assert.deepEqual(engine.hello().keep, { on: false, sid: null, since: null, waiting: null, paused: null, fails: 0 }, 'off until asked');
+    assert.equal((await engine.handle({ cmd: 'keep.set', on: true })).ok, false, 'on with no conversation to keep');
+    const r = await engine.handle({ cmd: 'keep.set', on: true, sid: st.sid });
+    assert.equal(r.ok, true, r.error);
+    assert.ok(live.some((e) => e.type === 'keep.changed' && e.on && e.sid === st.sid && e.waiting?.reason === 'idle'), 'on, with the conversation idle: it waits, then chooses');
+    assert.equal(engine.hello().keep.on, true);
+    assert.equal(JSON.parse(readFileSync(join(cfgDir, 'config.json'), 'utf8')).keep.on, true, 'remembered on disk');
+    // nothing asked for idleMs: free reign, as its own line, not the person's
+    await until(() => autos().length >= 1);
+    assert.equal(autos()[0].text, FREE_REIGN);
+    assert.ok(!live.some((e) => e.type === 'message.user' && e.text === 'hello' && e.auto), 'the person\'s own line is not marked');
+    // that turn is refused by the plan's limit: it waits for the window's reset (+ grace), then goes on
+    await until(() => ended().length >= 2);
+    assert.equal(ended()[1].status, 'error');
+    assert.ok(LIMIT_TEXT.test(ended()[1].error), ended()[1].error);
+    const waits = live.filter((e) => e.type === 'keep.changed' && e.waiting?.reason === 'limit');
+    assert.ok(waits.length >= 1, 'the limit was not waited for');
+    assert.ok(waits[0].waiting.until > Date.now() - 1000 && waits[0].waiting.until <= Date.now() + 600, 'waits until the reset plus grace, not a quarter hour');
+    await until(() => autos().length >= 2);
+    assert.equal(autos()[1].text, GO_ON, 'after the limit, go on');
+    await until(() => ended().length >= 3);
+    assert.equal(ended()[2].status, 'success');
+    // the person speaks: the clock is put back; their turn answered, it waits again before choosing
+    // (the switch says what it waits for as the turn ends — its line comes just before turn.ended in the stream)
+    await until(() => live.some((e) => e.type === 'keep.changed' && e.waiting?.reason === 'idle' && live.indexOf(e) > live.indexOf(autos()[1])));
+    const before = autos().length;
+    const spoke = live.length;
+    await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'wait, me' });
+    assert.ok(live.slice(spoke).some((e) => e.type === 'keep.changed' && e.on && e.waiting === null), 'the person speaking did not put the clock back');
+    await until(() => ended().length >= 4);
+    assert.equal(autos().length, before, 'it spoke over the person');
+    await until(() => live.slice(spoke).some((e) => e.type === 'keep.changed' && e.waiting?.reason === 'idle'));
+    assert.ok(live.slice(spoke).find((e) => e.type === 'keep.changed' && e.waiting?.reason === 'idle').waiting.until >= Date.now() - 50, 'their turn answered, it waits the whole idle time again');
+    // the audit says what the switch did
+    const tail = await engine.handle({ cmd: 'audit.tail', n: 200 });
+    assert.ok(tail.entries.some((a) => a.kind === 'keep.set' && a.on === true) && tail.entries.some((a) => a.kind === 'keep.send' && a.reason === 'limit')
+      && tail.entries.some((a) => a.kind === 'session.send' && a.auto === 'keep'), JSON.stringify(tail.entries.slice(-6)));
+    // off is off
+    await engine.handle({ cmd: 'keep.set', on: false });
+    assert.equal(engine.hello().keep.on, false);
+    assert.equal(JSON.parse(readFileSync(join(cfgDir, 'config.json'), 'utf8')).keep.on, false);
+    const n = autos().length;
+    await tick(900);
+    assert.equal(autos().length, n, 'off, and it still spoke');
+    // on again for a conversation that has ended (still the conversation: revived when its time comes),
+    // and the engine goes down with it on: the next engine picks the conversation up
+    await engine.handle({ cmd: 'session.stop', sid: st.sid });
+    await until(() => live.some((e) => e.type === 'session.ended' && e.sid === st.sid));
+    const again = await engine.handle({ cmd: 'keep.set', on: true, sid: st.sid });
+    assert.equal(again.ok, true, again.error);
+    assert.equal(again.waiting?.reason, 'idle', 'an ended conversation is not kept');
+    engine.shutdown();
+    await tick(300);
+  });
+
+  await aok('the engine comes back with the switch on: the conversation is revived from the index, under its new id, and told to go on', async () => {
+    const engine = createEngine({ store: createStore(cfgDir), consent: fixedConsent(true), env: { ...env, FAKE_CLAUDE_LIMIT_TURNS: '0' }, bins, keep: clocks });
+    const live = [];
+    engine.subscribe((e) => { live.push(e); if (e.type === 'permission.request') engine.handle({ cmd: 'permission.answer', sid: e.sid, requestId: e.requestId, decision: 'allow' }); });
+    assert.equal(engine.hello().keep.on, true, 'the switch came back on');
+    assert.equal(engine.hello().keep.waiting?.reason, 'restart');
+    await until(() => live.some((e) => e.type === 'message.user' && e.auto === 'keep' && e.text === RESTARTED), 5000);
+    const said = live.find((e) => e.type === 'message.user' && e.auto === 'keep');
+    const started = live.find((e) => e.type === 'session.started' && e.sid === said.sid);
+    assert.ok(started?.prior, 'revived as a continuation of the kept conversation, not a new one');
+    assert.equal(engine.hello().keep.sid, said.sid, 'the switch follows the conversation under its new id');
+    await until(() => live.some((e) => e.type === 'turn.ended' && e.sid === said.sid && e.status === 'success'), 5000);
+    await engine.handle({ cmd: 'keep.set', on: false });
+    await engine.handle({ cmd: 'session.stop', sid: said.sid });
+    engine.shutdown();
+    await tick(300);
+  });
+}
+
 rmSync(base, { recursive: true, force: true });
 console.log(`\n${passed} checks passed.`);

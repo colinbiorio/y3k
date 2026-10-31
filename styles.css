@@ -5780,3 +5780,12 @@ body.kode-chat .chat-menu > .cv-composer:focus-within { box-shadow: none; }
      their height here (code-view.js measureChat) */
   .code-root .cv-pane { bottom: max(calc(var(--hole-b) + 8px), var(--kode-room-bottom, 0px)); }
 }
+
+/* KEEP GOING (2026-10-31): the switch in the toolbar — chrome when on, its
+   glyph cut dark into the metal; the note under the toolbar; and the lines
+   the switch sent on the person's behalf, dimmer than theirs, labelled. */
+.cv-iconbtn.cv-keep.on { color: #1c1f26; background: linear-gradient(180deg, #ffffff, #dfe5ec 45%, #aeb7c3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(0, 0, 0, 0.35); }
+.cv-iconbtn.cv-keep.on .ic { stroke: currentColor; }   /* the glyph's own stroke is currentColor: dark, cut into the metal */
+.cv-note.cv-keepnote { color: #c3c8d2; }
+.code-root .it.us.auto { opacity: 0.82; }
+.code-root .it.us.auto .us-note { color: #9aa0ab; font-size: 0.74rem; }

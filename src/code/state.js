@@ -14,6 +14,7 @@ export function createState() {
     order: [],            // sids, newest last
     active: null,
     notices: [],
+    keep: null,           // the switch (keep going): { on, sid, since, waiting, paused } from the engine's hello and keep.changed
     compares: new Map(),  // id → a /compare group: the question, the session it was asked from, the ones asked beside it (openCompare)
   };
 }
@@ -266,6 +267,9 @@ export function apply(S, e, { replay = false } = {}) {
   // --- engine-wide ------------------------------------------------------------
   switch (e.type) {
     case 'engine.hello': out.engine = true; return out;
+    case 'keep.changed':
+      S.keep = { on: !!e.on, sid: e.sid || null, since: e.since || null, waiting: e.waiting || null, paused: e.paused || null, fails: e.fails | 0 };
+      out.engine = true; return out;
     case 'provider.status':
       if (Array.isArray(e.providers)) S.providers = e.providers;
       if (e.provider && Array.isArray(e.models)) S.models = { ...S.models, [e.provider]: e.models };
@@ -354,7 +358,8 @@ export function apply(S, e, { replay = false } = {}) {
     }
 
     case 'message.user': {
-      const it = item('user', { text: e.text, images: e.images || 0, withNote: !!e.withNote });
+      // (`auto`: a line the switch sent on the person's behalf — drawn as its own, keep.mjs)
+      const it = item('user', { text: e.text, images: e.images || 0, withNote: !!e.withNote, auto: e.auto || null });
       s.items.push(it); touch(it);
       break;
     }
