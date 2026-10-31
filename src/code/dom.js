@@ -53,6 +53,8 @@ export const swap = (el, ...kids) => add(clear(el), kids);
 
 // Small line icons, drawn in the one weight the pane uses.
 const ICONS = {
+  // keep going: two arrows chasing round
+  loop: 'M4 12a8 8 0 0 1 13.7-5.7L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.7L4 15.5M4 20v-4.5h4.5',
   folder: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z',
   branch: 'M7 4v10M7 14a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM17 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM17 10c0 4-10 2-10 6',
   terminal: 'M4 5h16v14H4zM7.5 9.5l3 2.5-3 2.5M12.5 15h4',

@@ -2597,6 +2597,99 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       delete window.y3kCode;
     }
   });
+
+  // KEEP GOING (2026-10-31, y3kode 0.3.11): the switch in the toolbar. Colin:
+  // "a system that when a switch is turned on in the kode screen, you
+  // intelligently continue working as soon as rates refresh, and if you have
+  // nothing to work on, you have free reign". The engine keeps the
+  // conversation (test/code-engine.test.mjs); the page has the switch, the
+  // consent, the note under the toolbar, and draws the switch's lines as its own.
+  console.log('\nkeep going:');
+  {
+    const hadStore = 'localStorage' in globalThis;
+    if (!hadStore) { const m = new Map(); globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); } }; }
+    const sent = [];
+    // (the hello answers nothing of sessions — an answer with none would end the one on screen; the version comes by cv._hello)
+    window.y3kCode = { cmd: async (o) => { sent.push(o); if (o.cmd === 'keep.set') return { ok: true, on: !!o.on, sid: o.sid || null, since: Date.now(), waiting: o.on ? { until: Date.now() + 300000, reason: 'idle' } : null, paused: null, fails: 0 }; return { ok: true }; }, onEvent: () => () => {}, since: async () => [] };
+    const asked = (c) => sent.filter((o) => o.cmd === c);
+
+    await ok('the switch asks once, in the site\'s words, then keeps the conversation on the screen; its note says what it waits for; its lines are drawn as its own; off is one press', async () => {
+      const toasts = [];
+      const cv = await viewWith('keep', { toast: (m) => toasts.push(m), link: { companion: () => null } });
+      const sid = 'kp1';
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/kp1', mode: 'auto' });
+      cv._feed({ sid, type: 'session.state', state: 'idle' });
+      cv.open();
+      await settle();
+      tick();
+      cv._hello({ version: '0.3.11' });   // an engine with the switch
+      const sw = $('button.cv-keep');
+      assert.ok(sw, 'no switch in the toolbar');
+      assert.equal(sw.getAttribute('aria-pressed'), 'false');
+      assert.ok(/plan.s limit lifts/.test(sw.title), sw.title);
+      sw.click();
+      await settle();
+      const card = document.querySelector('div.consent-card');   // the site's own dialog, outside the room
+      assert.ok(card, 'turning it on did not ask (' + JSON.stringify(toasts) + ')');
+      assert.equal(card.querySelector('h3.consent-title').textContent, 'Keep going on its own?');
+      assert.match(card.querySelector('p.consent-note').textContent, /spending your plan/);
+      assert.match(card.querySelector('p.consent-note').textContent, /in ask or plan it waits for you/);
+      assert.equal(asked('keep.set').length, 0, 'switched on before the answer');
+      card.querySelector('button.consent-cancel').click();
+      await settle();
+      assert.equal(asked('keep.set').length, 0, 'cancel switched it on');
+      sw.click();
+      await settle();
+      document.querySelector('div.consent-card button.consent-once').click();
+      await settle();
+      assert.deepEqual(asked('keep.set').map((o) => [o.on, o.sid]), [[true, sid]], 'on keeps the conversation on the screen');
+      tick();
+      assert.equal(cv._keep()?.on, true);
+      assert.equal($('button.cv-keep').getAttribute('aria-pressed'), 'true');
+      assert.match($('div.cv-keepnote').textContent, /Keeping going · nothing is waiting; it chooses what to do next at/);
+      // the engine says what it waits for: the limit, then the line it sent
+      cv._feed({ type: 'keep.changed', on: true, sid, since: Date.now(), waiting: { until: Date.now() + 3600e3, reason: 'limit' }, paused: null, fails: 0 });
+      tick();
+      assert.match($('div.cv-keepnote').textContent, /your plan's limit lifts at .*; it goes on then/);
+      cv._feed({ sid, type: 'message.user', text: '[keep going] The plan\'s limit has lifted. Go on from where you stopped.', auto: 'keep' });
+      tick();
+      const line = $('div.it.us.auto');
+      assert.ok(line, 'the switch\'s line is drawn as the person\'s');
+      assert.equal(line.querySelector('div.us-note').textContent, 'keep going, on its own');
+      assert.match(line.querySelector('div.us-text').textContent, /^\[keep going\]/);
+      cv._feed({ sid, type: 'message.user', text: 'wait, me' });
+      tick();
+      const own = [...room().querySelectorAll('div.it.us')].find((n) => !n.classList.contains('auto'));
+      assert.ok(own && !own.querySelector('div.us-note'), 'the person\'s own line is labelled');
+      // the engine revived the conversation on its own (after a restart): the room follows it under its new id
+      cv._feed({ sid, type: 'session.ended', reason: 'exit' });
+      cv._feed({ sid: 'kp2', type: 'session.started', provider: 'claude', cwd: '/tmp/kp1', mode: 'auto', prior: sid });
+      cv._feed({ type: 'keep.changed', on: true, sid: 'kp2', waiting: null, paused: null, fails: 0 });
+      await settle(); tick();
+      assert.equal(cv._state.active, 'kp2', 'the room stayed on the ended conversation while the switch went on in its continuation');
+      cv._feed({ sid: 'kp2', type: 'session.state', state: 'idle' });
+      // paused, it says so; off is one press, no question asked
+      cv._feed({ type: 'keep.changed', on: true, sid, waiting: null, paused: 'errors', fails: 3 });
+      tick();
+      assert.match($('div.cv-keepnote').textContent, /paused: three turns of its own failed/);
+      $('div.cv-keepnote button.cv-link').click();
+      await settle();
+      assert.deepEqual(asked('keep.set').map((o) => o.on), [true, false], 'off is not one press');
+      assert.ok(!document.querySelector('div.consent-card'), 'off asked a question');
+      cv._feed({ type: 'keep.changed', on: false, sid: null, waiting: null, paused: null, fails: 0 });
+      tick();
+      assert.ok(!$('div.cv-keepnote'), 'the note stays when it is off');
+      assert.equal($('button.cv-keep').getAttribute('aria-pressed'), 'false');
+      // an engine from before the switch is told to update, and not asked
+      sent.length = 0;
+      cv._hello({ version: '0.3.10' });
+      $('button.cv-keep').click();
+      await settle();
+      assert.ok(!document.querySelector('div.consent-card') && asked('keep.set').length === 0, 'an older engine was asked to keep going');
+      cv.close();
+    });
+    if (!hadStore) delete globalThis.localStorage;
+  }
 }
 
 await ok('the stylesheet: a rise only on entry, a pane frosted only at the top tier, motion on the compositor, stilled in smooth', () => {

@@ -29,6 +29,18 @@ asked in that terminal **and** on a small local page,
 `http://127.0.0.1:<port>/approve` (the Code screen has an *Open the approval
 window* button). Answer in either; the first answer counts.
 
+**Keep going (0.3.11).** A switch in the Code screen's toolbar. While it is on,
+the engine keeps the conversation on the screen by itself (`keep.mjs`): when
+your plan's limit lifts it tells the coder to go on from where it stopped;
+when a turn has ended and you have asked nothing for five minutes it tells
+the coder it has free reign — to choose what is worth doing next and do it;
+after the engine restarts it picks the conversation up again. Every line it
+sends is shown in the room as its own, and is in the activity record. It
+works with the page closed, in the mode chosen for the conversation; in ask
+or plan it waits for you at the first question. One press switches it off;
+it pauses, and says so, when three of its own turns fail in a row or when you
+stop the conversation. Remembered in `config.json` (`keep`).
+
 **Updating it.** When the site has a newer y3kode, *Update y3kode* in
 Settings → Brain asks you first, here and in the approval window. On a yes it
 fetches that version from the site it was started for, checks it is y3kode at

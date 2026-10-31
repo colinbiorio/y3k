@@ -7,6 +7,8 @@
 //   - waits for the permission answer, applies the edit only if allowed
 //   - records argv, env names, cwd and every line it received in $FAKE_CLAUDE_LOG
 // FAKE_CLAUDE_SCENARIO=deny makes the recorded Edit be refused.
+// FAKE_CLAUDE_LIMIT_TURNS=n: the n turns after the first hit the plan's limit
+// (a rate_limit_event rejected, the reset FAKE_CLAUDE_LIMIT_RESET_MS away).
 // "send it off" launches a subagent and a shell to the background; they finish
 // once the file at $FAKE_CLAUDE_GATE exists (so a test can look in between).
 // FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
@@ -102,6 +104,18 @@ async function turn(text) {
     for (const attempt of [1, 2]) out({ type: 'system', subtype: 'api_retry', attempt, max_retries: 10, retry_delay_ms: 500, error_status: 401, error: 'authentication_failed', session_id: sessionId });
     out({ type: 'assistant', message: { id: `msg_err_${turns}`, model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: err }] }, parent_tool_use_id: null, error: 'authentication_failed', session_id: sessionId });
     out({ type: 'result', subtype: 'success', is_error: true, result: err, session_id: sessionId, usage: {}, total_cost_usd: 0, duration_ms: 1200 });
+    return;
+  }
+  // FAKE_CLAUDE_LIMIT_TURNS=n: the n turns after the first are refused by the
+  // plan's limit, as Claude Code says it — a rate_limit_event, rejected, with
+  // the window's reset FAKE_CLAUDE_LIMIT_RESET_MS away, then an error result
+  // naming the limit; the turns after those go on as before (keep going).
+  const limitTurns = Number(process.env.FAKE_CLAUDE_LIMIT_TURNS) || 0;
+  if (turns > 1 && turns <= 1 + limitTurns) {
+    const resetsAt = Math.floor((Date.now() + (Number(process.env.FAKE_CLAUDE_LIMIT_RESET_MS) || 1500)) / 1000);
+    out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resetsAt,
+      unifiedWindows: { five_hour: { utilization: 1, resetsAt }, seven_day: { utilization: 0.4, resetsAt: resetsAt + 86400 } } }, session_id: sessionId });
+    out({ type: 'result', subtype: 'success', is_error: true, result: `You've hit your usage limit. It resets at ${new Date(resetsAt * 1000).toISOString()}.`, session_id: sessionId, usage: {}, total_cost_usd: 0, duration_ms: 300 });
     return;
   }
   if (turns > 1 && /plan it/.test(text)) return rich();

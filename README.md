@@ -272,6 +272,31 @@ build. Read the one for the part you are touching.
   never a hidden one's). Tests in `test/reach.test.mjs`, including the bus
   run under a stub document.
 
+- **2026-10-31** — **Keep going: a switch in kode, and it goes on by itself
+  (y3kode 0.3.11).** Colin: "build yourself a system that when a switch is
+  turned on in the kode screen, you intelligently continue working as soon as
+  rates refresh, and if you have nothing to work on, you have free reign to
+  continue working, building, watching the life, etc." The switch is the
+  person's word, given once (CODE.md, line 9), and it lives in y3kode on their
+  computer, so it works with the page closed. While it is on, the engine
+  speaks for them to the one conversation: when the plan's limit lifts (Claude
+  Code says its windows as it goes; a refused turn names the limit) it says
+  "go on" twenty seconds after the last full window resets; when a turn has
+  ended and nothing has been asked for five minutes it says "you have free
+  reign" — choose the one thing most worth doing, do one session's worth to a
+  clean, tested, shipped point, say what you did; and after y3kode restarts
+  (an update) it picks the conversation up again, revived from the index
+  under its new id. Every line it sends is drawn in the room as its own
+  ("keep going, on its own"), never as the person's; the person speaking puts
+  the clock back; one press switches it off; three failing turns of its own
+  in a row pause it and say so; stopping the conversation pauses it until the
+  person says more. Turning it on asks once, in the site's own words (always
+  · just this time · cancel), and a note under the toolbar says what it is
+  waiting for. Tests: `test/code-engine.test.mjs` (the switch on the fake
+  Claude: idle, refused, lifted, the person speaking, off, and the engine
+  coming back), `test/code-client.test.mjs` (the switch, the consent, the
+  note, its lines).
+
 - **2026-10-31** — **The toolbar runs alongside the frame.** Colin: "make
   the border more rectangular so that it runs directly alongside the outer
   edges." The capsule was a pill floating in the room, 10-12px in from its

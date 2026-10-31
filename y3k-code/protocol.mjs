@@ -42,6 +42,8 @@ export const EVENTS = [
   'orb.move',
   // the orb's hands on this computer (computer.mjs): shown before each action
   'computer.action', 'computer.stopped',
+  // the switch (keep.mjs, 0.3.11): on or off, and what it waits for
+  'keep.changed',
   // the vendor's own event, for the debug drawer only
   'raw',
 ];
@@ -78,6 +80,8 @@ export const COMMANDS = {
   'session.interrupt': { sid: S(64) },
   'session.stop': { sid: S(64) },
   'session.setMode': { sid: S(64), mode: S(20) },
+  // keep going (0.3.11): the switch; on keeps the conversation on the screen
+  'keep.set': { on: B(true), sid: S(64, false) },
   'session.setModel': { sid: S(64), model: S(120) },
   'session.setEffort': { sid: S(64), effort: S(20) },
   'session.contextUsage': { sid: S(64) },

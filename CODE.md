@@ -72,6 +72,21 @@ command-line tool and turns what it does into one stream the page can draw.
    what is open, the names that matter, how the person works, what has passed
    between us), so the thread survives the cut. Only the person's own `/clear`
    or `/new` starts over.
+9. **Keep going is the person's word, given once.** Colin, 2026-10-31: "a
+   system that when a switch is turned on in the kode screen, you
+   intelligently continue working as soon as rates refresh, and if you have
+   nothing to work on, you have free reign." Line 1 holds: nothing drives the
+   coder but the person — and a switch they turned on is them. While it is on,
+   the engine on their computer speaks for them to the one conversation
+   (`y3k-code/keep.mjs`): "go on" when the plan's limit lifts, "you have free
+   reign" when a turn has ended and nothing has been asked for a while, "go
+   on" after the engine restarts. Every line it sends is shown in the room as
+   the switch's own, never as the person's, and is in the audit; the person
+   speaking puts the clock back; one press switches it off; it pauses, and
+   says so, when its own turns fail three times running or the person stops
+   the conversation. It runs in the mode chosen for the conversation and never
+   past it: in ask or plan it waits for the person at the first question.
+   Turning it on is a consent, in the site's words.
 
 ## your presence, thinking on your own sign-in
 
