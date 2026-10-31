@@ -21,6 +21,11 @@
 //   HELD on it. Pressing on arrival would mean sweeping your hand across the
 //   screen fired every control it passed over.
 //
+//   A CONTACT — two fingertips meeting — is a thing you did, and it is
+//   answered the moment it forms: over something that is moved it is the
+//   grip (DRAGGABLE), over a button it is the press (PRESSED_BY_CONTACT,
+//   2026-10-31); opening the fingers where they closed is the click.
+//
 // THE FOUR RULES THAT ARE NOT NEGOTIABLE:
 //
 //  1. ALWAYS EMIT THE MATCHING UP. The orb ends a drag on a window-level
@@ -134,6 +139,38 @@ const NO_DWELL = '#home-brand, .home-brand, input[type=range], .mind-win, .win-e
 // it is also what stops a hand resting over a memory from pressing a link in it.
 const PRESSABLE = '.win-light, .win-min, .win-tab';
 
+// A CONTACT MADE OVER A BUTTON PRESSES IT (2026-10-31). The settings line has
+// promised "pinch to press" since the contact was invented, and it was true
+// of exactly the things a contact takes hold of — the wordmark, the collapse
+// arrows, a slider, a window — because those are pressed on arrival and let
+// go with a click when the fingers part. A plain button got the HOLD instead:
+// the contact landed on it and started the same six-tenths-of-a-second dwell
+// a lone finger starts, and a pinch opened sooner than that — which is every
+// pinch anybody makes as a tap — pressed nothing at all. Colin, 2026-10-29:
+// "let users use their hands on the nav bar glyphs." They could hold on
+// them; they could not tap them.
+//
+// So a contact that FORMS over one of these presses it the instant it forms
+// and stays down until the fingers open — the grip, exactly as the wordmark
+// has it — and opening them where they closed is the click. Forms, not
+// arrives: a contact made over the room and carried onto a button is a hand
+// moving something, not a tap, and it presses nothing (see p.merged below).
+// Buttons by what they are, not by a list of ids somebody has to keep.
+const PRESSED_BY_CONTACT = 'button, [role="button"], a[href], summary';
+
+// THE RAILS REACH FOR A HAND IN THEM. A rail glyph is 80px across, which is
+// bigger than SNAP_MAX, so a mark gets no help toward it — and between two
+// glyphs there is nothing: the bar itself is pointer-events:none, so a hand
+// resting in the gap is on the room's canvas, and a hand that drifts a few
+// pixels off a glyph while holding on it is suddenly on nothing and the ring
+// empties. A hand IN a rail means a glyph in that rail; the nearest one,
+// within a reach past its edge, is what the hand is on. Only inside the
+// rail's own box, so nothing out in the room is pulled. A folded rail's
+// glyphs have no pointer-events and are passed over, as elementFromPoint
+// would pass over them.
+const RAILS = '#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom';
+const RAIL_REACH = 30;
+
 // A HOLD ON ONE OF THESE OPENS THE MICROPHONE. Not a separate gesture: the same
 // six-tenths-of-a-second hold that presses a button, landing on a field you
 // would have to type into, offers the other way of putting words in it. A hand
@@ -242,7 +279,7 @@ export function createReach({ onWords = null, onMic = null } = {}) {
         id: ID_BASE + (nextId++), key,
         x: 0, y: 0, target: null, down: false, swipe: false,
         dwellFrom: 0, dwellAt: null, dwell: 0, fired: false, seen: 0, refused: false,
-        speed: 0, stillFrom: 0, from: null,
+        speed: 0, stillFrom: 0, from: null, merged: false,
         snapAt: null, snapTo: null,
       };
       live.set(key, p);
@@ -295,7 +332,28 @@ export function createReach({ onWords = null, onMic = null } = {}) {
       const near = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
       if (near < bestD) { bestD = near; best = el; }
     }
-    return best || direct;
+    return best || railGlyph(x, y) || direct;
+  }
+
+  // The nearest glyph of the rail this point is in, within RAIL_REACH of its
+  // edge; null outside every rail or beyond every glyph's reach.
+  function railGlyph(x, y) {
+    const rails = document.querySelectorAll?.(RAILS);
+    if (!rails) return null;
+    for (const rail of rails) {
+      const rr = rail.getBoundingClientRect();
+      if (!(rr.width > 0) || x < rr.left || x > rr.right || y < rr.top || y > rr.bottom) continue;
+      let best = null, bestD = RAIL_REACH;
+      for (const g of rail.querySelectorAll('button')) {
+        if (g.hidden) continue;
+        const r = g.getBoundingClientRect();
+        if (!(r.width > 0) || getComputedStyle(g).pointerEvents === 'none') continue;
+        const near = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+        if (near < bestD) { bestD = near; best = g; }
+      }
+      if (best) return best;
+    }
+    return null;
   }
 
   // ...and the answer is kept while the mark is still. See SNAP_AGAIN: a hand
@@ -395,7 +453,7 @@ export function createReach({ onWords = null, onMic = null } = {}) {
     // re-rendering for good. Going quiet is not the same as leaving.
     window.dispatchEvent(new PointerEvent('pointermove', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: -9999, clientY: -9999 }));
     p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false; p.refused = false; p.stillFrom = 0;
-    p.snapAt = null; p.snapTo = null; p.pane = null; p.scrollAt = null; p.grip = false;
+    p.snapAt = null; p.snapTo = null; p.pane = null; p.scrollAt = null; p.grip = false; p.merged = false;
     if (why === 'gone') live.delete(p.key);
   }
 
@@ -434,6 +492,11 @@ export function createReach({ onWords = null, onMic = null } = {}) {
       p.speed = p.seen ? p.speed + (inst - p.speed) * 0.35 : 0;
       p.seen = now;
       p.x = x; p.y = y;
+      // A CONTACT THAT HAS JUST FORMED, as against one being carried. Read
+      // before anything returns, so the frame it forms on is never missed and
+      // the frames after it never look new.
+      const formed = merged && !p.merged;
+      p.merged = merged;
 
       const el = at(x, y, p);
       // A pointer that wandered off the page keeps its press rather than
@@ -538,6 +601,18 @@ export function createReach({ onWords = null, onMic = null } = {}) {
       // a contact rather than a count: you have to mean it.
       if (merged && drags(el)) {
         p.swipe = false; p.grip = true; p.from = [x, y];
+        press(p);
+        p.dwell = 0;
+        return p;
+      }
+      // ---- A CONTACT MADE OVER A BUTTON PRESSES IT -------------------------
+      // The same grip, so the same release: the click comes when the fingers
+      // open, if they open where they closed. A finger already holding on the
+      // button has its dwell cleared here — the tap is the press, and a hold
+      // that had been counting must not fire a second one after it.
+      if (formed && two(el, PRESSED_BY_CONTACT)) {
+        p.swipe = false; p.grip = true; p.from = [x, y];
+        p.dwellFrom = 0; p.dwellAt = [x, y]; p.fired = true;   // latched here, as after a hold: a drift off the spot clears it
         press(p);
         p.dwell = 0;
         return p;
@@ -672,6 +747,8 @@ export function createReach({ onWords = null, onMic = null } = {}) {
     _draggable: DRAGGABLE,
     _noDwell: NO_DWELL,
     _pressable: PRESSABLE,
+    _pressedByContact: PRESSED_BY_CONTACT,
+    _rails: RAILS,
     _textField: TEXT_FIELD,
     _snapR: SNAP_R,
   };
