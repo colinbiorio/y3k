@@ -252,6 +252,30 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-01** — **One conversation, for real this time (y3kode 0.3.12).**
+  Colin: "we seem to be starting a new convo every time instead of keeping one
+  live always." The rule was written on 2026-10-29 (CODE.md line 8) and four
+  things still broke it. The folders' one button said "Continue in p-vs-np"
+  and started a new conversation, and it was the only thing on the page that
+  can. The room fell back to those folders after an update, because a
+  browser's socket left open to the old process carried the page's next event
+  stream to an engine that had gone: it heard pings and nothing else, while
+  every command reached the new engine, so a conversation it had just
+  continued never appeared. A conversation could be running twice, two Claude
+  Codes on one transcript (found live: the resume and the new one started a
+  second apart). And a `/compare` second opinion was never marked in the index,
+  so the page's "never a second opinion" had nothing to read, and the room
+  could come back to one. Now: "Continue in …" continues that folder's
+  conversation and says "Start in …" only after your own `/clear`; the door
+  closes every connection when the engine leaves, and the page notices a
+  stream naming a different engine than its commands reach and reopens it; an
+  engine that comes back new goes on with the conversation by itself; a start
+  that never comes over the stream is read from the engine; a resume of a
+  running conversation answers the running session; second opinions are marked.
+  The page's half works from the deploy, so the update to 0.3.12 itself is
+  already covered. Tests: the whole failure replayed on a stand-in companion,
+  the door with a keep-alive agent, each fix proved by planting its fault.
+
 - **2026-10-31** — **Hands on the glyphs: a pinch is a press.** Colin,
   2026-10-29: "let users use their hands on the nav bar glyphs." They could
   hold on one — a mark held still for six tenths of a second fired it, and a

@@ -669,9 +669,10 @@ export function createOnboard(env) {
   }
 
   // "Continue in <folder> · <tool> · <mode>": the last place, the last tool.
-  function continueButton({ folder, tool, mode, onGo }) {
+  // `fresh`: the person asked to start over (/clear, /new) — a start, and it says so.
+  function continueButton({ folder, tool, mode, fresh = false, onGo }) {
     const b = h('button.btn.btn-allow.ob-continue', { type: 'button', title: 'Enter' },
-      h('span.ob-contlabel', 'Continue in ', h('b', folder), ` · ${tool}`, mode ? ` · ${mode}` : ''), icon('chevron'));
+      h('span.ob-contlabel', fresh ? 'Start in ' : 'Continue in ', h('b', folder), ` · ${tool}`, mode ? ` · ${mode}` : ''), icon('chevron'));
     b.addEventListener('click', onGo);
     return b;
   }

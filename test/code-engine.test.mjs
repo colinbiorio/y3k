@@ -230,6 +230,49 @@ console.log('\na conversation Claude Code has no transcript of:');
     assert.equal((await rows(engine)).find((x) => x.sid === r.sid).lost, undefined);
   });
 
+  // ONE CONVERSATION, LIVE ONCE (0.3.12). The page picks the conversation up
+  // when the engine comes back and the switch revives it too (keep.mjs), or
+  // two pages ask for it: each used to spawn a coder of its own on the same
+  // transcript — two Claude Codes on one conversation, the room following the
+  // second (2026-11-01). A resume of one that is live answers the live session.
+  await aok('a conversation that is live already is not started twice: a resume of it answers the live session', async () => {
+    const live = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: first.sid });
+    assert.equal(live.ok, true, live.error);
+    await until(events, (e) => e.type === 'session.started' && e.sid === live.sid);   // (a coder says it is ready only at its first message)
+    const before = spawns(engine), were = (await rows(engine)).length;
+    const again = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: first.sid });
+    assert.equal(again.ok, true, again.error);
+    assert.equal(again.sid, live.sid, 'the live one');
+    assert.equal(again.already, true);
+    assert.equal(again.providerSessionId, first.providerSessionId);
+    const byId = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, providerSessionId: first.providerSessionId });
+    assert.equal(byId.sid, live.sid, 'by the coder\'s own id too');
+    assert.equal(spawns(engine), before, 'nothing spawned');
+    assert.equal((await rows(engine)).length, were, 'no row added');
+    assert.ok(engine.audit.tail(50).some((a) => a.kind === 'session.already' && a.sid === live.sid), 'written down');
+    // a fork is a new conversation, as before
+    const forked = await engine.handle({ cmd: 'session.fork', sid: first.sid });
+    assert.equal(forked.ok, true, forked.error);
+    assert.notEqual(forked.sid, live.sid);
+    assert.equal(spawns(engine), before + 1);
+    for (const sid of [live.sid, forked.sid]) { await engine.handle({ cmd: 'session.stop', sid }); await until(events, (e) => e.type === 'session.ended' && e.sid === sid); }
+  });
+
+  // "THE CONVERSATION" IS NEVER A SECOND OPINION. /compare starts one beside
+  // the conversation, and the page passes over rows marked `aside` — but the
+  // index never carried the mark, so after a /compare the newest row was the
+  // second opinion, and the room came back to that (found 2026-11-01).
+  await aok('a second opinion says so in the index; an ordinary start does not', async () => {
+    const aside = await engine.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'plan', aside: true, title: 'Compare: which is better?' });
+    assert.equal(aside.ok, true, aside.error);
+    const plain = await engine.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+    assert.equal(plain.ok, true, plain.error);
+    const list = await rows(engine);
+    assert.equal(list.find((x) => x.sid === aside.sid).aside, true, 'marked');
+    assert.equal(list.find((x) => x.sid === plain.sid).aside, undefined, 'not marked');
+    for (const sid of [aside.sid, plain.sid]) { await engine.handle({ cmd: 'session.stop', sid }); await until(events, (e) => e.type === 'session.ended' && e.sid === sid); }
+  });
+
   // An engine that cannot tell (no transcripts folder it can read) still
   // spawns — and the crash says what the look would have.
   await aok('a crash that says "No conversation found" marks the row, and the next pick passes it over', async () => {

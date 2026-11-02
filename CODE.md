@@ -71,7 +71,11 @@ command-line tool and turns what it does into one stream the page can draw.
    compact it, saying what to keep (what we are building and why, decisions,
    what is open, the names that matter, how the person works, what has passed
    between us), so the thread survives the cut. Only the person's own `/clear`
-   or `/new` starts over.
+   or `/new` starts over: the folders' "Continue in <folder>" continues that
+   folder's conversation, and begins one only when it has none. A conversation
+   is live once (a resume of one already running answers the running session),
+   and an engine that comes back new, from an update or a crash, goes on with
+   the conversation by itself; the room never needs a button for that.
 9. **Keep going is the person's word, given once.** Colin, 2026-10-31: "a
    system that when a switch is turned on in the kode screen, you
    intelligently continue working as soon as rates refresh, and if you have

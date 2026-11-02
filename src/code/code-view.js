@@ -52,7 +52,7 @@ export function createCodeView(opts = {}) {
 // `link` (from main.js) is how Code reaches the rest of the house — the
 // presence's note, the line back, talking to the presence, the orb. src/code
 // itself never calls the site.
-function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null, link = null, waitFor = waitForVersion } = {}) {
+function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null, link = null, waitFor = waitForVersion, settleMs = 4000 } = {}) {
   const S = createState();
   let transport = null;
   let root = null;
@@ -146,7 +146,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         if ((st === 'reconnecting' || st === 'offline') && !downAt) { downAt = Date.now(); setTimeout(() => schedule('engine'), 3100); }
         schedule('engine');
       },
-      onReset: () => { refreshHello(true); },
+      onReset: (r) => { refreshHello(true, { fresh: !!r?.fresh }); },
     };
     if (hasDesktopBridge()) { hold(); transport = createDesktop(handlers); S.conn = 'connecting'; return; }
     const saved = savedPairing();
@@ -168,11 +168,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let helloRun = null;       // the hello on its way
   let helloAgain = false;    // ...and another asked for meanwhile
   let reloadLive = false;    // a reset: read every live session from disk again
+  let reborn = false;        // ...from a NEW engine (another epoch): the conversation that ended with the old one goes on (doHello)
   let holdAll = null;        // events held from a reset until that is done
   let holdTimer = 0;
-  function refreshHello(reset = false) {
+  function refreshHello(reset = false, { fresh = false } = {}) {
     if (reset) {
       reloadLive = true;
+      if (fresh) reborn = true;
       // never held for good: an engine that does not answer lets them through
       if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); }
     }
@@ -191,8 +193,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // anything asked for while this one was on its way, it answers
     helloAgain = false;
     const reload = reloadLive;
-    reloadLive = false;
+    const fresh = reborn;
+    reloadLive = false; reborn = false;
     hello = r;
+    // A STREAM ON AN ENGINE THAT LEFT. The hello names the engine's epoch; the
+    // stream knows the one it hears. Two different ones mean the stream is on
+    // a process that is gone — an update's old half, still answering its old
+    // socket with pings — so it is dropped and opened again, on a new socket,
+    // once it has had a moment to name this engine (transport.js resync), and
+    // the reset it comes back with asks this hello once more, fresh.
+    if (r.epoch && transport?.epoch && r.epoch !== transport.epoch) transport.resync?.(r.epoch);
     if (r.keep) S.keep = r.keep;   // the switch (keep going), as the engine has it
     offerUpdate(r);
     S.providers = r.providers || S.providers;
@@ -217,6 +227,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       // (one on screen stays there, saying it has ended, with its Resume)
       apply(S, { sid, type: 'session.ended', reason: 'exited' }, { replay: true });
     }
+    // THE ENGINE CAME BACK NEW (an update; a crash and its restart): the
+    // conversation on screen ended with the old one, and it is still the
+    // conversation (CODE.md line 8) — it goes on, as the lines below pick it
+    // up (continueLast), unless the person is looking back or asked for the
+    // folders. It used to stay on screen saying "Stopped. Continue it", and
+    // the folders' one button started a new one (2026-11-01).
+    if (fresh && S.active && !viewingSid && S.sessions.get(S.active)?.state === 'ended') S.active = null;
     if (!S.active) { const l = liveSessions(S).filter((x) => !x.closing); if (l.length) S.active = l[l.length - 1].sid; }
     if (!S.active && !home.wantsFolders) continueLast();   // (not awaited: an engine that never answers must not hold the hello)
     schedule('engine'); schedule('meta'); rebuildTranscript();
@@ -231,10 +248,22 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let continuing = null;
   function continueLast() {
     if (continuing) return continuing;
+    return pickUp(async () => (await cmd({ cmd: 'session.list' }))?.sessions);
+  }
+  // THE FOLDER'S OWN CONVERSATION, from the folders' "Continue in <folder>"
+  // (afterOpen): the newest the engine holds in that folder with that tool,
+  // continued the same way. It used to start a new one — the one button that
+  // said Continue was the one sure way to lose the thread (2026-11-01).
+  function continueIn(cwd, provider) {
+    if (continuing) return continuing;
+    return pickUp(async () => ((await cmd({ cmd: 'session.list', cwd }))?.sessions || []).filter((x) => x && (!provider || x.provider === provider)));
+  }
+  function pickUp(list) {
     home.continuing = true;   // (the folders are not shown while it is picked up: renderHome)
+    if (ui) redrawHome();
     continuing = (async () => {
-      const r = await cmd({ cmd: 'session.list' });
-      const rows = (r?.sessions || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && x.provider && x.cwd);
+      // (a second opinion: marked by the engine since 0.3.12, known by the title /compare gave it before)
+      const rows = ((await list()) || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && !/^Compare: /.test(String(x.title || '')) && x.provider && x.cwd);
       // newest first; one the coder has no transcript of is passed over for
       // the one before it (LOST, below) — each tried once, a few at most. An
       // engine that knows already (0.3.9: the row marked `lost`, or a resume
@@ -274,12 +303,23 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // A session just resumed, until it is ready or has ended (a few seconds at
   // most; one with no transcript is gone within one).
   const settling = new Map();   // sid → done
-  function settled(sid, ms = 4000) {
+  function settled(sid, ms = settleMs) {
     const s = S.sessions.get(sid);
     if (s?.ready || s?.ended) return Promise.resolve(s);
     return new Promise((resolve) => {
       const done = () => { clearTimeout(t); settling.delete(sid); resolve(S.sessions.get(sid) || null); };
-      const t = setTimeout(done, ms);
+      // A start that never came over the stream — one that lags, or a stream
+      // on an engine that left (doHello) — is read from the engine itself
+      // (session.load): the room must never fall back to the folders over a
+      // conversation it has just continued (2026-11-01).
+      const t = setTimeout(async () => {
+        if (!settling.has(sid)) return;
+        if (!S.sessions.get(sid)?.cwd) {
+          await loadInto(sid).catch(() => false);
+          if (ui && S.active === sid && S.sessions.has(sid)) showSession(sid);   // (never heard, so never drawn)
+        }
+        done();
+      }, ms);
       t.unref?.();
       settling.set(sid, done);
     });
@@ -355,6 +395,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     let r = null;
     try { r = await cmd({ cmd: 'session.load', sid }); } finally { holding.delete(sid); }
     if (r?.ok) {
+      if (!Array.isArray(r.events)) r.events = [];
       const old = S.sessions.get(sid);
       if (old && have.has(sid)) { for (const e of r.events) take(e, true); }
       else readWhole(sid, r, old);
@@ -1087,6 +1128,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (!root) return;
       updating = ''; offer = null; renderChrome();
       toast(back ? `y3kode ${r.version || version} is here.` : 'y3kode did not come back yet — it reconnects on its own in a moment.');
+      // The one that answered is a new process: hello again, fresh — a stream
+      // left on the old one is dropped there (doHello), and the conversation
+      // that ended with it goes on.
+      if (back) refreshHello(true, { fresh: true });
       return;
     }
     updating = ''; renderChrome();
@@ -3078,7 +3123,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.homeEl.hidden = false;
     ui.dock.hidden = true;
     const down = isDown();
-    const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.continuing ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
+    const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.continuing ? 1 : 0, home.wantsFolders ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
       plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, attachments.length ? attachVer : 0, companion()?.name || '',
       home.full ? runningSessions().map((x) => `${x.sid}:${x.state}:${x.waiting}:${x.title}`).join() : '',
       JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
@@ -3220,7 +3265,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const lastTool = last ? known.find((p) => p.id === (last.provider || chosen)) || null : null;
     const cont = last && !gate && !(lastTool && needsSetup(lastTool))
       ? ob.continueButton({ folder: last.name || folderName(last.path), tool: AGENT_NAME[lastTool?.id] || lastTool?.label || AGENT_NAME[chosen] || chosen,
-        mode: last.mode ? MODE_INFO[last.mode]?.label : null, onGo: () => chooseFolder(last.path, lastTool?.id || chosen) })
+        mode: last.mode ? MODE_INFO[last.mode]?.label : null, fresh: home.wantsFolders, onGo: () => chooseFolder(last.path, lastTool?.id || chosen) })
       : null;
     const noneReady = !gate && known.length > 0 && known.every((p) => p.ready === false || p.installed === false);
     return h('div.cv-center.cv-wide', hero('Where are we working?', 'Pick a folder on your computer. The first time, y3kode asks you — on your computer — to trust it.'),
@@ -3301,10 +3346,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     afterOpen(await cmd({ cmd: 'workspace.open', path }), provider);
   }
 
-  function afterOpen(r, provider) {
+  async function afterOpen(r, provider) {
     if (r.code === 'cancelled') return;
     if (!r.ok) { home.error = r.code === 'declined' ? 'Not trusted — nothing was started.' : r.error; home.screen = 'folders'; redrawHome(); return; }
     home.pending = { path: r.path, name: r.name, findings: r.findings || [], mode: r.mode, provider: provider || chosenProvider() };
+    // ONE CONVERSATION (CODE.md line 8): the folder's conversation goes on
+    // when it has one with this tool (continueIn); a new one begins only when
+    // it has none — or by the person's word (/clear, /new brought the
+    // folders: wantsFolders).
+    if (!home.wantsFolders && await continueIn(r.path, home.pending.provider)) {
+      home.pending = null; home.screen = 'folders'; home.error = null; homeRev++;
+      return;
+    }
     if (r.mode) return start(r.mode);
     home.screen = 'mode';
     redrawHome();

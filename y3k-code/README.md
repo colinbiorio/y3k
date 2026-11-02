@@ -49,6 +49,16 @@ folder, and runs it in its own place on the same port; this window stays
 open, and your browser stays connected. The same command run later starts the
 newest version already fetched (`update.mjs`).
 
+**One conversation, live once (0.3.12).** An update ends the coder and the
+conversation goes on by itself on the new version. The old process stays as
+the new one's parent, so when it leaves it closes every connection, not only
+the idle ones: a browser's socket left open to it used to carry the page's next
+event stream to an engine that had gone, which answered with pings and nothing
+else. And a conversation already running is not started twice: a resume of it,
+from the page, a second page or the *keep going* switch, answers the running
+session (`session.already` in the activity record). A second opinion (`/compare`)
+is marked in the session index, so it is never taken for the conversation.
+
 **The orb.** Whichever tool is coding can move the orb beside y3kode: every
 session is handed one tool of y3k's own, `orb`, in the same words you type
 into the chat (`color/gold/form/heart`, `mood/thinking`). It is a tiny MCP
