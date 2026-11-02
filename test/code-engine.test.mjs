@@ -258,6 +258,63 @@ console.log('\na conversation Claude Code has no transcript of:');
     for (const sid of [live.sid, forked.sid]) { await engine.handle({ cmd: 'session.stop', sid }); await until(events, (e) => e.type === 'session.ended' && e.sid === sid); }
   });
 
+  // THE CONVERSATION'S NAME (0.3.13). Colin, 2026-11-02: "give us an option
+  // to name and rename the chat while keeping the singular thread". Renaming
+  // starts nothing; the name goes on with the conversation through every
+  // resume; it is Claude Code's own name for the session from its next start.
+  await aok('a name: given without starting anything, carried by every resume, and the coder\'s own session name', async () => {
+    const spawned = () => engine.audit.tail(1000).filter((a) => a.kind === 'session.spawn');
+    const live = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: first.sid });
+    assert.equal(live.ok, true, live.error);
+    await until(events, (e) => e.type === 'session.started' && e.sid === live.sid);
+    const before = spawned().length, were = (await rows(engine)).length;
+    const r = await engine.handle({ cmd: 'session.rename', sid: live.sid, name: '  orion\nand\u202e me  ' });
+    assert.deepEqual([r.ok, r.title, r.named], [true, 'orion and me', true], 'one clean line');
+    assert.equal(spawned().length, before, 'nothing spawned');
+    assert.equal((await rows(engine)).length, were, 'no row added');
+    const ev = await until(events, (e) => e.type === 'session.title' && e.sid === live.sid && e.named);
+    assert.equal(ev.title, 'orion and me');
+    assert.equal((await rows(engine)).find((x) => x.sid === live.sid).named, true);
+    assert.equal((await engine.handle({ cmd: 'engine.hello' })).sessions.find((x) => x.sid === live.sid).named, true);
+    // the person's first line no longer names it
+    await engine.handle({ cmd: 'session.send', sid: live.sid, text: 'hello there' });
+    await until(events, (e) => e.type === 'turn.ended' && e.sid === live.sid);
+    assert.equal((await rows(engine)).find((x) => x.sid === live.sid).title, 'orion and me');
+    await engine.handle({ cmd: 'session.stop', sid: live.sid });
+    await until(events, (e) => e.type === 'session.ended' && e.sid === live.sid);
+    // continued: the same name, and Claude Code is told it
+    const next = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: live.sid });
+    assert.equal(next.ok, true, next.error);
+    const st = await until(events, (e) => e.type === 'session.started' && e.sid === next.sid);
+    assert.deepEqual([st.title, st.named], ['orion and me', true], 'carried');
+    const args = spawned().at(-1).args;
+    assert.equal(args[args.indexOf('-n') + 1], 'y3k: orion and me', 'the coder\'s own name for it');
+    await engine.handle({ cmd: 'session.stop', sid: next.sid });
+    await until(events, (e) => e.type === 'session.ended' && e.sid === next.sid);
+    // renamed while it rests: said, kept, and carried
+    const r2 = await engine.handle({ cmd: 'session.rename', sid: next.sid, name: 'Compare: the long one' });
+    assert.equal(r2.title, 'Compare: the long one');
+    await until(events, (e) => e.type === 'session.title' && e.sid === next.sid && e.title === 'Compare: the long one');
+    const row = (await rows(engine)).find((x) => x.sid === next.sid);
+    assert.equal(row.aside, false, 'a name that reads like a second opinion is not one');
+    const third = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: next.sid });
+    assert.equal((await until(events, (e) => e.type === 'session.started' && e.sid === third.sid)).title, 'Compare: the long one');
+    // an empty name unnames it; the folder names the coder's session again
+    const r3 = await engine.handle({ cmd: 'session.rename', sid: third.sid, name: '   ' });
+    assert.deepEqual([r3.ok, r3.title, r3.named], [true, null, false]);
+    await engine.handle({ cmd: 'session.stop', sid: third.sid });
+    await until(events, (e) => e.type === 'session.ended' && e.sid === third.sid);
+    const fourth = await engine.handle({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: third.sid });
+    const st4 = await until(events, (e) => e.type === 'session.started' && e.sid === fourth.sid);
+    assert.notEqual(st4.named, true);
+    const args4 = spawned().at(-1).args;
+    assert.match(args4[args4.indexOf('-n') + 1], /^y3k: lost-/, 'the folder');
+    await engine.handle({ cmd: 'session.stop', sid: fourth.sid });
+    await until(events, (e) => e.type === 'session.ended' && e.sid === fourth.sid);
+    assert.equal((await engine.handle({ cmd: 'session.rename', sid: 'ffffffffffffffff', name: 'x' })).ok, false, 'an unknown one');
+    assert.equal((await engine.handle({ cmd: 'session.rename', sid: live.sid, name: 'x', extra: 1 })).code, 'invalid');
+  });
+
   // "THE CONVERSATION" IS NEVER A SECOND OPINION. /compare starts one beside
   // the conversation, and the page passes over rows marked `aside` — but the
   // index never carried the mark, so after a /compare the newest row was the
@@ -269,7 +326,7 @@ console.log('\na conversation Claude Code has no transcript of:');
     assert.equal(plain.ok, true, plain.error);
     const list = await rows(engine);
     assert.equal(list.find((x) => x.sid === aside.sid).aside, true, 'marked');
-    assert.equal(list.find((x) => x.sid === plain.sid).aside, undefined, 'not marked');
+    assert.equal(list.find((x) => x.sid === plain.sid).aside, false, 'says it is not one (0.3.13: so its title can never make it one)');
     for (const sid of [aside.sid, plain.sid]) { await engine.handle({ cmd: 'session.stop', sid }); await until(events, (e) => e.type === 'session.ended' && e.sid === sid); }
   });
 

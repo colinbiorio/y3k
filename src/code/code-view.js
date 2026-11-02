@@ -263,7 +263,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (ui) redrawHome();
     continuing = (async () => {
       // (a second opinion: marked by the engine since 0.3.12, known by the title /compare gave it before)
-      const rows = ((await list()) || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && !/^Compare: /.test(String(x.title || '')) && x.provider && x.cwd);
+      const rows = ((await list()) || []).filter((x) => x && x.providerSessionId && !x.live && !x.aside && !(x.aside == null && !x.named && /^Compare: /.test(String(x.title || ''))) && x.provider && x.cwd);
       // newest first; one the coder has no transcript of is passed over for
       // the one before it (LOST, below) — each tried once, a few at most. An
       // engine that knows already (0.3.9: the row marked `lost`, or a resume
@@ -868,7 +868,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       bar = {
         right, tools: [...right.children], keep: right.querySelector('.cv-keep'),
         ring: null, bars: null, cost: null, tell: slot(),
-        row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
+        row2: h('div.cv-controls'), name: slot(), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
       bar.row = h('div.cv-row', right);
       bar.right = right;
@@ -960,6 +960,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s) return;
     const off = s.state === 'ended' || !!viewingSid;
     const p = S.providers.find((x) => x.id === s.provider);
+    if (!holds(bar.name)) keyed(bar.name, [s.sid, s.named ? s.title : '', !!viewingSid].join('|'), () => nameChip(s));
     keyed(bar.folder, [s.sid, s.cwd, s.branch, s.git?.files?.length || 0, s.git?.ahead || 0].join('|'),
       () => h('span.cv-chip.cv-folder', { title: s.cwd }, icon('folder'), h('span', folderName(s.cwd)), gitChip(s)));
     keyed(bar.provider, [s.sid, s.provider, s.state === 'ended' ? 'off' : s.state === 'running' ? 'run' : 'ok', p?.label, p?.version].join('|'), () => providerChip(s));
@@ -967,7 +968,58 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!holds(bar.effort)) keyed(bar.effort, [s.sid, s.model, s.effort, off, JSON.stringify(modelOptions(s.provider).find((o) => o.id === s.model)?.efforts || null)].join('|'), () => effortSelect(s));
     keyed(bar.modes, [s.sid, s.mode, off, s.provider, (p?.modes || MODES).join()].join('|'), () => modeSwitch(s));
     keyed(bar.persona, 'persona', personaSlider);   // built once: its own input keeps it current
-    arrange(bar.row2, [bar.folder.el, bar.provider.el, bar.model.el, bar.effort.el, bar.modes.el, bar.persona.el]);
+    arrange(bar.row2, [bar.name.el, bar.folder.el, bar.provider.el, bar.model.el, bar.effort.el, bar.modes.el, bar.persona.el]);
+  }
+
+  // THE CONVERSATION'S NAME (2026-11-02, y3kode 0.3.13). Colin: "give us an
+  // option to name and rename the chat while keeping the singular thread".
+  // The one conversation can carry a name: the first thing on the toolbar's
+  // second row, pressed to write it (Enter keeps it, Esc leaves it as it was,
+  // an empty name unnames it), or /rename <name>. Nothing starts: the engine
+  // keeps the name in its index, every resume, revival and going back takes it
+  // from the one it continues, and it is Claude Code's own name for the
+  // session from its next start ("y3k: <name>").
+  const NAME_ENGINE = '0.3.13';
+  const NAME_MAX = 80;
+  function nameChip(s) {
+    const b = h('button.cv-chip.cv-name' + (s.named ? '' : '.unnamed'), { type: 'button', title: s.named ? 'Rename this conversation' : 'Name this conversation', disabled: !!viewingSid },
+      icon('pencil'), h('span', s.named && s.title ? s.title : 'name it'));
+    b.addEventListener('click', () => editName(s));
+    return b;
+  }
+  function editName(s) {
+    if (!bar?.name || viewingSid || !s) return;
+    if (!versionAtLeast(hello?.version, NAME_ENGINE)) { toast(`Naming the conversation needs y3kode ${NAME_ENGINE} — update y3kode.`); return; }
+    const was = s.named ? s.title || '' : '';
+    const input = h('input.cv-nameinput', { type: 'text', value: was, maxlength: String(NAME_MAX), placeholder: 'a name for this conversation', 'aria-label': 'The conversation\'s name', spellcheck: 'false' });
+    let done = false;
+    const finish = async (keep) => {
+      if (done) return;
+      done = true;
+      const v = input.value;
+      bar.name.key = undefined;          // drawn again, whatever happens
+      input.blur?.();
+      if (keep && v.trim() !== was) await renameThread(s, v);
+      schedule('meta');
+      renderControls(currentSession());
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation?.(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation?.(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    if (bar.name.el?.parentNode) bar.name.el.replaceWith(input);
+    bar.name.el = input;
+    input.focus?.();
+    try { input.select?.(); } catch { /* not every field */ }
+  }
+  async function renameThread(s, name) {
+    if (!versionAtLeast(hello?.version, NAME_ENGINE)) { toast(`Naming the conversation needs y3kode ${NAME_ENGINE} — update y3kode.`); return false; }
+    const r = await cmd({ cmd: 'session.rename', sid: s.sid, name: String(name || '').slice(0, 400) });
+    if (!r?.ok) { toast(refusedWhy(r || {}, 'could not name it')); return false; }
+    s.title = r.title || null; s.named = !!r.named;
+    toast(r.named ? `Named “${r.title}”. The same conversation.` : 'Unnamed. The same conversation.');
+    return true;
   }
 
   // --- patching helpers ----------------------------------------------------------------
@@ -1288,9 +1340,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // …and the room's own commands (LOCAL_MENU, below) stand in the same menu,
   // beside the coder's: what a terminal answers itself. One the coder has
   // too (/context, /usage) is listed once, as the coder's, and answered here.
+  // the coder's own commands, less the ones the room always answers itself
+  // (its /rename would name the coder's session only, not the conversation)
+  const ROOM_OWNS = new Set(['rename', 'name']);
+  const coderCommands = (s) => (S.commands?.[s.provider] || []).filter((c) => !ROOM_OWNS.has(String(c.name).toLowerCase()));
   function slashCommands(s) {
     if (!s) return [];
-    const own = S.commands?.[s.provider] || [];
+    const own = coderCommands(s);
     const taken = new Set(own.flatMap((c) => [c.name, ...(c.aliases || [])].map((n) => String(n).toLowerCase())));
     return [...own, ...LOCAL_MENU.filter((c) => !taken.has(c.name) && !(c.aliases || []).some((a) => taken.has(a)))];
   }
@@ -1931,6 +1987,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       ['/', 'its commands'],
       ['/compare …', 'ask every coder here at once, side by side'],
       ['/compare', 'their answers side by side (Esc closes)'],
+      ['/rename <name>', 'name this conversation (or press its name above)'],
       ['/status · /export · /model · /thinking · /mode', 'the room\'s own commands (/help lists them)'],
       ['/mcp · /git · /context · /usage · /stop · /exit', 'what the toolbar does, typed'],
       ['! <line>', 'run it in the folder\'s shell, the output here'],
@@ -2693,6 +2750,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     { name: 'help', description: 'the keys, and the room\'s own commands', builtin: true, local: true },
     { name: 'status', description: 'this conversation: tool, model, thinking, mode, folder, context', builtin: true, local: true },
     { name: 'export', description: 'save this conversation as Markdown', builtin: true, local: true },
+    { name: 'rename', hint: '<name>', description: 'name this conversation (nothing new starts)', builtin: true, local: true, aliases: ['name'] },
     { name: 'model', hint: '<name>', description: 'change the model', builtin: true, local: true },
     { name: 'thinking', hint: '<level>', description: 'how hard it thinks: low · medium · high · xhigh · max', builtin: true, local: true, aliases: ['effort'] },
     { name: 'mode', hint: '<mode>', description: 'ask · plan · accept edits · auto', builtin: true, local: true },
@@ -2724,12 +2782,17 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const name = m[1].toLowerCase(), arg = (m[2] || '').trim();
     // a command the coder has itself (/context, /usage as Claude Code reports
     // them) is the coder's: sent as typed, answered in its own words
-    const own = new Set((S.commands?.[s.provider] || []).flatMap((c) => [c.name, ...(c.aliases || [])].map((n) => String(n).toLowerCase())));
+    const own = new Set(coderCommands(s).flatMap((c) => [c.name, ...(c.aliases || [])].map((n) => String(n).toLowerCase())));
     if (own.has(name)) return false;
     switch (name) {
       case 'help': showKeys(true); return true;
       case 'status': roomLine(s, { type: 'local.note', text: statusText(s) }); return true;
       case 'export': exportConversation(s); return true;
+      case 'rename': case 'name':
+        if (!arg) { editName(s); return true; }
+        await renameThread(s, arg);
+        schedule('meta');
+        return true;
       case 'model': {
         if (!arg) { toast('/model <name> — the names are in the toolbar\'s picker'); return true; }
         const r = await cmd({ cmd: 'session.setModel', sid: s.sid, model: arg });

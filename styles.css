@@ -4463,6 +4463,14 @@ body.in-code .home-panel-head { display: none; }
 .cv-chip, .cv-sel { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 0.8rem; color: #cfd4dc; max-width: 100%; }
 .cv-folder > span { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the conversation's name (2026-11-02): pressed to write it in place */
+.cv-name { cursor: pointer; font: inherit; color: inherit; }
+.cv-name > span { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-name.unnamed { opacity: 0.55; font-style: italic; }
+.cv-name.unnamed:hover, .cv-name:focus-visible { opacity: 1; }
+.cv-name svg { width: 13px; height: 13px; opacity: 0.7; }
+.cv-nameinput { height: 28px; min-width: 18ch; max-width: 34ch; padding: 0 12px; border-radius: 999px; font: inherit; color: inherit;
+  background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.22); outline: none; }
 .cv-branch { display: inline-flex; align-items: center; gap: 4px; color: #8b93a1; font-size: 0.76rem; }
 .cv-live { width: 7px; height: 7px; border-radius: 50%; background: #4dd865; }
 .cv-live.run { animation: cv-pulse 1.4s ease-in-out infinite; }

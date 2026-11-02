@@ -21,7 +21,7 @@ export function createState() {
 
 function newSession(sid, e = {}) {
   return {
-    sid, provider: e.provider || 'claude', cwd: e.cwd || '', title: e.title || null,
+    sid, provider: e.provider || 'claude', cwd: e.cwd || '', title: e.title || null, named: !!e.named,   // named: the person gave the title (session.rename), not the first line
     mode: e.mode || null, model: e.model || null, effort: e.effort || null,
     state: 'starting', ended: null, version: null, providerSessionId: e.providerSessionId || null,
     items: [],            // top-level transcript items, in order
@@ -300,6 +300,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'session.started':
       if (!s.startedAt) s.startedAt = e.t || Date.now();
       Object.assign(s, { provider: e.provider, cwd: e.cwd, mode: e.mode || s.mode, model: e.model || s.model, effort: e.effort || s.effort, providerSessionId: e.providerSessionId || s.providerSessionId, title: e.title || s.title });
+      if (e.named) s.named = true;
       // continuing another session (Continue it, or gone back to before a
       // message): which one, and up to which of the person's messages — the
       // view draws that conversation above this one (code-view.js linkPrior)
@@ -315,7 +316,7 @@ export function apply(S, e, { replay = false } = {}) {
       out.meta = true;
       break;
     case 'session.state': s.state = e.state; out.meta = true; break;
-    case 'session.title': s.title = e.title; out.meta = true; break;
+    case 'session.title': s.title = e.title; if ('named' in e) s.named = !!e.named; out.meta = true; break;
     case 'session.ended': {
       s.ended = { reason: e.reason, detail: e.detail || null };
       s.state = 'ended';

@@ -32,7 +32,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.12';   // 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.13';   // 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -59,7 +59,15 @@ const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 const newSid = () => randomBytes(8).toString('hex');
 const isSid = (x) => typeof x === 'string' && /^[a-f0-9]{16}$/.test(x);
 // A second opinion (kode's /compare): marked since 0.3.12, known by its title before.
-const isAside = (r) => !!r?.aside || /^Compare: /.test(String(r?.title || ''));
+// (a row that says it is not one, or that the person named, is never taken for one by its title)
+const isAside = (r) => r?.aside === true || (r?.aside == null && !r?.named && /^Compare: /.test(String(r?.title || '')));
+// THE CONVERSATION'S NAME (0.3.13), as the person gives it: one line, no
+// control or direction-changing characters, at most 80 characters; empty
+// means unnamed.
+export const NAME_MAX = 80;
+export function cleanName(x) {
+  return String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX).trim();
+}
 
 // Orion's note, as the first thing the coder reads — framed as information from
 // y3k, not as an instruction, and unable to close its own frame.
@@ -211,6 +219,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       // a session that continues another says which, and how much of it — the
       // screen draws that conversation above this one (its own file starts empty)
       if (ev.type === 'session.started' && s.prior) ev = { ...ev, prior: s.prior, priorCut: s.priorCut ?? null };
+      // (and its name, when the person gave it one)
+      if (ev.type === 'session.started' && s.named) ev = { ...ev, title: s.title, named: true };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
       keeper.onEvent(s, ev);
@@ -329,7 +339,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   // --- sessions -----------------------------------------------------------------
-  async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
+  async function startSession({ provider, cwd, model, effort, mode, title, named, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
@@ -377,11 +387,18 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const why = await cannotGetIn(provider);
     if (why) return why;
 
+    // A NAME THE PERSON GAVE goes on with the conversation: a resume, a
+    // revival, going back — each a new session here, the same conversation
+    // (CODE.md line 8) — takes it from the one it continues.
+    const from = isSid(resumeOf) && !aside ? indexRead().find((r) => r.sid === resumeOf) : null;
+    if (from?.named && from.title) { title = from.title; named = true; }
+    named = !!named && !!title;
     const sid = newSid();
-    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false, resumeId: resumeId || null, fork: !!fork, auth: auth.method,
+    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, named, started: now(), mode: chosen, sentFirst: false, resumeId: resumeId || null, fork: !!fork, auth: auth.method,
       prior: isSid(resumeOf) ? resumeOf : null, priorCut: Number.isInteger(priorCut) && priorCut >= 0 ? priorCut : null };
     s.emit = sessionEmitter(s);
-    const name = `y3k: ${t.rec.name || t.real.split(/[\\/]/).pop()}`;
+    // the coder's own name for it (Claude Code's -n): the person's name for the conversation, else the folder
+    const name = `y3k: ${named ? title : t.rec.name || t.real.split(/[\\/]/).pop()}`;
     s.adapter = A.createAdapter({
       sid, cwd: t.real, emit: s.emit, audit, bin: d.bin, tmpDir: store.tmpDir, configDir: store.dir,
       env: A.envFor(env, { auth: auth.method, apiKey: auth.key, homeDir: join(store.dir, 'homes', provider) }),
@@ -415,7 +432,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     }
     // (a second opinion says so in the index: "the conversation" is never one of
     // them. It never did, so the page's "never a second opinion" had nothing to read.)
-    indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork, ...(aside ? { aside: true } : {}) });
+    indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork, aside: !!aside, ...(named ? { named: true } : {}) });
     if (isSid(resumeOf) && !fork) keeper.follow(resumeOf, sid);   // keep going keeps the conversation, under its new id
     emit({ type: 'workspace.recent', folders: recent() });
     return { ok: true, sid, providerSessionId: s.providerSessionId, mode: chosen, auth: auth.method };
@@ -648,6 +665,26 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
     'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); keeper.stopped(sid); return s.adapter.stop(); },
+    // THE CONVERSATION'S NAME (0.3.13). Renaming starts nothing: the same
+    // session, the same conversation, a new name — kept in the index, said to
+    // every page, and the coder's own session name from its next start.
+    'session.rename': async ({ sid, name }) => {
+      if (!isSid(sid)) return { ok: false, error: 'Unknown session.' };
+      const s = sessions.get(sid) || null;
+      const row = s ? null : indexRead().find((r) => r.sid === sid);
+      if (!s && !row) return { ok: false, error: 'Unknown session.' };
+      const title = cleanName(name) || null;
+      const named = !!title;
+      indexWrite({ sid, title, named, aside: false });
+      audit.write('session.rename', { sid, named });
+      const ev = { type: 'session.title', title, named };
+      if (s) { s.title = title; s.named = named; s.emit(ev); }
+      else {
+        const seq = bus.emit({ ...ev, sid });
+        try { appendFileSync(eventsFile(sid), JSON.stringify({ ...ev, sid, seq }) + '\n', { mode: 0o600 }); } catch { /* the index has it */ }
+      }
+      return { ok: true, sid, title, named };
+    },
     // KEEP GOING (0.3.11): the switch; on keeps the conversation on the screen
     'keep.set': async ({ on, sid }) => keeper.set({ on: !!on, sid }),
     // The command gate holds a mode to MODES already; it is checked again here,
@@ -815,7 +852,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       update: updater.able,
       // the switch (keep.mjs): on, which conversation, what it waits for
       keep: keeper.status(),
-      sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
+      sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, ...(s.named ? { named: true } : {}), mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
     };
   }
 

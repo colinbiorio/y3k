@@ -1024,9 +1024,10 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.equal(ta.value, '/usage ');
     type('/');
     // 2026-10-30: the coder's four, and the room's own twelve beside them
-    // (the two the coder has too — /context, /usage — are listed once, as its)
-    assert.equal(names().length, 16, 'a bare slash lists them all');
-    assert.ok(names().includes('/status') && names().includes('/export') && !names().includes('/connectors'), 'the room\'s own, by name');
+    // (the two the coder has too — /context, /usage — are listed once, as its);
+    // 2026-11-02: and /rename, the room's always
+    assert.equal(names().length, 17, 'a bare slash lists them all');
+    assert.ok(names().includes('/status') && names().includes('/export') && names().includes('/rename') && !names().includes('/connectors'), 'the room\'s own, by name');
     press(ta, 'Escape');
     await settle();
     assert.equal(names().length, 0, 'Esc closes the menu');
@@ -2557,6 +2558,88 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     delete window.y3kCode;
   });
 
+  // THE CONVERSATION'S NAME (2026-11-02, y3kode 0.3.13). Colin: "give us an
+  // option to name and rename the chat while keeping the singular thread".
+  await ok('the view: the conversation is named in place — its name on the toolbar, pressed to write it, or /rename; nothing starts (2026-11-02)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.rename') { const t = o.name.trim().replace(/\s+/g, ' ') || null; return { ok: true, sid: o.sid, title: t, named: !!t }; }
+      return { ok: true };
+    };
+    const toasts = [];
+    const cv = await viewWith('name-it', { toast: (m) => toasts.push(m) });
+    const S = cv._state;
+    cv.open();
+    await settle();
+    tick();
+    cv._hello({ version: '0.3.13' });
+    cv._feed({ sid: 'nm1', type: 'session.started', provider: 'claude', cwd: '/tmp/nm', mode: 'auto', providerSessionId: U(98) });
+    cv._feed({ sid: 'nm1', type: 'session.state', state: 'idle' });
+    // the coder has a /rename of its own: the room's is the one that answers
+    cv._feed({ type: 'provider.status', provider: 'claude', commands: [{ name: 'rename', description: 'the coder\'s' }, { name: 'compact', description: 'x' }] });
+    // the engine's first-line title is not a name
+    cv._feed({ sid: 'nm1', type: 'session.title', title: 'first thing I said' });
+    tick();
+    let chip = $('button.cv-name');
+    assert.ok(chip, 'on the toolbar');
+    assert.ok(chip.classList.contains('unnamed'));
+    assert.equal(chip.textContent, 'name it');
+    // pressed: written in place; Esc leaves it as it was
+    chip.click();
+    let input = $('input.cv-nameinput');
+    assert.ok(input, 'written in place');
+    assert.equal(input.value, '');
+    input.value = 'not this';
+    input.dispatch('keydown', { key: 'Escape' });
+    await settle();
+    tick();
+    assert.equal(asked('session.rename').length, 0, 'Esc: nothing said');
+    assert.equal($('input.cv-nameinput'), null);
+    // Enter keeps it
+    $('button.cv-name').click();
+    input = $('input.cv-nameinput');
+    input.value = 'orion and me';
+    input.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.rename').map((o) => [o.sid, o.name]), [['nm1', 'orion and me']]);
+    chip = $('button.cv-name');
+    assert.equal(chip.textContent, 'orion and me');
+    assert.ok(!chip.classList.contains('unnamed'));
+    assert.match(toasts.at(-1), /Named “orion and me”\. The same conversation\./);
+    // /rename: the room's own, never sent to the coder
+    const ta = $('textarea.cv-input');
+    ta.value = '/rename  the long one ';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.rename').at(-1).name.trim(), 'the long one');
+    assert.equal($('button.cv-name').textContent, 'the long one');
+    assert.equal(asked('session.send').length, 0, 'not sent to the coder');
+    // another page renamed it: said here too
+    cv._feed({ sid: 'nm1', type: 'session.title', title: 'from the other tab', named: true });
+    tick();
+    assert.equal($('button.cv-name').textContent, 'from the other tab');
+    // nothing was started, nothing resumed, nothing stopped
+    assert.equal(asked('session.start').length + asked('session.resume').length + asked('session.stop').length, 0);
+    assert.equal(S.active, 'nm1');
+    // a continuation carries the name it was given (the engine says so)
+    cv._feed({ sid: 'nm2', type: 'session.started', provider: 'claude', cwd: '/tmp/nm', mode: 'auto', providerSessionId: U(98), prior: 'nm1', title: 'from the other tab', named: true });
+    tick();
+    assert.equal(S.active, 'nm2');
+    assert.equal($('button.cv-name').textContent, 'from the other tab');
+    // an engine before 0.3.13 says what it needs
+    cv._hello({ version: '0.3.12' });
+    $('button.cv-name').click();
+    assert.equal($('input.cv-nameinput'), null);
+    assert.match(toasts.at(-1), /needs y3kode 0\.3\.13/);
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
   await ok('the view: a second opinion is never the conversation picked up, marked or only titled (a row from before 0.3.12) (2026-11-01)', async () => {
     const asked = bridge();
     const base = window.y3kCode.cmd;
@@ -2564,6 +2647,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       await base(o);
       if (o.cmd === 'session.list') return { ok: true, sessions: [
         { sid: 'as2', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(96), live: false, title: 'Compare: which is better?' },
+        { sid: 'as1b', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(99), live: false, title: 'Compare: these two files', aside: false, started: 0 },
         { sid: 'as1', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(95), live: false, aside: true },
         { sid: 'as0', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(94), live: false },
       ] };
@@ -2573,7 +2657,8 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     const cv = await viewWith('not-aside', { toast: () => {}, settleMs: 5 });
     cv.open();
     await until(() => asked('session.resume').length === 1);
-    assert.deepEqual(asked('session.resume').map((o) => o.sid), ['as0']);
+    // (one that says it is not one is the conversation, whatever its first line said: 2026-11-02)
+    assert.deepEqual(asked('session.resume').map((o) => o.sid), ['as1b']);
     cv.close();
     window.y3kCode.cmd = base;
     delete window.y3kCode;

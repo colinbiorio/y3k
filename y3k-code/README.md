@@ -59,6 +59,13 @@ from the page, a second page or the *keep going* switch, answers the running
 session (`session.already` in the activity record). A second opinion (`/compare`)
 is marked in the session index, so it is never taken for the conversation.
 
+**Its name (0.3.13).** `session.rename {sid, name}` names the conversation, or
+unnames it with an empty name. It starts nothing: the name is kept in the
+index, said to every page (`session.title` with `named`), carried by every
+resume, revival and going back, and passed to Claude Code as its session name
+(`-n "y3k: <name>"`) from the coder's next start. One line, at most 80
+characters, with control and direction-changing characters removed.
+
 **The orb.** Whichever tool is coding can move the orb beside y3kode: every
 session is handed one tool of y3k's own, `orb`, in the same words you type
 into the chat (`color/gold/form/heart`, `mood/thinking`). It is a tiny MCP

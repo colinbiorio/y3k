@@ -252,6 +252,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-02** — **The conversation has a name (y3kode 0.3.13).** Colin:
+  "give us an option to name and rename the chat while keeping the singular
+  thread." The first thing on kode's second toolbar row is the conversation's
+  name ("name it" until it has one). Press it and write it in place: Enter
+  keeps it, Esc leaves it as it was, and an empty name unnames it.
+  `/rename <name>` in the composer does the same, and the room always
+  answers it itself. Renaming starts nothing. The engine keeps the name in
+  its index, and every resume, revival and going back takes it from the one
+  it continues. It is also Claude Code's own name for the session
+  ("y3k: <name>") from the coder's next start. A conversation now says
+  explicitly that it is not a second opinion, so a first line or a name that
+  begins "Compare:" can never hide it.
+
 - **2026-11-01** — **One conversation, for real this time (y3kode 0.3.12).**
   Colin: "we seem to be starting a new convo every time instead of keeping one
   live always." The rule was written on 2026-10-29 (CODE.md line 8) and four
