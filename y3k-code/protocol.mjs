@@ -90,6 +90,8 @@ export const COMMANDS = {
   'session.load': { sid: S(64) },
   'session.resume': { provider: S(40), cwd: S(4096), providerSessionId: S(200, false), sid: S(64, false), fork: B() },
   'session.fork': { sid: S(64) },
+  // the conversation's name (0.3.13): empty clears it
+  'session.rename': { sid: S(64), name: S(400, false) },
   'session.rewind': { sid: S(64), at: S(64, false), cut: N(), model: S(120, false) },
   'session.toolOutput': { sid: S(64), callId: S(200) },
   // the terminal's own line (0.3.10): a shell command in a trusted folder, its output back to the page

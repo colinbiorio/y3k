@@ -75,7 +75,11 @@ command-line tool and turns what it does into one stream the page can draw.
    folder's conversation, and begins one only when it has none. A conversation
    is live once (a resume of one already running answers the running session),
    and an engine that comes back new, from an update or a crash, goes on with
-   the conversation by itself; the room never needs a button for that.
+   the conversation by itself; the room never needs a button for that. The
+   conversation can carry a name (2026-11-02: "name and rename the chat while
+   keeping the singular thread"): the person's word, written in place on the
+   toolbar or with `/rename`. Renaming starts nothing; the name goes on with
+   the conversation through every resume and is the coder's own session name.
 9. **Keep going is the person's word, given once.** Colin, 2026-10-31: "a
    system that when a switch is turned on in the kode screen, you
    intelligently continue working as soon as rates refresh, and if you have
