@@ -149,6 +149,7 @@ export async function pair(port, code, { by = null } = {}) {
 }
 
 // --- the companion ------------------------------------------------------------
+export const RESYNC_GRACE_MS = 1200;
 export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
   const auth = { authorization: `Bearer ${token}` };
   let closed = false;
@@ -156,6 +157,8 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
   let epoch = null;
   let seq = 0;
   let attempt = 0;
+  let resyncing = false;   // dropped on purpose (resync): back at once, on a new socket
+  let resyncTimer = null;  // the moment a stream has to name its engine (resync)
   let status = 'connecting';
   const setStatus = (s, detail) => { if (s !== status || detail) { status = s; onStatus?.(s, detail); } };
 
@@ -182,6 +185,7 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
         if (r.status === 401) { setStatus('unpaired'); return; }
         if (!r.ok || !r.body) throw new Error(String(r.status));
         attempt = 0;
+        resyncing = false;
         setStatus('connected');
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buf = '';
@@ -203,7 +207,10 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
             if (!data) continue;
             let obj;
             try { obj = JSON.parse(data); } catch { continue; }
-            if (ev === 'reset') { epoch = obj.epoch; seq = obj.seq; onReset?.(obj); continue; }
+            // `fresh`: the reset names another epoch than this stream had — a
+            // new engine, not only a ring that rolled past (code-view.js: the
+            // conversation that ended with the old engine goes on)
+            if (ev === 'reset') { const fresh = !!epoch && obj.epoch !== epoch; epoch = obj.epoch; seq = obj.seq; onReset?.({ ...obj, fresh }); continue; }
             if (obj.epoch && obj.epoch !== epoch) epoch = obj.epoch;
             if (obj.seq <= seq) continue; // already seen
             seq = obj.seq;
@@ -213,15 +220,46 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
       } catch { /* dropped — reconnect below */ }
       if (closed) return;
       setStatus('reconnecting');
-      const wait = Math.min(10000, 400 * 2 ** attempt++);
+      const quick = resyncing;
+      resyncing = false;
+      const wait = quick ? 50 : Math.min(10000, 400 * 2 ** attempt++);
       await new Promise((r) => setTimeout(r, wait));
     }
   }
   loop();
 
+  // THE STREAM IS ONLY AS GOOD AS THE ENGINE BEHIND IT. When the engine is
+  // replaced in place (an update: the old process hands the port to the new
+  // one and stays as its parent), the browser could reopen the stream on a
+  // keep-alive socket it still held to the old process — which went on
+  // answering, with pings and nothing in them — while every command reached
+  // the new engine (2026-11-01: the room went blind to the conversation it had
+  // just continued, and offered the folders over it). A hello that names
+  // another epoch than the stream hears says so (code-view.js doHello): this
+  // drops the stream, and it comes back on a new socket, to whoever answers
+  // the port now — with a reset, since its epoch is not theirs.
+  //
+  // `want` is the epoch the hello named. A stream says 'connected' at its
+  // headers, before its first line, so one just opened on that very engine has
+  // not named it yet: it is given a moment, and only a stream still naming
+  // another engine after it is dropped.
+  function resync(want) {
+    if (closed || resyncing || resyncTimer || !ac || !want || epoch === want) return false;
+    resyncTimer = setTimeout(() => {
+      resyncTimer = null;
+      if (closed || resyncing || !ac || epoch === want) return;
+      resyncing = true;
+      ac.abort();
+    }, RESYNC_GRACE_MS);
+    resyncTimer.unref?.();
+    return true;
+  }
+
   return {
-    kind: 'companion', port, cmd,
-    close() { closed = true; ac?.abort(); },
+    kind: 'companion', port, cmd, resync,
+    // the epoch of the engine this stream hears (null until its first event)
+    get epoch() { return epoch; },
+    close() { closed = true; clearTimeout(resyncTimer); ac?.abort(); },
     get status() { return status; },
     async revoke() { try { await fetch(`${base(port)}/v1/revoke`, { method: 'POST', headers: auth, credentials: 'omit' }); } catch { /* offline */ } forgetPairing(); },
   };
@@ -236,7 +274,7 @@ export function createDesktop({ onEvent, onStatus, onReset }) {
   // numbers its events from 1 again: the count starts over with it, or every
   // event it sent would read as already seen until it passed the old count.
   const take = (e) => {
-    if (e.epoch !== epoch) { if (epoch) { seq = 0; onReset?.({ epoch: e.epoch, seq: e.seq }); } epoch = e.epoch; }
+    if (e.epoch !== epoch) { if (epoch) { seq = 0; onReset?.({ epoch: e.epoch, seq: e.seq, fresh: true }); } epoch = e.epoch; }
     if (e.seq <= seq) return;
     seq = e.seq;
     onEvent(e);
@@ -245,6 +283,9 @@ export function createDesktop({ onEvent, onStatus, onReset }) {
   bridge.since(0).then((events) => { for (const e of events || []) take(e); onStatus?.('connected'); }).catch(() => onStatus?.('offline'));
   return {
     kind: 'desktop', cmd: (obj) => bridge.cmd(obj),
+    // (the bridge is in this process: its stream cannot be on an engine that left)
+    get epoch() { return epoch; },
+    resync() { return false; },
     close() { off?.(); },
     get status() { return 'connected'; },
     async revoke() {},

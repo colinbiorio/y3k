@@ -1940,7 +1940,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     // the browser's store for "not now" (the view's pref): a stand-in where node has none
     const hadStore = 'localStorage' in globalThis;
     if (!hadStore) { const m = new Map(); globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); } }; }
-    let cv = await viewWith('update-offer', { toast: (m) => toasts.push(m), link, waitFor: async (v) => { waited.push(v); return true; } });
+    let cv = await viewWith('update-offer', { toast: (m) => toasts.push(m), link, waitFor: async (v) => { waited.push(v); version = v; return true; } });   // (the engine that came back is that version: the page says hello to it)
     cv.open();
     await settle(); tick();
     assert.deepEqual(cv._offer(), { version: '0.3.10', token: 'tok-1' }, 'the newer version is on offer');
@@ -1953,6 +1953,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.equal(cv._offer(), null);
     assert.equal(toasts.at(-1), 'y3kode 0.3.10 is here.');
     cv.close();
+    version = '0.3.8';
     // not now: that version is put away for this browser
     cv = await viewWith('update-later', { toast: () => {}, link, waitFor: async () => true });
     cv.open();
@@ -2397,6 +2398,245 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     cv.close();
     window.y3kCode.cmd = base;
     delete window.y3kCode;
+  });
+
+  // THE WHOLE OF IT, as it went on 2026-11-01. y3kode updated under an open
+  // room. The old process ended its stream and stayed on as the new one's
+  // parent, with a browser's socket still open to it; the page's next stream
+  // went down that socket and heard pings and nothing else, while every
+  // command reached the new engine. The conversation was continued, the room
+  // never heard, and it fell back to the folders, whose one button said
+  // "Continue in p-vs-np" and started a new conversation.
+  await ok('the view: an update under the room: a stream left on the engine that went is dropped, and the conversation goes on; nothing new is started (2026-11-01)', async () => {
+    const eng = companionEngine();
+    // (these streams die with their AbortSignal, as a browser's do)
+    const stub = globalThis.fetch;
+    const opened = [];
+    globalThis.fetch = async (url, o = {}) => {
+      const r = await stub(url, o);
+      if (url.includes('/v1/events')) {
+        const c = eng.stream;
+        opened.push(url);
+        o.signal?.addEventListener('abort', () => { try { c.error(new DOMException('aborted', 'AbortError')); } catch { /* ended */ } });
+      }
+      return r;
+    };
+    const S1 = 'b1b1b1b1b1b1b1b1', S2 = 'b2b2b2b2b2b2b2b2', P = U(91);
+    let epoch = 'old';
+    let liveNow = [{ sid: S1, provider: 'claude', cwd: '/tmp/bl', title: null, mode: 'auto', state: 'idle', started: 1 }];
+    const resumes = [], starts = [];
+    eng.auto['engine.hello'] = () => ({ ok: true, version: '0.3.12', epoch, providers: [], recent: [], sessions: liveNow });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, meta: null, live: true, events: [
+      { sid: c.sid, seq: 2, type: 'session.started', provider: 'claude', cwd: '/tmp/bl', mode: 'auto', providerSessionId: P },
+      { sid: c.sid, seq: 3, type: 'message.user', text: 'the long thread' },
+    ] });
+    eng.auto['session.list'] = () => ({ ok: true, sessions: [{ sid: S1, provider: 'claude', cwd: '/tmp/bl', providerSessionId: P, live: false }] });
+    eng.auto['session.resume'] = (c) => { resumes.push(c); return { ok: true, sid: S2, providerSessionId: P, mode: 'auto' }; };
+    eng.auto['session.start'] = (c) => { starts.push(c); return { ok: true, sid: 'b3b3b3b3b3b3b3b3' }; };
+    try {
+      const cv = await viewWith('blind-stream', { toast: () => {}, settleMs: 20 });
+      const S = cv._state;
+      cv.open();
+      await until(() => eng.streams === 1);
+      eng.send({ v: 1, epoch: 'old', seq: 1, sid: null, t: 1, type: 'engine.hello', version: '0.3.11' });
+      await until(() => S.active === S1 && S.sessions.get(S1)?.cwd);
+      // the update: another engine answers every command, and the stream ends…
+      epoch = 'new';
+      liveNow = [];
+      eng.end();
+      // …and comes back on the one that left: it answers, and says nothing
+      await until(() => opened.length === 2);
+      assert.match(opened[1], /epoch=old/);
+      // the hello named another engine; after its moment that stream is dropped
+      await until(() => opened.length === 3, 4000);
+      await until(() => S.sessions.get(S1)?.state === 'ended');
+      assert.equal(resumes.length, 0, 'still waiting to hear which engine this is');
+      // on a new socket, the new engine: its first word says so
+      eng.send({ epoch: 'new', seq: 4 }, 'reset');
+      await until(() => resumes.length === 1);
+      assert.deepEqual([resumes[0].sid, resumes[0].providerSessionId, resumes[0].cwd], [S1, P, '/tmp/bl'], 'the same conversation');
+      eng.send({ v: 1, epoch: 'new', seq: 5, sid: S2, t: 2, type: 'session.started', provider: 'claude', cwd: '/tmp/bl', mode: 'auto', providerSessionId: P, prior: S1 });
+      await until(() => S.active === S2 && S.sessions.get(S2)?.cwd);
+      tick();
+      assert.equal($('div.cv-home').hidden, true, 'not the folders');
+      // the good stream is left alone once it has named its engine
+      await new Promise((r) => setTimeout(r, 1400));
+      assert.equal(opened.length, 3, 'not dropped again');
+      assert.equal(starts.length, 0, 'no new conversation');
+      assert.equal(resumes.length, 1, 'continued once');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: in the desktop app too, an engine that came back new goes on with the conversation on screen, by itself (2026-11-01)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    let push = null;
+    window.y3kCode.onEvent = (fn) => { push = fn; return () => {}; };
+    let liveNow = [{ sid: 'nw1', provider: 'claude', cwd: '/tmp/nw', title: null, mode: 'auto', state: 'idle', started: 1 }];
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'engine.hello') return { ok: true, version: '0.3.12', sessions: liveNow };
+      if (o.cmd === 'session.load') return { ok: true, sid: o.sid, meta: null, live: true, events: [{ sid: o.sid, seq: 2, type: 'session.started', provider: 'claude', cwd: '/tmp/nw', mode: 'auto', providerSessionId: U(90) }] };
+      if (o.cmd === 'session.list') return { ok: true, sessions: [{ sid: 'nw1', provider: 'claude', cwd: '/tmp/nw', providerSessionId: U(90), live: false }] };
+      if (o.cmd === 'session.resume') return { ok: true, sid: 'nw2' };
+      return { ok: true };
+    };
+    const cv = await viewWith('reborn', { toast: () => {}, settleMs: 5 });
+    const S = cv._state;
+    cv.open();
+    await until(() => S.active === 'nw1');
+    push({ v: 1, epoch: 'e1', seq: 3, sid: null, t: 1, type: 'notice', text: 'x' });
+    liveNow = [];
+    push({ v: 1, epoch: 'e2', seq: 1, sid: null, t: 2, type: 'engine.hello' });
+    await until(() => S.active === 'nw2' && S.sessions.get('nw2')?.cwd);
+    assert.deepEqual(asked('session.resume').map((o) => [o.sid, o.providerSessionId]), [['nw1', U(90)]]);
+    assert.equal(asked('session.start').length, 0, 'no new conversation');
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: a conversation continued that never comes over the stream is read from the engine: the room shows it, not the folders (2026-11-01)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') return { ok: true, sessions: [{ sid: 'rd1', provider: 'claude', cwd: '/tmp/rd', providerSessionId: U(92), live: false }] };
+      if (o.cmd === 'session.resume') return { ok: true, sid: 'rd2' };
+      if (o.cmd === 'session.load') return { ok: true, sid: o.sid, meta: null, live: o.sid === 'rd2', events: o.sid === 'rd2'
+        ? [{ sid: 'rd2', seq: 1, type: 'session.started', provider: 'claude', cwd: '/tmp/rd', mode: 'auto', providerSessionId: U(92), prior: 'rd1' }]
+        : [{ sid: 'rd1', seq: 1, type: 'session.started', provider: 'claude', cwd: '/tmp/rd', mode: 'auto', providerSessionId: U(92) }, { sid: 'rd1', seq: 2, type: 'message.user', text: 'the long thread' }] };
+      return { ok: true };
+    };
+    const cv = await viewWith('read-it', { toast: () => {}, settleMs: 5 });
+    const S = cv._state;
+    cv.open();
+    await until(() => S.sessions.get('rd2')?.cwd === '/tmp/rd');
+    await until(() => asked('session.load').length === 2);
+    assert.deepEqual(asked('session.load').map((o) => o.sid), ['rd2', 'rd1'], 'and the conversation it continues, to draw above it');
+    await settle();
+    tick();
+    assert.equal(S.active, 'rd2');
+    assert.equal($('div.cv-home').hidden, true, 'not the folders');
+    assert.match($('div.cv-list').textContent, /the long thread/, 'the thread is on screen');
+    assert.equal(asked('session.start').length, 0);
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: "Continue it" on a conversation that never comes over the stream: read from the engine and drawn, with no folders to press (2026-11-01)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.resume') return { ok: true, sid: 'cl2' };
+      if (o.cmd === 'session.load') return { ok: true, sid: o.sid, meta: null, live: o.sid === 'cl2', events: [{ sid: o.sid, seq: 1, type: 'session.started', provider: 'claude', cwd: '/tmp/cl', mode: 'auto', providerSessionId: U(97) }] };
+      return { ok: true };
+    };
+    const cv = await viewWith('continue-it-late', { toast: () => {}, settleMs: 5 });
+    const S = cv._state;
+    cv.open();
+    await settle();
+    tick();
+    cv._feed({ sid: 'cl1', type: 'session.started', provider: 'claude', cwd: '/tmp/cl', mode: 'auto', providerSessionId: U(97) });
+    cv._feed({ sid: 'cl1', type: 'session.ended', reason: 'stopped' });
+    tick();
+    const go = $$('button.cv-link').find((b) => b.textContent === 'Continue it');
+    assert.ok(go, 'the button');
+    go.click();
+    await until(() => S.sessions.get('cl2')?.cwd === '/tmp/cl');
+    await settle();
+    tick();
+    assert.equal(S.active, 'cl2');
+    assert.equal($('div.cv-home').hidden, true, 'the conversation, not the folders');
+    assert.equal(asked('session.start').length, 0);
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: a second opinion is never the conversation picked up, marked or only titled (a row from before 0.3.12) (2026-11-01)', async () => {
+    const asked = bridge();
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      await base(o);
+      if (o.cmd === 'session.list') return { ok: true, sessions: [
+        { sid: 'as2', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(96), live: false, title: 'Compare: which is better?' },
+        { sid: 'as1', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(95), live: false, aside: true },
+        { sid: 'as0', provider: 'claude', cwd: '/tmp/as', providerSessionId: U(94), live: false },
+      ] };
+      if (o.cmd === 'session.resume') return { ok: true, sid: 'as3' };
+      return { ok: true };
+    };
+    const cv = await viewWith('not-aside', { toast: () => {}, settleMs: 5 });
+    cv.open();
+    await until(() => asked('session.resume').length === 1);
+    assert.deepEqual(asked('session.resume').map((o) => o.sid), ['as0']);
+    cv.close();
+    window.y3kCode.cmd = base;
+    delete window.y3kCode;
+  });
+
+  // The folders' one button said "Continue in <folder>" and started a new
+  // conversation: every time the room fell back to them, that press lost the
+  // thread. Nothing else on the page starts one.
+  await ok('the view: "Continue in <folder>" continues that folder\'s conversation; a new one begins only when it has none, or after the person\'s /clear (2026-11-01)', async () => {
+    const tool = { id: 'claude', label: 'Claude Code', installed: true, auth: 'ok', ready: true, modes: ['ask', 'auto'] };
+    const recent = [{ path: '/tmp/fc', name: 'fc', provider: 'claude', mode: 'auto', lastUsed: 1 }];
+    const room = async (tag, rows) => {
+      const asked = bridge();
+      const base = window.y3kCode.cmd;
+      window.y3kCode.cmd = async (o) => {
+        await base(o);
+        if (o.cmd === 'engine.hello') return { ok: true, version: '0.3.12', providers: [tool], recent, sessions: [] };
+        // (nothing is continued as the room opens, so the folders are what it shows)
+        if (o.cmd === 'session.list') return { ok: true, sessions: o.cwd ? rows.filter((x) => x.cwd === o.cwd) : [] };
+        if (o.cmd === 'workspace.open') return { ok: true, path: o.path, name: 'fc', findings: [], mode: 'auto' };
+        if (o.cmd === 'session.resume') return { ok: true, sid: 'fc2' };
+        if (o.cmd === 'session.start') return { ok: true, sid: 'fc3' };
+        if (o.cmd === 'session.load') return { ok: true, sid: o.sid, meta: null, live: true, events: [{ sid: o.sid, seq: 1, type: 'session.started', provider: 'claude', cwd: '/tmp/fc', mode: 'auto', providerSessionId: U(93) }] };
+        return { ok: true };
+      };
+      const cv = await viewWith(tag, { toast: () => {}, settleMs: 5 });
+      cv.open();
+      await until(() => asked('session.list').length === 1);
+      await settle();
+      tick();
+      await until(() => { tick(); return !!$('button.ob-continue'); });
+      return { asked, cv, end() { cv.close(); window.y3kCode.cmd = base; delete window.y3kCode; } };
+    };
+
+    // a folder with a conversation: it goes on
+    const one = await room('folder-goes-on', [{ sid: 'fc1', provider: 'claude', cwd: '/tmp/fc', providerSessionId: U(93), live: false }]);
+    assert.match($('button.ob-continue').textContent, /^Continue in fc/);
+    $('button.ob-continue').click();
+    await until(() => one.asked('session.resume').length === 1);
+    assert.deepEqual(one.asked('session.resume').map((o) => [o.sid, o.providerSessionId, o.cwd]), [['fc1', U(93), '/tmp/fc']], 'the folder\'s own conversation');
+    assert.deepEqual(one.asked('session.list').map((o) => o.cwd), [undefined, '/tmp/fc']);
+    await until(() => one.cv._state.sessions.get('fc2')?.cwd === '/tmp/fc');
+    await settle();
+    tick();
+    assert.equal(one.cv._state.active, 'fc2');
+    assert.equal(one.asked('session.start').length, 0, 'nothing new was started');
+    // the person's own /clear: the folders say so, and a press starts a new one
+    const ta = $('textarea.cv-input');
+    ta.value = '/clear';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await until(() => { tick(); return !!$('button.ob-continue'); });
+    assert.match($('button.ob-continue').textContent, /^Start in fc/, 'says what it does');
+    $('button.ob-continue').click();
+    await until(() => one.asked('session.start').length === 1);
+    assert.equal(one.asked('session.resume').length, 1, 'not continued');
+    one.end();
+
+    // a folder with none: it begins
+    const two = await room('folder-begins', []);
+    $('button.ob-continue').click();
+    await until(() => two.asked('session.start').length === 1);
+    assert.equal(two.asked('session.resume').length, 0);
+    two.end();
   });
 
   await ok('the view: a conversation that fills up is compacted on its own, at rest, once, told what to keep (2026-10-29)', async () => {

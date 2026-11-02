@@ -304,7 +304,10 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
   function events(req, res, url, origin, token) {
     if (streams >= MAX_STREAMS) return send(res, 429, { error: 'too many streams' }, origin);
     streams++;
-    res.writeHead(200, { ...baseHeaders(origin), 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+    // `connection: close`: the stream IS its socket. Ended, the socket goes
+    // with it, so a browser never pools it for its next request — which, in
+    // an update's hand-over, reached the process that had left (close, below).
+    res.writeHead(200, { ...baseHeaders(origin), 'content-type': 'text/event-stream; charset=utf-8', connection: 'close', 'x-accel-buffering': 'no' });
     const write = (e) => { res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`); };
     const after = Math.max(0, parseInt(url.searchParams.get('after') || '0', 10) || 0);
     const epoch = url.searchParams.get('epoch');
@@ -356,12 +359,20 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
   }
 
   // Closing ends the open event streams first: a page that is still connected
-  // would otherwise hold the door open for as long as it stays.
+  // would otherwise hold the door open for as long as it stays. And then EVERY
+  // connection, idle or not. On an update the old process hands the port to
+  // the new one and stays as its parent; it used to end its streams and close
+  // only the idle sockets — so a browser's keep-alive socket to the old
+  // process, busy with its last chunk at that instant, survived, and the
+  // page's next stream request went down it: to an engine that had left,
+  // which answered with pings and nothing else, while every command reached
+  // the new one. The room went blind to the conversation it had just
+  // continued, and offered the folders over it (2026-11-01).
   function close() {
     return new Promise((r) => {
       for (const end of [...live]) end();
       server.close(() => r());
-      setImmediate(() => server.closeIdleConnections?.());
+      setImmediate(() => { if (typeof server.closeAllConnections === 'function') server.closeAllConnections(); else server.closeIdleConnections?.(); });
     });
   }
 

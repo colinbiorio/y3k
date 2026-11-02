@@ -32,7 +32,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.11';   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.12';   // 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -58,6 +58,8 @@ const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 
 const newSid = () => randomBytes(8).toString('hex');
 const isSid = (x) => typeof x === 'string' && /^[a-f0-9]{16}$/.test(x);
+// A second opinion (kode's /compare): marked since 0.3.12, known by its title before.
+const isAside = (r) => !!r?.aside || /^Compare: /.test(String(r?.title || ''));
 
 // Orion's note, as the first thing the coder reads — framed as information from
 // y3k, not as an instruction, and unable to close its own frame.
@@ -276,7 +278,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   function reviveFor(k) {
     const rows = indexRead();
     const row = rows.find((r) => r.sid === k.sid && r.providerSessionId && !r.lost)
-      || rows.filter((r) => r.cwd === k.cwd && r.provider === k.provider && r.providerSessionId && !r.lost).sort((a, b) => (b.started || 0) - (a.started || 0))[0];
+      || rows.filter((r) => r.cwd === k.cwd && r.provider === k.provider && r.providerSessionId && !r.lost && !isAside(r)).sort((a, b) => (b.started || 0) - (a.started || 0))[0];
     if (!row) return { ok: false, error: 'no conversation to pick up' };
     return startSession({ provider: row.provider, cwd: row.cwd, resumeId: row.providerSessionId, resumeOf: row.sid });
   }
@@ -332,6 +334,21 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
     if (!p.ready || !A) return { ok: false, error: `${p.label} is coming soon in y3kode.`, code: 'not-ready' };
+    // ONE CONVERSATION, LIVE ONCE (0.3.12). The page picks the conversation up
+    // when the engine comes back and the switch revives it too (keep.mjs), or
+    // two pages ask for it: each used to spawn a coder of its own on the same
+    // transcript — two Claude Codes on one conversation, the room following
+    // whichever started last (2026-11-01). A resume of one that is live
+    // answers the live session, and the switch follows it. A fork is a new
+    // conversation, as before.
+    if (resumeId && !fork) {
+      const had = [...sessions.values()].find((x) => x.provider === provider && !x.fork && x.adapter?.state !== 'ended' && (x.providerSessionId === resumeId || x.resumeId === resumeId));
+      if (had) {
+        audit.write('session.already', { sid: had.sid, resumeId, resumeOf: isSid(resumeOf) ? resumeOf : null });
+        if (isSid(resumeOf) && resumeOf !== had.sid) keeper.follow(resumeOf, had.sid);
+        return { ok: true, sid: had.sid, providerSessionId: had.providerSessionId, mode: had.mode, auth: had.auth || null, already: true };
+      }
+    }
     if (sessions.size >= MAX_SESSIONS) return { ok: false, error: `At most ${MAX_SESSIONS} sessions at once — stop one first.`, code: 'too-many' };
     const t = trusted(cwd);
     if (t.error) return { ok: false, error: t.error, code: t.code || 'refused', path: t.real };
@@ -361,7 +378,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (why) return why;
 
     const sid = newSid();
-    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false, resumeId: resumeId || null,
+    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false, resumeId: resumeId || null, fork: !!fork, auth: auth.method,
       prior: isSid(resumeOf) ? resumeOf : null, priorCut: Number.isInteger(priorCut) && priorCut >= 0 ? priorCut : null };
     s.emit = sessionEmitter(s);
     const name = `y3k: ${t.rec.name || t.real.split(/[\\/]/).pop()}`;
@@ -396,7 +413,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       orb.close(sid);
       return { ok: false, error: String(err?.message || err) };
     }
-    indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork });
+    // (a second opinion says so in the index: "the conversation" is never one of
+    // them. It never did, so the page's "never a second opinion" had nothing to read.)
+    indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork, ...(aside ? { aside: true } : {}) });
     if (isSid(resumeOf) && !fork) keeper.follow(resumeOf, sid);   // keep going keeps the conversation, under its new id
     emit({ type: 'workspace.recent', folders: recent() });
     return { ok: true, sid, providerSessionId: s.providerSessionId, mode: chosen, auth: auth.method };

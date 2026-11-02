@@ -10,7 +10,8 @@
 // form posted from that very page — carrying the question's nonce — can answer.
 // Then the one-click start (`--pair`), end to end through the real command.
 import assert from 'node:assert';
-import { request } from 'node:http';
+import { request, Agent } from 'node:http';
+import { connect } from 'node:net';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
@@ -288,6 +289,61 @@ await ok('a revoke typed in another terminal ends an open stream within one ping
   assert.ok(ms >= 0, 'ended by the next ping once the file said so');
   assert.equal((await call('POST', '/v1/cmd', { to: portR, token: keep, body: { cmd: 'engine.hello' } })).status, 401);
   await httpR.close();
+});
+
+// THE DOOR CLOSES BEHIND THE ENGINE. On an update the old process hands the
+// port to the new one and stays as its parent. It used to end its streams but
+// close only the idle sockets: a browser's keep-alive socket to the old
+// process survived, its next stream request went down it — to an engine that
+// had left, answering with pings and nothing else — while every command
+// reached the new one (2026-11-01). Now the stream's socket closes with the
+// stream, and close() closes every connection, idle or not.
+await ok('closing the door closes every connection: no socket of the engine that left survives for a browser to reuse', async () => {
+  const dir = join(base, 'config-door');
+  const st = createStore(dir);
+  const pairingD = createPairing({ load: st.tokens, save: st.setTokens });
+  const httpD = createHttp({ engine, pairing: pairingD, pingMs: 60 });
+  const portD = await httpD.listen(0);
+  const tok = pairingD.mint({ origin: SITE, agent: 'Chrome' });
+  const agent = new Agent({ keepAlive: true });   // a browser's pool: sockets kept for the next request
+  const via = (path) => new Promise((resolve, reject) => {
+    const req = request({ agent, host: '127.0.0.1', port: portD, path, headers: { host: `127.0.0.1:${portD}`, origin: SITE, authorization: `Bearer ${tok}` } }, (res) => {
+      const s = { status: res.statusCode, headers: res.headers, socket: res.socket, closed: false };
+      res.socket.on('close', () => { s.closed = true; });
+      res.on('data', () => {});
+      resolve(s);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  const h = await via('/v1/hello');
+  assert.equal(h.status, 200);
+  await until(() => Object.values(agent.freeSockets).some((l) => l.length), 1000).catch(() => {});
+  assert.ok(Object.values(agent.freeSockets).some((l) => l.length), 'a command\'s socket goes back to the pool');
+  const s = await via('/v1/events?after=0');
+  assert.equal(s.status, 200);
+  assert.equal(s.headers.connection, 'close', 'the stream\'s socket is its own: never pooled after it');
+  // and one that is not idle: a command half sent as the door closes. This is
+  // the socket that used to survive, and the door used to wait six seconds on.
+  const busy = await new Promise((resolve, reject) => {
+    const c = connect(portD, '127.0.0.1', () => { c.off('error', reject); resolve(c); });
+    c.on('error', reject);
+  });
+  busy.on('error', () => {});
+  let busyGone = false;
+  busy.on('close', () => { busyGone = true; });
+  busy.write(`POST /v1/cmd HTTP/1.1\r\nHost: 127.0.0.1:${portD}\r\nOrigin: ${SITE}\r\nAuthorization: Bearer ${tok}\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{`);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(busyGone, false, 'a request under way');
+  const closed = await Promise.race([httpD.close().then(() => true), new Promise((r) => setTimeout(() => r(false), 1500))]);
+  assert.equal(closed, true, 'closed at once, not held open by a socket still in use');
+  await until(() => s.closed && h.socket.destroyed && busyGone, 2000);
+  assert.ok(s.closed, 'the stream\'s socket is closed, not only its response ended');
+  assert.ok(h.socket.destroyed, 'the pooled socket too');
+  assert.ok(busyGone, 'and the one in use');
+  assert.ok(!Object.values(agent.freeSockets).some((l) => l.length), 'nothing left in the pool to reuse');
+  await assert.rejects(via('/v1/hello'), /ECONNREFUSED|ECONNRESET|socket hang up/, 'the next request has nowhere to go: no listener, no old socket');
+  agent.destroy();
 });
 
 await ok('the listener is on loopback only', () => {
