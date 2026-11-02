@@ -4471,6 +4471,8 @@ body.in-code .home-panel-head { display: none; }
 .cv-name svg { width: 13px; height: 13px; opacity: 0.7; }
 .cv-nameinput { height: 28px; min-width: 18ch; max-width: 34ch; padding: 0 12px; border-radius: 999px; font: inherit; color: inherit;
   background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.22); outline: none; }
+/* on a phone the toolbar row is one line: a long name must not push the rest off it */
+@media (max-width: 560px) { .cv-name > span { max-width: 13ch; } .cv-nameinput { min-width: 12ch; max-width: 22ch; } }
 .cv-branch { display: inline-flex; align-items: center; gap: 4px; color: #8b93a1; font-size: 0.76rem; }
 .cv-live { width: 7px; height: 7px; border-radius: 50%; background: #4dd865; }
 .cv-live.run { animation: cv-pulse 1.4s ease-in-out infinite; }

@@ -263,7 +263,9 @@ build. Read the one for the part you are touching.
   it continues. It is also Claude Code's own name for the session
   ("y3k: <name>") from the coder's next start. A conversation now says
   explicitly that it is not a second opinion, so a first line or a name that
-  begins "Compare:" can never hide it.
+  begins "Compare:" can never hide it. On a phone a long name is clipped to
+  thirteen characters so the rest of the toolbar stays on screen (seen in a
+  phone-sized screenshot the same day).
 
 - **2026-11-01** — **One conversation, for real this time (y3kode 0.3.12).**
   Colin: "we seem to be starting a new convo every time instead of keeping one
