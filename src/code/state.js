@@ -601,7 +601,16 @@ export function apply(S, e, { replay = false } = {}) {
     }
     case 'local.orion': {
       const it = item('orion', { who: e.who, text: e.text, name: e.name || null });
+      if (e.id != null) s.byKey.set('or:' + e.id, it);
       s.items.push(it); touch(it);
+      break;
+    }
+    // a line of the presence's still being written (code-view.js caption): grown in place
+    case 'local.orion.update': {
+      const it = s.byKey.get('or:' + e.id);
+      if (!it) break;
+      it.text = String(e.text || '');
+      touch(it);
       break;
     }
     case 'compact': { const it = item('compact', { trigger: e.trigger, preTokens: e.preTokens }); s.items.push(it); touch(it); break; }

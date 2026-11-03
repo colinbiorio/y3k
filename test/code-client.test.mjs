@@ -2640,6 +2640,75 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     delete window.y3kCode;
   });
 
+  // CAPTIONS IN KODE ARE MESSAGES, AND THE PRESENCE THINKS ON THE MODEL IN USE (2026-11-02).
+  // Colin: "text that gets output to the screen doesn't disappear and conflicts in kode -- in
+  // kode, let's always have messages show up as a chat message"; "the 'plan with orion' feature
+  // got caught stuck in fable ... it should always route to whatever the user is currently using".
+  await ok('the view: a caption is a message in kode — grown in place, finished by the reply, a notice its own line, the person\'s words not repeated, the planning thread when there is no conversation; and the conversation\'s model is the presence\'s (2026-11-02)', async () => {
+    bridge();
+    const listeners = {};
+    const realAdd = window.addEventListener;
+    window.addEventListener = (t, fn) => { (listeners[t] ||= []).push(fn); };
+    const store = new Map();
+    const hadStore = 'localStorage' in globalThis;
+    const realStore = globalThis.localStorage;
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    try {
+      const cv = await viewWith('captions', { toast: () => {}, link: { companion: () => ({ name: 'orion' }), talk: () => {} } });
+      const S = cv._state;
+      cv.open();
+      await settle();
+      tick();
+      const reply = (text) => (listeners['y3k:chat'] || []).forEach((fn) => fn({ detail: { role: 'presence', text } }));
+      // no conversation yet: the planning thread is the conversation
+      assert.equal(cv.caption('Let me', 'y3k'), true, 'kode did not take it');
+      cv.caption('Let me think about that', 'y3k');
+      reply('Let me think about that first.');
+      assert.deepEqual(cv._plan().items.map((i) => [i.who, i.text]), [['presence', 'Let me think about that first.']], 'one line, finished by the reply');
+      // a conversation on screen
+      cv._feed({ sid: 'cp1', type: 'session.started', provider: 'claude', cwd: '/tmp/cp', mode: 'auto', model: 'opus' });
+      cv._feed({ sid: 'cp1', type: 'session.state', state: 'idle' });
+      tick();
+      const ors = () => S.sessions.get('cp1').items.filter((i) => i.kind === 'orion').map((i) => i.text);
+      cv.caption('Hello', 'y3k');
+      cv.caption('Hello there, I', 'y3k');
+      tick();
+      assert.deepEqual(ors(), ['Hello there, I'], 'grown in place');
+      reply('Hello there, I read it.');
+      tick();
+      assert.deepEqual(ors(), ['Hello there, I read it.'], 'the reply finished it, and was not written twice');
+      // the next line is its own message; the person's own words are not repeated
+      cv.caption('Claude Code on your computer did not answer; it said: limit.', 'y3k');
+      assert.equal(cv.caption('what I just said', 'you'), true);
+      tick();
+      assert.deepEqual(ors(), ['Hello there, I read it.', 'Claude Code on your computer did not answer; it said: limit.']);
+      assert.ok($('div.cv-list').textContent.includes('did not answer'), 'not drawn in the conversation');
+      // the conversation's model goes to the presence (own-brain.js liveModel)
+      assert.deepEqual(JSON.parse(store.get('y3k.liveModel')), { claude: 'opus' });
+      cv._feed({ sid: 'cp1', type: 'model.changed', model: 'claude-fable-5-1' });
+      tick();
+      assert.deepEqual(JSON.parse(store.get('y3k.liveModel')), { claude: 'claude-fable-5-1' });
+      cv.close();
+      assert.equal(cv.caption('after', 'y3k'), false, 'a closed room takes captions');
+    } finally {
+      window.addEventListener = realAdd;
+      if (hadStore) globalThis.localStorage = realStore; else delete globalThis.localStorage;
+      delete window.y3kCode;
+    }
+  });
+
+  await ok('source: the house hands captions to kode first, the overlay is hidden in kode, the presence thinks on the model in use, and a long prompt stays in the bar (2026-11-02)', () => {
+    const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+    const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+    const own = readFileSync(join(ROOT, 'src/own-brain.js'), 'utf8');
+    const social = readFileSync(join(ROOT, 'src/social.js'), 'utf8');
+    assert.match(main, /if \(document\.body\.classList\.contains\('in-code'\) && social\.kodeCaption\?\.\(text, who\)\) return;/);
+    assert.match(social, /kodeCaption: \(t, w\) => \(codeView \? codeView\.caption\(t, w\) : false\)/);
+    assert.match(css, /body\.in-code #caption \{ display: none !important; \}/);
+    assert.match(css, /body\.kode-chat \.cv-input \{ max-height: calc\(4\.5em \+ 12px\); overflow-y: auto; \}/);
+    assert.match(own, /const model = liveModel\(job\.provider\) \|\| ownModel\(job\.provider\);/);
+  });
+
   await ok('the view: a second opinion is never the conversation picked up, marked or only titled (a row from before 0.3.12) (2026-11-01)', async () => {
     const asked = bridge();
     const base = window.y3kCode.cmd;

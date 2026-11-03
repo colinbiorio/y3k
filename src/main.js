@@ -1612,6 +1612,9 @@ function clearCaption() {
 window.addEventListener('resize', clearCaption);
 
 function showCaption(text, who) {
+  // IN KODE A CAPTION IS A MESSAGE (2026-11-02; code-view.js caption): the room takes it, and
+  // nothing is drawn over the conversation
+  if (document.body.classList.contains('in-code') && social.kodeCaption?.(text, who)) return;
   if (who === 'you') beforeYou?.();
   clearCaption();
   if (document.body.classList.contains('in-home')) { history.push(who, text); lastRing = { who, text: String(text || '').trim() }; }

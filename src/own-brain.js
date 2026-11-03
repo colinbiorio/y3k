@@ -124,6 +124,23 @@ export function setOwnModel(provider, model) {
   } catch { /* private window */ }
   if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event('y3k:model'));
 }
+// THE MODEL YOU ARE USING (2026-11-02, Colin: "the 'plan with orion' feature got caught stuck in
+// fable and couldn't respond when i was using opus because my fable limit was reached -- it should
+// always route to whatever the user is currently using"). kode says which model its conversation
+// is on (code-view.js noteLiveModel: the one Claude Code reports, or the one chosen with /model or
+// the toolbar), and your presence thinks on that one here; Settings → Brain's choice stands when
+// kode has said none.
+const LIVE_KEY = 'y3k.liveModel';
+export function liveModel(provider = 'claude') {
+  try { const m = JSON.parse(localStorage.getItem(LIVE_KEY))?.[provider]; return typeof m === 'string' && m ? m : null; } catch { return null; }
+}
+export function setLiveModel(provider, model) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LIVE_KEY) || '{}') || {};
+    if (model && model !== 'default') all[provider] = model; else delete all[provider];
+    localStorage.setItem(LIVE_KEY, JSON.stringify(all));
+  } catch { /* private window */ }
+}
 // The models Claude Code last offered this plan, as y3kode heard them in a
 // kode session (models.list → heard, y3kode 0.3.1): [{ id, label, desc }] or null.
 export async function heardModels(provider = 'claude', { cmd = engineCmd } = {}) {
@@ -351,7 +368,7 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
       let job;
       try { job = JSON.parse(ev.data); } catch { return; }
       if (!/^[0-9a-f]{32}$/.test(String(job?.id))) return;
-      const model = ownModel(job.provider);
+      const model = liveModel(job.provider) || ownModel(job.provider);
       thinkingNow.add(job.id);
       // SPEAK AS IT THINKS (Colin, 2026-10-19: "don't wait to print the full
       // message to start talking"). While the turn runs, read what y3kode has

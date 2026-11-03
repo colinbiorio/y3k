@@ -819,4 +819,48 @@ try {
   rmSync(DATA, { recursive: true, force: true });
 }
 
+
+// --- the mic waits three times as long (2026-11-02) -----------------------------
+// Colin: "the mic turns off too quickly -- let's triple the required period of silence before we
+// cut off the user". The recognizer runs on (continuous), and the module ends it itself once no
+// word has come for END_SILENCE_MS; a pause the browser marks as the end of a phrase is not the
+// end of the utterance, which is handed on as final once, whole.
+console.log('\nthe mic waits for a longer pause:');
+{
+  const recs = [];
+  class FakeRec { constructor() { recs.push(this); } start() {} stop() { this.stopped = true; setTimeout(() => this.onend?.(), 0); } }
+  const was = globalThis.window;
+  globalThis.window = { ...(was || {}), SpeechRecognition: FakeRec };
+  globalThis.requestAnimationFrame = globalThis.requestAnimationFrame || (() => 1);
+  globalThis.cancelAnimationFrame = globalThis.cancelAnimationFrame || (() => {});
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const V = await import('../src/voice.js?mic');
+    await ok('three seconds of quiet, not the browser\'s one, before the words are handed on — once, whole', async () => {
+      assert.equal(V.END_SILENCE_MS, 3000);
+      const heard = [];
+      let on = null;
+      const voice = V.createVoice({ onTranscript: (t) => heard.push(t), onListeningChange: (x) => { on = x; }, endSilenceMs: 40 });
+      await voice.startListening();
+      const r = recs.at(-1);
+      assert.equal(r.continuous, true, 'the browser still ends it at its own pause');
+      const res = (index, parts) => ({ resultIndex: index, results: parts.map(([t, fin]) => Object.assign([{ transcript: t }], { isFinal: fin })) });
+      r.onresult(res(0, [['hello', false]]));
+      r.onresult(res(0, [['hello there', true]]));   // the browser's end of a phrase
+      await sleep(20);
+      assert.equal(heard.filter((t) => t.final).length, 0, 'cut off at the browser\'s pause');
+      assert.equal(on, true);
+      r.onresult(res(1, [['hello there', true], [' and more', false]]));
+      await sleep(25);
+      assert.equal(heard.filter((t) => t.final).length, 0, 'the clock did not start again with the new words');
+      await sleep(60);
+      const finals = heard.filter((t) => t.final);
+      assert.deepEqual(finals, [{ text: 'hello there and more', final: true }], 'not handed on once, whole');
+      assert.equal(r.stopped, true);
+      assert.equal(voice.isListening(), false);
+      assert.deepEqual(heard.filter((t) => !t.final).map((t) => t.text), ['hello', 'hello there', 'hello there and more']);
+    });
+  } finally { globalThis.window = was; }
+}
+
 console.log(`\n${passed} checks passed.`);
