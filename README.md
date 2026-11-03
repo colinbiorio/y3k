@@ -252,6 +252,30 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-02** — **Five quick fixes in kode (y3kode 0.3.14).** Colin's list, each
+  done in place:
+  - **The mic waits longer.** It waits three times as long for you to finish.
+    The browser's one-utterance mode ended about a second after the last
+    word. Now recognition runs on, and the mic lets go only after three
+    seconds without a word (`voice.js END_SILENCE_MS`), handing on the whole
+    utterance once.
+  - **Any file can go to the coder.** The image button is a paper clip that
+    picks any file, and dropping or pasting takes any file too. A picture
+    still goes as a picture. Anything else, up to 10 MB, is saved by y3kode
+    in the conversation's own folder, under `.y3k/attachments/`, a folder that
+    keeps itself out of git. The message tells the coder where the file is.
+    On an older y3kode a text file goes as text, and anything else waits for
+    the update.
+  - **Your presence uses the model you're using.** In kode it thinks on the
+    conversation's model, the one you chose with `/model` or the toolbar, not
+    a different one that may have run out (the planning card had stayed on
+    Fable after its limit while the conversation was on Opus).
+  - **Captions become messages.** In kode what used to be drawn over the
+    room as a caption is now a message in the conversation. The presence's
+    words grow in place as they stream, and a line like "did not answer"
+    gets its own entry. The overlay is off while kode is open.
+  - **A long prompt stays in the bar.** Three lines, then it scrolls.
+
 - **2026-11-02** — **The conversation has a name (y3kode 0.3.13).** Colin:
   "give us an option to name and rename the chat while keeping the singular
   thread." The first thing on kode's second toolbar row is the conversation's

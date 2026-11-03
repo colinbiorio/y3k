@@ -2867,7 +2867,8 @@ await ok('the caption stays clear of the chat bar\'s highest thing, measured (20
   assert.match(main, /function clearCaption\(\) \{/);
   assert.match(main, /for \(const id of \['chat', 'chat-air', 'nav-collapse-bottom'\]\)/, 'the bar, its air mark, its fold button');
   assert.match(main, /window\.addEventListener\('resize', clearCaption\);/);
-  assert.match(main, /function showCaption\(text, who\) \{\n  if \(who === 'you'\) beforeYou\?\.\(\);\n  clearCaption\(\);/, 'measured when a caption shows');
+  // (2026-11-02: in kode a caption is a message, handed to the room before anything is measured or drawn)
+  assert.match(main, /function showCaption\(text, who\) \{\n(?:  \/\/[^\n]*\n)*  if \(document\.body\.classList\.contains\('in-code'\) && social\.kodeCaption\?\.\(text, who\)\) return;\n  if \(who === 'you'\) beforeYou\?\.\(\);\n  clearCaption\(\);/, 'measured when a caption shows');
   assert.match(readFileSync(join(ROOT, 'styles.css'), 'utf8'), /bottom: max\(108px, calc\(100% - var\(--caption-clear, 100%\) \+ 12px\)\);/, 'never under 108px, above the bar when it is higher');
 });
 

@@ -92,6 +92,8 @@ export const COMMANDS = {
   'session.fork': { sid: S(64) },
   // the conversation's name (0.3.13): empty clears it
   'session.rename': { sid: S(64), name: S(400, false) },
+  // a file for the coder (0.3.14): at most 10 MB, sent as base64
+  'files.put': { cwd: S(4096), name: S(400), data: S(14 * 1024 * 1024) },
   'session.rewind': { sid: S(64), at: S(64, false), cut: N(), model: S(120, false) },
   'session.toolOutput': { sid: S(64), callId: S(200) },
   // the terminal's own line (0.3.10): a shell command in a trusted folder, its output back to the page

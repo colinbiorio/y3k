@@ -10,7 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { waitForVersion } from '../own-brain.js';
+import { waitForVersion, setLiveModel } from '../own-brain.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf, usdText } from './render/meters.js';
@@ -571,12 +571,65 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // (the turn's own clock stops while the page cannot be seen: see workClock)
   globalThis.document?.addEventListener?.('visibilitychange', () => { markTab(); workClock(); });
 
+  // CAPTIONS IN KODE ARE MESSAGES (2026-11-02, Colin: "text that gets output to the screen
+  // doesn't disappear and conflicts in kode -- in kode, let's always have messages show up as a
+  // chat message"). What the house would write over the room as a caption (main.js showCaption)
+  // — the presence's words as they stream in, and its own lines: a turn that did not come back,
+  // and why — is a message in the conversation instead, one that grows in place while the words
+  // come; the overlay stays off while kode is open (styles.css). The person's own words are in
+  // the room already (sent) or in the box (dictation), so theirs are not written twice. With no
+  // conversation on screen, the planning thread is the conversation.
+  let capLine = null;   // { sid, id, text } the presence's message still being written
+  let capNo = 0;
+  let planCap = false;  // the planning thread's last line is a caption still being written
+  const sameStart = (a, b) => { const x = String(a).replace(/\s+/g, ' ').trim(), y = String(b).replace(/\s+/g, ' ').trim(); return x.startsWith(y) || y.startsWith(x); };
+  function caption(text, who) {
+    if (!root) return false;
+    if (who === 'you') return true;
+    const t = String(text || '').trim();
+    if (!t) return true;
+    const s = currentSession();
+    if (!s) {
+      const last = plan.items[plan.items.length - 1];
+      if (planCap && last?.who === 'presence' && sameStart(t, last.text)) last.text = t;
+      else plan.items.push({ who: 'presence', text: t });
+      planCap = true;
+      plan.waiting = false;
+      plan.rev++;
+      redrawHome();
+      return true;
+    }
+    if (capLine && capLine.sid === s.sid && sameStart(t, capLine.text)) {
+      capLine.text = t;
+      roomLine(s, { type: 'local.orion.update', id: capLine.id, text: t });
+      return true;
+    }
+    capLine = { sid: s.sid, id: ++capNo, text: t };
+    roomLine(s, { type: 'local.orion', who: 'orion', text: t, name: companion()?.name, id: capLine.id });
+    return true;
+  }
+
   // What was said to the presence from here comes back on the house's own chat
-  // event; shown in this session's transcript, never sent to the coder.
+  // event; shown in this session's transcript, never sent to the coder. A reply
+  // the caption already wrote (above) is finished there, not written twice.
   function onChat(ev) {
     const d = ev.detail || {};
-    if (d.role !== 'presence' || !root || Date.now() - orionAt > 3 * 60 * 1000) return;
+    if (d.role !== 'presence' || !root) return;
     const s = currentSession();
+    const said = String(d.text || '');
+    if (!s && planCap) {
+      const last = plan.items[plan.items.length - 1];
+      if (last?.who === 'presence' && sameStart(said, last.text)) {
+        last.text = said; planCap = false; plan.waiting = false; plan.rev++; redrawHome();
+        return;
+      }
+    }
+    if (s && capLine && capLine.sid === s.sid && sameStart(said, capLine.text)) {
+      roomLine(s, { type: 'local.orion.update', id: capLine.id, text: said });
+      capLine = null;
+      return;
+    }
+    if (Date.now() - orionAt > 3 * 60 * 1000) return;
     if (!s) {
       // no session on screen: this is the planning thread's turn
       if (!plan.waiting) return;
@@ -956,8 +1009,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (panel.open) renderPanel();
   }
 
+  // the model of the conversation on screen, for your presence to think on too (own-brain.js liveModel)
+  let liveKey = '';
+  function noteLiveModel(s) {
+    if (!s || s.provider !== 'claude' || viewingSid) return;
+    const k = String(s.model || '');
+    if (k === liveKey) return;
+    liveKey = k;
+    setLiveModel('claude', s.model || null);
+  }
   function renderControls(s) {
     if (!s) return;
+    noteLiveModel(s);
     const off = s.state === 'ended' || !!viewingSid;
     const p = S.providers.find((x) => x.id === s.provider);
     if (!holds(bar.name)) keyed(bar.name, [s.sid, s.named ? s.title : '', !!viewingSid].join('|'), () => nameChip(s));
@@ -1902,11 +1965,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     ta.addEventListener('blur', () => { if (shortcuts.open) showKeys(false); });
     ta.addEventListener('paste', (e) => {
-      for (const f of e.clipboardData?.files || []) if (/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { e.preventDefault(); addImage(f); }
+      const files = [...(e.clipboardData?.files || [])];
+      if (files.length) { e.preventDefault(); for (const f of files) addAny(f); }
     });
-    const pick = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true });
-    pick.addEventListener('change', () => { for (const f of pick.files) addImage(f); pick.value = ''; });
-    const clip = h('button.cv-iconbtn', { type: 'button', title: 'Attach an image' }, icon('image'));
+    const pick = h('input', { type: 'file', multiple: true, hidden: true });
+    pick.addEventListener('change', () => { for (const f of pick.files) addAny(f); pick.value = ''; });
+    const clip = h('button.cv-iconbtn', { type: 'button', title: 'Attach a file' }, icon('clip'));
     clip.addEventListener('click', () => pick.click());
     const micBtn = h('button.cv-iconbtn.cv-mic', { type: 'button', title: 'Speak — click and talk; shift-click for hands-free', 'aria-pressed': 'false' }, icon('mic'));
     micBtn.addEventListener('click', (e) => toggleMic(e.shiftKey));
@@ -1928,7 +1992,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (FIELD_SIZING || !dockUi) return;
     const ta = dockUi.ta;
     ta.style.height = 'auto';
-    ta.style.height = Math.min(280, ta.scrollHeight) + 'px';
+    const max = parseFloat(globalThis.getComputedStyle?.(ta)?.maxHeight) || 280;
+    ta.style.height = Math.min(max, ta.scrollHeight) + 'px';
   }
   // Words put into the composer from here (pass to, sent, cleared).
   function setDraft(text) {
@@ -2121,6 +2186,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const text = String((el?.ta?.value ?? plan.draft) || '').trim();
     if (!text || !companion() || !link?.talk) return;
     plan.items.push({ who: 'you', text });
+    planCap = false;
     plan.draft = '';
     if (el?.ta) el.ta.value = '';
     plan.waiting = true;
@@ -2136,7 +2202,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     plan.timer = setTimeout(() => {
       if (!plan.waiting || orionAt !== at) return;
       plan.waiting = false;
-      plan.items.push({ who: 'presence', text: `(${companion()?.name || 'the presence'} did not answer here — what it said, if anything, is in the room's caption.)`, note: true });
+      plan.items.push({ who: 'presence', text: `(${companion()?.name || 'the presence'} did not answer.)`, note: true });
       plan.rev++;
       redrawHome();
     }, 75 * 1000);
@@ -2506,8 +2572,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // between 3.75 and 5MB was sent on past Anthropic's limit). Four at most,
   // counted again as each lands: several dropped at once all pass the first
   // count.
+  const images = () => attachments.filter((a) => a.kind !== 'file');
+  const files = () => attachments.filter((a) => a.kind === 'file');
   async function addImage(file) {
-    if (attachments.length >= 4) { toast('four images at most'); return; }
+    if (images().length >= 4) { toast('four images at most'); return; }
     let pic = file;
     if (!fitsAsIs(file)) {
       if (file.size > 25 * 1024 * 1024) { toast('that image is too large to read (25 MB at most)'); return; }
@@ -2516,18 +2584,70 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     const reader = new FileReader();
     reader.onload = () => {
-      if (attachments.length >= 4) { toast('four images at most'); return; }
+      if (images().length >= 4) { toast('four images at most'); return; }
       const url = String(reader.result);
-      attachments.push({ url, mediaType: pic.type, data: url.split(',')[1] });
+      attachments.push({ kind: 'image', url, mediaType: pic.type, data: url.split(',')[1] });
       attachVer++;
       renderDock();
       redrawHome();
     };
     reader.readAsDataURL(pic);
   }
-  // the pictures going with the next message, each removable until it is sent
-  const attachChips = () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att', h('img', { src: a.url, alt: '' }),
+  // ANY FILE JOINS THE NEXT MESSAGE TOO (2026-11-02, Colin: "only images are currently accepted
+  // by drag field, no file uploads, but we should accept all files and change the image icon to a
+  // paper clip"). A picture the coders read as one goes as before; anything else is read here and,
+  // when the message is sent, saved by y3kode in the conversation's own folder (files.put, 0.3.14,
+  // under .y3k/attachments/), the message saying where. Ten megabytes, eight files at most.
+  const FILE_ENGINE = '0.3.14';
+  const FILE_MAX = 10 * 1024 * 1024;
+  function addAny(file) {
+    if (/^image\//.test(file.type || '')) return addImage(file);
+    return addFile(file);
+  }
+  function addFile(file) {
+    if (files().length >= 8) { toast('eight files at most'); return; }
+    if ((file.size || 0) > FILE_MAX) { toast(`${file.name || 'that file'} is too large (10 MB at most)`); return; }
+    if (!file.size) { toast(`${file.name || 'that file'} is empty`); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (files().length >= 8) { toast('eight files at most'); return; }
+      const url = String(reader.result);
+      attachments.push({ kind: 'file', name: file.name || 'file', size: file.size || 0, mediaType: file.type || 'application/octet-stream', data: url.split(',')[1] || '' });
+      attachVer++;
+      renderDock();
+      redrawHome();
+    };
+    reader.readAsDataURL(file);
+  }
+  const sizeText = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+  // the pictures and files going with the next message, each removable until it is sent
+  const attachChips = () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att' + (a.kind === 'file' ? '.file' : ''),
+    a.kind === 'file' ? [icon('clip'), h('span.cv-attname', { title: `${a.name} · ${sizeText(a.size)}` }, a.name)] : h('img', { src: a.url, alt: '' }),
     h('button', { type: 'button', title: 'Remove', onclick: () => { attachments.splice(i, 1); attachVer++; renderDock(); redrawHome(); } }, icon('close')))));
+  // A file the person attached, as words for the coder: where y3kode saved it (an engine with
+  // files.put), or, on an older engine, the text itself when it is text. → { text } or { error }
+  const textOf = (b64) => {
+    try {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      if (bytes.includes(0) || bytes.length > 100 * 1024) return null;
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch { return null; }
+  };
+  async function fileLines(s) {
+    const out = [];
+    for (const f of files()) {
+      if (versionAtLeast(hello?.version, FILE_ENGINE)) {
+        const r = await cmd({ cmd: 'files.put', cwd: s.cwd, name: f.name, data: f.data });
+        if (!r?.ok) return { error: `${f.name}: ${r?.error || 'not saved'}` };
+        out.push(`Attached file: \`${r.path}\` (${f.name}, ${sizeText(f.size)}).`);
+      } else {
+        const text = textOf(f.data);
+        if (text == null) return { error: `${f.name} needs y3kode ${FILE_ENGINE} to go to the coder — update y3kode.` };
+        out.push(`Attached file \`${f.name}\`:\n\`\`\`\n${text}\n\`\`\``);
+      }
+    }
+    return { text: out.join('\n') };
+  }
 
   // A PICTURE DROPPED ON KODE. Colin, 2026-10-25: "make sure that when you're
   // draggin a photo into y3kode, the photo gets added to the coding
@@ -2630,11 +2750,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
   function takeDropped(files) {
     const way = dropWay();
-    if (way === 'shut') { toast('this session has ended — continue it to give the coder a picture'); return; }
+    if (way === 'shut') { toast('this session has ended — continue it to give the coder a file'); return; }
+    if (!files.length) return;
+    for (const f of files) addAny(f);
     const pics = files.filter((f) => /^image\//.test(f.type || ''));
-    if (!pics.length) { toast('only pictures go to the coder'); return; }
-    for (const f of pics) addImage(f);
-    const it = pics.length === 1 ? 'the picture' : 'the pictures', comp = companion();
+    const it = files.length === 1 ? (pics.length ? 'the picture' : 'the file') : (pics.length === files.length ? 'the pictures' : 'the files'), comp = companion();
     if (way === 'wait') toast(`${it} will go with your first message to the coder`);
     else if (talkTo === 'orion' && comp) toast(`${it} will go with your next message to the coder, not to ${comp.name}`);
     else dockUi?.ta.focus({ preventScroll: true });
@@ -2709,7 +2829,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       scrollToBottom();
       return;
     }
-    const r = await cmd({ cmd: 'session.send', sid: s.sid, text: text || '(image)', handoff, attachments: attachments.length ? attachments.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data })) : undefined });
+    capLine = null;
+    let said = text;
+    if (files().length) {
+      const fl = await fileLines(s);
+      if (fl.error) { toast(fl.error); return; }
+      said = [text, fl.text].filter(Boolean).join('\n\n');
+    }
+    const pics = images();
+    const r = await cmd({ cmd: 'session.send', sid: s.sid, text: said || '(image)', handoff, attachments: pics.length ? pics.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data })) : undefined });
     if (r.ok && first) notes.delete(s.sid);
     if (!r.ok) { toast(r.error || 'not sent'); return; }
     setDraft('');
@@ -3339,8 +3467,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       draft.trim() ? h('div.cv-note', icon('send'), ' A prompt is waiting in the message box for the coder.') : null,
       // pictures with no conversation on screen (dropped here, or left in the box): they go with the next one's first message
       attachments.length ? h('div.cv-note.cv-waitpics', attachChips(), h('span', attachments.length === 1
-        ? 'A picture is waiting to go with your first message to the coder.'
-        : `${attachments.length} pictures are waiting to go with your first message to the coder.`)) : null,
+        ? (files().length ? 'A file is waiting to go with your first message to the coder.' : 'A picture is waiting to go with your first message to the coder.')
+        : `${attachments.length} ${files().length ? 'attachments' : 'pictures'} are waiting to go with your first message to the coder.`)) : null,
       cont ? h('div.ob-controw', cont) : null,
       noneReady ? h('div.cv-note.warn', 'No coding tool is on this computer yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
       h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('span.cv-sel', 'with ', glassSelect(provider))),
@@ -3688,11 +3816,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     busy: () => liveSessions(S).length > 0,
     // a line said to the conversation from elsewhere on the site (social.kodeSay)
     say: (text) => sayFromSite(text),
+    // a caption the house would have drawn over the room (main.js showCaption): a message here instead
+    caption: (text, who) => caption(text, who),
     // the conversation as Markdown (/export), and the engine's hello, for the tests
     _markdown: (sid) => conversationMarkdown(S.sessions.get(sid)),
     _hello: (patch) => (patch ? (hello = { ...(hello || {}), ...patch }) : hello),
     _offer: () => (offer ? { ...offer } : null),
     _state: S,
+    _plan: () => plan,
     _keep: () => S.keep,
     // scripts/code-smoke.mjs feeds made-up events through the same path as the
     // engine's, to watch the screen draw them

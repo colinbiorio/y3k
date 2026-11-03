@@ -6,7 +6,7 @@
 // (terminal and approval page, first answer wins).
 import assert from 'node:assert';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, statSync, rmSync, symlinkSync, realpathSync, readdirSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -313,6 +313,40 @@ console.log('\na conversation Claude Code has no transcript of:');
     await until(events, (e) => e.type === 'session.ended' && e.sid === fourth.sid);
     assert.equal((await engine.handle({ cmd: 'session.rename', sid: 'ffffffffffffffff', name: 'x' })).ok, false, 'an unknown one');
     assert.equal((await engine.handle({ cmd: 'session.rename', sid: live.sid, name: 'x', extra: 1 })).code, 'invalid');
+  });
+
+  // A FILE FOR THE CODER (0.3.14). Colin, 2026-11-02: "only images are currently accepted by
+  // drag field, no file uploads, but we should accept all files".
+  await aok('a file for the coder: saved in the trusted folder under .y3k/attachments, never overwritten, kept out of git; refused when too large, untrusted, or led out by a link (0.3.14)', async () => {
+    const data = Buffer.from('hello, coder\n').toString('base64');
+    const r = await engine.handle({ cmd: 'files.put', cwd: repo, name: '../../notes.txt', data });
+    assert.equal(r.ok, true, r.error);
+    assert.match(r.path, /^\.y3k\/attachments\/[0-9T-]+Z-[0-9a-f]{4}-notes\.txt$/, 'a plain name, under .y3k/attachments: ' + r.path);
+    assert.equal(readFileSync(join(repo, r.path), 'utf8'), 'hello, coder\n');
+    assert.equal(r.bytes, 13);
+    assert.equal(readFileSync(join(repo, '.y3k', '.gitignore'), 'utf8'), '*\n', 'kept out of git');
+    const r2 = await engine.handle({ cmd: 'files.put', cwd: repo, name: 'notes.txt', data });
+    assert.equal(r2.ok, true, r2.error);
+    assert.notEqual(r2.path, r.path, 'the same name twice: two files');
+    assert.ok(engine.audit.tail(50).some((a) => a.kind === 'files.put' && a.name === 'notes.txt'), 'written down');
+    // a binary file comes back byte for byte
+    const bin = Buffer.from([0, 1, 2, 250, 255, 0, 10]);
+    const r3 = await engine.handle({ cmd: 'files.put', cwd: repo, name: 'blob.bin', data: bin.toString('base64') });
+    assert.ok(readFileSync(join(repo, r3.path)).equals(bin));
+    const big = await engine.handle({ cmd: 'files.put', cwd: repo, name: 'big.bin', data: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64') });
+    assert.equal(big.code, 'too-large');
+    assert.equal((await engine.handle({ cmd: 'files.put', cwd: repo, name: 'e.txt', data: '' })).code, 'empty');
+    const out = realpathSync(mkdtempSync(join(base, 'untrusted-')));
+    const un = await engine.handle({ cmd: 'files.put', cwd: out, name: 'x.txt', data });
+    assert.equal(un.ok, false, 'an untrusted folder');
+    // a folder whose .y3k leads elsewhere
+    const linked = realpathSync(mkdtempSync(join(base, 'linked-')));
+    const elsewhere = realpathSync(mkdtempSync(join(base, 'elsewhere-')));
+    symlinkSync(elsewhere, join(linked, '.y3k'));
+    assert.equal((await engine.handle({ cmd: 'workspace.open', path: linked })).ok, true);
+    const led = await engine.handle({ cmd: 'files.put', cwd: linked, name: 'x.txt', data });
+    assert.equal(led.code, 'refused', 'led out by a link');
+    assert.deepEqual(readdirSync(elsewhere), [], 'nothing made outside the trusted folder');
   });
 
   // "THE CONVERSATION" IS NEVER A SECOND OPINION. /compare starts one beside

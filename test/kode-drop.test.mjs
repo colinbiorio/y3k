@@ -207,7 +207,7 @@ installDom();
     cv.close();
   });
 
-  await ok('a thumbnail comes off before it is sent; four at most, even dropped at once; only pictures', async () => {
+  await ok('a thumbnail comes off before it is sent; four pictures at most, even dropped at once; any other file joins as a file (2026-11-02)', async () => {
     toasts.length = 0; sent.length = 0;
     const cv = await viewWith('many');
     cv.open();
@@ -224,9 +224,69 @@ installDom();
     toasts.length = 0;
     drag('drop', $('div.cv-dock div.cv-composer'), [new File(['notes'], 'notes.txt', { type: 'text/plain' })]);
     await settle();
-    assert.deepEqual(toasts, ['only pictures go to the coder']);
-    assert.equal($$('span.cv-att').length, 3);
+    assert.deepEqual(toasts, [], 'a file is no longer turned away');
+    assert.equal($$('span.cv-att').length, 4, 'the file joins the pictures');
+    assert.equal($$('span.cv-att.file').length, 1);
+    assert.equal($('span.cv-att.file span.cv-attname').textContent, 'notes.txt');
     cv.close();
+  });
+
+  // ANY FILE (2026-11-02): saved by y3kode in the conversation's folder (files.put, 0.3.14) and
+  // named in the message; on an older engine a text file goes as text, anything else waits for
+  // the update and is said to.
+  await ok('a file goes with the message: saved by y3kode in the folder and named; an older engine gets text files as text and says what it needs for the rest', async () => {
+    toasts.length = 0; sent.length = 0;
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      sent.push(o);
+      if (o.cmd === 'files.put') return { ok: true, path: `.y3k/attachments/2026-11-02T00-00-00-000Z-abcd-${o.name}`, bytes: 5 };
+      return { ok: true };
+    };
+    const cv = await viewWith('files');
+    cv.open();
+    await settle();
+    cv._hello({ version: '0.3.14' });
+    cv._feed({ sid: 'f1', type: 'session.started', provider: 'claude', cwd: '/tmp/f1', mode: 'ask' });
+    await settle();
+    drag('drop', $('div.cv-dock div.cv-composer'), [new File(['%PDF-1.7 binary'], 'report.pdf', { type: 'application/pdf' })]);
+    await settle();
+    assert.equal($$('span.cv-att.file').length, 1);
+    const ta = $('textarea.cv-input');
+    ta.value = 'summarise this';
+    ta.dispatch('input');
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle(30);
+    const put = sent.filter((o) => o.cmd === 'files.put');
+    assert.deepEqual(put.map((o) => [o.cwd, o.name, atob(o.data)]), [['/tmp/f1', 'report.pdf', '%PDF-1.7 binary']], 'saved in the conversation\'s folder');
+    const msg = sent.filter((o) => o.cmd === 'session.send');
+    assert.equal(msg.length, 1);
+    assert.match(msg[0].text, /^summarise this\n\nAttached file: `\.y3k\/attachments\/2026-11-02T00-00-00-000Z-abcd-report\.pdf` \(report\.pdf, 15 B\)\.$/);
+    assert.equal(msg[0].attachments, undefined, 'a file is not sent as a picture');
+    assert.equal($$('span.cv-att').length, 0, 'still in the composer after it was sent');
+    // an older engine: a text file as text; a binary one waits, and says what it needs
+    cv._hello({ version: '0.3.13' });
+    sent.length = 0;
+    drag('drop', $('div.cv-dock div.cv-composer'), [new File(['a,b\n1,2'], 'data.csv', { type: 'text/csv' })]);
+    await settle();
+    ta.value = 'look';
+    ta.dispatch('input');
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle(30);
+    assert.equal(sent.filter((o) => o.cmd === 'files.put').length, 0, 'an older engine was asked to save');
+    assert.equal(sent.filter((o) => o.cmd === 'session.send')[0].text, 'look\n\nAttached file `data.csv`:\n```\na,b\n1,2\n```');
+    sent.length = 0; toasts.length = 0;
+    drag('drop', $('div.cv-dock div.cv-composer'), [new File([new Uint8Array([0, 1, 2, 3])], 'blob.bin', { type: 'application/octet-stream' })]);
+    await settle();
+    ta.value = 'and this';
+    ta.dispatch('input');
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle(30);
+    assert.equal(sent.filter((o) => o.cmd === 'session.send').length, 0, 'sent without its file');
+    assert.deepEqual(toasts, ['blob.bin needs y3kode 0.3.14 to go to the coder — update y3kode.']);
+    assert.equal($$('span.cv-att.file').length, 1, 'the file is kept, not lost');
+    assert.equal(ta.value, 'and this', 'the words are kept too');
+    cv.close();
+    window.y3kCode.cmd = base;
   });
 
   await ok('with no conversation yet it waits for the first message, as a prompt in the box does', async () => {
@@ -265,7 +325,7 @@ installDom();
     assert.ok(!roomEl().classList.contains('cv-dropping'), 'lit where it would not be taken');
     drag('drop', $('div.cv-list'), [png()]);
     await settle();
-    assert.deepEqual(toasts, ['this session has ended — continue it to give the coder a picture']);
+    assert.deepEqual(toasts, ['this session has ended — continue it to give the coder a file']);
     assert.equal($$('span.cv-att').length, 0);
     cv.close();
   });
@@ -310,15 +370,16 @@ await ok('code-view.js: kode\'s listeners live with the room, take what dropTarg
   }
   assert.match(view, /const dropHere = \(e\) => hasFiles\(e\) && dropTarget\(e, \{ inCode: document\.body\.classList\.contains\('in-code'\) \}\) === 'kode';/, 'kode asks something other than main.js');
   const take = view.slice(view.indexOf('  function takeDropped(files) {'), view.indexOf('  async function send(s, ta) {'));
-  assert.match(take, /for \(const f of pics\) addImage\(f\);/, 'a drop does not go where a pasted picture goes');
+  assert.match(take, /for \(const f of files\) addAny\(f\);/, 'a drop does not go where a pasted file goes');
+  assert.match(view, /function addAny\(file\) \{\n\s+if \(\/\^image\\\/\/\.test\(file\.type \|\| ''\)\) return addImage\(file\);/, 'a picture is not a picture any more');
   assert.ok(!/\bfetch\(|\/api\/|link\.talk|link\.sendBack/.test(take), 'a dropped picture goes somewhere besides the composer');
-  assert.match(view, /const r = await cmd\(\{ cmd: 'session\.send', sid: s\.sid, text: text \|\| '\(image\)', handoff, attachments: attachments\.length \? attachments\.map\(\(a\) => \(\{ type: 'image', mediaType: a\.mediaType, data: a\.data \}\)\) : undefined \}\);/);
+  assert.match(view, /const r = await cmd\(\{ cmd: 'session\.send', sid: s\.sid, text: said \|\| '\(image\)', handoff, attachments: pics\.length \? pics\.map\(\(a\) => \(\{ type: 'image', mediaType: a\.mediaType, data: a\.data \}\)\) : undefined \}\);/);
 });
 await ok('a picture that does not fit is redrawn to fit, not turned away; the composer\'s four are counted as each lands', () => {
-  const add = view.slice(view.indexOf('  async function addImage(file) {'), view.indexOf('  // the pictures going with the next message'));
+  const add = view.slice(view.indexOf('  async function addImage(file) {'), view.indexOf('  // ANY FILE JOINS THE NEXT MESSAGE TOO'));
   assert.match(add, /if \(!fitsAsIs\(file\)\) \{/);
   assert.match(add, /pic = await shrinkPicture\(file, \{ side: 1568, maxBytes: Math\.floor\(\(KODE_B64_MAX \* 3\) \/ 4\) \}\);/);
-  assert.match(add, /reader\.onload = \(\) => \{\n\s+if \(attachments\.length >= 4\) \{ toast\('four images at most'\); return; \}/);
+  assert.match(add, /reader\.onload = \(\) => \{\n\s+if \(images\(\)\.length >= 4\) \{ toast\('four images at most'\); return; \}/);
   assert.match(add, /mediaType: pic\.type/);
   assert.ok(!/file\.size > 5 \* 1024 \* 1024/.test(add), 'the old 5MB-of-file refusal is back');
 });

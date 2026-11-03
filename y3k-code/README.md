@@ -59,6 +59,13 @@ from the page, a second page or the *keep going* switch, answers the running
 session (`session.already` in the activity record). A second opinion (`/compare`)
 is marked in the session index, so it is never taken for the conversation.
 
+**Files for the coder (0.3.14).** `files.put {cwd, name, data}` saves a file the person
+dropped, pasted or picked in the room, at most 10 MB, in the trusted folder under
+`.y3k/attachments/<time>-<random>-<name>`. It never overwrites, writes a `.gitignore` of `*` in
+`.y3k/` so the folder stays out of git, and refuses a `.y3k` or `attachments` that is a link
+before making anything. The room tells the coder the path, so every coder can read it with its
+own tools.
+
 **Its name (0.3.13).** `session.rename {sid, name}` names the conversation, or
 unnames it with an empty name. It starts nothing: the name is kept in the
 index, said to every page (`session.title` with `named`), carried by every

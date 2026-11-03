@@ -107,7 +107,10 @@ export function refusalLine(no) {
   return `Last answer from ${name}, ${at}: ${what}.`;
 }
 
-export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice }) {
+// how long the mic waits after the last word before it lets go (startListening, below)
+export const END_SILENCE_MS = 3000;
+
+export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice, endSilenceMs = END_SILENCE_MS }) {
   const sttSupported = Boolean(SpeechRecognition);
   let recog = null;
   let listening = false;
@@ -166,6 +169,12 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     micStream = null;
   }
 
+  // THE PAUSE BEFORE THE MIC LETS GO (2026-11-02, Colin: "the mic turns off too quickly --
+  // let's triple the required period of silence before we cut off the user"). The browser's
+  // one-utterance mode (continuous = false) ends about a second after the last word. Now the
+  // recognition runs on and this module ends it itself, once no word has come for
+  // END_SILENCE_MS: three times as long. Until then everything heard is one utterance, shown as
+  // it grows (final: false), and it is handed on as final only once, when it is over.
   async function startListening() {
     if (listening || !sttSupported) return;
     listening = true;
@@ -177,25 +186,39 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     recog = new SpeechRecognition();
     recog.lang = 'en-US';
     recog.interimResults = true;
-    recog.continuous = false;
+    recog.continuous = true;
     let finalText = '';
-    let firedFinal = false; // so onend doesn't re-dispatch a final already sent by onresult
+    let interim = '';
+    let done = false;
+    let quiet = 0;
+    const mine = recog;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(quiet);
+      const text = (finalText + interim).trim();
+      if (text) onTranscript?.({ text, final: true });
+      if (recog === mine) stopListening();
+    };
+    // no word for END_SILENCE_MS: the person has finished; the browser hands over what it
+    // still holds, and onend finishes
+    const hush = () => {
+      clearTimeout(quiet);
+      quiet = setTimeout(() => { try { mine.stop(); } catch { finish(); } }, endSilenceMs);
+    };
 
     recog.onresult = (e) => {
-      let interim = '';
+      interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) finalText += t;
         else interim += t;
       }
-      if (finalText) firedFinal = true;
-      onTranscript?.({ text: (finalText || interim).trim(), final: Boolean(finalText) });
+      hush();
+      onTranscript?.({ text: (finalText + interim).trim(), final: false });
     };
-    recog.onerror = () => stopListening();
-    recog.onend = () => {
-      if (!firedFinal && finalText.trim()) onTranscript?.({ text: finalText.trim(), final: true });
-      stopListening();
-    };
+    recog.onerror = () => finish();
+    recog.onend = () => finish();
     recog.start();
   }
 

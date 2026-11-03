@@ -6,8 +6,8 @@
 // authenticate, pass commands to `handle()` and stream `subscribe()`/`since()`.
 
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync, realpathSync, lstatSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { platform } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
 import { createBus, createCoalescer, COALESCED } from './bus.mjs';
@@ -32,7 +32,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.13';   // 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.14';   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -61,6 +61,16 @@ const isSid = (x) => typeof x === 'string' && /^[a-f0-9]{16}$/.test(x);
 // A second opinion (kode's /compare): marked since 0.3.12, known by its title before.
 // (a row that says it is not one, or that the person named, is never taken for one by its title)
 const isAside = (r) => r?.aside === true || (r?.aside == null && !r?.named && /^Compare: /.test(String(r?.title || '')));
+// A FILE FOR THE CODER (0.3.14): at most this many bytes, and a plain name — the last part of
+// whatever path came with it, without control or direction-changing characters or the ones
+// file systems refuse, at most 120 characters (the end kept, so the extension stays).
+export const FILE_MAX = 10 * 1024 * 1024;
+export function cleanFileName(name) {
+  const last = String(name ?? '').replace(/\\/g, '/').split('/').pop();
+  const t = last.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '').replace(/[:*?"<>|]/g, '_').trim();
+  const s = t.length > 120 ? t.slice(-120) : t;
+  return !s || s === '.' || s === '..' ? 'file' : s;
+}
 // THE CONVERSATION'S NAME (0.3.13), as the person gives it: one line, no
 // control or direction-changing characters, at most 80 characters; empty
 // means unnamed.
@@ -684,6 +694,42 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
         try { appendFileSync(eventsFile(sid), JSON.stringify({ ...ev, sid, seq }) + '\n', { mode: 0o600 }); } catch { /* the index has it */ }
       }
       return { ok: true, sid, title, named };
+    },
+    // A FILE FOR THE CODER (0.3.14). Colin, 2026-11-02: "we should accept all files". The person
+    // dropped, pasted or picked it in the room; it is saved in the conversation's own trusted
+    // folder, under `.y3k/attachments/`, and the room tells the coder where. Nothing is overwritten
+    // (a time stamp before the name, and `wx`); `.y3k/` keeps itself out of git (a `.gitignore` of
+    // `*`); a link that would lead the files out of the trusted folder is refused.
+    'files.put': async ({ cwd, name, data }) => {
+      const t = trusted(cwd);
+      if (t.error) return { ok: false, error: t.error, code: t.code || 'refused' };
+      const base = cleanFileName(name);
+      const buf = Buffer.from(String(data || ''), 'base64');
+      if (!buf.length) return { ok: false, error: 'That file is empty.', code: 'empty' };
+      if (buf.length > FILE_MAX) return { ok: false, error: `That file is too large (${FILE_MAX / 1024 / 1024} MB at most).`, code: 'too-large' };
+      const top = join(t.real, '.y3k');
+      const dir = join(top, 'attachments');
+      // each folder looked at before anything is made in it: one that is a link (or not a folder)
+      // is refused, so nothing is ever created outside the trusted folder
+      const ownDir = (p) => {
+        let st = null;
+        try { st = lstatSync(p); } catch { /* not there yet */ }
+        if (st && (st.isSymbolicLink() || !st.isDirectory())) return false;
+        if (!st) mkdirSync(p);
+        return realpathSync(p) === p;
+      };
+      try {
+        if (!ownDir(top) || !ownDir(dir)) return { ok: false, error: 'The attachments folder leads out of this folder; nothing was saved.', code: 'refused' };
+        const ignore = join(top, '.gitignore');
+        if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { mode: 0o644 });
+        const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
+        const file = join(dir, `${stamp}-${randomBytes(2).toString('hex')}-${base}`);
+        writeFileSync(file, buf, { flag: 'wx', mode: 0o600 });
+        audit.write('files.put', { cwd: t.real, name: base, bytes: buf.length });
+        return { ok: true, path: relative(t.real, file), bytes: buf.length };
+      } catch (err) {
+        return { ok: false, error: `Not saved: ${String(err?.message || err).slice(0, 200)}` };
+      }
     },
     // KEEP GOING (0.3.11): the switch; on keeps the conversation on the screen
     'keep.set': async ({ on, sid }) => keeper.set({ on: !!on, sid }),
