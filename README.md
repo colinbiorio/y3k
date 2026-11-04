@@ -252,6 +252,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **Burn coverage (y3kode 0.3.19).** The worker's
+  watchdog writes a heartbeat every minute (working, resting or GAP), and the
+  burn strip now ends with "no gaps in 52 min", or with how many minutes had
+  the switch on and nothing running. This is the answer to "were there points
+  where nothing was running?", measured rather than asserted
+  (`burn.mjs coverageOf`).
+
 - **2026-11-04** — **The agent panel (y3kode 0.3.18).** Colin: "show an
   agent panel that shows any live agent/agents and a description of what
   they're working on -- if the user can't see what the ai is doing that leads
