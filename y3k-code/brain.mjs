@@ -144,7 +144,18 @@ export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input,
 // image block, so the presence sees the person it is talking to on this path
 // too; before, the bridge carried text only and the orb had to say the camera
 // was not reaching it. A frame that is not plausible base64 JPEG, PNG, GIF or WebP is dropped.
-export const LIMIT_HIT = /hit your (?:session|weekly|usage|daily|monthly) limit|usage limit (?:reached|exceeded)|rate.?limit/i;
+export const LIMIT_HIT = /hit your (?:session|weekly|usage|daily|monthly) limit|usage limit (?:reached|exceeded)|rate.?limit|reached your [\w .'-]{0,40}limit|switch to another model/i;
+// A SPENT MODEL IS NOT THE END OF A TURN (2026-11-04). Claude Code now says
+// "You've reached your Fable limit. Switch to another model, or manage usage
+// credits ..." when one model's share of the plan is used up. LIMIT_HIT did
+// not know those words (the page called it a refusal), and nothing tried
+// another model, so a presence on the account's default could not think at
+// all until that share came back; lucid's world went mute the same way for
+// four hours. Now those words are the plan's limit, and a turn that meets one
+// model's limit is asked again of the next model in MODEL_FALLBACK; the turn
+// that answers says so (fallback: { from, to }), so the page can show it.
+export const MODEL_LIMIT = /reached your [\w .'-]{0,40}limit|switch to another model/i;
+export const MODEL_FALLBACK = ['opus', 'sonnet'];
 export const MAX_IMAGE = 3 * 1024 * 1024;
 // the media type from the first bytes, as server.mjs sniffMediaType does
 const KINDS = [['/9j/', 'image/jpeg'], ['iVBORw0KGgo', 'image/png'], ['R0lGOD', 'image/gif'], ['UklGR', 'image/webp']];
@@ -169,9 +180,15 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
     const seen = isImage(image);
     const go = runner || (stream || seen ? runStreaming : run);
     const input = seen ? imageTurn(prompt, image) : String(prompt);
-    const r = await go(bin, claudeArgs({ sysFile, model, effort, stream, image: seen }), { cwd: dir, env, timeout: timeoutMs, input, onPart });
-    const res = resultOf(r.stdout);
-    const said = typeof res?.result === 'string' ? res.result : '';
+    const tries = [model, ...MODEL_FALLBACK.filter((m) => m !== model)];
+    let r, res, said, used = 0;
+    for (; used < tries.length; used++) {
+      r = await go(bin, claudeArgs({ sysFile, model: tries[used], effort, stream, image: seen }), { cwd: dir, env, timeout: timeoutMs, input, onPart });
+      res = resultOf(r.stdout);
+      said = typeof res?.result === 'string' ? res.result : '';
+      const failed = !res || res.is_error || r.code !== 0;
+      if (!failed || used === tries.length - 1 || !MODEL_LIMIT.test(said || r.stderr || '')) break;
+    }
     if (!res || res.is_error || r.code !== 0) {
       const why = said || r.stderr || `exit ${r.code}`;
       if (AUTH_FAIL.test(why)) return { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer: run `claude`, then /login.' };
@@ -188,7 +205,8 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
     }
     const u = res.usage || {};
     return { ok: true, text: said.slice(0, MAX_TEXT), usage: { in: u.input_tokens | 0, out: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0 },
-      speed: { ...speedOf(r.times, res), model: typeof res.modelUsage === 'object' && res.modelUsage ? Object.keys(res.modelUsage)[0] || null : null } };
+      speed: { ...speedOf(r.times, res), model: typeof res.modelUsage === 'object' && res.modelUsage ? Object.keys(res.modelUsage)[0] || null : null },
+      ...(used > 0 ? { fallback: { from: model || 'default', to: tries[used] } } : {}) };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* gone already */ }
   }

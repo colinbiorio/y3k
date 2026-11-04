@@ -252,6 +252,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **A spent model is not the end of a turn (y3kode 0.3.15).**
+  Claude Code began to say "You've reached your Fable limit. Switch to another
+  model, ..." when one model's share of the plan is used up. Neither of the
+  engine's limit patterns knew those words, so the page called it a refusal
+  and KEEP GOING restarted into the same wall. Nothing tried another model
+  either, so a presence on the account's default could not think at all until
+  that share came back. (Orion's own world in lucid went mute this way for four
+  hours the same morning.) Now:
+  - the words are the plan's limit (`LIMIT_HIT`, `keep.mjs LIMIT_TEXT`);
+  - a turn that meets one model's limit is asked again of the next model in
+    `MODEL_FALLBACK` (opus, then sonnet), and the turn that answers says so
+    (`fallback: { from, to }`, and `speed.model` shows who answered);
+  - a plan-wide limit still waits for its reset.
+
+  `test/model-limit.test.mjs` uses a stand-in CLI spent on every model but the
+  ones it is told have room.
+
 - **2026-11-02** — **Five quick fixes in kode (y3kode 0.3.14).** Colin's list, each
   done in place:
   - **The mic waits longer.** It waits three times as long for you to finish.
