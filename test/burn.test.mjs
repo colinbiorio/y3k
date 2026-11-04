@@ -4,7 +4,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBurn } from '../y3k-code/burn.mjs';
+import { createBurn, feedOf } from '../y3k-code/burn.mjs';
 import { COMMANDS } from '../src/code/protocol.js';
 
 let passed = 0;
@@ -40,6 +40,19 @@ await ok('status reads the worker: running, resting, the last sessions', () => {
 
 await ok('the page may send burn.set and burn.status', () => {
   assert.ok(COMMANDS.includes('burn.set') && COMMANDS.includes('burn.status'));
+});
+
+await ok('the strip reads the newest turn log: what it said, which tools it ran', () => {
+  const line = (content) => JSON.stringify({ type: 'assistant', message: { content } });
+  const log = [line([{ type: 'text', text: 'Reading the note.' }]), 'not json', JSON.stringify({ type: 'user' }),
+    line([{ type: 'tool_use', name: 'Bash', input: { description: 'Run the checks', command: 'python3 x.py' } }])].join('\n');
+  assert.deepEqual(feedOf(log), [{ kind: 'said', text: 'Reading the note.' }, { kind: 'tool', tool: 'Bash', text: 'Run the checks' }]);
+  writeFileSync(join(home, 'orion', 'burn', 'turn-20261104-155942.log'), log);
+  writeFileSync(join(home, 'orion', 'burn', 'turn-20261104-152745.log'), line([{ type: 'text', text: 'older' }]));
+  const s = createBurn({ dir, home }).status();
+  assert.equal(s.turn.feed.length, 2, 'the newest log, not the older one');
+  assert.equal(new Date(s.turn.started).getHours(), 15);
+  assert.equal(s.turns, 4);
 });
 
 console.log(`\n${passed} passed`);
