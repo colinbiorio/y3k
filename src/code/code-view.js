@@ -747,6 +747,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function close() {
+    if (burnPoll) { clearInterval(burnPoll); burnPoll = null; }   // the burn strip polls only while the room is open
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     if (dialog.el) closeDialog(false);
     closeSlash(); slash.el = null; slash.wrap = null;
@@ -1155,6 +1156,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       banners.push(h('div.cv-note.cv-update', `y3kode ${hello?.version || ''} is answering, and ${offer.version} is out. `, go, ' · ', later));
     }
     if (viewingSid && s) banners.push(h('div.cv-note', 'A past session, read-only. ', resumeButton(s)));
+    // BURN (0.3.17): while the switch is on, a strip says what the unattended turn is doing, and opens
+    // to a read-only feed of it (what it said, which tools it ran), refreshed every few seconds
+    if (S.burn?.on) banners.push(burnStrip(S.burn));
+    // the strip's clock runs only while the switch is on (a room at rest keeps no timers)
+    if (S.burn?.on && !burnPoll) burnPoll = setInterval(pollBurn, 5000);
+    else if (!S.burn?.on && burnPoll) { clearInterval(burnPoll); burnPoll = null; }
     // KEEP GOING: what the switch waits for, where the person is, with off one press away
     if (S.keep?.on) {
       const off = h('button.cv-link', { type: 'button' }, 'switch off');
@@ -1214,6 +1221,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (b.resting) return `Burn: on · resting until the limit resets at ${at(b.resting)} · press to switch off`;
     if (b.running) return 'Burn: on · a session is working now · press to switch off';
     return 'Burn: on · the next session starts within five minutes · press to switch off';
+  }
+  const BURN_FEED = '0.3.17';
+  let burnOpen = false, burnPoll = null;
+  const ago = (ms) => { const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+  function burnLine(b) {
+    if (b.resting) return `Burn · resting until the limit resets at ${at(b.resting)}; it starts again then`;
+    const n = b.turns ? ` · turn ${b.turns + (b.running ? 1 : 0)}` : '';
+    if (b.running && b.turn) {
+      const lastTool = [...(b.turn.feed || [])].reverse().find((f) => f.kind === 'tool');
+      return `Burn${n} · working since ${at(b.turn.started)}` + (lastTool ? ` · now: ${lastTool.text || lastTool.tool}` : '');
+    }
+    if (b.running) return `Burn${n} · working`;
+    return 'Burn · on · the next turn starts within a minute';
+  }
+  function burnStrip(b) {
+    const show = h('button.cv-link', { type: 'button' }, burnOpen ? 'hide' : 'show');
+    show.addEventListener('click', () => { burnOpen = !burnOpen; renderChrome(); });
+    const off = h('button.cv-link', { type: 'button' }, 'switch off');
+    off.addEventListener('click', () => toggleBurn());
+    const head = h('div.cv-burnline', burnLine(b), ' · ', show, ' · ', off);
+    if (!burnOpen) return h('div.cv-note.cv-burnnote', head);
+    const rows = (b.turn?.feed || []).map((f) => h('div.cv-burnrow' + (f.kind === 'said' ? '.said' : ''), f.kind === 'tool' ? `${f.tool} · ${f.text}` : f.text));
+    const foot = b.turn ? h('div.cv-burnfoot', `read-only · last written ${ago(b.turn.touched)}${b.conversation ? ' · conversation ' + b.conversation.slice(0, 8) : ''}`) : '';
+    return h('div.cv-note.cv-burnnote.open', head, h('div.cv-burnfeed', ...(rows.length ? rows : [h('div.cv-burnrow', 'nothing written yet')])), foot);
+  }
+  async function pollBurn() {
+    if (!S.burn?.on || !versionAtLeast(hello?.version, BURN_FEED)) return;
+    const r = await cmd({ cmd: 'burn.status' }).catch(() => null);
+    if (r?.ok) { S.burn = r; renderChrome(); }
   }
   async function toggleBurn() {
     if (!versionAtLeast(hello?.version, BURN_ENGINE)) { toast(`y3kode ${hello?.version || ''} has no burn switch — update y3kode (${BURN_ENGINE})`); return; }

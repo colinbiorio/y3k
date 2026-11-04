@@ -5807,7 +5807,12 @@ body.in-code #caption { display: none !important; }
 .cv-iconbtn.cv-keep.on { color: #1c1f26; background: linear-gradient(180deg, #ffffff, #dfe5ec 45%, #aeb7c3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(0, 0, 0, 0.35); }
 .cv-iconbtn.cv-keep.on .ic { stroke: currentColor; }
 .cv-iconbtn.cv-burn.on { color: #2a1406; background: linear-gradient(180deg, #ffe7c2, #ffb15c 50%, #e8742a); box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 2px 8px rgba(232,116,42,.45); }   /* the burn switch, on: ember */
-.cv-iconbtn.cv-burn.on .ic { stroke: currentColor; }   /* the glyph's own stroke is currentColor: dark, cut into the metal */
+.cv-iconbtn.cv-burn.on .ic { stroke: currentColor; }
+.cv-burnnote { border-left: 2px solid #e8742a; }   /* the burn strip: an ember edge */
+.cv-burnfeed { margin-top: 8px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.4; }
+.cv-burnrow { color: rgba(255, 255, 255, 0.62); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-burnrow.said { color: rgba(255, 255, 255, 0.9); font-family: inherit; white-space: normal; }
+.cv-burnfoot { margin-top: 6px; font-size: 11.5px; color: rgba(255, 255, 255, 0.45); }   /* the glyph's own stroke is currentColor: dark, cut into the metal */
 .cv-note.cv-keepnote { color: #c3c8d2; }
 .code-root .it.us.auto { opacity: 0.82; }
 .code-root .it.us.auto .us-note { color: #9aa0ab; font-size: 0.74rem; }

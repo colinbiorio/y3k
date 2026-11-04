@@ -252,6 +252,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **Burn, seen (y3kode 0.3.17).** Colin: "burn is on rn
+  but there's no active process". It was running, but nothing on screen said
+  so.
+  - While the switch is on, a strip under kode's toolbar says what the
+    unattended turn is doing, for example "Burn · turn 3 · working since 15:59
+    · now: Run the checks". During a limit it reads "resting until …".
+  - **show** opens a read-only feed of the turn: what it said and which tools
+    it ran, newest last, with when it last wrote.
+  - The engine reads the worker's newest stream log (`burn.mjs feedOf`), and
+    the page asks every 5 s, only while the room is open.
+
 - **2026-11-04** — **The burn switch, at the top of kode (y3kode 0.3.16).**
   Colin asked for a system that hits every 5-hour limit while a switch is on.
   It should be an actual switch at the top of kode that only he can control,
