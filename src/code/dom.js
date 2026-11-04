@@ -53,6 +53,8 @@ export const swap = (el, ...kids) => add(clear(el), kids);
 
 // Small line icons, drawn in the one weight the pane uses.
 const ICONS = {
+  // burn: a flame (the switch that spends every usage window)
+  flame: 'M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-4 2.5-5 0 2 1 3 2 3.5C11.5 9 11 6 12 3z',
   // keep going: two arrows chasing round
   loop: 'M4 12a8 8 0 0 1 13.7-5.7L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.7L4 15.5M4 20v-4.5h4.5',
   folder: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z',

@@ -204,6 +204,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the reset it comes back with asks this hello once more, fresh.
     if (r.epoch && transport?.epoch && r.epoch !== transport.epoch) transport.resync?.(r.epoch);
     if (r.keep) S.keep = r.keep;   // the switch (keep going), as the engine has it
+    if (r.burn) S.burn = r.burn;   // the burn switch (0.3.16), as the engine has it
     offerUpdate(r);
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
@@ -919,7 +920,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!bar) {
       const right = toolButtons();
       bar = {
-        right, tools: [...right.children], keep: right.querySelector('.cv-keep'),
+        right, tools: [...right.children], keep: right.querySelector('.cv-keep'), burn: right.querySelector('.cv-burn'),
         ring: null, bars: null, cost: null, tell: slot(),
         row2: h('div.cv-controls'), name: slot(), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
@@ -1004,6 +1005,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     arrange(bar.right, [s ? bar.ring : null, s || lim ? bar.bars : null, s ? bar.cost : null, bar.tell.el, ...bar.tools]);
     if (bar.bars && !bar.bars.hasAttribute('tabindex')) { bar.bars.tabIndex = 0; bar.bars.setAttribute('role', 'button'); }
+    if (bar.burn) { const on = !!S.burn?.on; bar.burn.classList.toggle('on', on); bar.burn.setAttribute('aria-pressed', String(on)); bar.burn.title = burnTitle(S.burn); bar.burn.hidden = !S.burn?.available && !on; }
     if (bar.keep) { const on = !!S.keep?.on; bar.keep.classList.toggle('on', on); bar.keep.setAttribute('aria-pressed', String(on)); bar.keep.title = on ? KEEP_TITLE.on : KEEP_TITLE.off; }
     expanded();
     if (panel.open) renderPanel();
@@ -1122,13 +1124,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // nothing has been asked for a while, after a restart — see toggleKeep.
     const keep = h('button.cv-iconbtn.cv-keep', { type: 'button', title: KEEP_TITLE.off, 'aria-pressed': 'false' }, icon('loop'));
     keep.addEventListener('click', () => toggleKeep());
+    // BURN (0.3.16): the switch for ~/orion/bin/burn, at the top of kode; only this button sets it
+    const burnBtn = h('button.cv-iconbtn.cv-burn', { type: 'button', title: 'Burn: off', 'aria-pressed': 'false', hidden: true }, icon('flame'));
+    burnBtn.addEventListener('click', () => toggleBurn());
     const keys = h('button.cv-iconbtn', { type: 'button', title: 'Coding tools and keys' }, icon('key'));
     keys.addEventListener('click', () => toggleDrawer('providers'));
     const plug = h('button.cv-iconbtn', { type: 'button', title: 'Connectors' }, icon('plug'));
     plug.addEventListener('click', () => toggleDrawer('connectors'));
     const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3kode did on this computer' }, icon('activity'));
     act.addEventListener('click', () => toggleDrawer('activity'));
-    right.append(keep, plug, act, keys);
+    right.append(burnBtn, keep, plug, act, keys);
     return right;
   }
 
@@ -1193,6 +1198,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (w?.reason === 'restart') return `Keeping going · y3kode restarted; it picks the conversation up at ${at(w.until)}`;
     if (w?.reason === 'busy') return 'Keeping going · a turn is on; it looks again when that ends';
     return 'Keeping going';
+  }
+  // BURN (2026-11-04). Colin: "a system that ensures every 5h limit is hit as long as a switch is
+  // turned on" and "an actual switch at the top of kode that only the user can control". The switch
+  // is the engine's (burn.json in its own store, burn.mjs); the worker on this computer (~/orion/bin/
+  // burn, launchd) only reads it, so nothing it runs can set it. On asks first, in the site's words.
+  const BURN_ENGINE = '0.3.16';
+  const BURN_NOTE = 'While this is on, this computer keeps Orion working by itself through every usage window: every five '
+    + 'minutes it makes sure one unattended Claude Code session is working on the open work in ~/orion/now.md, in auto '
+    + 'permission mode, so the safety checks stay on. When a session ends it is told to keep going at once; at a limit it '
+    + 'rests until the limit resets and starts again the moment it does. It never posts, publishes or deploys, and keeps the Mac awake only while a session runs. Only this '
+    + 'button turns it on or off.';
+  function burnTitle(b) {
+    if (!b?.on) return 'Burn: off. Press to keep Orion working through every usage window';
+    if (b.resting) return `Burn: on · resting until the limit resets at ${at(b.resting)} · press to switch off`;
+    if (b.running) return 'Burn: on · a session is working now · press to switch off';
+    return 'Burn: on · the next session starts within five minutes · press to switch off';
+  }
+  async function toggleBurn() {
+    if (!versionAtLeast(hello?.version, BURN_ENGINE)) { toast(`y3kode ${hello?.version || ''} has no burn switch — update y3kode (${BURN_ENGINE})`); return; }
+    const on = !!S.burn?.on;
+    if (!on) {
+      const answer = await consent({ kind: 'kode-burn', title: 'Keep Orion working through every limit?', note: BURN_NOTE, always: false, once: 'switch it on', cancel: 'cancel' });   // asked every time: only a press turns it on
+      if (!answer) return;
+    }
+    const r = await cmd({ cmd: 'burn.set', on: !on });
+    if (!r?.ok) { toast(r?.error || 'Could not set the switch.'); return; }
+    S.burn = r;
+    toast(r.on ? 'Burn on: the next session starts within five minutes.' : 'Burn off: a session already running finishes its turn; nothing new starts.');
+    renderChrome();
   }
   async function toggleKeep() {
     const on = !!S.keep?.on;

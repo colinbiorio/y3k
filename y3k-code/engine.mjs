@@ -8,7 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync, realpathSync, lstatSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { platform } from 'node:os';
+import { platform, homedir } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
 import { createBus, createCoalescer, COALESCED } from './bus.mjs';
 import { createAudit } from './audit.mjs';
@@ -28,11 +28,12 @@ import { createComputer } from './computer.mjs';
 import { createLife } from './life.mjs';
 import { createUpdater } from './update.mjs';
 import { createKeeper } from './keep.mjs';
+import { createBurn } from './burn.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.15';   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.16';   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -292,6 +293,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   // engine speaks for the person to the one conversation — when the plan's
   // limit lifts, when nothing has been asked for a while, after a restart —
   // and revives that conversation from the index when it is not live.
+  const burn = createBurn({ dir: store.dir, home: env.HOME || homedir(), now });
   const keeper = createKeeper({ config: () => store.config(), setConfig: (k) => store.setConfig({ keep: k }), now, emit, notice, sessions, audit,
     row: (sid) => { const r = isSid(sid) ? indexRead().find((x) => x.sid === sid && !x.lost) : null; return r ? { cwd: r.cwd, provider: r.provider } : null; },
     revive: reviveFor, send: (s, text, attachments, handoff, auto) => send(s, text, attachments, handoff, auto), ...keep });
@@ -733,6 +735,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     // KEEP GOING (0.3.11): the switch; on keeps the conversation on the screen
     'keep.set': async ({ on, sid }) => keeper.set({ on: !!on, sid }),
+    'burn.status': async () => burn.status(),
+    'burn.set': async ({ on }) => { audit.write('burn.set', { on: !!on }); return burn.set(!!on); },
     // The command gate holds a mode to MODES already; it is checked again here,
     // as startSession does, since each adapter turns it into its vendor's permissions.
     'session.setMode': async ({ sid, mode }) => { if (!MODES.includes(mode)) return { ok: false, error: 'Unknown mode.' }; const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
@@ -898,6 +902,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       update: updater.able,
       // the switch (keep.mjs): on, which conversation, what it waits for
       keep: keeper.status(),
+      // the burn switch (burn.mjs, 0.3.16): set only from kode's button
+      burn: burn.status(),
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, ...(s.named ? { named: true } : {}), mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
     };
   }
