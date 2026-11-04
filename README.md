@@ -252,6 +252,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **The burn switch, at the top of kode (y3kode 0.3.16).**
+  Colin asked for a system that hits every 5-hour limit while a switch is on.
+  It should be an actual switch at the top of kode that only he can control,
+  and it should continue no matter what, re-prompted the moment a limit
+  resets. The flame button sits beside KEEP GOING.
+  - Pressing it asks every time; there is no "always allow". `burn.set` then
+    writes the switch into the engine's own store (`burn.json`, `burn.mjs`).
+  - The worker on this computer, `~/orion/bin/burn`, only reads the switch.
+    It is not in this repo, and it has no on or off of its own, so nothing it
+    runs can flip it.
+  - While the switch is on, the worker keeps one unattended Claude Code turn
+    going at a time, in auto permission mode. Each finished turn resumes the
+    same conversation with "keep going".
+  - At a limit it sleeps until the parsed reset time and re-prompts at once.
+  - A launchd watchdog restarts the worker within a minute if it ever dies.
+  - The button's title says whether a turn is working or the switch is
+    resting, and until when.
+
+  `test/burn.test.mjs`.
+
 - **2026-11-04** — **A spent model is not the end of a turn (y3kode 0.3.15).**
   Claude Code began to say "You've reached your Fable limit. Switch to another
   model, ..." when one model's share of the plan is used up. Neither of the

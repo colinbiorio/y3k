@@ -82,6 +82,8 @@ export const COMMANDS = {
   'session.setMode': { sid: S(64), mode: S(20) },
   // keep going (0.3.11): the switch; on keeps the conversation on the screen
   'keep.set': { on: B(true), sid: S(64, false) },
+  'burn.set': { on: B(true) },
+  'burn.status': {},
   'session.setModel': { sid: S(64), model: S(120) },
   'session.setEffort': { sid: S(64), effort: S(20) },
   'session.contextUsage': { sid: S(64) },
