@@ -4,7 +4,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBurn, feedOf } from '../y3k-code/burn.mjs';
+import { createBurn, feedOf, coverageOf } from '../y3k-code/burn.mjs';
 import { COMMANDS } from '../src/code/protocol.js';
 
 let passed = 0;
@@ -53,6 +53,15 @@ await ok('the strip reads the newest turn log: what it said, which tools it ran'
   assert.equal(s.turn.feed.length, 2, 'the newest log, not the older one');
   assert.equal(new Date(s.turn.started).getHours(), 15);
   assert.equal(s.turns, 4);
+});
+
+await ok('coverage counts the last day of heartbeats: working, resting, gaps', () => {
+  const now = new Date(2026, 10, 4, 17, 30).getTime();
+  const log = ['2026-11-04 17:10 working worker=1 turn=2', '2026-11-04 17:11 GAP worker=1 turn=-', '2026-11-04 17:12 resting worker=1 turn=-',
+    '2026-11-04 17:13 off worker=- turn=-', '2026-11-02 09:00 GAP worker=1 turn=-', 'garbage'].join('\n');
+  assert.deepEqual(coverageOf(log, now), { minutes: 3, working: 1, resting: 1, gaps: 1, lastGap: new Date(2026, 10, 4, 17, 11).getTime() });
+  writeFileSync(join(home, 'orion', 'burn', 'heartbeat.log'), log);
+  assert.equal(createBurn({ dir, home, now: () => now }).status().coverage.minutes, 3);
 });
 
 console.log(`\n${passed} passed`);

@@ -1244,7 +1244,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     show.addEventListener('click', () => { burnOpen = !burnOpen; renderChrome(); });
     const off = h('button.cv-link', { type: 'button' }, 'switch off');
     off.addEventListener('click', () => toggleBurn());
-    const head = h('div.cv-burnline', burnLine(b), ' · ', show, ' · ', off);
+    const cov = b.coverage?.minutes ? ` · ${b.coverage.gaps ? `${b.coverage.gaps} min with nothing running` : 'no gaps'} in ${b.coverage.minutes} min` : '';
+    const head = h('div.cv-burnline', burnLine(b) + cov, ' · ', show, ' · ', off);
     if (!burnOpen) return h('div.cv-note.cv-burnnote', head);
     const rows = (b.turn?.feed || []).map((f) => h('div.cv-burnrow' + (f.kind === 'said' ? '.said' : ''), f.kind === 'tool' ? `${f.tool} · ${f.text}` : f.text));
     const foot = b.turn ? h('div.cv-burnfoot', `read-only · last written ${ago(b.turn.touched)}${b.conversation ? ' · conversation ' + b.conversation.slice(0, 8) : ''}`) : '';

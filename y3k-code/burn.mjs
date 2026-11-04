@@ -14,6 +14,23 @@ import { join } from 'node:path';
 // (Claude Code's stream-json), and this reads the newest one's tail into a short feed: what it said,
 // which tools it ran. It is read-only and is never sent anywhere but this person's kode.
 const TAIL = 256 * 1024;
+// COVERAGE (0.3.19). The watchdog writes ~/orion/burn/heartbeat.log, one line a minute:
+// "YYYY-MM-DD HH:MM <off|working|resting|GAP> ...". This counts the last day of it, so kode can say
+// how many minutes burn covered and whether any minute had the switch on and nothing running.
+export function coverageOf(text, now = Date.now(), span = 24 * 3600 * 1000) {
+  const c = { minutes: 0, working: 0, resting: 0, gaps: 0, lastGap: null };
+  for (const line of String(text).split('\n')) {
+    const m = line.match(/^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d) (off|working|resting|GAP)\b/);
+    if (!m) continue;
+    const t = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
+    if (now - t > span || m[6] === 'off') continue;
+    c.minutes++;
+    if (m[6] === 'working') c.working++;
+    else if (m[6] === 'resting') c.resting++;
+    else { c.gaps++; c.lastGap = t; }
+  }
+  return c;
+}
 export function feedOf(text, max = 14) {
   const out = [];
   for (const line of String(text).split('\n')) {
@@ -59,7 +76,9 @@ export function createBurn({ dir, home, now = () => Date.now() }) {
       }
     } catch { /* no turn yet */ }
     const turns = Array.isArray(st.sessions) ? st.sessions.length : 0;
-    return { ok: true, available: existsSync(tool), on: !!sw.on, since: sw.since || null, running, resting, last, turns, conversation: st.session_id || null, turn };
+    let coverage = null;
+    try { coverage = coverageOf(readFileSync(join(work, 'heartbeat.log'), 'utf8'), now()); } catch { /* no heartbeat yet */ }
+    return { ok: true, available: existsSync(tool), on: !!sw.on, since: sw.since || null, running, resting, last, turns, conversation: st.session_id || null, turn, coverage };
   }
 
   function set(on) {
