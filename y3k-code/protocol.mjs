@@ -84,6 +84,7 @@ export const COMMANDS = {
   'keep.set': { on: B(true), sid: S(64, false) },
   'burn.set': { on: B(true) },
   'burn.status': {},
+  'agents.list': {},
   'session.setModel': { sid: S(64), model: S(120) },
   'session.setEffort': { sid: S(64), effort: S(20) },
   'session.contextUsage': { sid: S(64) },

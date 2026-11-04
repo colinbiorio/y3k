@@ -747,6 +747,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function close() {
+    clearTimeout(agentsTimer); agentsTimer = 0;   // the agent panel refreshes only while open
     if (burnPoll) { clearInterval(burnPoll); burnPoll = null; }   // the burn strip polls only while the room is open
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     if (dialog.el) closeDialog(false);
@@ -1132,9 +1133,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     keys.addEventListener('click', () => toggleDrawer('providers'));
     const plug = h('button.cv-iconbtn', { type: 'button', title: 'Connectors' }, icon('plug'));
     plug.addEventListener('click', () => toggleDrawer('connectors'));
+    // THE AGENT PANEL (0.3.18): every live agent on this computer and what it is working on
+    const agentsBtn = h('button.cv-iconbtn.cv-agentsbtn', { type: 'button', title: 'Agents: every live session and agent on this computer' }, icon('agents'));
+    agentsBtn.addEventListener('click', () => toggleDrawer('agents'));
     const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3kode did on this computer' }, icon('activity'));
     act.addEventListener('click', () => toggleDrawer('activity'));
-    right.append(burnBtn, keep, plug, act, keys);
+    right.append(burnBtn, keep, agentsBtn, plug, act, keys);
     return right;
   }
 
@@ -3703,6 +3707,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (drawerKind === 'changes') renderChanges();
     if (drawerKind === 'connectors') renderConnectors();
     if (drawerKind === 'activity') renderActivity();
+    if (drawerKind === 'agents') renderAgents();
   }
 
   function drawerHead(title) {
@@ -3838,6 +3843,39 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       mine.length ? mine : h('div.muted.cv-small', 'None yet.'),
       h('div.cv-prov', h('b', 'Add a connector'), h('div.cv-keyrow', name, glassSelect(kind)), what, secret, h('div.cv-acts', add),
         h('div.muted.cv-small', 'You will be asked on your computer, with the exact command or address shown.')));
+  }
+
+  // --- the agent panel (0.3.18) -----------------------------------------------------------------------
+  // Colin, 4 Nov: "if the user can't see what the ai is doing that leads to issues." Every Claude Code
+  // session written to in the last half hour, its subagents, what each was asked and what it is doing
+  // now; live = written in the last two minutes. It refreshes every 5 s while open, and stops when closed.
+  const AGENTS_ENGINE = '0.3.18';
+  let agentsTimer = 0;
+  async function renderAgents() {
+    clearTimeout(agentsTimer); agentsTimer = 0;
+    if (drawerKind !== 'agents') return;
+    if (!versionAtLeast(hello?.version, AGENTS_ENGINE)) {
+      swap(ui.drawer, drawerHead('Agents'), h('div.muted.cv-small', `y3kode ${hello?.version || ''} cannot list agents yet — update y3kode (${AGENTS_ENGINE}).`));
+      return;
+    }
+    const r = await cmd({ cmd: 'agents.list' }).catch(() => null);
+    if (drawerKind !== 'agents') return;
+    const list = r?.agents || [];
+    const dot = (state) => h('span.cv-agentdot.' + state, { title: state });
+    const nowLine = (feed) => { const f = (feed || []).at(-1); return f ? h('div.cv-agentnow', f.kind === 'tool' ? `${f.tool} · ${f.text}` : f.text) : null; };
+    const role = (s) => s.role === 'burn' ? 'burn' : s.role === 'kode' ? `kode · ${s.title}` : 'session';
+    const live = list.filter((s) => s.state === 'live').length + list.reduce((n, s) => n + s.agents.filter((a) => a.state === 'live').length, 0);
+    const rows = list.map((s) => h('div.cv-agent',
+      h('div.cv-agenthead', dot(s.state), h('b', role(s)), h('span.muted.cv-small', ` · ${s.state} · ${ago(s.touched)} · ${s.sid.slice(0, 8)}`)),
+      s.asked ? h('div.cv-agentasked', s.asked) : null,
+      nowLine(s.now),
+      ...s.agents.map((a) => h('div.cv-agent.sub',
+        h('div.cv-agenthead', dot(a.state), h('b', a.description), h('span.muted.cv-small', ` · ${a.state} · ${ago(a.touched)}`)),
+        a.state !== 'done' ? nowLine(a.now) : null))));
+    swap(ui.drawer, drawerHead(`Agents · ${live} live`),
+      h('div.muted.cv-small', 'Every Claude Code session on this computer written to in the last half hour, and the agents each started. Read from the transcripts on this computer; nothing leaves it.'),
+      h('div.cv-agents', ...(rows.length ? rows : [h('div.muted', 'Nothing has run in the last half hour.')])));
+    agentsTimer = setTimeout(renderAgents, 5000);
   }
 
   // --- what was done on this computer ----------------------------------------------------------------

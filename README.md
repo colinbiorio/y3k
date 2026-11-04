@@ -252,6 +252,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **The agent panel (y3kode 0.3.18).** Colin: "show an
+  agent panel that shows any live agent/agents and a description of what
+  they're working on -- if the user can't see what the ai is doing that leads
+  to issues."
+  - A new button, two figures in kode's toolbar, opens a drawer listing every
+    Claude Code session on this computer written to in the last half hour:
+    burn's conversation, kode's own, and any in a terminal.
+  - Each session shows what it was asked, what it is doing now, and the
+    agents it started, each with its description and live, quiet or done.
+  - The engine reads the transcripts read-only (`agents.mjs`,
+    `agents.list`). The drawer refreshes every 5 s, only while it is open.
+
 - **2026-11-04** — **Burn, seen (y3kode 0.3.17).** Colin: "burn is on rn
   but there's no active process". It was running, but nothing on screen said
   so.

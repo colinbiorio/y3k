@@ -53,6 +53,8 @@ export const swap = (el, ...kids) => add(clear(el), kids);
 
 // Small line icons, drawn in the one weight the pane uses.
 const ICONS = {
+  // agents: two figures, one behind the other (the agent panel)
+  agents: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.6M18 14.4c1.8.6 3 2 3 4.6',
   // burn: a flame (the switch that spends every usage window)
   flame: 'M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-4 2.5-5 0 2 1 3 2 3.5C11.5 9 11 6 12 3z',
   // keep going: two arrows chasing round
