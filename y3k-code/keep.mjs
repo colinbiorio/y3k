@@ -35,7 +35,7 @@ export const KEEP_RESTART_MS = 30_000;      // the engine came up with the switc
 export const KEEP_BUSY_MS = 60_000;         // a turn was running when its time came: look again after this
 export const KEEP_FAILS = 3;                // its own turns failing in a row: it pauses
 // how Claude Code names it: "You've hit your limit · resets 4pm", "Claude AI usage limit reached", "rate_limit_error", 429
-export const LIMIT_TEXT = /rate[_ -]?limit|usage limit|\blimit\b.*\b(reset|reached|hit)|\bresets? (at|in)\b|too many requests|\b429\b/i;
+export const LIMIT_TEXT = /rate[_ -]?limit|usage limit|\blimit\b.*\b(reset|reached|hit)|\bresets? (at|in)\b|too many requests|\b429\b|reached your [\w .'-]{0,40}limit|switch to another model/i;
 
 // What it says, on the person's behalf. Said as the person's standing word —
 // the switch — not as the coder's own thought, so the coder knows who asked.
