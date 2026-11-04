@@ -45,7 +45,7 @@ import { createHttp } from '../http.mjs';
 import { createConsentDesk } from '../consent.mjs';
 import { PROVIDERS, isProvider, isKeyTarget, checkKey, keyChosen, keyChoice } from '../providers.mjs';
 import { inspectFolder } from '../workspace.mjs';
-import { newestInstalled, restartArgs, siteOrigin } from '../update.mjs';
+import { newestInstalled, restartArgs, siteOrigin, RELAY_CODE, writeRelay, takeRelay } from '../update.mjs';
 
 const SITE = 'https://yearthreethousand.com';
 const argv = process.argv.slice(2);
@@ -133,6 +133,9 @@ async function start() {
     say(`\n  Updating to y3kode ${next.version}. Restarting…`);
     engine.shutdown();
     await Promise.race([http.close(), new Promise((r) => setTimeout(r, 6000))]);
+    // the relay (update.mjs): a handed-over engine does not start a child of its own; the first
+    // process, which is already waiting, starts the new version in its place
+    if (process.env.Y3K_CODE_RELAY) { writeRelay(process.env.Y3K_CODE_RELAY, next, restartArgs(argv, port)); process.exit(RELAY_CODE); }
     handOver(next, restartArgs(argv, port));
   };
   const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`), door: () => (port ? `http://127.0.0.1:${port}` : null),
@@ -225,14 +228,24 @@ const fmt = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
 // Run another version of y3kode in this one's place, in this terminal. This
 // process only waits: Ctrl+C reaches both (the terminal signals the whole
 // group), and the new one stops its own sessions before this one leaves.
+// The first process is the only one that waits: a later update relays back here (RELAY_CODE) and
+// the next version starts as this process's child too, so no chain of waiters grows.
+let relayChild = null;
 function handOver({ version, dir }, args) {
-  process.removeAllListeners('SIGINT');
-  process.removeAllListeners('SIGTERM');
-  const child = spawn(process.execPath, [join(dir, 'bin', 'y3k-code.mjs'), ...args], { stdio: 'inherit', env: { ...process.env, Y3K_CODE_HANDED_OVER: version } });
-  process.on('SIGINT', () => {});
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-  child.on('error', (err) => fail(`could not start y3kode ${version}: ${err.message}`));
-  child.on('exit', (code, sig) => process.exit(code ?? (sig ? 1 : 0)));
+  if (!handOver.armed) {
+    handOver.armed = true;
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('SIGTERM');
+    process.on('SIGINT', () => {});
+    process.on('SIGTERM', () => relayChild?.kill('SIGTERM'));
+  }
+  const relay = join(store.dir, 'relay.json');
+  relayChild = spawn(process.execPath, [join(dir, 'bin', 'y3k-code.mjs'), ...args], { stdio: 'inherit', env: { ...process.env, Y3K_CODE_HANDED_OVER: version, Y3K_CODE_RELAY: relay } });
+  relayChild.on('error', (err) => fail(`could not start y3kode ${version}: ${err.message}`));
+  relayChild.on('exit', (code, sig) => {
+    if (code === RELAY_CODE) { const r = takeRelay(relay); if (r) return handOver(r.next, r.args); }
+    process.exit(code ?? (sig ? 1 : 0));
+  });
 }
 
 function status() {

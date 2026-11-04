@@ -25,7 +25,7 @@
 // ============================================================================
 
 import { gunzipSync } from 'node:zlib';
-import { mkdirSync, writeFileSync, renameSync, rmSync, readdirSync, existsSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, renameSync, rmSync, readdirSync, existsSync, chmodSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -139,6 +139,26 @@ export function newestInstalled(root, than) {
 // The companion's own arguments, for the version that takes its place: the
 // same site and flags, the port it had (the pairing names it), no browser tab
 // and no pairing code (the browser that asked is already paired).
+// THE RELAY (0.3.20, 2026-11-04). Each update used to start the new version as a child of the old one,
+// which then only waited (so Ctrl+C and the exit code still reach the terminal). The next update did
+// the same inside the child, so every update left one more waiting node process behind: on
+// 4 November, 0.3.15, 0.3.16 and 0.3.17 were all still alive under 0.3.19, one holding 46 MB of an
+// 8 GB machine. Now only the first process waits. A handed-over engine that updates writes what to
+// run next to `relay.json` in the store and exits with RELAY_CODE; the first process reads it and
+// starts that version in its place. However many updates, there is one waiter and one engine.
+export const RELAY_CODE = 75;
+export function writeRelay(file, next, args) {
+  writeFileSync(file, JSON.stringify({ version: next.version, dir: next.dir, args }), { mode: 0o600 });
+}
+export function takeRelay(file) {
+  try {
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    unlinkSync(file);
+    if (!VERSION_RE.test(String(r.version)) || typeof r.dir !== 'string' || !Array.isArray(r.args)) return null;
+    return { next: { version: r.version, dir: r.dir }, args: r.args.map(String) };
+  } catch { return null; }
+}
+
 export function restartArgs(argv, port) {
   const out = [];
   for (let i = 0; i < argv.length; i++) {
