@@ -252,6 +252,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-04** — **An update no longer leaves the old version behind
+  (y3kode 0.3.20).** Each update started the new version as a child of the
+  old one, which then only waited. The next update did the same inside the
+  child, so the waiters stacked up: on 4 November, 0.3.15, 0.3.16 and 0.3.17
+  were all still running under 0.3.19, one holding 46 MB of an 8 GB machine.
+  - Now only the first process waits. A handed-over engine that updates
+    writes what to run next (`relay.json` in the store) and exits with
+    `RELAY_CODE`.
+  - The first process then starts that version in its place, so there is one
+    waiter and one engine however many times y3kode updates.
+  - Waiters already running from earlier updates are left alone; they go when
+    the terminal does.
+  - `test/relay.test.mjs` runs the real bin through two updates with stub
+    versions and checks that both are children of the first process.
+
 - **2026-11-04** — **Burn coverage (y3kode 0.3.19).** The worker's
   watchdog writes a heartbeat every minute (working, resting or GAP), and the
   burn strip now ends with "no gaps in 52 min", or with how many minutes had
