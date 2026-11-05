@@ -252,6 +252,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **On a phone the world's bar stands inside the hole.** At
+  `top: 10px` it stood across the frame's top edge, and the frame paints over
+  the world, so its status line ("watching @orion · … · evening") and its row
+  of walk in, ride and the map were ghosts behind the frame, with the top grip
+  over ride or the map. Now it stands inside the hole, as the tools already
+  did; its top padding is the band where the top grip rests, and the side's
+  list is measured below it. Measured live with the rule injected at 360, 390
+  and 430px: nothing in the bar covered.
+
 - **2026-11-05** — **On a phone, nothing lies over what you reach for.** From
   the same guest scout: the right collapse grip's 40px box reached 28px into
   the panel, and a post scrolled to the rail's middle had its Report-or-block

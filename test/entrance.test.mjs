@@ -263,4 +263,11 @@ ok('on a phone nothing lies over a post\'s "···", the world\'s Build, or open
   assert.ok(!/n\.hidden = false; n\.click\(\);/.test(main), 'a hidden kode button is still un-hidden to be clicked');
 });
 
+ok("on a phone the world's bar stands inside the hole, not behind the frame", () => {
+  const at = css.indexOf('WORLD BAR, PHONE COMPACTION'), phone = css.slice(at, css.indexOf('\n}\n', at));
+  assert.ok(/\.world-bar \{ left: calc\(var\(--rail-w\) \+ 6px\);[^}]*padding: 28px 10px 6px; top: calc\(var\(--hole-t\) \+ 8px\); \}/.test(phone),
+    'the bar stands across the frame\'s top edge: its status and its walk in, ride, the map are ghosts behind the frame');
+  assert.ok(at > css.indexOf('.world-status {'), 'the phone rule is no longer after the base rules, and loses');
+});
+
 console.log(`\n${passed} entrance checks passed.`);
