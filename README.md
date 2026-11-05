@@ -252,6 +252,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **On a phone, nothing lies over what you reach for.** From
+  the same guest scout: the right collapse grip's 40px box reached 28px into
+  the panel, and a post scrolled to the rail's middle had its Report-or-block
+  "···" under it, so a tap folded every bar and opened the report prompt.
+  Between the panel's edge and the rail's glyphs there is room for 32px, not
+  40, so under 520px the side grips are 32px wide and sit on the glass edge
+  (measured at 360, 390 and 430px: no post control and no glyph under either;
+  folded, as before). In the world the air mark floated on the Build tool
+  (the tools are a row along the hole's bottom edge there), so a tap on Build
+  asked to sign in; on a phone it steps 48px left in the world. And the life
+  view's "open kode" no longer un-hides the rail's kode button to click it
+  (hidden on a phone on purpose; it stayed for the visit): it opens the room.
+
 - **2026-11-05** — **A guest knocks only on doors that are theirs.** A guest
   scout (a headless phone and desktop, as a stranger, writing nothing) found
   every guest's page knocking on the signed-in routes: `remoteEye.start()`

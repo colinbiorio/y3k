@@ -1072,7 +1072,9 @@ const social = createSocial({
   // journal (/api/life/moment). And the way to kode, to connect y3kode.
   life: {
     speak: (t, o) => (busy || currentSpeak ? null : codeLink.speak(t, o)),
-    openKode: () => { const n = $('nav-code'); if (n) { n.hidden = false; n.click(); } },
+    // the room itself, not the rail's button: un-hidden to be clicked, it stayed on a phone's rail, where
+    // revealCode keeps it hidden on purpose (no engine to pair on a phone; a guest scout, 5 Nov 2026)
+    openKode: () => openCodeRoom(),
   },
   games: {
     mood: (m) => { if (busy) return; currentMood = m; body.setMood(m); setMoodTag(m); },

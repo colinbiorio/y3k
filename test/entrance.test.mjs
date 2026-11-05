@@ -255,4 +255,12 @@ ok("a profile's counts stay inside a phone's panel", () => {
   assert.ok(/\n\.profile-stats \{ display: flex; gap: 32px; \}/.test(css), 'the desktop row changed');
 });
 
+ok('on a phone nothing lies over a post\'s "···", the world\'s Build, or opens kode on a phone\'s rail', () => {
+  assert.ok(/@media \(max-width: 520px\) \{\s*body:not\(\.nav-collapsed-right\) \.nav-collapse-right \{ width: 32px; right: calc\(var\(--hole-r\) - 6px\); \}\s*body:not\(\.nav-collapsed\) \.nav-collapse \{ width: 32px; left: calc\(var\(--hole-l\) - 6px\); \}/.test(css),
+    'the right grip reaches 28px into the panel, over a post\'s Report-or-block');
+  assert.ok(/@media \(max-width: 560px\) \{ body\.in-world \.chat-air \{ translate: calc\(-50% - 48px\) 0; \} \}/.test(css), 'the air mark sits on the world\'s Build tool');
+  assert.ok(/openKode: \(\) => openCodeRoom\(\),/.test(main), 'the life view opens kode by un-hiding the rail\'s button');
+  assert.ok(!/n\.hidden = false; n\.click\(\);/.test(main), 'a hidden kode button is still un-hidden to be clicked');
+});
+
 console.log(`\n${passed} entrance checks passed.`);
