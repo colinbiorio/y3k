@@ -252,6 +252,14 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **A guest's life view asks for nothing of theirs.** The
+  moon's view polled `/api/life/latest` and asked the site's setup for a
+  guest, a 401 at every poll while it stayed open, and its card offered
+  "open kode", which only says to sign in. `createLifeView` takes
+  `isSignedIn`: a guest's view asks for neither and says plainly that a
+  signed-in visitor can watch the life their y3kode lives; a guest watching
+  someone's shared life (`?life=`) still asks for that one.
+
 - **2026-11-05** — **On a phone the world's bar stands inside the hole.** At
   `top: 10px` it stood across the frame's top edge, and the frame paints over
   the world, so its status line ("watching @orion · … · evening") and its row

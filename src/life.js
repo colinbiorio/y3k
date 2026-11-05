@@ -226,7 +226,10 @@ export const fresh = (life, now = Date.now()) => !!life && now - Number(life.at 
 
 export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null, openKode = null, schedule = setTimeout, unschedule = clearTimeout, fetchFn = (...a) => fetch(...a),
   update = updateY3kode, waitFor = waitForVersion, setup = siteSetup, openUrl = (u) => window.open(u, '_blank', 'noopener,noreferrer'),
-  watch: watch0 = null, pubEvery = PUB_LIVE_MS, doc = typeof document === 'undefined' ? null : document } = {}) {
+  watch: watch0 = null, pubEvery = PUB_LIVE_MS, doc = typeof document === 'undefined' ? null : document, isSignedIn = () => true } = {}) {
+  // A GUEST HAS NO LIFE OF THEIR OWN TO ASK AFTER: /api/life/latest and the site's setup answered them 401,
+  // a console error at every poll while the view stayed open, and the card offered "open kode", which only
+  // says to sign in (a guest scout, 5 Nov 2026). A guest watching someone's shared life (watch) still asks.
   let watch = watch0;
   let root = null;         // the stage, on the body while the view is open (the whole screen, like the world)
   let el = {};             // its parts, by name
@@ -287,7 +290,7 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     st = r;
     phase = updating ? 'old' : phaseOf(r);
     // what to offer instead: an update, the app, the install line
-    if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (await setup({ fetchFn })) || {}; if (!root) return; }
+    if ((phase === 'old' || phase === 'unpaired') && !setupV) { setupV = (isSignedIn() ? await setup({ fetchFn }) : null) || {}; if (!root) return; }
     if ((phase === 'old' || phase === 'resting' || phase === 'living') && !engine) { const hh = await cmd({ cmd: 'engine.hello' }); if (!root) return; engine = hh?.ok ? { version: hh.version || '', update: hh.update === true } : { version: '', update: false }; }
     if (r?.ok && typeof r.frame === 'string' && r.frame) { pic = 'data:image/jpeg;base64,' + r.frame; since = r.frameN | 0; }
     // a moment of a living life, and only then: a life at rest still shows
@@ -317,10 +320,13 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     unschedule(pubTimer); pubTimer = 0;
     if (!root) return;
     let r;
-    try {
-      const x = await fetchFn(watch ? `/api/life/latest?user=${encodeURIComponent(watch)}` : '/api/life/latest', { cache: 'no-store' });
-      r = x.ok ? await x.json() : { ok: false, status: x.status };
-    } catch { r = { ok: false, status: 0 }; }
+    if (!watch && !isSignedIn()) r = { ok: false, status: 401 };   // what it would have answered, unasked
+    else {
+      try {
+        const x = await fetchFn(watch ? `/api/life/latest?user=${encodeURIComponent(watch)}` : '/api/life/latest', { cache: 'no-store' });
+        r = x.ok ? await x.json() : { ok: false, status: x.status };
+      } catch { r = { ok: false, status: 0 }; }
+    }
     if (!root) return;
     pub = r;
     if (!viewTimer && r?.life?.view?.url) pollView();   // it is making views: watch them
@@ -584,7 +590,10 @@ export function createLifeView({ toast = () => {}, cmd = engineCmd, speak = null
     const note = (t) => c.append(h('p', 'life-note', t));
     if (phase === 'checking') note('looking for the life on this computer…');
     else if (phase === 'none') { c.append(h('b', null, watch ? `${watch} is not sharing a life here` : 'no life here')); if (watch) note('Nothing is published for that name, or it is not shared.'); }
-    else if (phase === 'unpaired' && source !== 'web') {
+    else if (phase === 'unpaired' && source !== 'web' && !isSignedIn()) {
+      c.append(h('b', null, 'a life lives on your own computer'));
+      note('lucid runs there, through y3kode, and this page watches it. Sign in, and the life your y3kode lives can be watched here.');
+    } else if (phase === 'unpaired' && source !== 'web') {
       c.append(h('b', null, 'a life lives on your own computer'));
       note('lucid runs there, through y3kode, and this page watches it. Open kode once to connect y3kode in this browser, then come back.');
       if (openKode) c.append(btn('open kode', 'create-go', () => openKode()));
