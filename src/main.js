@@ -1075,6 +1075,7 @@ const social = createSocial({
     // the room itself, not the rail's button: un-hidden to be clicked, it stayed on a phone's rail, where
     // revealCode keeps it hidden on purpose (no engine to pair on a phone; a guest scout, 5 Nov 2026)
     openKode: () => openCodeRoom(),
+    isSignedIn: () => !!account,   // a guest's life view asks the site for nothing of theirs
   },
   games: {
     mood: (m) => { if (busy) return; currentMood = m; body.setMood(m); setMoodTag(m); },

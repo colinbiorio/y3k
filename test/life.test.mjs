@@ -316,6 +316,33 @@ await ok('the view opens as a stage on the body and draws, with no engine here a
   } finally { process.off('uncaughtException', catchIt); process.off('unhandledRejection', catchIt); }
 });
 
+await ok('a guest asks the site for no life of their own, is asked to sign in, and still watches a shared one', async () => {
+  const { serialize } = await import('./fakes/mini-dom.mjs');
+  const { createLifeView } = await import('../src/life.js');
+  const asked = [], setups = [];
+  const make = (watch) => createLifeView({
+    toast: () => {}, speak: null, openKode: () => {}, isSignedIn: () => false, ...(watch ? { watch } : {}),
+    cmd: async () => ({ ok: false, code: 'unpaired' }),
+    fetchFn: async (url) => { asked.push(String(url)); return { ok: false, status: 404, json: async () => ({}) }; },
+    setup: async () => { setups.push(1); return {}; },
+    schedule: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), unschedule: clearTimeout,
+  });
+  const view = make(null);
+  view.open();
+  for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 5));
+  const html = serialize(document.body.querySelector('.life-root'));
+  view.close();
+  assert.deepEqual(asked.filter((u) => u.includes('/api/life/latest')), [], 'a guest\'s page asks after a life of its own (401 at every poll)');
+  assert.equal(setups.length, 0, 'a guest\'s page asks the site\'s setup (401)');
+  assert.match(html, /Sign in, and the life your y3kode lives can be watched here\./, 'the card does not ask a guest to sign in');
+  assert.ok(!/open kode/.test(html), 'a guest is offered "open kode", which only says to sign in');
+  const shared = make('y3klay');
+  shared.open();
+  for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5));
+  shared.close();
+  assert.ok(asked.some((u) => u.includes('/api/life/latest?user=y3klay')), 'a guest cannot watch a shared life');
+});
+
 await ok('a published life of your own, awake: the picture, its thought and words, one line, and the chat bar reaches it', async () => {
   const { serialize } = await import('./fakes/mini-dom.mjs');
   const { createLifeView } = await import('../src/life.js');
