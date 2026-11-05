@@ -229,4 +229,30 @@ ok('it withdraws: after 45 seconds, on any glyph, on either button', () => {
   assert.ok(/\$\('arrive-go'\)\?\.addEventListener\('click', \(\) => \{ const go = arriveGo; hideArrive\(\); go\?\.\(\); \}\);/.test(main), 'the card stays up over where it sent you');
 });
 
+console.log('\na guest knocks only on doors that are theirs (a guest scout, 5 Nov 2026):');
+const settingsSrc = read('src/settings.js');
+
+ok('the remote eye starts for an account, never for a guest, and for a guest who turns out to be signed in', () => {
+  assert.ok(/\n  if \(account\) remoteEye\.start\(\);/.test(main), 'every guest announces a device: a 401 every fifteen seconds');
+  assert.ok(!/\n  remoteEye\.start\(\);/.test(main), 'an ungated start is still there');
+  assert.ok(/if \(account && loginEl\?\.classList\.contains\('gone'\)\) \{ claimBrowser\(account\); remoteEye\.start\(\); \}/.test(main),
+    'a guest whose session answered late is never announced to their other devices');
+});
+
+ok("a guest's Settings asks for no account's shelf, usage or devices", () => {
+  assert.ok(/isSignedIn: \(\) => !!account, wake:/.test(main), 'Settings is not told who is here');
+  assert.ok(/isSignedIn = \(\) => true \} = \{\}\) \{/.test(settingsSrc), 'Settings takes no word of who is here');
+  const shelf = settingsSrc.slice(settingsSrc.indexOf('const paintShelf = async () => {'), settingsSrc.indexOf("const r = await fetch('/api/shelf');"));
+  assert.ok(/if \(!isSignedIn\(\)\) \{ list\.textContent = 'Sign in to give your presence a text\.'; return; \}/.test(shelf), 'the shelf asks as a guest');
+  assert.ok(/const r = !isSignedIn\(\) \? null : await fetch\('\/api\/remote\/screens'/.test(settingsSrc), 'the devices are asked for every 2.5 s as a guest');
+  assert.ok(/if \(isSignedIn\(\)\) try \{ v = \(await fetch\('\/api\/usage'\)/.test(settingsSrc), 'the usage asks as a guest');
+});
+
+ok("a profile's counts stay inside a phone's panel", () => {
+  assert.ok(/@media \(max-width: 520px\) \{\s*\.profile-top \{ gap: 14px; \}\s*\.profile-stats \{ flex: 1; min-width: 0; gap: 6px; justify-content: space-around; \}/.test(css),
+    'at 390px the third count falls under the right rail');
+  assert.ok(/@media \(max-width: 360px\) \{\s*\.profile-top \{ flex-wrap: wrap; \}\s*\.profile-stats \{ flex-basis: 100%;/.test(css), 'at 320px the counts have nowhere to go');
+  assert.ok(/\n\.profile-stats \{ display: flex; gap: 32px; \}/.test(css), 'the desktop row changed');
+});
+
 console.log(`\n${passed} entrance checks passed.`);

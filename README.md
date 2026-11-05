@@ -252,6 +252,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **A guest knocks only on doors that are theirs.** A guest
+  scout (a headless phone and desktop, as a stranger, writing nothing) found
+  every guest's page knocking on the signed-in routes: `remoteEye.start()`
+  ran for anyone who went in, "or remain mysterious…" included, so a guest
+  sent a 401 to `/api/remote/here` every fifteen seconds for as long as they
+  stayed, plus an event stream that 401s, each a console error. It now starts
+  only for an account, and for a guest whose session check answered late
+  (`enterApp`'s claim). Settings is told who is here (`isSignedIn`) and asks a
+  guest for no shelf, no usage and no devices (the devices were asked again
+  every 2.5 s while the pane was open). And on a phone a profile's third count
+  ("0 posts") fell under the right rail: under 520px the counts share the row,
+  under 360px they go beneath the face; desktop is as it was (measured on the
+  live page with the rule injected: 7 elements outside the panel at 390px,
+  then none; at 320px, none). Pinned in `test/entrance.test.mjs`.
+
 - **2026-11-05** — **No script on the site comes from a third party.** The
   camera's vision library (MediaPipe Tasks Vision 1.0.1, Apache-2.0) came from
   jsDelivr, the one script the site did not serve itself. Its bundle and its

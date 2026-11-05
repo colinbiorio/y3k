@@ -305,7 +305,8 @@ function enterApp() {
   // (enterApp.now, below) is not passed again for them: left as the guest's,
   // what they keep in it this visit was forgotten as a guest's at their next
   // sign-in (brain.js claimBrowser).
-  if (account && loginEl?.classList.contains('gone')) claimBrowser(account);
+  // (and only now say so to their other devices: the door that would have was a guest's)
+  if (account && loginEl?.classList.contains('gone')) { claimBrowser(account); remoteEye.start(); }
   // THE FOUNDER'S PAGE FOLLOWS THE DEPLOY (src/ship.js): when the live commit is
   // no longer the one this page was loaded on, it reloads itself. The
   // founder's account only; everyone else keeps the page they have.
@@ -331,8 +332,10 @@ enterApp.now = function enterAppNow() {
   // seconds and one idle stream — the price of appearing in the list on your
   // phone without having had to arrange it first. Gated on being signed in
   // because the routes answer 401 otherwise, and an EventSource that 401s
-  // retries forever.
-  remoteEye.start();
+  // retries forever. A GUEST PASSES HERE TOO ("or remain mysterious…" is a way
+  // in): every guest's page knocked on those routes every fifteen seconds for
+  // as long as they stayed, a 401 each time (a guest scout, 5 Nov 2026).
+  if (account) remoteEye.start();
   // The orb flares to greet you, then eases back to calm as the card clears.
   body.setMood('excited');
   body.setAudioLevel(1);
@@ -856,7 +859,7 @@ wakeFlow.prepare();
 // a key put in use in another tab of this browser: this tab's card has nothing left to offer
 window.addEventListener('storage', (e) => { if (e?.key === 'y3k.brain' && e.newValue) hideWake(); });
 
-const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setFace, setHands, setCamView, wake: oneClickHere() ? () => wakeFlow.wake() : null });
+const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setFace, setHands, setCamView, isSignedIn: () => !!account, wake: oneClickHere() ? () => wakeFlow.wake() : null });
 
 let currentMood = 'calm';
 let busy = false;
