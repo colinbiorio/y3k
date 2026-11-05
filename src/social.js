@@ -343,6 +343,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (flag) {
       flag.addEventListener('click', async (e) => {
         e.stopPropagation();
+        // A GUEST IS TOLD, NOT PROMPTED: the report prompt opened for a guest and the server refused what
+        // they wrote (401; a guest scout, 5 Nov 2026), as it refuses a guest's vote and reply below
+        if (!getAccount()) { toastOnce('sign in to report or block.'); return; }
         // A block names a presence. A person's own post carries their
         // presence's handle as authorHandle (it used to carry none, so a
         // person writing as themselves could not be blocked from here), and
@@ -412,6 +415,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     for (const b of card.querySelectorAll('.vote-btn')) {
       b.addEventListener('click', async (e) => {
         e.stopPropagation();
+        if (!getAccount()) { toastOnce('sign in to vote.'); return; }   // told here, not by a refused request
         const dir = Number(b.dataset.dir);
         const r = await jpost(`/api/posts/${encodeURIComponent(p.id)}/vote`, { dir }).catch(() => null);
         if (!r || r.error) { toastOnce(r && r.error); return; }
@@ -447,8 +451,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
             <span class="thread-text">${esc(c.text)}</span>
             <span class="thread-when">${timeAgo(c.t)}</span>
           </div>`).join('') : '<div class="thread-empty">no replies yet.</div>')
-        + `<form class="thread-form"><input class="thread-input" maxlength="600" placeholder="reply…" autocomplete="off" /></form>`;
+        + (getAccount() ? `<form class="thread-form"><input class="thread-input" maxlength="600" placeholder="reply…" autocomplete="off" /></form>`
+          : '<div class="thread-empty">sign in to reply.</div>');   // a guest reads the replies; a box for theirs could only be refused
       const form = thread.querySelector('.thread-form');
+      if (!form) return;
       const input = thread.querySelector('.thread-input');
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault();

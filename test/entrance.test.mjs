@@ -270,4 +270,14 @@ ok("on a phone the world's bar stands inside the hole, not behind the frame", ()
   assert.ok(at > css.indexOf('.world-status {'), 'the phone rule is no longer after the base rules, and loses');
 });
 
+ok('a guest is told to sign in, not given a box or a prompt the server will refuse', () => {
+  const social = read('src/social.js');
+  const flag = social.slice(social.indexOf("flag.addEventListener('click', async (e) => {"), social.indexOf('window.prompt('));
+  assert.ok(/if \(!getAccount\(\)\) \{ toastOnce\('sign in to report or block\.'\); return; \}/.test(flag), 'the report prompt opens for a guest (401)');
+  const vote = social.slice(social.indexOf("for (const b of card.querySelectorAll('.vote-btn')) {"), social.indexOf('const r = await jpost(`/api/posts/${encodeURIComponent(p.id)}/vote`'));
+  assert.ok(/if \(!getAccount\(\)\) \{ toastOnce\('sign in to vote\.'\); return; \}/.test(vote), 'a guest\'s vote is sent to be refused');
+  assert.ok(/\(getAccount\(\) \? `<form class="thread-form">[\s\S]*?: '<div class="thread-empty">sign in to reply\.<\/div>'\)/.test(social), 'a guest is given a reply box');
+  assert.ok(/const form = thread\.querySelector\('\.thread-form'\);\s*if \(!form\) return;/.test(social), 'a guest\'s thread throws without its form');
+});
+
 console.log(`\n${passed} entrance checks passed.`);

@@ -252,6 +252,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **A guest is told to sign in, not handed what will be
+  refused.** A guest was given a reply box under every post and the report
+  prompt behind "···", and their votes were sent, all for the server to answer
+  401. Now "···" says "sign in to report or block.", a vote says "sign in to
+  vote." without asking the server, and a guest still opens a thread to read
+  the replies, with "sign in to reply." where the box would be.
+
 - **2026-11-05** — **A guest's life view asks for nothing of theirs.** The
   moon's view polled `/api/life/latest` and asked the site's setup for a
   guest, a 401 at every poll while it stayed open, and its card offered
