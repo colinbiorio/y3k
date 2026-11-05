@@ -1381,6 +1381,15 @@ body.nav-collapsed-right .nav-collapse-right {
   transform: translateY(-50%) scaleX(-1); opacity: 1;
 }
 body:not(.in-home) .nav-collapse-right { display: none; }
+/* ON A PHONE THE RIGHT GRIP LAY OVER A POST'S "···". Its 40px box reached 28px into the panel, and a
+   post scrolled to the rail's middle had its Report-or-block under it: a tap there folded every bar
+   and opened the report prompt (a guest scout, 5 Nov 2026). Between the panel's edge and the rail's
+   glyphs there is room for 32px, not 40: measured at 360, 390 and 430px, the narrower grips sit on the
+   glass edge and overlap no post control and no glyph. Folded, they are as they were. */
+@media (max-width: 520px) {
+  body:not(.nav-collapsed-right) .nav-collapse-right { width: 32px; right: calc(var(--hole-r) - 6px); }
+  body:not(.nav-collapsed) .nav-collapse { width: 32px; left: calc(var(--hole-l) - 6px); }
+}
 /* The top and bottom twins. Same grip, turned a quarter: each points the way
    its own bar will go, and a tap on any of the four moves all four. */
 .nav-collapse-top, .nav-collapse-bottom {
@@ -1900,6 +1909,11 @@ body.alive:not(.dancing) #brain-toggle::after { opacity: 1; animation: rec-blink
   width: 76px; height: 58px; padding: 0; border: none; background: none; cursor: pointer;
   transition: bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 body.nav-dragging .chat-air { transition: none; }
+/* IN THE WORLD, ON A PHONE, IT SAT ON THE BUILD TOOL. The world's tools are a row along the hole's bottom
+   edge, right-aligned, and the first reached the bar's centre line, where this floats: a tap on Build
+   asked a guest to sign in and the palette never opened (a guest scout, 5 Nov 2026; measured at 360 and
+   390px; the desktop's tools stand clear). There it steps aside, left, off the row. */
+@media (max-width: 560px) { body.in-world .chat-air { translate: calc(-50% - 48px) 0; } }
 /* tall, #chat spans the hole rather than centring on the window */
 body.chat-typing .chat-air { left: calc(50vw - var(--hole-l)); }
 .chat-air-face { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; pointer-events: none;
