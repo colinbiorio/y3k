@@ -3607,8 +3607,13 @@ body.merc-sdf .ident-card { border-color: transparent; }
    sat BEFORE the bar's base font rules once, where equal specificity made
    its font sizes dead. Last position wins and stays winning. */
 @media (max-width: 560px) {
+  /* INSIDE THE HOLE, like the tools. At top:10px the bar stood across the frame's top edge, and the frame
+     paints over the world (z41 over z31): its status line and its row of walk in, ride and the map were
+     ghosts behind it, and the top grip lay over ride or the map (a guest scout, 5 Nov 2026). Inside the
+     hole it reads whole; its top padding is the band where the top grip rests, and the side's list is
+     measured below it (src/world-side.js). Measured at 360, 390 and 430px: nothing in it covered. */
   .world-bar { left: calc(var(--rail-w) + 6px); max-width: calc(100vw - 2 * (var(--rail-w) + 6px));
-    gap: 4px 8px; padding: 6px 10px; top: 10px; }
+    gap: 4px 8px; padding: 28px 10px 6px; top: calc(var(--hole-t) + 8px); }
   .world-bar #world-budget-slider { width: 64px; }
   .world-status { font-size: 0.76rem; }
   .world-bar .login-alt { font-size: 0.74rem; }
