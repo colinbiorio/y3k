@@ -35,7 +35,7 @@ import { pack, weigh, answerOf } from './eyewire.js';
 
 const $ = (id) => document.getElementById(id);
 const VISION = '@mediapipe/tasks-vision';
-const WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
+const WASM_BASE = '/src/vendor/tasks-vision@1.0.1/wasm';   // served from here (src/vendor), not jsDelivr
 const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 // The phone is not trying to hit 60. The desktop's own tracker runs at 24 and

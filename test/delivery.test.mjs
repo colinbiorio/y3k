@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { brotliDecompressSync, gunzipSync, brotliCompressSync } from 'node:zlib';
 import {
   negotiate, notModified, staticImports, maskSource, resolveSpecifier, moduleEntries, injectPreloads,
-  describe, encoded, cached, settled, etagOf, tagFor,
+  describe, encoded, cached, settled, etagOf, tagFor, POLISH_MAX,
 } from '../delivery.mjs';
 import { inlineScriptHashes } from '../security.mjs';
 
@@ -132,6 +132,16 @@ await ok('a tag follows the content, not the clock', async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+await ok('a file over POLISH_MAX keeps its quick copy (the vision engine: 19 s of a core for 16%)', async () => {
+  const data = readFileSync(join(ROOT, 'src', 'vendor', 'tasks-vision@1.0.1', 'wasm', 'vision_wasm_nosimd_internal.wasm'));
+  assert.ok(data.length > POLISH_MAX);
+  const etag = etagOf(data);
+  const first = await encoded(data, etag, 'br');
+  await settled();
+  assert.equal(cached(etag, 'br'), first, 'still the quick copy: not polished');
+  assert.equal(first.tag, tagFor(etag, 'br', true));
+});
+
 await ok('compressed once, quick first, then brotli at its best swapped in', async () => {
   const data = readFileSync(join(ROOT, 'src', 'body.js'));
   const etag = etagOf(data);
@@ -193,6 +203,27 @@ try {
       assert.deepEqual(plain.body, disk);
       for (const r of [br, gz, plain]) assert.match(r.headers.vary || '', /Accept-Encoding/i, 'caches keep the encodings apart');
     }
+  });
+
+  await ok('the vision engine is served from here, as wasm, compressed, and held for a year', async () => {
+    // src/vendor/tasks-vision@1.0.1 (2026-11-05): it came from jsDelivr
+    const VW = '/src/vendor/tasks-vision@1.0.1/wasm/vision_wasm_internal.wasm';
+    const disk = readFileSync(join(ROOT, VW));
+    const br = await raw(VW, { 'accept-encoding': 'gzip, deflate, br' });
+    assert.equal(br.status, 200);
+    assert.equal(br.headers['content-type'], 'application/wasm', 'without its type the browser cannot compile it as it streams');
+    assert.equal(br.headers['content-encoding'], 'br');
+    assert.ok(br.body.length < disk.length / 3.5, `${br.body.length} of ${disk.length} (jsDelivr sent 3.05 MB)`);
+    assert.deepEqual(decode(br), disk);
+    assert.match(br.headers['cache-control'], /immutable/, 'the version is in the path');
+    const bundle = await raw('/src/vendor/tasks-vision@1.0.1/vision_bundle.mjs', { 'accept-encoding': 'br' });
+    assert.equal(bundle.status, 200);
+    assert.match(bundle.headers['content-type'], /^text\/javascript/);
+    // and served from here, it is still loaded only when the camera is asked
+    // for (a dynamic import): the page preloads none of it
+    const page = decode(await raw('/', { 'accept-encoding': 'br' })).toString('utf8');
+    assert.ok(page.includes('rel="modulepreload"'), 'the page has its preload list');
+    assert.ok(!/rel="modulepreload"[^>]*tasks-vision/.test(page), 'the camera\'s bundle is preloaded for everyone');
   });
 
   await ok('a file under a kilobyte goes as it is', async () => {

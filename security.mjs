@@ -110,27 +110,27 @@ export function inlineScriptHashes(html) {
 // violations so they never get a response), after a stretch report-only.
 // Anything else is refused by the browser and still reported to
 // /api/csp-report. The third parties are the ones the client uses today, each
-// as narrow as it can be: the one pinned vision package on jsDelivr (anyone can
-// publish to jsDelivr, so the whole host would let any injected script in),
-// the hand and face models in Google's mediapipe-models folder, lichess for
-// chess, OpenRouter for the one-click key (src/openrouter.js: the return page
+// as narrow as it can be: the hand and face models in Google's
+// mediapipe-models folder, lichess for chess, OpenRouter for the one-click key (src/openrouter.js: the return page
 // trades OpenRouter's code for the person's key with OpenRouter itself, so the
 // key never passes through this site on its way to them; the host only, which
 // is OpenRouter's own), the 4irden portal, 127.0.0.1 where the y3kode engine listens, and
 // y3k: — the desktop app's own scheme, which Firefox opens through a hidden
-// frame from kode's "Open the y3k app". three.js is served from src/vendor.
+// frame from kode's "Open the y3k app". three.js is served from src/vendor, and
+// since 2026-11-05 so is the vision package, its bundle and its wasm (it came
+// from jsDelivr, the one script from a third party), so script-src is 'self'.
 // The version here, the two importmaps and WASM_BASE in perceive.js and
 // eye.js move together (test/security.test.mjs holds them to it).
 //   dev: a server that is not the deployed one (no RENDER) may also frame
 // and show a 4irden running on this machine (portal.js ?airden=localhost).
-export const VISION_PKG = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/';
+export const VISION_PKG = '/src/vendor/tasks-vision@1.0.1/';   // served from here since 2026-11-05: no third party in script-src
 export function appShellCsp(scriptHashes = [], { dev = false } = {}) {
   const local = dev ? ' http://localhost:* http://127.0.0.1:*' : '';
   return [
     "default-src 'self'",
-    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' ${VISION_PKG}`.replace(/\s+/g, ' '),
+    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval'`.replace(/\s+/g, ' '),
     "worker-src 'self' blob:",
-    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://openrouter.ai https://storage.googleapis.com/mediapipe-models/ ${VISION_PKG}`,
+    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://openrouter.ai https://storage.googleapis.com/mediapipe-models/`,
     `img-src 'self' data: blob: https:${local}`,
     "media-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",

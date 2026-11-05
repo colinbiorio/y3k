@@ -884,6 +884,7 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
+  '.wasm': 'application/wasm',   // the vision engine (src/vendor/tasks-vision@…): this type lets the browser compile it as it streams
 };
 
 // Static caching: the shell always revalidates; media may be held briefly. Any

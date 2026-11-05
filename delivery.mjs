@@ -41,7 +41,7 @@ const gzip = promisify(zlib.gzip);
 
 // Text only. Everything else the site serves (png, jpg, webp, gif, ico, woff2)
 // is a compressed format already; squeezing it again costs CPU for nothing.
-export const COMPRESSIBLE = new Set(['.js', '.mjs', '.css', '.html', '.json', '.svg', '.txt', '.md', '.webmanifest']);
+export const COMPRESSIBLE = new Set(['.js', '.mjs', '.css', '.html', '.json', '.svg', '.txt', '.md', '.webmanifest', '.wasm']);
 // Below this the encoding's own framing eats the saving (and a 304 is smaller
 // still), so tiny files go as they are.
 export const MIN_COMPRESS_BYTES = 1024;
@@ -166,6 +166,11 @@ const BR_QUICK = (n) => ({ params: { ...hints(n), [zlib.constants.BROTLI_PARAM_Q
 const BR_BEST = (n) => ({ params: { ...hints(n), [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } });
 const GZIP = { level: 9 };
 let polishing = Promise.resolve();
+// The vision engine (src/vendor/tasks-vision@1.0.1, 2026-11-05) is 11.76 MB of
+// wasm: quality 5 makes it 2.86 MB in about 0.2 s (jsDelivr sent 3.05 MB), and
+// quality 11 2.40 MB in about 19 s of a core, which on this server would come
+// after every restart, for each engine. A file this large keeps its quick copy.
+export const POLISH_MAX = 4 * 1024 * 1024;
 
 function keep(key, entry) {
   const old = variants.get(key);
@@ -199,7 +204,7 @@ export function encoded(data, etag, enc) {
     .then((buf) => {
       const entry = { buf, tag: tagFor(etag, enc, quick) };
       keep(key, entry);
-      if (quick) {
+      if (quick && data.length <= POLISH_MAX) {
         polishing = polishing
           .then(async () => {
             if (variants.get(key) !== entry) return; // evicted or replaced meanwhile: nothing to polish

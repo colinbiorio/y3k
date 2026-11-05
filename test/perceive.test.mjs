@@ -122,9 +122,10 @@ ok('it is wired to the camera the app already has, and pins its version', () => 
   assert.ok(/let faceWanted = false, handsWanted = false, camViewWanted = false;/.test(main), 'a tracking switch defaults ON — that is a camera prompt nobody asked for');
   assert.ok(/localStorage\.getItem\('y3k\.face'\) === '1'/.test(main), 'the face switch is opt-out rather than opt-in');
   assert.ok(/hullReport\('perceive:/.test(main), 'the eye does not report damage to the hull');
-  // the importmap is how this house adds a library, and the CDN path IS the
-  // version: @latest would re-download everything and change behaviour
-  assert.ok(/"@mediapipe\/tasks-vision": "https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@1\.0\.1\//.test(html), 'tasks-vision is not pinned in the importmap');
+  // the importmap is how this house adds a library, and the path IS the
+  // version: @latest would re-download everything and change behaviour (served
+  // from src/vendor since 2026-11-05, not jsDelivr)
+  assert.ok(/"@mediapipe\/tasks-vision": "\/src\/vendor\/tasks-vision@1\.0\.1\/vision_bundle\.mjs"/.test(html), 'tasks-vision is not pinned in the importmap, from src/vendor');
   assert.ok(!/tasks-vision@latest/.test(html + src), 'a @latest pin would change under us');
 });
 

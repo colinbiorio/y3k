@@ -96,6 +96,8 @@ One module owns the camera-derived perception loop. Rules:
 
 **`@mediapipe/tasks-vision@1.0.1`, Apache-2.0, zero runtime dependencies.** ESM entry `vision_bundle.mjs`. All of the following was fetched and verified on 2026-09-19 — URLs returned 200, sizes are real `content-length` bytes.
 
+Since 2026-11-05 the bundle and the wasm are served from the site itself (`/src/vendor/tasks-vision@1.0.1/`, byte-for-byte the published package; y3k-code/RELEASE.md); the URLs below are where they came from when this was written.
+
 ```
 https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs      152 KB
 https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm/                  (FilesetResolver base)
