@@ -309,7 +309,7 @@ ok('an absent time is absent everywhere it is stored', () => {
     assert.match(main, /import \{[^}]*\baccountHere\b[^}]*\} from '\.\/brain\.js';/);
     assert.match(main, /asked\.then\(\(late\) => \{ if \(late && !account && !authBusy\) \{ account = late; enterApp\(\); \} \}\)/);
     const door = main.slice(main.indexOf('function enterApp() {'), main.indexOf('enterApp.now = function'));
-    assert.match(door, /\n  if \(account && loginEl\?\.classList\.contains\('gone'\)\) claimBrowser\(account\);\n/,
+    assert.match(door, /\n  if \(account && loginEl\?\.classList\.contains\('gone'\)\) \{ claimBrowser\(account\); remoteEye\.start\(\); \}\n/,
       'a late sign-in after the guest went in leaves this browser the guest\'s');
   });
 

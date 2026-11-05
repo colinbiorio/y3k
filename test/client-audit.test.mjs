@@ -126,7 +126,7 @@ await ok('every way out forgets, and every way in claims, before anything reads 
   const main = read('src/main.js');
   const terms = main.slice(main.indexOf('function askTerms()'), main.indexOf('// YOUR OWN SIGN-IN, OFFERED TO THE SITE'));
   assert.ok(/forgetAccount\(\);[^\n]*\n\s*location\.reload\(\);/.test(terms), 'the terms card\'s sign-out leaves the keys behind');
-  const door = main.slice(main.indexOf('enterApp.now = function enterAppNow() {'), main.indexOf('remoteEye.start();'));
+  const door = main.slice(main.indexOf('enterApp.now = function enterAppNow() {'), main.indexOf('if (account) remoteEye.start();'));
   assert.ok(/claimBrowser\(account\);/.test(door), 'entering does not check whose keys these are');
   // and the page says so where the key is pasted
   assert.match(set, /is never saved on the server\. Signing out removes it from this browser\./);

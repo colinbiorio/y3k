@@ -103,7 +103,11 @@ const SLIDER_NAMES = { stability: 'Stability', speed: 'Speed' };
 // camera does needs to know its live state, not guess it.
 // wake: the one-click OpenRouter key (src/openrouter.js createWake, made once
 // in main.js and pressed from here and from the room's wake card)
-export function createSettings(body, { music, cameraIsOn = null, setFace = null, setHands = null, setCamView = null, wake = null } = {}) {
+export function createSettings(body, { music, cameraIsOn = null, setFace = null, setHands = null, setCamView = null, wake = null,
+  isSignedIn = () => true } = {}) {
+  // A GUEST'S SETTINGS DO NOT ASK FOR AN ACCOUNT'S THINGS. The shelf, the usage and the other
+  // devices are an account's: asked as a guest they answered 401, a console error each, the
+  // devices again every 2.5 s while the pane stayed open (a guest scout, 5 Nov 2026).
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -1027,6 +1031,7 @@ function kommandPane() {
     {
       const list = $('shelf-list'), status = $('shelf-status'), give = $('shelf-give');
       const paintShelf = async () => {
+        if (!isSignedIn()) { list.textContent = 'Sign in to give your presence a text.'; return; }
         try {
           const r = await fetch('/api/shelf');
           if (r.status === 401) { list.textContent = 'Sign in to give your presence a text.'; return; }
@@ -1331,7 +1336,7 @@ function kommandPane() {
       let lastScreens = '';
       const NONE = 'No other device of yours is signed in right now.';
       const fill = async () => {
-        const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
+        const r = !isSignedIn() ? null : await fetch('/api/remote/screens', { credentials: 'same-origin' })
           .then((x) => x.json()).catch(() => null);
         // NEVER OFFER THIS DEVICE ITSELF. It already has its own camera, and a
         // device feeding itself would round-trip its own hands through Oregon.
@@ -2112,7 +2117,7 @@ function kommandPane() {
     const el = $('usage-panel');
     if (!el) return;
     let v;
-    try { v = (await fetch('/api/usage').then((x) => x.json())).usage; } catch { /* fall through */ }
+    if (isSignedIn()) try { v = (await fetch('/api/usage').then((x) => x.json())).usage; } catch { /* fall through */ }
     if (!v) { el.textContent = 'Sign in to see your usage.'; return; }
     const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
     // The days as a skyline (pattern after Bklit UI's design-engineered charts,

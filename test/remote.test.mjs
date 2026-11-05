@@ -333,7 +333,7 @@ ok('every signed-in device announces itself, not only one that wants something',
   const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
   // Both pickers are lists of the OTHER devices, so a device that only
   // announced itself when it wanted an eye could never be lent one.
-  const at = main.indexOf('remoteEye.start();');
+  const at = main.indexOf('if (account) remoteEye.start();');   // the door's (a guest who signs in late is announced from enterApp)
   assert.ok(at > 0, 'nothing announces the device');
   assert.ok(at > main.indexOf('enterApp.now = function'), 'it announces before anyone is signed in — the routes answer 401');
   assert.ok(at < main.indexOf('body.setMood(\'excited\')'), 'it announces late enough to miss the list');

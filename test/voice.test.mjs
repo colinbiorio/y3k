@@ -258,9 +258,9 @@ await ok('Kamera: the device list and the lend/borrow notes refresh while the Ka
   const lender = { to: () => null, status: () => ({}), start() {}, stop() {} };
   let tick = null;
   const modal = { hidden: false }, doc = { hidden: false, createElement: () => ({}) }, onPaneShown = {};
-  const pane = new Function('link', 'lender', 'lendEl', 'lendNote', 'borrowEl', 'borrowNote', 'handsEl', 'modal', 'document', 'onPaneShown', 'fetch', 'setInterval', 'window',
+  const pane = new Function('link', 'lender', 'lendEl', 'lendNote', 'borrowEl', 'borrowNote', 'handsEl', 'modal', 'document', 'onPaneShown', 'fetch', 'setInterval', 'window', 'isSignedIn',
     `let shownPane = 'kamera';\n${src}\nreturn (p) => { shownPane = p; };`)(
-    link, lender, lendEl, lendNote, borrowEl, borrowNote, null, modal, doc, onPaneShown, fetch, (fn) => { tick = fn; }, {});
+    link, lender, lendEl, lendNote, borrowEl, borrowNote, null, modal, doc, onPaneShown, fetch, (fn) => { tick = fn; }, {}, () => true);
   await settle();
   assert.equal(lendNote.textContent, 'No other device of yours is signed in right now.');
   // the phone signs in while the Mac's Kamera tab is open
@@ -458,9 +458,9 @@ console.log('\nthe voice, on your own key only:');
       // the Usage pane: the person's own ledger, whatever an older server sends
       const empty = { requests: 0, in: 0, out: 0, cost: 0 };
       let usage = null;
-      const pane = new Function('$', 'fetch', 'esc', 'reducedMotion', 'animate',
+      const pane = new Function('$', 'fetch', 'esc', 'reducedMotion', 'animate', 'isSignedIn',
         `${cut('  const money = (n)', '\n  }\n')}\nreturn { refreshUsage };`)(
-        $, async () => ({ json: async () => usage }), (s) => String(s), () => true, () => {});
+        $, async () => ({ json: async () => usage }), (s) => String(s), () => true, () => {}, () => true);
       usage = { usage: { lifetime: { ...empty, requests: 3, cost: 0.42 }, today: empty, byDay: [], byModel: [] },
         house: { brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice: { usedChars: 1200, capChars: 20000, siteResting: false } } };
       await pane.refreshUsage();

@@ -1976,6 +1976,19 @@ body.panel-open .budget-pop { opacity: 0; pointer-events: none; visibility: hidd
 .profile-stats .stat { text-align: center; }
 .profile-stats .stat b { display: block; font-size: 1.15rem; color: #efeefb; }
 .profile-stats .stat span { font-size: 0.72rem; color: #8f8ca2; letter-spacing: 0.02em; }
+/* ON A PHONE THE THIRD COUNT FELL OFF THE PANEL: face, 32px, and three counts 32px apart are wider than
+   the room between the rails at 390px ("0 posts" sat under the right rail; a guest scout, 5 Nov 2026).
+   There the counts share what is left of the row instead. Desktop is as it was. */
+@media (max-width: 520px) {
+  .profile-top { gap: 14px; }
+  .profile-stats { flex: 1; min-width: 0; gap: 6px; justify-content: space-around; }
+  .profile-stats .stat span { font-size: 0.66rem; }
+}
+/* narrower still (a 320px phone leaves 172px between the rails): the counts go under the face */
+@media (max-width: 360px) {
+  .profile-top { flex-wrap: wrap; }
+  .profile-stats { flex-basis: 100%; justify-content: space-between; }
+}
 .p-name { margin-top: 22px; font-size: 1.05rem; color: #efeefb; font-weight: 600; }
 .p-bio { margin-top: 6px; color: #b8b5c6; font-size: 0.9rem; line-height: 1.5;
   max-width: 460px; overflow-wrap: anywhere; }
