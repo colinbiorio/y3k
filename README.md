@@ -252,6 +252,28 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-05** — **No script on the site comes from a third party.** The
+  camera's vision library (MediaPipe Tasks Vision 1.0.1, Apache-2.0) came from
+  jsDelivr, the one script the site did not serve itself. Its bundle and its
+  two wasm engines (with and without SIMD) are now in
+  `src/vendor/tasks-vision@1.0.1/`, byte-for-byte the published package
+  (checked against the registry's integrity; the README there lists each file's
+  sha-256, and `test/security.test.mjs` checks them), and `script-src` is
+  `'self' 'wasm-unsafe-eval'`, nothing else.
+  - The server sends `.wasm` as `application/wasm`, so the browser compiles it
+    as it streams, and compresses it: brotli makes the 11.76 MB engine 2.86 MB
+    in about 0.2 s (jsDelivr sent 3.05 MB). Brotli at its best would make it
+    2.40 MB but costs about 19 s of a core per engine after every restart, so
+    files over `POLISH_MAX` (4 MB) keep their quick copy.
+  - Still loaded only when the camera is asked for (a dynamic import): the
+    page preloads none of it.
+  - Checked in Chromium against the real server and its policy: a face
+    landmarker made from the vendored engine, the engine served as
+    `application/wasm`, brotli, no request to jsDelivr, nothing refused. Still
+    from elsewhere: the face and hand models (data, from Google's
+    mediapipe-models folder); and the library's call home is still answered
+    by the site itself (THE BEACON).
+
 - **2026-11-04** — **An update no longer leaves the old version behind
   (y3kode 0.3.20).** Each update started the new version as a child of the
   old one, which then only waited. The next update did the same inside the

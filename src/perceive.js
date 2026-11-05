@@ -28,17 +28,21 @@
 // 11,756,954 B · face 3,758,596 B. Over the wire, measured in a browser
 // 2026-09-19: bundle 44 KB · wasm loader 77 KB · wasm 3,051 KB · model not
 // reported (storage.googleapis.com sends no Timing-Allow-Origin). Second
-// turn-on serves the engine from cache: 414 ms to 50 ms.
+// turn-on serves the engine from cache: 414 ms to 50 ms. Served from here
+// since 2026-11-05: the engine goes brotli at 2,860 KB.
 //
 // Turn the readout on with ?reach — same shape as ?perf. Inert without it.
 // ============================================================================
 
-// Pinned, deliberately. The CDN path IS the version: @latest would silently
+// Pinned, deliberately, and served from here (src/vendor/tasks-vision@1.0.1,
+// byte-for-byte the published package; until 2026-11-05 from jsDelivr, so the
+// one script on the site that came from a third party). The path IS the
+// version: @latest would silently
 // re-download everything and change behaviour underneath us. The bare
 // specifier resolves through the importmap in index.html, which is how this
 // house adds a library (three arrives the same way).
 const VISION = '@mediapipe/tasks-vision';
-const WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
+const WASM_BASE = '/src/vendor/tasks-vision@1.0.1/wasm';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 // 7.46 MB uncompressed, and it is most of the difference between face-only and
 // everything — which is why it is behind its own switch and fetched only when

@@ -25,8 +25,10 @@ bridge in it. The lines below that are not ticked are owed, not waived.
       narrowed to what the pages use, and its text is part of each page's tag so
       no returning visitor keeps an old one. Violations are still reported to
       /api/csp-report.
-- [ ] Vendor the camera's vision bundle and wasm too (three.js already is), so
-      no script comes from a third party at all.
+- [x] Vendor the camera's vision bundle and wasm too (three.js already is), so
+      no script comes from a third party at all — done 2026-11-05:
+      `src/vendor/tasks-vision@1.0.1/`, `script-src 'self' 'wasm-unsafe-eval'`;
+      the models (data) still come from Google's mediapipe-models folder.
 - [ ] Run `scripts/code-cloud-spike.mjs` against a real session; build tier A
       (attach) only if it works, otherwise keep tier B (teleport) as it is.
 - [ ] Run each tool for real with the founder's accounts:

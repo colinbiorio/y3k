@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { crossSiteRefused, CROSS_SITE_OK, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceKey, _test } from '../security.mjs';
+import { crossSiteRefused, CROSS_SITE_OK, BASE_HEADERS, appShellCsp, VISION_PKG, inlineScriptHashes, noteCspReport, sourceKey, _test } from '../security.mjs';
 import { pack } from '../src/eyewire.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,18 +128,24 @@ ok('no inline script beyond the hashed ones, no plugins, no framing by others', 
 ok('the enforced policy is as narrow as what the page uses', () => {
   const csp = appShellCsp([]);
   const dir = (name, policy = csp) => policy.split(';').map((d) => d.trim()).find((d) => d.startsWith(name + ' ')) || '';
-  // jsDelivr is anyone's to publish to: only the one pinned vision package
-  const pkg = /https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@([\d.]+)\//;
-  for (const d of ['script-src', 'connect-src']) {
-    assert.match(dir(d), pkg, `${d} names the vision package`);
-    assert.ok(!dir(d).split(/\s+/).includes('https://cdn.jsdelivr.net'), `${d} lets in all of jsDelivr`);
-  }
-  // and its version is the one every importer pins
-  const v = dir('script-src').match(pkg)[1];
+  // no script comes from a third party: the vision package is served from
+  // src/vendor like three.js (it came from jsDelivr until 2026-11-05)
+  assert.equal(dir('script-src'), "script-src 'self' 'wasm-unsafe-eval'", 'script-src is this site and its wasm, nothing else');
+  assert.ok(!/jsdelivr|unpkg|cdnjs/.test(csp), 'a script CDN is back in the policy');
+  // its version is the one every importer pins, at the vendored path, and the
+  // files there are byte-for-byte the published package (its README lists them)
+  const v = VISION_PKG.match(/^\/src\/vendor\/tasks-vision@([\d.]+)\/$/)[1];
   for (const f of ['index.html', 'eye.html', 'src/perceive.js', 'src/eye.js']) {
-    const pins = [...readFileSync(join(ROOT, f), 'utf8').matchAll(/tasks-vision@([\d.]+)/g)].map((m) => m[1]);
+    const text = readFileSync(join(ROOT, f), 'utf8');
+    const pins = [...text.matchAll(/tasks-vision@([\d.]+)/g)].map((m) => m[1]);
     assert.ok(pins.length > 0, `${f} names the vision package`);
     for (const p of pins) assert.equal(p, v, `${f} pins tasks-vision@${p}, the policy @${v}`);
+    assert.ok(!/cdn\.jsdelivr\.net/.test(text), `${f} still loads from jsDelivr`);
+  }
+  const sums = [...readFileSync(join(ROOT, VISION_PKG.slice(1), 'README.md'), 'utf8').matchAll(/^ {4}([0-9a-f]{64}) {2}(\S+)$/gm)];
+  assert.equal(sums.length, 5, 'the bundle and the two engines with their loaders');
+  for (const [, sum, file] of sums) {
+    assert.equal(createHash('sha256').update(readFileSync(join(ROOT, VISION_PKG.slice(1), file))).digest('hex'), sum, `${file} is not the published file`);
   }
   assert.match(dir('connect-src'), /https:\/\/storage\.googleapis\.com\/mediapipe-models\//, 'the models, and only their folder');
   assert.ok(!/\bhttps:\/\/storage\.googleapis\.com(\s|$)/.test(dir('connect-src')), 'all of Google storage');
