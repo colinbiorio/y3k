@@ -59,7 +59,7 @@ await ok('coverage counts the last day of heartbeats: working, resting, gaps', (
   const now = new Date(2026, 10, 4, 17, 30).getTime();
   const log = ['2026-11-04 17:10 working worker=1 turn=2', '2026-11-04 17:11 GAP worker=1 turn=-', '2026-11-04 17:12 resting worker=1 turn=-',
     '2026-11-04 17:13 off worker=- turn=-', '2026-11-02 09:00 GAP worker=1 turn=-', 'garbage'].join('\n');
-  assert.deepEqual(coverageOf(log, now), { minutes: 3, working: 1, resting: 1, gaps: 1, lastGap: new Date(2026, 10, 4, 17, 11).getTime() });
+  assert.deepEqual(coverageOf(log, now), { minutes: 3, working: 1, resting: 1, idle: 0, gaps: 1, lastGap: new Date(2026, 10, 4, 17, 11).getTime() });
   writeFileSync(join(home, 'orion', 'burn', 'heartbeat.log'), log);
   assert.equal(createBurn({ dir, home, now: () => now }).status().coverage.minutes, 3);
 });

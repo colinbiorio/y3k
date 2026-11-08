@@ -5253,6 +5253,7 @@ body.in-code .home-panel-head { display: none; }
 .cv-st.st-new { color: #9be8a0; background: rgba(80, 230, 140, 0.1); }
 .cv-st.st-del { color: #ff8a9e; background: rgba(255, 138, 158, 0.1); }
 .cv-st.st-mod { color: #ffd47a; background: rgba(255, 189, 46, 0.1); }
+.cv-st.st-conflict { color: #ff6b4a; background: rgba(255, 107, 74, 0.14); font-weight: 600; }
 .cv-change { font-size: 0.82rem; }
 .cv-diffs { display: flex; flex-direction: column; gap: 10px; }
 .cv-actrow { display: grid; grid-template-columns: 70px 1fr; gap: 8px; padding: 5px 2px; font-size: 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); overflow-wrap: anywhere; }

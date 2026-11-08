@@ -6,8 +6,9 @@
 // own store (burn.json), it is set only by the kode page's button (burn.set, behind a consent), and
 // the worker only reads it — `burn` on the command line cannot turn it on or off, so no session
 // it runs can flip its own switch.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeJsonAtomic } from './store.mjs';
 
 // WHAT THE TURN IS DOING (0.3.17). Colin: "burn is on rn but there's no active process". It was
 // running, but nothing on screen said so. The worker streams every turn to ~/orion/burn/turn-*.log
@@ -15,18 +16,21 @@ import { join } from 'node:path';
 // which tools it ran. It is read-only and is never sent anywhere but this person's kode.
 const TAIL = 256 * 1024;
 // COVERAGE (0.3.19). The watchdog writes ~/orion/burn/heartbeat.log, one line a minute:
-// "YYYY-MM-DD HH:MM <off|working|resting|GAP> ...". This counts the last day of it, so kode can say
+// "YYYY-MM-DD HH:MM <off|working|resting|idle|GAP> ...". This counts the last day of it, so kode can say
 // how many minutes burn covered and whether any minute had the switch on and nothing running.
+// IDLE (8 Nov): the worker resting between turns that did no work (a conversation that had decided to
+// hold answered every "keep going" in five seconds, 1,500 times, and spent four 5h windows on it).
 export function coverageOf(text, now = Date.now(), span = 24 * 3600 * 1000) {
-  const c = { minutes: 0, working: 0, resting: 0, gaps: 0, lastGap: null };
+  const c = { minutes: 0, working: 0, resting: 0, idle: 0, gaps: 0, lastGap: null };
   for (const line of String(text).split('\n')) {
-    const m = line.match(/^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d) (off|working|resting|GAP)\b/);
+    const m = line.match(/^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d) (off|working|resting|idle|GAP)\b/);
     if (!m) continue;
     const t = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
     if (now - t > span || m[6] === 'off') continue;
     c.minutes++;
     if (m[6] === 'working') c.working++;
     else if (m[6] === 'resting') c.resting++;
+    else if (m[6] === 'idle') c.idle++;
     else { c.gaps++; c.lastGap = t; }
   }
   return c;
@@ -62,6 +66,7 @@ export function createBurn({ dir, home, now = () => Date.now() }) {
     try { pid = Number(readFileSync(join(work, 'worker.pid'), 'utf8').trim()) || null; } catch { /* none */ }
     const running = !!pid && alive(pid);
     const resting = st.resume_at && st.resume_at * 1000 > now() ? Math.round(st.resume_at * 1000) : null;
+    const idle = !resting && st.idle_until && st.idle_until * 1000 > now() ? Math.round(st.idle_until * 1000) : null;   // turns that did no work: it asks again then
     const last = Array.isArray(st.sessions) ? st.sessions.slice(-3) : [];
     let turn = null;
     try {
@@ -78,12 +83,13 @@ export function createBurn({ dir, home, now = () => Date.now() }) {
     const turns = Array.isArray(st.sessions) ? st.sessions.length : 0;
     let coverage = null;
     try { coverage = coverageOf(readFileSync(join(work, 'heartbeat.log'), 'utf8'), now()); } catch { /* no heartbeat yet */ }
-    return { ok: true, available: existsSync(tool), on: !!sw.on, since: sw.since || null, running, resting, last, turns, conversation: st.session_id || null, turn, coverage };
+    return { ok: true, available: existsSync(tool), on: !!sw.on, since: sw.since || null, running, resting, idle, last, turns, conversation: st.session_id || null, turn, coverage };
   }
 
   function set(on) {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify({ on: !!on, since: now(), by: 'kode' }), { mode: 0o600 });
+    // whole or not at all, like every file in the store: the worker reads the switch every minute (a second reader, 2026-11-08)
+    writeJsonAtomic(file, { on: !!on, since: now(), by: 'kode' });
     return status();
   }
 
