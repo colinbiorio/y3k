@@ -86,7 +86,9 @@ export function cleanName(x) {
 // y3k, not as an instruction, and unable to close its own frame.
 export function handoffBlock(h) {
   if (!h || typeof h !== 'object') return '';
-  const clean = (s, n) => String(s || '').replace(/<\/?\s*context[^>]*>/gi, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, n);
+  // the brackets themselves are turned, so no tag can be formed at all: removing <context> once let
+  // "<</context>/context>" join into a closing tag and step out of the frame (a second reader, 2026-11-08)
+  const clean = (s, n) => String(s || '').replace(/</g, '‹').replace(/>/g, '›').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, n);
   const note = clean(h.note, NOTE_MAX);
   if (!note) return '';
   const who = clean(h.name, 60);
@@ -355,7 +357,27 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   // --- sessions -----------------------------------------------------------------
-  async function startSession({ provider, cwd, model, effort, mode, title, named, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
+  // ONE CONVERSATION, LIVE ONCE, WHILE IT STARTS (a second reader, 2026-11-08): the check below for a live
+  // session runs before the awaits of a start (finding the coder, signing in), and the session is registered
+  // only after them, so two resumes a moment apart while the engine was coming up (the page after an update,
+  // a second page, the switch's revival) both passed it and two coders ran on one transcript. A resume being
+  // started is kept here until it is set up, and a second ask for it gets that same session.
+  const starting = new Map();   // `${provider}:${resumeId}` -> the start under way
+  async function startSession(args) {
+    const key = args?.resumeId && !args.fork ? `${args.provider}:${args.resumeId}` : null;
+    if (key && starting.has(key)) {
+      const r = await starting.get(key);
+      if (!r?.ok) return r;
+      audit.write('session.already', { sid: r.sid, resumeId: args.resumeId, resumeOf: isSid(args.resumeOf) ? args.resumeOf : null });
+      if (isSid(args.resumeOf) && args.resumeOf !== r.sid) keeper.follow(args.resumeOf, r.sid);
+      return { ...r, already: true };
+    }
+    const run = startSessionNow(args);
+    if (key) { starting.set(key, run); run.finally(() => starting.delete(key)).catch(() => {}); }
+    return run;
+  }
+
+  async function startSessionNow({ provider, cwd, model, effort, mode, title, named, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];

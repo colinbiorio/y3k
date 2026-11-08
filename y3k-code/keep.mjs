@@ -111,7 +111,9 @@ export function createKeeper({ config, setConfig, now = () => Date.now(), emit, 
     if (disposed || !st.on || st.paused) return;
     const reason = st.waiting?.reason || 'idle';
     let s = sessions.get(st.sid);
-    if (s && s.adapter?.state === 'running') { wait(now() + busyMs, reason); return; }   // its turn is still on: look again
+    // its turn is still on, or it waits on the person (a permission, a question): look again; it spoke over an
+    // open card before (a second reader, 2026-11-08), where the README says it waits for you at the first question
+    if (s && ['running', 'waiting'].includes(s.adapter?.state)) { wait(now() + busyMs, reason); return; }
     if (!s) {
       let r = null;
       try { r = await revive(st); } catch (e) { r = { ok: false, error: String(e?.message || e) }; }
@@ -200,7 +202,7 @@ export function createKeeper({ config, setConfig, now = () => Date.now(), emit, 
     init() {
       const k = config()?.keep;
       if (!k?.on || !k.sid) { st = off(); return; }
-      st = { on: true, sid: k.sid, cwd: k.cwd || null, provider: k.provider || null, since: k.since || now(), waiting: null, paused: k.paused === 'errors' ? 'errors' : null, fails: k.fails | 0 };
+      st = { on: true, sid: k.sid, cwd: k.cwd || null, provider: k.provider || null, since: k.since || now(), waiting: null, paused: ['errors', 'stopped'].includes(k.paused) ? k.paused : null, fails: k.fails | 0 };   // a stop by the person outlives a restart (a second reader, 2026-11-08)
       if (st.paused) { changed(); return; }
       const until = k.waiting?.until && k.waiting.until > now() + restartMs ? k.waiting.until : now() + restartMs;
       wait(until, k.waiting?.reason === 'limit' && until > now() + restartMs ? 'limit' : 'restart');

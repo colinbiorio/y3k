@@ -829,10 +829,10 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const r = await control({ subtype: 'get_usage' });
     const rows = planWindows(r.ok ? r.response?.rate_limits : null);
     if (rows.length) {
-      // percentages (13 for 13%), as Claude's /usage shows them — unless every
-      // one is a fraction already; decided for the set, so 0.5% is not 50%
-      const scale = rows.some((w) => w.utilization > 1) ? 100 : 1;
-      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / scale), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
+      // percentages (13 for 13%), as Claude's /usage shows them, always: a set guessed to be fractions when
+      // every window was at 1% or less drew a fresh plan at 1% as 100% full, and keep going read it as spent
+      // (a second reader, 2026-11-08). If a CLI ever sends fractions this reads low, the safer way to be wrong.
+      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / 100), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
       emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
     }
     return { ok: r.ok };

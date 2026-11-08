@@ -184,11 +184,19 @@ export async function gitStatus(cwd) {
   const r = await git(cwd, ['status', '--porcelain=v2', '--branch', '-z']);
   if (r.code !== 0) return { error: r.stderr.trim().slice(0, 300) || 'not a git repository' };
   const out = { branch: null, ahead: 0, behind: 0, files: [] };
-  for (const rec of r.stdout.split('\0')) {
+  // a rename's record is followed by its old path as a field of its own (-z); read as a record of its own,
+  // an old name starting "1", "2" or "?" threw or made up a file (a second reader, 2026-11-08)
+  const recs = r.stdout.split('\0');
+  for (let i = 0; i < recs.length; i++) {
+    const rec = recs[i];
     if (!rec) continue;
     if (rec.startsWith('# branch.head ')) out.branch = rec.slice(14);
     else if (rec.startsWith('# branch.ab ')) { const m = rec.match(/\+(\d+) -(\d+)/); if (m) { out.ahead = +m[1]; out.behind = +m[2]; } }
-    else if (rec[0] === '1' || rec[0] === '2') { const f = rec.split(' '); out.files.push({ path: f.slice(8 + (rec[0] === '2' ? 1 : 0)).join(' '), index: f[1][0], work: f[1][1] }); }
+    else if (rec[0] === '1' || rec[0] === '2') {
+      const f = rec.split(' ');
+      out.files.push({ path: f.slice(8 + (rec[0] === '2' ? 1 : 0)).join(' '), index: f[1][0], work: f[1][1] });
+      if (rec[0] === '2') i++;   // the old path
+    }
     else if (rec[0] === '?') out.files.push({ path: rec.slice(2), index: '?', work: '?' });
   }
   return out;
