@@ -295,8 +295,10 @@ for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.a
 // download app glyph titled 'download' directly right of the
 // yearthreethousand logo"): a press opens the desktop app for this computer,
 // from the setup the y3kode screen already reads and the computer it already
-// works out; a drag only turns it. Poured in mercury-mount.js.
-wireDownloadGlyph({ el: $('home-download'), setup: () => siteSetup(), platform: () => detectPlatform() });
+// works out; a drag only turns it. Poured in mercury-mount.js. A guest's press
+// asks the site nothing (the setup is an account's: a 401 at every hover, focus
+// and press, a second guest scout, 8 Nov) and opens the newest release.
+wireDownloadGlyph({ el: $('home-download'), setup: () => (account ? siteSetup() : null), platform: () => detectPlatform() });
 
 function enterApp() {
   // next time the card opens on sign in; and a guest's arrival card goes, for

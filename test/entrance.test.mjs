@@ -291,4 +291,14 @@ ok("on touch, the small things a visitor meets first have a finger's reach", () 
   assert.ok(!/\.follow-btn::after[^{]*\{[^}]*inset: -/.test(css), "the follow button's metal line was taken for its reach");
 });
 
+ok("on touch, the mine's tabs and book and Settings' small buttons have a finger's reach too (a second scout, 8 Nov)", () => {
+  const touch = css.slice(css.indexOf('@media (pointer: coarse), (hover: none) {'));
+  const block = touch.slice(0, touch.indexOf('\n}\n'));
+  for (const [sel, inset] of [['.shaft-tabs .login-alt::before', '-8px -7px'], ['.shaft-lex a::before', '-8px -4px -10px'], ['#settings .btn.small::before', '-8px 0']]) {
+    assert.ok(block.includes(`${sel} { content: ''; position: absolute; inset: ${inset}; }`), `no reach for ${sel}`);
+  }
+  assert.ok(block.includes('.shaft-tabs .login-alt, .shaft-lex a, #settings .btn.small { position: relative; }'), 'a reach with nothing to hold it');
+  assert.ok(!/\.btn\.small::before[^{]*\{[^}]*inset: -[^}]*\}/.test(css.slice(0, css.indexOf('@media (pointer: coarse), (hover: none) {'))), 'the reach is given off touch too');
+});
+
 console.log(`\n${passed} entrance checks passed.`);

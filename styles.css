@@ -5588,6 +5588,16 @@ body.in-code .home-panel-head { display: none; }
   #login-toggle::before, #arrive-later::before { content: ''; position: absolute; inset: -7px -6px; }
   .follow-btn::before { content: ''; position: absolute; inset: -7px -4px; }
   .world-bar .login-alt::before { content: ''; position: absolute; inset: -7px -3px; }
+  /* …AND THE ONES A SECOND SCOUT FOUND (8 Nov 2026): the mine's "the dig" and "the ladder" (20px; 14px
+     apart, so 7px each way), its "the book" (15px, reaching more below, away from the tabs), and Settings'
+     small buttons (28px: a guest's "Sign in", the music's Search, Trending and microphone; in rows, so up
+     and down only). Measured on the live site with these rules injected (headless phone, the mine,
+     Settings' Account and Music): 20, 20, 15 and 28 became 36, 33, 34 and 42, and no control's centre is
+     taken that was not taken before (the rail's glyphs lie under the Settings sheet either way). */
+  .shaft-tabs .login-alt, .shaft-lex a, #settings .btn.small { position: relative; }
+  .shaft-tabs .login-alt::before { content: ''; position: absolute; inset: -8px -7px; }
+  .shaft-lex a::before { content: ''; position: absolute; inset: -8px -4px -10px; }
+  #settings .btn.small::before { content: ''; position: absolute; inset: -8px 0; }
   /* a tab's ×: 20px of bead, 44px of reach. The strip of tabs scrolls, and a
      scroller clips what reaches past it, so it takes 7px more above and below
      (given back by its margin: nothing moves); the tabs stand 8px apart, so
