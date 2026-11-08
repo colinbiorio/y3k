@@ -13,8 +13,10 @@ import { run } from './proc.mjs';
 
 const IS_WIN = platform() === 'win32';
 
+// the path as the disk spells it (realpathSync.native): the JS realpath keeps the case it was given, and on
+// macOS's case-insensitive disk /Users/COLIN and ~/library passed every refusal below (a second reader, 2026-11-08)
 function real(p) {
-  try { return realpathSync(p); } catch { return null; }
+  try { return realpathSync.native(p); } catch { try { return realpathSync(p); } catch { return null; } }
 }
 
 // Folders no session may run in, whatever the person clicks: the filesystem
@@ -22,9 +24,11 @@ function real(p) {
 // config, and the OS's app-data trees.
 export function refusalFor(realPath, { configDir } = {}) {
   if (!realPath) return 'That folder does not exist.';
+  realPath = real(realPath) || realPath;   // as the disk spells it, however it was handed in
   const home = real(homedir()) || homedir();
   if (realPath === sep || /^[A-Za-z]:\\?$/.test(realPath)) return 'Not the whole disk — pick a project folder.';
   if (realPath === home) return 'Not your whole home folder — pick a project folder inside it.';
+  if (home.startsWith(realPath.endsWith(sep) ? realPath : realPath + sep)) return 'Not a folder that holds your home folder — pick a project folder inside it.';   // /Users holds ~/.ssh
   if (realPath.split(/[\\/]/).some((seg) => seg.startsWith('.') && seg.length > 1)) return 'Hidden folders are off limits (they hold keys and settings).';
   // The settings folder is compared RESOLVED, like the path: on macOS the
   // temp tree is /var/folders → /private/var/folders, and an unresolved

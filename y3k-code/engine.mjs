@@ -731,7 +731,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       try {
         if (!ownDir(top) || !ownDir(dir)) return { ok: false, error: 'The attachments folder leads out of this folder; nothing was saved.', code: 'refused' };
         const ignore = join(top, '.gitignore');
-        if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { mode: 0o644 });
+        // created, never written through: an existsSync check follows a link, so a .gitignore planted as a link
+        // to somewhere else made y3kode create that file outside the folder (a second reader, 2026-11-08)
+        try { writeFileSync(ignore, '*\n', { mode: 0o644, flag: 'wx' }); } catch { /* there already, or a link: left alone */ }
         const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
         const file = join(dir, `${stamp}-${randomBytes(2).toString('hex')}-${base}`);
         writeFileSync(file, buf, { flag: 'wx', mode: 0o600 });

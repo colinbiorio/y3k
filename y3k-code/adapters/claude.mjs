@@ -25,7 +25,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { resolve as resolvePath, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, ndjson, resolveBin, run, tempFile } from '../proc.mjs';
-import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified } from '../diff.mjs';
+import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified, previewable } from '../diff.mjs';
 import { toolKind, riskOf, resultText, capOutput, toolTitle } from './base.mjs';
 import { ORB_TOOL_ID } from '../orb.mjs';
 
@@ -351,6 +351,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const kind = toolKind(name);
     const abs = (p) => (p ? (isAbsolute(p) ? p : resolvePath(cwd, p)) : p);
     try {
+      // A PREVIEW READS ONLY INSIDE THE FOLDER (diff.mjs previewable): outside it, the card names the path, no diff
+      if ((name === 'Edit' || name === 'Write') && !previewable(abs(input.file_path), cwd)) return { path: input.file_path, diff: null, outside: true };
       if (name === 'Edit') {
         const d = editPreview(abs(input.file_path), input.old_string, input.new_string, !!input.replace_all);
         return { path: input.file_path, diff: d ? [d] : null };
