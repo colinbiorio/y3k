@@ -252,6 +252,25 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **The keys go only where the eyes can** (`src/inert-hidden.js`).
+  The guest scout's desktop pass (1440×900, read only) found the desktop
+  clean to the eye, and then tabbed through it: every control that can be
+  seen shows its focus, but the page hides its chrome by `opacity: 0;
+  pointer-events: none`, which a mouse obeys and Tab does not. Twelve
+  controls nobody could see took focus behind the entrance card (the chat
+  bar's input among them: typing went into a box that was not there), the
+  same twelve under the feed, two at home. And the header's back button opts
+  back into pointer events (the header never blocks the orb), so while the
+  header was hidden the invisible "‹ home" still took taps: on a phone at
+  home, over the 4irden portal's edge. Now hidden chrome is `inert` (out of
+  the tab order, of a screen reader's reach and of every pointer, drawn
+  exactly as before): the chat bar, the portal, the life glyph, the name and
+  the camera popup when their own pointer events go off, the header by its
+  two hiding rules (gated, in-home). Tried on the live site with the files
+  swapped in: 26 hidden focus stops became 0, every visible one still shows
+  its focus, and the phone's corner tap no longer finds the invisible
+  button. Test: `test/inert-hidden.test.mjs` (the wiring fails on the old
+  main.js).
 - **2026-11-08** — **A second guest scout, on a phone.** The first scout's two
   walks run again on the live site after #88–#96 (headless, read only, every
   browser closed): its ten findings stay fixed, no page errors, no sideways
