@@ -252,6 +252,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **A second reader's ten (y3kode 0.3.21).** A separate reader
+  went through y3kode for bugs and showed each with a script that failed;
+  each is fixed and kept in `test/code-reader.test.mjs` (and shell.run's in
+  `code-engine`). Security first: **a shell line is asked about whole** (the
+  person was shown the first 400 characters while the shell ran up to 4,000;
+  a longer line is now refused, and long runs of spaces are said, not drawn);
+  **a preview reads only inside the folder** (to preview a proposed Write or
+  Edit, the engine read the target before Claude Code's deny rules applied,
+  so a turn proposing to write `~/.ssh/id_ed25519` put the key on the page and
+  in the session file); **folder refusals hold as the disk spells them** (on a
+  case-insensitive disk the home folder and y3kode's own settings folder in
+  other case could be trusted; a folder that holds home is refused too); and
+  `files.put` never writes through a `.gitignore` planted as a link. Then:
+  git status reads renames right; a resume being started is one session to a
+  second ask (two coders on one conversation while the engine came up); keep
+  going keeps a person's stop across a restart and waits while a question is
+  open; the plan meter reads usage as percent (1% was drawn full); the
+  presence's note cannot close its own frame; and Gemini allows the orb
+  unasked only with the orb's own arguments.
+
 - **2026-11-08** — **A finger's reach for the small things a visitor meets
   first.** On touch, a post's votes, reply and "···" (27–30px), "have an
   account? sign in" (18px), "not now" (20px), follow, and the world bar's
