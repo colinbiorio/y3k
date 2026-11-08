@@ -5576,6 +5576,17 @@ body.in-code .home-panel-head { display: none; }
   .x::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; }
   .win-lights { gap: 30px; padding: 0 7px; }
   .win-light::before { content: ''; position: absolute; inset: -15px; }
+  /* A FINGER'S REACH FOR THE SMALL ONES A VISITOR MEETS FIRST (a guest scout, 5 Nov 2026): a post's votes,
+     reply and "···" (27-30px), "have an account? sign in" (18px), "not now" (20px), follow, and the world
+     bar's walk in, ride, the map, home (18px). The footer's buttons stand 4px apart, so they reach up and
+     down only; the world bar's rows stand 13px apart, so a pixel of overlap where the later one wins.
+     Measured on the live site (headless phone): all twelve met reach 32px or more; no control's centre is
+     taken by another's reach. .follow-btn::after is its metal line, so its reach is ::before. */
+  .vote-btn, .reply-btn, .post-flag, #login-toggle, #arrive-later, .world-bar .login-alt { position: relative; }
+  .vote-btn::before, .reply-btn::before, .post-flag::before { content: ''; position: absolute; inset: -8px 0; }
+  #login-toggle::before, #arrive-later::before { content: ''; position: absolute; inset: -7px -6px; }
+  .follow-btn::before { content: ''; position: absolute; inset: -7px -4px; }
+  .world-bar .login-alt::before { content: ''; position: absolute; inset: -7px -3px; }
   /* a tab's ×: 20px of bead, 44px of reach. The strip of tabs scrolls, and a
      scroller clips what reaches past it, so it takes 7px more above and below
      (given back by its margin: nothing moves); the tabs stand 8px apart, so

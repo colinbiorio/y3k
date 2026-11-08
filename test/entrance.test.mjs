@@ -280,4 +280,15 @@ ok('a guest is told to sign in, not given a box or a prompt the server will refu
   assert.ok(/const form = thread\.querySelector\('\.thread-form'\);\s*if \(!form\) return;/.test(social), 'a guest\'s thread throws without its form');
 });
 
+ok("on touch, the small things a visitor meets first have a finger's reach", () => {
+  const touch = css.slice(css.indexOf('@media (pointer: coarse), (hover: none) {'));
+  const block = touch.slice(0, touch.indexOf('\n}\n'));
+  for (const [sel, inset] of [['.vote-btn::before, .reply-btn::before, .post-flag::before', '-8px 0'], ['#login-toggle::before, #arrive-later::before', '-7px -6px'],
+    ['.follow-btn::before', '-7px -4px'], ['.world-bar .login-alt::before', '-7px -3px']]) {
+    assert.ok(block.includes(`${sel} { content: ''; position: absolute; inset: ${inset}; }`), `no reach for ${sel}`);
+  }
+  assert.ok(block.includes('.vote-btn, .reply-btn, .post-flag, #login-toggle, #arrive-later, .world-bar .login-alt { position: relative; }'), 'a reach with nothing to hold it');
+  assert.ok(!/\.follow-btn::after[^{]*\{[^}]*inset: -/.test(css), "the follow button's metal line was taken for its reach");
+});
+
 console.log(`\n${passed} entrance checks passed.`);

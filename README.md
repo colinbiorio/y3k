@@ -252,6 +252,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **A finger's reach for the small things a visitor meets
+  first.** On touch, a post's votes, reply and "···" (27–30px), "have an
+  account? sign in" (18px), "not now" (20px), follow, and the world bar's
+  walk in, ride, the map and home (18px) were under a fingertip. Each now has
+  an invisible reach (`::before`, in the touch block with the others): the
+  footer's buttons stand 4px apart, so they reach up and down only. Nothing
+  moves. Measured on the live site with the rules injected (headless phone):
+  all twelve reached 32px or more after (none did before), and no control's
+  centre is taken by another's reach.
+
 - **2026-11-08** — **Back stays on the site.** No view added a history entry,
   so on a phone the back gesture with the feed, a profile, the world or a
   game open left the site for whatever page came before. Now opening a view
