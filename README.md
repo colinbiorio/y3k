@@ -252,6 +252,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **A sheet holds the keys while it is open** (`src/inert-hidden.js`).
+  Tabbing into Settings on the live site (desktop, a guest): opened from its
+  glyph by the keyboard, focus stayed on the glyph behind the sheet's veil;
+  Tab went to seventeen controls behind it in thirty stops; Escape did
+  nothing. Now, while a sheet is open, what lies behind it is inert (not the
+  sheets, a question asked over one, or the toast); focus goes into it unless
+  it put focus there itself; Escape closes it by its own close button (a key
+  a select's list or a question already answered is left alone); and when it
+  closes, focus goes back to what opened it. One owner decides inert for the
+  hidden chrome and the sheets, so neither undoes the other. A sheet is open
+  when it is on screen: four open by `hidden`, three (go live, compose,
+  profile) by an `.open` class; read by `hidden` alone, a closed compose sheet
+  held the whole page inert and the entrance could not be passed (caught on
+  the live site with the file swapped in, and kept by the test). Tried there:
+  focus into Settings, no stop behind it, Escape closes it and focus comes
+  home; the hidden chrome still takes no focus, and every visible control is
+  still hit on desktop and phone. Test in `inert-hidden` (the sheet, a
+  question over it, a key already answered; fails on the module before).
 - **2026-11-08** — **The keys go only where the eyes can** (`src/inert-hidden.js`).
   The guest scout's desktop pass (1440×900, read only) found the desktop
   clean to the eye, and then tabbed through it: every control that can be

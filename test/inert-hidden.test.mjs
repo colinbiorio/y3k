@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wireInert, BY_POINTER, HUD_HIDDEN_BY } from '../src/inert-hidden.js';
+import { installDom } from './fakes/mini-dom.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -86,6 +87,50 @@ await ok('main.js wires it; the header mirrors exactly the rules that hide it; e
   assert.ok(/body\.panel-open #portal, body\.gated #portal, body\.viewing #portal \{ opacity: 0; pointer-events: none; \}/.test(css));
   assert.ok(/body\.panel-open #nav-life, body\.gated #nav-life, body\.viewing #nav-life \{ opacity: 0; pointer-events: none; \}/.test(css));
   assert.ok(/body\.cam-on #cam-popup \{ opacity: 1; transform: none; pointer-events: auto; \}/.test(css));
+});
+
+await ok('a sheet: focus goes in, what lies behind it is inert (not a question asked over it, nor the toast), Escape closes it by its own button, focus comes back', () => {
+  const doc = installDom();
+  doc.getElementById ||= (id) => doc.querySelector('#' + id);
+  const el = (tag, attrs = {}, kids = []) => { const e = doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k === 'id') e.id = v; else e.setAttribute(k, v); } for (const k of kids) e.appendChild(k); return e; };
+  const glyph = el('button', { id: 'nav-settings' });
+  const nav = el('nav', { id: 'home-nav' }, [glyph]);
+  const chat = el('div', { id: 'chat' }, [el('textarea', { id: 'chat-input' })]);
+  const toast = el('div', { id: 'toast' });
+  const close = el('button', { class: 'x mercury', id: 'settings-close', 'aria-label': 'Close' });
+  const tab = el('button', { class: 'set-tab' });
+  const settings = el('div', { id: 'settings', class: 'modal' }, [el('div', { class: 'sheet' }, [el('div', { class: 'sheet-head' }, [close]), el('div', { class: 'sheet-body' }, [tab])])]);
+  settings.hidden = true;
+  close.addEventListener('click', () => { settings.hidden = true; });   // the sheet's own close
+  const compose = el('div', { id: 'compose-modal', class: 'modal compose-modal' });   // opens by an .open class; closed, display none
+  for (const c of [nav, chat, toast, compose, settings]) doc.body.appendChild(c);
+  const observers = [];
+  const win = { getComputedStyle: (e) => ({ pointerEvents: 'auto', display: e.classList.contains('compose-modal') && !e.classList.contains('open') ? 'none' : 'block' }), MutationObserver: class { constructor(cb) { this.cb = cb; observers.push(this); } observe() {} } };
+  const keys = []; const was = doc.addEventListener; doc.addEventListener = (t, fn) => { if (t === 'keydown') keys.push(fn); else was(t, fn); };
+  const sync = wireInert({ doc, win });
+  doc.addEventListener = was;
+  assert.equal(observers.length, 3, 'the body\'s class and each sheet are not all watched');
+  assert.equal(!!nav.inert, false, 'a sheet that opens by its class, closed, held the page inert (the entrance could not be passed)');
+  const press = (key, answered = false) => { const e = { key, defaultPrevented: answered, preventDefault() { this.defaultPrevented = true; } }; for (const k of keys) k(e); };
+  glyph.focus();
+  settings.hidden = false; sync();   // opened by its glyph, from the keyboard
+  assert.ok(settings.contains(doc.activeElement), 'focus stayed behind the sheet, on what opened it');
+  assert.deepEqual([nav.inert, chat.inert, toast.inert, settings.inert].map(Boolean), [true, true, false, false], 'what lies behind the sheet can be tabbed to');
+  const scrim = el('div', { class: 'consent-scrim' }, [el('button', { class: 'consent-cancel' })]);
+  doc.body.appendChild(scrim); sync();
+  assert.equal(!!scrim.inert, false, 'a question asked over the sheet was made inert');
+  scrim.remove?.(); if (scrim.parentNode) scrim.parentNode.removeChild(scrim);
+  press('Escape', true);
+  assert.equal(settings.hidden, false, 'a key already answered (a select\'s list) closed the sheet');
+  press('Escape'); sync();
+  assert.equal(settings.hidden, true, 'Escape did not close the sheet');
+  assert.deepEqual([nav.inert, chat.inert].map(Boolean), [false, false], 'the page stayed inert after the sheet closed');
+  assert.equal(doc.activeElement, glyph, 'focus did not come back to what opened the sheet');
+  // the chrome's own rule still holds with a sheet closed (one owner for both)
+  const hiddenChat = { getComputedStyle: (e) => ({ pointerEvents: e === chat ? 'none' : 'auto' }) };
+  win.getComputedStyle = (e) => ({ ...hiddenChat.getComputedStyle(e), display: e === compose ? 'none' : 'block' }); sync();
+  assert.equal(chat.inert, true, 'the hidden chat bar is not inert once the sheet has closed');
+  assert.match(read('src/inert-hidden.js'), /consent-scrim/, 'a question asked over a sheet is not named among what stays over it');
 });
 
 console.log(`\n${passed} checks passed.`);
