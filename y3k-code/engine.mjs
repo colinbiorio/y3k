@@ -100,6 +100,8 @@ export function handoffBlock(h) {
 // (orb.mjs) is there. Null: no orb tool for the coders.
 // `update`: { site, root, restart({ dir, version }), fetchFn? } from a host that
 // can run a newer version in this one's place (update.mjs); null: it cannot.
+const SHELL_SHOWN = 400;   // the longest line the person is asked about whole (shell.run)
+
 export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null, keep = {} } = {}) {
   const bus = createBus();
   const audit = createAudit(store.auditDir);
@@ -632,9 +634,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (t.error) return { ok: false, error: t.error, code: t.code };
       const c = String(command || '').trim();
       if (!c) return { ok: false, error: 'Nothing to run.' };
+      // WHAT IS SAID YES TO IS WHAT RUNS (a second reader, 2026-11-08): the person was shown the first
+      // SHELL_SHOWN characters and the shell ran up to 4000, so a line padded past them ran a part nobody
+      // read, and the audit did not have it either. A line too long to be read whole is not run.
+      if (c.length > SHELL_SHOWN) return { ok: false, code: 'too-long', error: `A line over ${SHELL_SHOWN} characters is not run: it could not be shown whole to say yes to. Put it in a script and run that.` };
       // a page can ask; this computer says yes (CODE.md, line 7) — every line
-      if (!(await ask('shell.run', { folder: t.real, command: c.slice(0, 400) }))) return { ok: false, code: 'declined', error: 'Not run.' };
-      audit.write('shell', { cwd: t.real, command: c.slice(0, 400) });
+      if (!(await ask('shell.run', { folder: t.real, command: c }))) return { ok: false, code: 'declined', error: 'Not run.' };
+      audit.write('shell', { cwd: t.real, command: c });
       const win = platform() === 'win32';
       const sh = win ? (env.ComSpec || 'cmd.exe') : (env.SHELL || '/bin/sh');
       const args = win ? ['/d', '/s', '/c', c] : ['-c', c];

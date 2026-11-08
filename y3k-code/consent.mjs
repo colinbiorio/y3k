@@ -57,7 +57,8 @@ export function describe(kind, d = {}) {
       'lucid runs here: Claude, on your own Claude sign-in, looks at a dreamed picture and decides what to do, about once every few seconds, and SD-Turbo dreams the next picture on this computer\'s graphics chip. Each moment uses your Claude plan. It rests when you stop it, or when no page has looked at it for ten minutes.'].join('\n');
     // the terminal's own line (0.3.10): what will run, where — the page asked,
     // this computer says yes, every time
-    case 'shell.run': return `Run this in ${shown(d.folder)}?\n  ${shown(d.command)}`;
+    // a long run of spaces or tabs is said, not drawn, so it cannot push a tail out of sight (a second reader, 2026-11-08)
+    case 'shell.run': return `Run this in ${shown(d.folder)}?\n  ${shown(d.command).replace(/[ \t]{4,}/g, (m) => ` [${m.length} ${/\t/.test(m) ? 'blanks' : 'spaces'}] `)}`;
     default: return `${kind}: ${spelled(JSON.stringify(d))}`;
   }
 }
