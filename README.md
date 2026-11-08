@@ -252,6 +252,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **Back stays on the site.** No view added a history entry,
+  so on a phone the back gesture with the feed, a profile, the world or a
+  game open left the site for whatever page came before. Now opening a view
+  from the orb pushes one entry (`src/back.js`; never a stack: views change
+  within it), Back pops it and comes home to the orb, and coming home by the
+  site's own controls takes the entry back quietly, so the next Back is the
+  browser's own. Tried before shipping on the live site with the new files
+  swapped in (headless phone): feed, Back, still on the site at the orb; feed,
+  the orb glyph, Back, gone to the page before. `test/back.test.mjs`.
+
 - **2026-11-05** — **A guest is told to sign in, not handed what will be
   refused.** A guest was given a reply box under every post and the report
   prompt behind "···", and their votes were sent, all for the server to answer
