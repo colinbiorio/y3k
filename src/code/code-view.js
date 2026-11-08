@@ -1218,11 +1218,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   const BURN_NOTE = 'While this is on, this computer keeps Orion working by itself through every usage window: every five '
     + 'minutes it makes sure one unattended Claude Code session is working on the open work in ~/orion/now.md, in auto '
     + 'permission mode, so the safety checks stay on. When a session ends it is told to keep going at once; at a limit it '
-    + 'rests until the limit resets and starts again the moment it does. It never posts, publishes or deploys, and keeps the Mac awake only while a session runs. Only this '
+    + 'rests until the limit resets and starts again the moment it does. A session that finds nothing to do is started fresh, and if that one finds nothing either, '
+    + 'it rests a while (15 minutes to an hour) before it is asked again. It never posts, publishes or deploys, and keeps the Mac awake only while a session runs. Only this '
     + 'button turns it on or off.';
   function burnTitle(b) {
     if (!b?.on) return 'Burn: off. Press to keep Orion working through every usage window';
     if (b.resting) return `Burn: on · resting until the limit resets at ${at(b.resting)} · press to switch off`;
+    if (b.idle) return `Burn: on · nothing to do, asking again at ${at(b.idle)} · press to switch off`;
     if (b.running) return 'Burn: on · a session is working now · press to switch off';
     return 'Burn: on · the next session starts within five minutes · press to switch off';
   }
@@ -1231,6 +1233,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   const ago = (ms) => { const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
   function burnLine(b) {
     if (b.resting) return `Burn · resting until the limit resets at ${at(b.resting)}; it starts again then`;
+    if (b.idle) return `Burn · its last turns found nothing to do; it asks again at ${at(b.idle)}`;
     const n = b.turns ? ` · turn ${b.turns + (b.running ? 1 : 0)}` : '';
     if (b.running && b.turn) {
       const lastTool = [...(b.turn.feed || [])].reverse().find((f) => f.kind === 'tool');
@@ -3785,7 +3788,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s) return;
     const files = s.git?.files || [];
     const list = h('div.cv-hist', files.map((f) => {
-      const b = h('button.cv-histrow.cv-change', { type: 'button' }, h('span', h('code.cm.cv-st.st-' + (f.work === '?' ? 'new' : f.work === 'D' || f.index === 'D' ? 'del' : 'mod'), f.work === '?' ? 'new' : (f.index !== '.' ? f.index : f.work)), ' ', f.path));
+      const b = h('button.cv-histrow.cv-change', { type: 'button' }, h('span', h('code.cm.cv-st.st-' + (f.conflict ? 'conflict' : f.work === '?' ? 'new' : f.work === 'D' || f.index === 'D' ? 'del' : 'mod'), f.conflict ? 'conflict' : f.work === '?' ? 'new' : (f.index !== '.' ? f.index : f.work)), ' ', f.path));
       b.addEventListener('click', () => renderChanges(f.path));
       return b;
     }));

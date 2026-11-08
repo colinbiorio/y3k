@@ -252,6 +252,30 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **The reader's second list, and burn when there is nothing to
+  do (y3kode 0.3.22).** What the second reader suspected and could not show,
+  each now with a check that failed on the code before (`test/code-reader.test.mjs`):
+  **a shell line's output is read to its close** (Node promises a child's
+  output only when its pipes close, not at its exit; a line whose child said
+  something as it ended lost it; a child left in the background holds the
+  answer a quarter second at most); **a renamed second opinion stays one**
+  (a rename said `aside: false`, so a renamed /compare could be revived as
+  the conversation); **a thought that threw is over** (its partial words were
+  left "still coming"); **git status lists files left in conflict** by a
+  merge or rebase, and the changes card names them; **burn's switch is
+  written whole** (temp file, then rename, like every file in the store).
+  And **burn says when it has nothing to do**: on 7–8 November its
+  conversation, its focus finished, answered every "keep going" in five
+  seconds, 1,500 times, and spent four 5-hour windows that way. The worker
+  (`~/orion/bin/burn`) now starts a fresh conversation after two turns that
+  do no work, then rests 15, 30, then 60 minutes between them until one
+  works; kode's burn line says "its last turns found nothing to do; it asks
+  again at …", the heartbeat's idle minutes count, and the switch's note says
+  so before it is turned on. Left open: an update deletes versions older than
+  the running one, which could include one another host runs (the desktop
+  app, not released yet); the agent panel decodes folder names lossily (not
+  shown anywhere); whether burn.set should also ask on the computer is
+  Colin's call.
 - **2026-11-08** — **A second reader's ten (y3kode 0.3.21).** A separate reader
   went through y3kode for bugs and showed each with a script that failed;
   each is fixed and kept in `test/code-reader.test.mjs` (and shell.run's in

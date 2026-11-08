@@ -198,6 +198,9 @@ export async function gitStatus(cwd) {
       if (rec[0] === '2') i++;   // the old path
     }
     else if (rec[0] === '?') out.files.push({ path: rec.slice(2), index: '?', work: '?' });
+    // a file left in conflict by a merge or a rebase ("u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>"):
+    // it was not listed at all, so the card said nothing was left to settle (a second reader, 2026-11-08)
+    else if (rec[0] === 'u') { const f = rec.split(' '); out.files.push({ path: f.slice(10).join(' '), index: f[1][0], work: f[1][1], conflict: true }); }
   }
   return out;
 }

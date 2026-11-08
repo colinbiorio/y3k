@@ -4,7 +4,7 @@
 // on the code (shell.run's own check is in code-engine.test.mjs). Each check here failed before its fix.
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import { gitStatus, refusalFor } from '../y3k-code/workspace.mjs';
 import { previewable } from '../y3k-code/diff.mjs';
 import { createKeeper } from '../y3k-code/keep.mjs';
 import { projectDirName } from '../y3k-code/adapters/claude.mjs';
+import { createBurn } from '../y3k-code/burn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -121,6 +122,81 @@ await ok('the presence\'s note cannot close its own frame, and usage is read as 
   const claude = read('y3k-code/adapters/claude.mjs');
   assert.ok(/utilization: Math\.min\(1, w\.utilization \/ 100\)/.test(claude) && !/const scale = rows\.some/.test(claude), 'a plan at 1% is drawn full');
   assert.match(read('y3k-code/adapters/acp.mjs'), /typeof tc\.rawInput\.kommand === 'string' && Object\.keys\(tc\.rawInput\)\.length === 1 &&/, 'Gemini allows the orb by words in a title');
+});
+
+// THE READER'S SECOND LIST (2026-11-08): what it suspected and could not show. Each check below
+// failed on the code before its change; the shell's own was not seen short in 180 runs here, and is
+// kept because Node promises a child's output only at 'close'.
+console.log('\nthe reader\'s second list:');
+
+await ok('a shell line\'s output is read to its close (what a child says as the line ends is not lost), and a child left running does not hold the answer', async () => {
+  const { proj, engine } = trustedEngine('shell-close', { env: { ...process.env, SHELL: '/bin/sh' } });
+  const late = await engine.handle({ cmd: 'shell.run', cwd: proj, command: 'echo now; (sleep 0.1; echo late) &' });
+  const held = await engine.handle({ cmd: 'shell.run', cwd: proj, command: 'echo quick; (sleep 3; echo never) &' });
+  engine.shutdown();
+  assert.equal(late.output, 'now\nlate\n', 'the end of the output was lost');
+  assert.ok(held.output === 'quick\n' && held.ms < 2000, `a child left in the background held the answer ${held.ms} ms`);
+});
+
+await ok('a renamed second opinion stays one (it was made "the conversation" for revival); a name alone makes nothing one', async () => {
+  const { dir, proj, store, engine } = trustedEngine('rename-aside');
+  const rows = [
+    { sid: 'a1a1a1a1a1a1a1a1', provider: 'claude', cwd: proj, providerSessionId: 'p1', title: 'Compare: the two files', aside: true, started: 1 },
+    { sid: 'b2b2b2b2b2b2b2b2', provider: 'claude', cwd: proj, providerSessionId: 'p2', title: 'Compare: an old one', started: 2 },   // before 0.3.12: known by its title
+    { sid: 'c3c3c3c3c3c3c3c3', provider: 'claude', cwd: proj, providerSessionId: 'p3', title: 'the work', aside: false, started: 3 },
+  ];
+  mkdirSync(store.sessionsDir, { recursive: true });
+  writeFileSync(join(store.sessionsDir, 'index.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  for (const [sid, name] of [['a1a1a1a1a1a1a1a1', 'notes'], ['b2b2b2b2b2b2b2b2', 'older notes'], ['c3c3c3c3c3c3c3c3', 'Compare: x and y']]) {
+    assert.equal((await engine.handle({ cmd: 'session.rename', sid, name })).ok, true);
+  }
+  const after = (await engine.handle({ cmd: 'session.list' })).sessions;
+  engine.shutdown();
+  const aside = (sid) => after.find((r) => r.sid === sid).aside;
+  assert.deepEqual([aside('a1a1a1a1a1a1a1a1'), aside('b2b2b2b2b2b2b2b2'), aside('c3c3c3c3c3c3c3c3')], [true, true, false], dir);
+});
+
+await ok('a thought that threw is not left "still coming" (brain.partial said done: false for it forever)', async () => {
+  const dir = fresh('partial');
+  const store = createStore(join(dir, 'cfg'));
+  store.setConfig({ signIn: true, ownBrain: { claude: true } });
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(dir, 'claude'), FAKE_CLAUDE_LOG: join(dir, 'fake.log') };
+  const engine = createEngine({ store, consent: async () => true, env, bins: { ...BINS, claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+  rmSync(store.tmpDir, { recursive: true, force: true });
+  writeFileSync(store.tmpDir, 'not a folder');   // the turn's own folder cannot be made: thinkWithClaude throws
+  const tag = 'f'.repeat(32);
+  const r = await engine.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y', tag }).catch((e) => ({ ok: false, threw: String(e) }));
+  const p = await engine.handle({ cmd: 'brain.partial', tag });
+  engine.shutdown();
+  assert.equal(r.ok, false, 'the turn did not fail as set up: ' + JSON.stringify(r));
+  assert.equal(p.done, true, 'the failed turn is still "thinking": ' + JSON.stringify(p));
+});
+
+await ok('git status lists a file left in conflict (the card said nothing was left to settle)', async () => {
+  const repo = fresh('conflict');
+  g(repo, 'init', '-q', '-b', 'main'); writeFileSync(join(repo, 'a b.txt'), 'one\n'); g(repo, 'add', '.'); g(repo, 'commit', '-qm', 'one');
+  g(repo, 'checkout', '-qb', 'side'); writeFileSync(join(repo, 'a b.txt'), 'side\n'); g(repo, 'commit', '-qam', 'side');
+  g(repo, 'checkout', '-q', 'main'); writeFileSync(join(repo, 'a b.txt'), 'main\n'); g(repo, 'commit', '-qam', 'main');
+  try { g(repo, 'merge', '-q', 'side'); } catch { /* the conflict */ }
+  const st = await gitStatus(repo);
+  assert.deepEqual(st.files, [{ path: 'a b.txt', index: 'U', work: 'U', conflict: true }]);
+  assert.match(read('src/code/code-view.js'), /f\.conflict \? 'conflict'/, 'the card does not name a conflict');
+});
+
+await ok('the burn switch is written whole (the worker reads it every minute), and kode says when burn has nothing to do', async () => {
+  assert.ok(/writeJsonAtomic\(file, \{ on: !!on/.test(read('y3k-code/burn.mjs')), 'burn.json is written in place');
+  const dir = fresh('burn'), home = join(dir, 'home'), work = join(home, 'orion', 'burn');
+  mkdirSync(work, { recursive: true });
+  const t = new Date(2026, 10, 8, 14, 0).getTime();
+  writeFileSync(join(work, 'state.json'), JSON.stringify({ idle_until: t / 1000 + 900, idle: 3 }));
+  writeFileSync(join(work, 'heartbeat.log'), '2026-11-08 13:58 working worker=1 turn=2\n2026-11-08 13:59 idle worker=1 turn=-\n');
+  const b = createBurn({ dir: join(dir, 'store'), home, now: () => t });
+  b.set(true);
+  assert.equal(JSON.parse(readFileSync(b.file, 'utf8')).on, true);
+  const st = b.status();
+  assert.equal(st.idle, t + 900_000, 'the rest between turns that did no work is not said');
+  assert.deepEqual([st.coverage.minutes, st.coverage.idle, st.coverage.gaps], [2, 1, 0], 'an idle minute is not counted');
+  assert.match(read('src/code/code-view.js'), /if \(b\.idle\) return `Burn · its last turns found nothing to do/, 'kode says it is working while it rests');
 });
 
 console.log(`\n${passed} reader checks passed.`);

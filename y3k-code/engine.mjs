@@ -35,7 +35,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.21';   // 0.3.21: a second reader's ten (shell.run asks about what runs; previews read only inside the folder; refusals as the disk spells them; live once while starting; keep going keeps a stop, waits on a question)   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.22';   // 0.3.22: the reader's second list (a shell line read to its close; a renamed second opinion stays one; a thought that threw is over; conflicts listed; burn's switch written whole, and its rest when there is nothing to do)   // 0.3.21: a second reader's ten (shell.run asks about what runs; previews read only inside the folder; refusals as the disk spells them; live once while starting; keep going keeps a stop, waits on a question)   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -103,6 +103,7 @@ export function handoffBlock(h) {
 // `update`: { site, root, restart({ dir, version }), fetchFn? } from a host that
 // can run a newer version in this one's place (update.mjs); null: it cannot.
 const SHELL_SHOWN = 400;   // the longest line the person is asked about whole (shell.run)
+const SHELL_DRAIN_MS = 250;   // after the shell exits, how long its output may still come (shell.run)
 
 export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null, keep = {} } = {}) {
   const bus = createBus();
@@ -338,15 +339,18 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     }
     if (thinking >= 2) return { ok: false, code: 'busy', error: 'Your presence is already thinking twice over — try again in a moment.' };
     thinking++;
+    const keyed = typeof tag === 'string' && tag ? tag : null;
     try {
-      const keyed = typeof tag === 'string' && tag ? tag : null;
       if (keyed) partials.set(keyed, '');
       const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort, image,
         ...(keyed ? { onPart: (t) => partials.set(keyed, t) } : {}) });
-      if (keyed) partials.delete(keyed);
       audit.write('brain.complete', { provider, chars: prompt.length, ok: r.ok, code: r.code || null });
       return r;
-    } finally { thinking--; }
+    } finally {
+      thinking--;
+      // a turn that threw is over too: its words are not left "still coming" (a second reader, 2026-11-08)
+      if (keyed) partials.delete(keyed);
+    }
   }
 
   // For Claude Code, Codex and Gemini CLI a key is the person's choice over
@@ -685,7 +689,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
         child.stderr?.setEncoding('utf8').on('data', take);
         timer = setTimeout(() => { try { killTree(child); } catch { /* gone */ } finish(null, `Stopped after ${SHELL_MS / 1000}s.`); }, SHELL_MS);
         child.on('error', (e) => finish(null, String(e?.message || e)));
-        child.on('exit', (code, signal) => finish(code, signal ? `killed by ${signal}` : null));
+        // THE WHOLE OUTPUT (a second reader, 2026-11-08): Node does not promise a child's output is all
+        // read when it exits, only when its pipes close. The answer waits for the close; a child left
+        // running in the background holds them open, so after the exit it waits SHELL_DRAIN_MS at most.
+        const ended = (code, signal) => [code, signal ? `killed by ${signal}` : null];
+        let exited = null;
+        child.on('exit', (code, signal) => { exited = ended(code, signal); setTimeout(() => finish(...exited), SHELL_DRAIN_MS).unref?.(); });
+        child.on('close', (code, signal) => finish(...(exited || ended(code, signal))));
       });
     },
     'git.diff': async ({ cwd, path, staged }) => {
@@ -713,11 +723,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'session.rename': async ({ sid, name }) => {
       if (!isSid(sid)) return { ok: false, error: 'Unknown session.' };
       const s = sessions.get(sid) || null;
-      const row = s ? null : indexRead().find((r) => r.sid === sid);
+      const row = indexRead().find((r) => r.sid === sid) || null;
       if (!s && !row) return { ok: false, error: 'Unknown session.' };
       const title = cleanName(name) || null;
       const named = !!title;
-      indexWrite({ sid, title, named, aside: false });
+      // a name is only a name: a second opinion renamed stays one, and is never revived as the
+      // conversation; anything else is said not to be one, whatever its new name reads like
+      indexWrite({ sid, title, named, aside: isAside(row) });
       audit.write('session.rename', { sid, named });
       const ev = { type: 'session.title', title, named };
       if (s) { s.title = title; s.named = named; s.emit(ev); }
