@@ -19,7 +19,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { spawnChild, stopChild, childEnv, resolveBin, run } from '../proc.mjs';
-import { editPreview, writePreview, parseUnified, countChanges } from '../diff.mjs';
+import { editPreview, writePreview, parseUnified, countChanges, previewable } from '../diff.mjs';
 import { capOutput, resultText } from './base.mjs';
 
 export const CAPS = Object.freeze({
@@ -132,7 +132,8 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
     if (!t && (st.status === 'running' || st.status === 'completed' || st.status === 'error') && Object.keys(input).length) {
       let preview = {};
       try {
-        if (p.tool === 'edit') preview = { path: input.filePath, diff: [editPreview(input.filePath, input.oldString, input.newString, !!input.replaceAll)].filter(Boolean) };
+        if ((p.tool === 'edit' || p.tool === 'write') && !previewable(input.filePath, cwd)) preview = { path: input.filePath, diff: null, outside: true };   // only inside the folder (diff.mjs)
+        else if (p.tool === 'edit') preview = { path: input.filePath, diff: [editPreview(input.filePath, input.oldString, input.newString, !!input.replaceAll)].filter(Boolean) };
         else if (p.tool === 'write') preview = { path: input.filePath, diff: [writePreview(input.filePath, input.content)] };
         else if (kind === 'bash') preview = { command: input.command, cwd: input.workdir || cwd, description: input.description || null };
         else if (kind === 'web') preview = { url: input.url || null, query: input.query || null };

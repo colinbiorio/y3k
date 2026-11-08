@@ -25,7 +25,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { resolve as resolvePath, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, ndjson, resolveBin, run, tempFile } from '../proc.mjs';
-import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified } from '../diff.mjs';
+import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified, previewable } from '../diff.mjs';
 import { toolKind, riskOf, resultText, capOutput, toolTitle } from './base.mjs';
 import { ORB_TOOL_ID } from '../orb.mjs';
 
@@ -351,6 +351,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const kind = toolKind(name);
     const abs = (p) => (p ? (isAbsolute(p) ? p : resolvePath(cwd, p)) : p);
     try {
+      // A PREVIEW READS ONLY INSIDE THE FOLDER (diff.mjs previewable): outside it, the card names the path, no diff
+      if ((name === 'Edit' || name === 'Write') && !previewable(abs(input.file_path), cwd)) return { path: input.file_path, diff: null, outside: true };
       if (name === 'Edit') {
         const d = editPreview(abs(input.file_path), input.old_string, input.new_string, !!input.replace_all);
         return { path: input.file_path, diff: d ? [d] : null };
@@ -827,10 +829,10 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const r = await control({ subtype: 'get_usage' });
     const rows = planWindows(r.ok ? r.response?.rate_limits : null);
     if (rows.length) {
-      // percentages (13 for 13%), as Claude's /usage shows them — unless every
-      // one is a fraction already; decided for the set, so 0.5% is not 50%
-      const scale = rows.some((w) => w.utilization > 1) ? 100 : 1;
-      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / scale), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
+      // percentages (13 for 13%), as Claude's /usage shows them, always: a set guessed to be fractions when
+      // every window was at 1% or less drew a fresh plan at 1% as 100% full, and keep going read it as spent
+      // (a second reader, 2026-11-08). If a CLI ever sends fractions this reads low, the safer way to be wrong.
+      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / 100), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
       emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
     }
     return { ok: r.ok };

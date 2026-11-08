@@ -13,8 +13,10 @@ import { run } from './proc.mjs';
 
 const IS_WIN = platform() === 'win32';
 
+// the path as the disk spells it (realpathSync.native): the JS realpath keeps the case it was given, and on
+// macOS's case-insensitive disk /Users/COLIN and ~/library passed every refusal below (a second reader, 2026-11-08)
 function real(p) {
-  try { return realpathSync(p); } catch { return null; }
+  try { return realpathSync.native(p); } catch { try { return realpathSync(p); } catch { return null; } }
 }
 
 // Folders no session may run in, whatever the person clicks: the filesystem
@@ -22,9 +24,11 @@ function real(p) {
 // config, and the OS's app-data trees.
 export function refusalFor(realPath, { configDir } = {}) {
   if (!realPath) return 'That folder does not exist.';
+  realPath = real(realPath) || realPath;   // as the disk spells it, however it was handed in
   const home = real(homedir()) || homedir();
   if (realPath === sep || /^[A-Za-z]:\\?$/.test(realPath)) return 'Not the whole disk — pick a project folder.';
   if (realPath === home) return 'Not your whole home folder — pick a project folder inside it.';
+  if (home.startsWith(realPath.endsWith(sep) ? realPath : realPath + sep)) return 'Not a folder that holds your home folder — pick a project folder inside it.';   // /Users holds ~/.ssh
   if (realPath.split(/[\\/]/).some((seg) => seg.startsWith('.') && seg.length > 1)) return 'Hidden folders are off limits (they hold keys and settings).';
   // The settings folder is compared RESOLVED, like the path: on macOS the
   // temp tree is /var/folders → /private/var/folders, and an unresolved
@@ -180,11 +184,19 @@ export async function gitStatus(cwd) {
   const r = await git(cwd, ['status', '--porcelain=v2', '--branch', '-z']);
   if (r.code !== 0) return { error: r.stderr.trim().slice(0, 300) || 'not a git repository' };
   const out = { branch: null, ahead: 0, behind: 0, files: [] };
-  for (const rec of r.stdout.split('\0')) {
+  // a rename's record is followed by its old path as a field of its own (-z); read as a record of its own,
+  // an old name starting "1", "2" or "?" threw or made up a file (a second reader, 2026-11-08)
+  const recs = r.stdout.split('\0');
+  for (let i = 0; i < recs.length; i++) {
+    const rec = recs[i];
     if (!rec) continue;
     if (rec.startsWith('# branch.head ')) out.branch = rec.slice(14);
     else if (rec.startsWith('# branch.ab ')) { const m = rec.match(/\+(\d+) -(\d+)/); if (m) { out.ahead = +m[1]; out.behind = +m[2]; } }
-    else if (rec[0] === '1' || rec[0] === '2') { const f = rec.split(' '); out.files.push({ path: f.slice(8 + (rec[0] === '2' ? 1 : 0)).join(' '), index: f[1][0], work: f[1][1] }); }
+    else if (rec[0] === '1' || rec[0] === '2') {
+      const f = rec.split(' ');
+      out.files.push({ path: f.slice(8 + (rec[0] === '2' ? 1 : 0)).join(' '), index: f[1][0], work: f[1][1] });
+      if (rec[0] === '2') i++;   // the old path
+    }
     else if (rec[0] === '?') out.files.push({ path: rec.slice(2), index: '?', work: '?' });
   }
   return out;

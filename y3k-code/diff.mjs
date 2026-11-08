@@ -6,7 +6,8 @@
 // A proposed edit is diffed BEFORE the person is asked to allow it, so the
 // permission card always shows the change first.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 const CONTEXT = 3;
 const MAX_CELLS = 4_000_000; // lines(a) × lines(b) beyond this: show a whole-file replace
@@ -113,6 +114,21 @@ const readOr = (path, fallback) => { try { return readFileSync(path, 'utf8'); } 
 
 // What an Edit would change, computed from the file on disk. `null` when the
 // text to replace is not there (the tool will fail and say so itself).
+// A PREVIEW READS ONLY INSIDE THE FOLDER (a second reader, 2026-11-08). The preview of a proposed Write or
+// Edit read the target to show what it would replace, BEFORE Claude Code applied its deny rules, for any
+// path the model named: a turn proposing to write ~/.ssh/id_ed25519 put the private key on the page and in
+// the session file, though the write itself was refused. Now a target is read only when its real path (its
+// folder's, if it does not exist yet) is inside the session's own folder, which a trusted folder never makes
+// home, a hidden folder or y3kode's settings (workspace.mjs refusalFor). Returns that real path, or null.
+export function previewable(path, cwd) {
+  if (!path || !cwd) return null;
+  const real = (p) => { try { return realpathSync.native(p); } catch { return null; } };
+  const abs = isAbsolute(path) ? path : resolve(cwd, path);
+  const at = real(abs) || ((d) => (d ? join(d, basename(abs)) : null))(real(dirname(abs)));
+  const root = real(cwd);
+  return at && root && (at === root || at.startsWith(root.endsWith(sep) ? root : root + sep)) ? at : null;
+}
+
 export function editPreview(path, oldString, newString, replaceAll = false) {
   const before = readOr(path, null);
   if (before == null || !oldString || !before.includes(oldString)) return null;

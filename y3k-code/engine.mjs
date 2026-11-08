@@ -35,7 +35,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.20';   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.21';   // 0.3.21: a second reader's ten (shell.run asks about what runs; previews read only inside the folder; refusals as the disk spells them; live once while starting; keep going keeps a stop, waits on a question)   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -86,7 +86,9 @@ export function cleanName(x) {
 // y3k, not as an instruction, and unable to close its own frame.
 export function handoffBlock(h) {
   if (!h || typeof h !== 'object') return '';
-  const clean = (s, n) => String(s || '').replace(/<\/?\s*context[^>]*>/gi, '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, n);
+  // the brackets themselves are turned, so no tag can be formed at all: removing <context> once let
+  // "<</context>/context>" join into a closing tag and step out of the frame (a second reader, 2026-11-08)
+  const clean = (s, n) => String(s || '').replace(/</g, '‹').replace(/>/g, '›').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, n);
   const note = clean(h.note, NOTE_MAX);
   if (!note) return '';
   const who = clean(h.name, 60);
@@ -100,6 +102,8 @@ export function handoffBlock(h) {
 // (orb.mjs) is there. Null: no orb tool for the coders.
 // `update`: { site, root, restart({ dir, version }), fetchFn? } from a host that
 // can run a newer version in this one's place (update.mjs); null: it cannot.
+const SHELL_SHOWN = 400;   // the longest line the person is asked about whole (shell.run)
+
 export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null, keep = {} } = {}) {
   const bus = createBus();
   const audit = createAudit(store.auditDir);
@@ -353,7 +357,27 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   // --- sessions -----------------------------------------------------------------
-  async function startSession({ provider, cwd, model, effort, mode, title, named, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
+  // ONE CONVERSATION, LIVE ONCE, WHILE IT STARTS (a second reader, 2026-11-08): the check below for a live
+  // session runs before the awaits of a start (finding the coder, signing in), and the session is registered
+  // only after them, so two resumes a moment apart while the engine was coming up (the page after an update,
+  // a second page, the switch's revival) both passed it and two coders ran on one transcript. A resume being
+  // started is kept here until it is set up, and a second ask for it gets that same session.
+  const starting = new Map();   // `${provider}:${resumeId}` -> the start under way
+  async function startSession(args) {
+    const key = args?.resumeId && !args.fork ? `${args.provider}:${args.resumeId}` : null;
+    if (key && starting.has(key)) {
+      const r = await starting.get(key);
+      if (!r?.ok) return r;
+      audit.write('session.already', { sid: r.sid, resumeId: args.resumeId, resumeOf: isSid(args.resumeOf) ? args.resumeOf : null });
+      if (isSid(args.resumeOf) && args.resumeOf !== r.sid) keeper.follow(args.resumeOf, r.sid);
+      return { ...r, already: true };
+    }
+    const run = startSessionNow(args);
+    if (key) { starting.set(key, run); run.finally(() => starting.delete(key)).catch(() => {}); }
+    return run;
+  }
+
+  async function startSessionNow({ provider, cwd, model, effort, mode, title, named, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
@@ -632,9 +656,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (t.error) return { ok: false, error: t.error, code: t.code };
       const c = String(command || '').trim();
       if (!c) return { ok: false, error: 'Nothing to run.' };
+      // WHAT IS SAID YES TO IS WHAT RUNS (a second reader, 2026-11-08): the person was shown the first
+      // SHELL_SHOWN characters and the shell ran up to 4000, so a line padded past them ran a part nobody
+      // read, and the audit did not have it either. A line too long to be read whole is not run.
+      if (c.length > SHELL_SHOWN) return { ok: false, code: 'too-long', error: `A line over ${SHELL_SHOWN} characters is not run: it could not be shown whole to say yes to. Put it in a script and run that.` };
       // a page can ask; this computer says yes (CODE.md, line 7) — every line
-      if (!(await ask('shell.run', { folder: t.real, command: c.slice(0, 400) }))) return { ok: false, code: 'declined', error: 'Not run.' };
-      audit.write('shell', { cwd: t.real, command: c.slice(0, 400) });
+      if (!(await ask('shell.run', { folder: t.real, command: c }))) return { ok: false, code: 'declined', error: 'Not run.' };
+      audit.write('shell', { cwd: t.real, command: c });
       const win = platform() === 'win32';
       const sh = win ? (env.ComSpec || 'cmd.exe') : (env.SHELL || '/bin/sh');
       const args = win ? ['/d', '/s', '/c', c] : ['-c', c];
@@ -725,7 +753,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       try {
         if (!ownDir(top) || !ownDir(dir)) return { ok: false, error: 'The attachments folder leads out of this folder; nothing was saved.', code: 'refused' };
         const ignore = join(top, '.gitignore');
-        if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { mode: 0o644 });
+        // created, never written through: an existsSync check follows a link, so a .gitignore planted as a link
+        // to somewhere else made y3kode create that file outside the folder (a second reader, 2026-11-08)
+        try { writeFileSync(ignore, '*\n', { mode: 0o644, flag: 'wx' }); } catch { /* there already, or a link: left alone */ }
         const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
         const file = join(dir, `${stamp}-${randomBytes(2).toString('hex')}-${base}`);
         writeFileSync(file, buf, { flag: 'wx', mode: 0o600 });

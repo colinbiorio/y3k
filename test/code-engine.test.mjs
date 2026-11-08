@@ -6,7 +6,7 @@
 // (terminal and approval page, first answer wins).
 import assert from 'node:assert';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, statSync, rmSync, symlinkSync, realpathSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, statSync, rmSync, symlinkSync, realpathSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,7 +52,7 @@ ok('nothing in the protocol skips permissions, and the one command that runs a l
   assert.deepEqual(Object.keys(COMMANDS).filter((c) => /shell\./.test(c)), ['shell.run'], 'no other way to a shell');
   const src = readFileSync(new URL('../y3k-code/engine.mjs', import.meta.url), 'utf8');
   const run = src.slice(src.indexOf("'shell.run': async"), src.indexOf("'git.diff': async"));
-  assert.ok(run.indexOf("if (!(await ask('shell.run', { folder: t.real, command: c.slice(0, 400) }))) return { ok: false, code: 'declined', error: 'Not run.' };") > 0, 'the line runs without a yes on the machine');
+  assert.ok(run.indexOf("if (!(await ask('shell.run', { folder: t.real, command: c }))) return { ok: false, code: 'declined', error: 'Not run.' };") > 0, 'the line runs without a yes on the machine, or the yes is to less than runs');
   assert.ok(run.indexOf('const t = trusted(cwd);') < run.indexOf("await ask('shell.run'") && run.indexOf("await ask('shell.run'") < run.indexOf('spawnChild('), 'trusted, then asked, then run');
 });
 
@@ -875,6 +875,20 @@ await aok('workspace.files: a trusted folder\'s file names, matched to what is t
   assert.equal(no.ok, false); assert.equal(no.code, 'declined', JSON.stringify(no));
   assert.ok(!shy.audit.tail(50).some((a) => a.kind === 'shell'), 'nothing audited as run');
   passed += 1; console.log('  ✓ shell.run: a no on this computer runs nothing');
+  // …and what is said yes to is what runs (a second reader, 2026-11-08: the person read the first 400
+  // characters, the shell ran up to 4000, and the audit kept only what was read)
+  const askedStore = createStore(join(base, 'cfg-shell-whole'));
+  askedStore.setFolder(repo, { trusted: true, trustedAt: Date.now(), lastUsed: Date.now(), name: 'shell', isGit: false });
+  const said = [];
+  const whole = createEngine({ store: askedStore, consent: async (kind, d) => { said.push(describe(kind, d)); return true; }, env: process.env, bins: { claude: none, codex: none, gemini: none, opencode: none } });
+  const padded = await whole.handle({ cmd: 'shell.run', cwd: repo, command: 'echo hello' + ' '.repeat(400) + '; echo HIDDEN > pwned.txt' });
+  assert.equal(padded.ok, false); assert.equal(padded.code, 'too-long', JSON.stringify(padded));
+  assert.ok(!existsSync(join(repo, 'pwned.txt')) && said.length === 0, 'a line too long to read whole is asked about, or run');
+  const tail = await whole.handle({ cmd: 'shell.run', cwd: repo, command: 'echo shown' + ' '.repeat(40) + '; echo tail' });
+  assert.equal(tail.ok, true, tail.error); assert.ok(tail.output.includes('tail'));
+  assert.ok(said.at(-1).includes('echo shown [40 spaces] ; echo tail'), 'padding hides the tail of what is asked: ' + said.at(-1));
+  assert.ok(whole.audit.tail(50).some((a) => a.kind === 'shell' && a.command.endsWith('; echo tail')), 'the audit keeps less than ran');
+  passed += 1; console.log('  ✓ shell.run: what is said yes to is what runs (a line too long to read whole is refused; padding is said, not drawn)');
 }
 
 // KEEP GOING (0.3.11, keep.mjs). Colin, 2026-10-31: "a system that when a

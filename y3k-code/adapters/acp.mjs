@@ -226,8 +226,11 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   async function onRequest(method, p) {
     if (method !== 'session/request_permission') return undefined; // fs/*, terminal/* are not offered
     const tc = p.toolCall || {};
-    // y3k's orb tool (orb.mjs): it moves the orb and nothing else — no question
-    if (opts.orb && tc.rawInput && typeof tc.rawInput.kommand === 'string' && new RegExp(`\\b${opts.orb.name}\\b`, 'i').test(String(tc.title || '')) && /\borb\b/i.test(String(tc.title || ''))) {
+    // y3k's orb tool (orb.mjs): it moves the orb and nothing else — no question. Its arguments must be the
+    // orb's own and nothing more (its schema: kommand, additionalProperties false): matched by words in the
+    // title alone, a shell line titled "echo y3k orb; …" with a kommand beside its command could have passed
+    // unasked (a second reader's suspicion, 2026-11-08)
+    if (opts.orb && tc.rawInput && typeof tc.rawInput.kommand === 'string' && Object.keys(tc.rawInput).length === 1 && new RegExp(`\\b${opts.orb.name}\\b`, 'i').test(String(tc.title || '')) && /\borb\b/i.test(String(tc.title || ''))) {
       const once = (p.options || []).find((o) => o.kind === 'allow_once') || (p.options || []).find((o) => o.kind === 'allow_always');
       if (once) return { outcome: { outcome: 'selected', optionId: once.optionId } };
     }
