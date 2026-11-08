@@ -20,6 +20,7 @@ import { modelName } from './models.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { wireDownloadGlyph } from './download-glyph.js';
+import { wireInert } from './inert-hidden.js';
 import { detectPlatform } from './code/platform.js';
 import { createSpeedReadout } from './speed.js';
 import { createVersionWatch, newVersionNote } from './ship.js';
@@ -299,6 +300,10 @@ for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.a
 // asks the site nothing (the setup is an account's: a 401 at every hover, focus
 // and press, a second guest scout, 8 Nov) and opens the newest release.
 wireDownloadGlyph({ el: $('home-download'), setup: () => (account ? siteSetup() : null), platform: () => detectPlatform() });
+
+// THE KEYS GO ONLY WHERE THE EYES CAN (inert-hidden.js): chrome hidden by
+// opacity and pointer-events is made inert, so Tab and a stray tap pass it by.
+wireInert();
 
 function enterApp() {
   // next time the card opens on sign in; and a guest's arrival card goes, for
