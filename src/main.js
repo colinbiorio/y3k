@@ -24,6 +24,7 @@ import { detectPlatform } from './code/platform.js';
 import { createSpeedReadout } from './speed.js';
 import { createVersionWatch, newVersionNote } from './ship.js';
 import { createSocial } from './social.js';
+import { createBack } from './back.js';
 import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
@@ -1045,7 +1046,10 @@ const codeLink = {
   hush: () => { if (dictation) voice.stopListening(); },
 };
 
+// BACK STAYS ON THE SITE (src/back.js): a view pushes one entry, and Back comes home to the orb
+const back = createBack({ onBack: () => showHome() });
 const social = createSocial({
+  onView: (v) => (v === 'orb' ? back.home() : back.away()),
   code: codeLink,
   // the world's play button, bound late: `tend` is built a few lines down, and
   // these closures only run on a click, long after it exists

@@ -46,7 +46,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code, games, life }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code, games, life, onView = null }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -110,6 +110,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (v === 'chess' || v === 'twenty') lastGame = v;
     const inGames = v === 'chess' || v === 'twenty';
     view = v;
+    onView?.(v);   // BACK STAYS ON THE SITE (back.js): the history hears which view shows
     document.body.classList.toggle('panel-open', v !== 'orb');
     // chess keeps the home chat bar (and the caption it answers in) on screen
     document.body.classList.toggle('in-chess', v === 'chess');
