@@ -216,7 +216,9 @@ await ok('poured in the name\'s metal on its own mount and its own spin, drawn w
 });
 await ok('nothing new is asked of the site: the setup the y3kode screen reads, no fetch, no route', () => {
   assert.ok(!/\bfetch\s*\(/.test(glyph), 'download-glyph.js fetches');
-  assert.ok(/wireDownloadGlyph\(\{ el: \$\('home-download'\), setup: \(\) => siteSetup\(\), platform: \(\) => detectPlatform\(\) \}\);/.test(main), 'main.js does not wire the glyph to the existing setup');
+  assert.ok(/wireDownloadGlyph\(\{ el: \$\('home-download'\), setup: \(\) => \(account \? siteSetup\(\) : null\), platform: \(\) => detectPlatform\(\) \}\);/.test(main), 'main.js does not wire the glyph to the existing setup');
+  // …for an account only: the setup is an account's, and a guest's every hover, focus and press was a 401 (a second guest scout, 8 Nov)
+  assert.ok(!/setup: \(\) => siteSetup\(\), platform/.test(main), 'a guest\'s press asks the site for an account\'s setup');
   // every ask for it in the page: kode's (main.js codeLink.setup) and Settings' (own-brain.js siteSetup)
   const src = readdirSync(join(ROOT, 'src'), { recursive: true }).filter((f) => /\.m?js$/.test(f)).map((f) => read(join('src', f))).join('\n');
   const asks = [...src.matchAll(/fetch(?:Fn)?\('\/api\/code\/setup'/g)].length;

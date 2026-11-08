@@ -252,6 +252,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **A second guest scout, on a phone.** The first scout's two
+  walks run again on the live site after #88–#96 (headless, read only, every
+  browser closed): its ten findings stay fixed, no page errors, no sideways
+  scroll. Two new: **a guest's download glyph asked for an account's setup**
+  at every hover, focus and press (a 401 and a console error each, three for
+  a hover and two presses) before opening the newest release, which is where
+  a guest goes anyway; it now asks only for an account (main.js), and a guest
+  goes straight there (tried on the live site with the file swapped in: no
+  ask, the same release page). And **the last small controls of the first
+  scout's list have a finger's reach on touch**: the mine's "the dig" and
+  "the ladder" (20px) and "the book" (15px), and Settings' small buttons
+  (28px: a guest's "Sign in", the music's Search, Trending and microphone),
+  measured on the live site with the rules injected: 36, 33, 34 and 42, no
+  control's centre newly taken. Tests in download-glyph and entrance (each
+  fails on the old file).
 - **2026-11-08** — **The reader's second list, and burn when there is nothing to
   do (y3kode 0.3.22).** What the second reader suspected and could not show,
   each now with a check that failed on the code before (`test/code-reader.test.mjs`):
