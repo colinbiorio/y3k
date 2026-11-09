@@ -1932,6 +1932,13 @@ body.nav-dragging .chat-air { transition: none; }
    is put away (by visibility: neither a finger, the Tab key nor a screen reader finds it), unless airden is on,
    when it is the way to stop it. */
 @media (max-width: 560px) { body:is(.in-chess, .in-twenty):not(.airden) .chat-air { visibility: hidden; } }
+/* …AND IN KODE, AT ANY WIDTH, IT SAT ON KODE'S OWN BOX. The kode card scrolls under the mark's place, and its last
+   control is the box you type the plan in: at 1440x900, scrolled to its end, the middle of "What are we building?"
+   was the mark's, so a click to type set the presence speaking aloud; scrolled 200px, it took a corner of "Have a
+   code from y3kode? Type it" (a new member's walk on desktop, 8 Nov 2026). Kode is where a click must land where it
+   is aimed, and with a project open the conversation scrolls under the same place; there it is put away too, unless
+   airden is on, when it is the way to stop it. */
+body.in-code:not(.airden) .chat-air { visibility: hidden; }
 /* tall, #chat spans the hole rather than centring on the window */
 body.chat-typing .chat-air { left: calc(50vw - var(--hole-l)); }
 .chat-air-face { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; pointer-events: none;
