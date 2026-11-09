@@ -75,7 +75,7 @@ await ok('the laptop is on the right rail, go live on the left after live now', 
   const right = html.slice(html.indexOf('<nav id="home-nav-right"'), html.indexOf('</nav>', html.indexOf('<nav id="home-nav-right"')));
   const ids = (s) => [...s.matchAll(/<button id="([\w-]+)"/g)].map((m) => m[1]);
   assert.deepEqual(ids(left), ['nav-profile', 'nav-feed', 'nav-post', 'nav-live', 'broadcast', 'nav-search']);
-  assert.deepEqual(ids(right), ['nav-settings', 'nav-code', 'nav-world', 'nav-games', 'nav-mine', 'nav-orb']);
+  assert.deepEqual(ids(right), ['nav-settings', 'nav-code', 'nav-world', 'nav-games', 'nav-mine', 'nav-frequencies', 'nav-orb']);
   assert.match(right, /id="nav-code"[^>]*hidden/, 'hidden until the rollout allows it');
 });
 

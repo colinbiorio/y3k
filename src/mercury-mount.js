@@ -473,6 +473,7 @@ export function mountAppMercury() {
   // the middle would re-texture every glyph after it — each one keeps its own
   // pattern only as long as its index does. DOM order sets where it sits on the
   // rail; this array's order sets nothing but the seed.
+  ['nav-frequencies', (el) => ({ svgEl: svgOf(el), size: S(70) })],   // the horn (9 Nov 2026)
   ['nav-mine', (el) => ({ svgEl: svgOf(el), size: S(70) })],   // matches the rail's other glyphs
   // Appended for the same reason as the mine: every seed above keeps its index.
   ['nav-code', (el) => ({ svgEl: svgOf(el), size: S(70) })],

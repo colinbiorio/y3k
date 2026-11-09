@@ -252,6 +252,34 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-09** — **Frequencies: a room where real physics is the invariant**
+  (`src/frequencies.js`, `src/frequencies/*.mjs`, `FREQUENCIES.md`). Colin:
+  "physically simulate the construction of a pyramid using only sound, and
+  provide all of the exact details ... so that a physicist could verify". A
+  new glyph on the right rail, the horn, opens two tabs. **The pyramid:** the
+  Great Pyramid 1:1 from Petrie's 1883 survey (base 230.35 m, height 146.71 m,
+  51° 52′, and the level of every one of the 203 surviving courses from his
+  Plate 8), 2.59 million m³, about 6 million tonnes, two million blocks on a
+  1.27 m module, rising course by course on the method the dossier sets out:
+  opposed horns at 135 Hz (c / 2·1.27 m) make a standing wave whose velocity
+  nodes gather grains into a square lattice at the block module (Kundt), the
+  sound-wind carries the disaggregated limestone across the course at
+  Bagnold's rate, the horns' pressure packs it (Γ > 1), Davidovits' binder
+  (160 kg kaolinitic clay, 60 kg natron, 80 kg slaked lime, 2 m³ water per
+  4500 kg limestone) sets it. Every horn is sized by its physics: the tone
+  sets the mouth (circumference = λ), the power sets the throat (the air's
+  170 dB limit), the flare follows. The schedule: 1,140 horns and 22.7 MW on
+  the first course, 4.3 years of continuous 160 dB sound in all. What sound
+  does not do is said plainly: it lifts nothing (Gor'kov: 163 dB at 20 kHz,
+  185 dB at 135 Hz, past the shock limit), it climbs nothing, it cuts no
+  joint. **The sandbox:** a 12 × 8 m bed of 0.25 mm calcite grains; place
+  horns, aim them, choose a pair or the lattice, pour binder, tip sand, run
+  time ×1–×600; see the sand, the level, the wind, and each horn's full
+  specification. Twenty-one checks pin the physics to textbook values (ISO
+  9613-1, Rayleigh's piston, Bagnold, Gor'kov, Petrie, the recipe) and the
+  engine to its claims (threshold, sweeping, mass conservation, the damp face,
+  set stone, packing, the λ/2 minima).
+
 - **2026-11-08** — **In kode, a click to type is a click to type** (`styles.css`).
   A new member's walk on desktop (1440x900, a throwaway server; kode's first
   screen with no y3kode, nothing pressed, every other host refused: the page
