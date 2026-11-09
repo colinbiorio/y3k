@@ -1914,6 +1914,14 @@ body.nav-dragging .chat-air { transition: none; }
    asked a guest to sign in and the palette never opened (a guest scout, 5 Nov 2026; measured at 360 and
    390px; the desktop's tools stand clear). There it steps aside, left, off the row. */
 @media (max-width: 560px) { body.in-world .chat-air { translate: calc(-50% - 48px) 0; } }
+/* AT THE GAMES, ON A PHONE, IT SAT ON THE GAME'S OWN BUTTONS. The chat stays at the chessboard and at twenty
+   questions, to talk while playing, and the mark floats over the panel's foot, where a game's controls are when it
+   opens: at 390px the middle of "sit down across from it" was the mark's, and a tap there set the presence speaking
+   aloud on its own key; at 360px it took the corners of the colour and clock tiles and of twenty questions' "begin"
+   (a member's walk on a throwaway server, 8 Nov 2026). Stepped aside it would only sit on other tiles, so there it
+   is put away (by visibility: neither a finger, the Tab key nor a screen reader finds it), unless airden is on,
+   when it is the way to stop it. */
+@media (max-width: 560px) { body:is(.in-chess, .in-twenty):not(.airden) .chat-air { visibility: hidden; } }
 /* tall, #chat spans the hole rather than centring on the window */
 body.chat-typing .chat-air { left: calc(50vw - var(--hole-l)); }
 .chat-air-face { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; pointer-events: none;
@@ -2942,7 +2950,10 @@ body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
 .chess-steps a, .chess-lead a { color: #dfe3ea; text-decoration: underline;
   text-underline-offset: 3px; text-decoration-color: rgba(214, 219, 228, 0.4); }
 .chess-steps a:hover, .chess-lead a:hover { text-decoration-color: rgba(214, 219, 228, 0.9); }
-.chess-opts { display: flex; gap: 8px; }
+/* THE THIRD TILE WENT PAST THE CARD. A tile is no narrower than its longest word, and three need about 218px:
+   at 390px the card held 170 and "either" and "30+0" stood 21px past its edge, its border drawn through them (51px
+   at 360; a member's walk on a throwaway server, 8 Nov 2026). Where three do not fit, the third takes its own line. */
+.chess-opts { display: flex; flex-wrap: wrap; gap: 8px; }
 .chess-opts .usage { flex: 1; }
 
 .chess-live { display: flex; flex-direction: column; gap: 10px; }

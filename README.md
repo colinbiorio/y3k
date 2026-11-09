@@ -252,6 +252,25 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **A member's first game on a phone** (`styles.css`). A new
+  member's first walk, on a throwaway server (sign up, the first home, every
+  glyph, a post, the profile, every Settings tab; no other host reachable):
+  no page errors, no failed requests, every control named. Two faults at the
+  games. (1) The airden mark floats over the panel's foot, and at the
+  chessboard and twenty questions the chat stays: at 390px the middle of "sit
+  down across from it" was the mark's, so a tap meant to start a game set the
+  presence speaking aloud on its own key; at 360px it took the corners of the
+  colour and clock tiles and of "begin". On a phone it is put away at the games
+  (by visibility: no finger, Tab or screen reader finds it), unless airden is
+  on, when it is the way to stop it. (2) The chess tiles never wrapped: three
+  need about 218px, and at 390px the card held 170, so "either" and "30+0"
+  stood 21px past its edge with its border drawn through them (51px at 360).
+  Where three do not fit, the third now takes its own line. Measured with a tap
+  at each control's centre before and after, at 360, 390 and 430. Left: on a
+  360px phone the window's bottom grip sits over whatever is at a panel's foot
+  when it opens (before, two clock tiles' corners; now "either"); a pass of its
+  own, across every panel.
+
 - **2026-11-08** — **Every field says what it is** (`test/field-names.test.mjs`).
   A screen-reader pass over the live site as a guest, phone and desktop,
   reading the browser's own accessibility tree at each screen: every
