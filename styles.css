@@ -5608,6 +5608,14 @@ body.in-code .home-panel-head { display: none; }
   .shaft-tabs .login-alt, .shaft-lex a, #settings .btn.small { position: relative; }
   .shaft-tabs .login-alt::before { content: ''; position: absolute; inset: -8px -7px; }
   .shaft-lex a::before { content: ''; position: absolute; inset: -8px -4px -10px; }
+  /* …AND SIGN-UP'S TWO BOXES, the first thing a new member touches (a member's walk, 8 Nov 2026): 13px boxes in
+     19px rows 7px apart. Of 81 points a finger may land on in a 32px square around each box, 30 ticked it; the
+     rest touched nothing, or, below "I am 17 or older", ticked the box above. The boxes grow to 20px and each row
+     reaches 6px above and below, into a gap of 10, so the rows stand where they stood (the later row wins the 2px
+     where the two meet). The terms row's link stays a link: its middle opens the terms, as before. */
+  .login-agree { gap: 10px; }
+  .login-agree label { padding: 6px 0; margin: -6px 0; }
+  .login-agree input { width: 20px; height: 20px; margin: 0; }
   #settings .btn.small::before { content: ''; position: absolute; inset: -8px 0; }
   /* a tab's ×: 20px of bead, 44px of reach. The strip of tabs scrolls, and a
      scroller clips what reaches past it, so it takes 7px more above and below
