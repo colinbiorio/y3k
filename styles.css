@@ -1390,6 +1390,16 @@ body:not(.in-home) .nav-collapse-right { display: none; }
   body:not(.nav-collapsed-right) .nav-collapse-right { width: 32px; right: calc(var(--hole-r) - 6px); }
   body:not(.nav-collapsed) .nav-collapse { width: 32px; left: calc(var(--hole-l) - 6px); }
 }
+/* …AND THE TOP AND BOTTOM GRIPS LAY OVER A PANEL'S OWN CONTROLS. They rest inside the window, centred on its
+   top and bottom edges, and a panel's content passes under them: on opening search the top grip covered the top of
+   the search box at 360, 390 and 430px; scrolled, a post's vote (its centre, at 360 and 430) and a profile's follow
+   passed under one or the other; at the chessboard on a 360px phone the bottom one sat on "either". A tap there
+   folds every bar. With a panel open on a phone they are put away (by visibility: no finger, Tab or screen reader
+   finds them): the left and right grips fold all four bars as well, and stand on the glass edge clear of every
+   control (measured across the guest's panels, 8 Nov 2026). */
+@media (max-width: 520px) {
+  body.panel-open .nav-collapse-top, body.panel-open .nav-collapse-bottom { visibility: hidden; }
+}
 /* The top and bottom twins. Same grip, turned a quarter: each points the way
    its own bar will go, and a tap on any of the four moves all four. */
 .nav-collapse-top, .nav-collapse-bottom {

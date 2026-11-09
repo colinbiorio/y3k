@@ -252,6 +252,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **On a phone, a panel's controls are not under the top and
+  bottom grips** (`styles.css`). The grips that fold the bars rest inside the
+  window, centred on its top and bottom edges, and a panel's content passes
+  under them. Measured on the live site as a guest, at 360, 390 and 430px, in
+  the feed, live, search, the mine and the life, at the opening scroll and
+  three scrolls down: on opening search the top grip covered the top of the
+  search box at every width; scrolled, a post's vote (its centre, at 360 and
+  430) and a profile's follow passed under one grip or the other; and a
+  member's walk had found the bottom one on chess's "either" at 360. A tap
+  there folds every bar. With a panel open on a phone those two are put away
+  (by visibility); the left and right grips, which stand on the glass edge
+  clear of every control, still fold all four. After: in all 120 measurements
+  neither takes a tap; at home all four grips are as they were.
+
 - **2026-11-08** — **Sign-up's two boxes are a finger's size** (`styles.css`).
   The first thing a new member touches: "I am 17 or older" and "I accept the
   terms" were 13px boxes in 19px rows. Of 81 points a finger may land on in a

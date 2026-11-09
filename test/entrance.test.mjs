@@ -262,6 +262,9 @@ ok('on a phone nothing lies over a post\'s "···", the world\'s Build, a game\
   assert.ok(/@media \(max-width: 560px\) \{ body:is\(\.in-chess, \.in-twenty\):not\(\.airden\) \.chat-air \{ visibility: hidden; \} \}/.test(css),
     'the air mark sits on "sit down across from it" (390px) and the games\' tiles (360px): a tap meant to play set the presence speaking');
   assert.ok(/\.chess-opts \{ display: flex; flex-wrap: wrap; gap: 8px; \}/.test(css), 'at 390px the third chess tile stands 21px past its card');
+  assert.ok(/@media \(max-width: 520px\) \{\s*body\.panel-open \.nav-collapse-top, body\.panel-open \.nav-collapse-bottom \{ visibility: hidden; \}\s*\}/.test(css),
+    'the top grip lies over the search box, the bottom one over a scrolled vote and the chess tiles: a tap there folds every bar');
+  assert.ok(/body:not\(\.nav-collapsed-right\) \.nav-collapse-right \{ width: 32px;/.test(css), 'the side grips, which still fold all four on a phone, changed');
   assert.ok(/openKode: \(\) => openCodeRoom\(\),/.test(main), 'the life view opens kode by un-hiding the rail\'s button');
   assert.ok(!/n\.hidden = false; n\.click\(\);/.test(main), 'a hidden kode button is still un-hidden to be clicked');
 });
