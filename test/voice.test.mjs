@@ -331,12 +331,12 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
   // a key pasted for OpenAI, then Service switched inside the half second
   const keys = { openai: '', cartesia: 'c-key' };
   const timers = [];
-  const field = (value) => ({ value, on: {}, addEventListener(t, f) { this.on[t] = f; } });
+  const field = (value) => ({ value, on: {}, attrs: {}, addEventListener(t, f) { this.on[t] = f; }, setAttribute(k, v) { this.attrs[k] = String(v); } });
   const voiceKeyEl = field(''), providerSel = field('openai');
   const wire = new Function('voiceKeyEl', 'providerSel', 'setVoiceKey', 'getVoiceKey', 'loadVoiceList', 'serviceOf', 'VOICE_SERVICES', 'setTimeout', 'clearTimeout',
     `let browsing = 'openai';\n${cut('    const showService = () => {', '\n    };\n')}${cut('    let vkTimer = null;', '\n    });\n')}${cut("    providerSel.addEventListener('change'", '\n    });\n')}`);
   wire(voiceKeyEl, providerSel, (k, p) => { keys[p] = k; }, (p) => keys[p] || '', () => {}, (p) => p,
-    { openai: { hint: '' }, cartesia: { hint: '' } },
+    { openai: { hint: 'OpenAI API key' }, cartesia: { hint: 'Cartesia API key' } },
     (fn) => { timers.push({ fn, live: true }); return timers.length; }, (id) => { if (timers[id - 1]) timers[id - 1].live = false; });
   voiceKeyEl.value = 'sk-pasted';
   voiceKeyEl.on.input();
@@ -344,6 +344,7 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
   providerSel.on.change();
   for (const t of timers) if (t.live) t.fn();
   assert.equal(keys.openai, 'sk-pasted', 'the pasted key is kept, for OpenAI');
+  assert.equal(voiceKeyEl.attrs['aria-label'], 'Cartesia API key', 'the key field\'s name stays the last service\'s (test/field-names.test.mjs)');
   assert.equal(keys.cartesia, 'c-key', 'and Cartesia\'s is untouched');
   assert.equal(voiceKeyEl.value, 'c-key', 'the field shows the service now chosen');
 });

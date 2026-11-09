@@ -480,7 +480,7 @@ function kommandPane() {
             '<div class="muted">Permanently deletes your account and everything in it: your presence and its posts, memory, journal, shelf and letters, its society in the world, your games and your uploads. This cannot be undone.</div>' +
             '<button id="acct-close" class="btn small danger">Delete account</button>' +
             '<div id="acct-close-box" hidden>' +
-              '<label class="field"><input id="acct-close-pw" type="password" placeholder="Password" autocomplete="current-password" /></label>' +
+              '<label class="field"><input id="acct-close-pw" aria-label="Password" type="password" placeholder="Password" autocomplete="current-password" /></label>' +
               '<div class="acct-close-row">' +
                 '<button id="acct-close-go" class="btn small danger">Delete everything</button>' +
                 '<button id="acct-close-no" class="btn small">Cancel</button>' +
@@ -511,7 +511,7 @@ function kommandPane() {
               '<button type="button" id="or-connect-go" class="btn">Connect OpenRouter</button>' +
               '<div class="muted">One click: sign in at OpenRouter and it gives this browser a key of your own. It wakes on a free model: free models cost nothing, up to 50 requests a day (1,000 once you have bought at least 10 credits there).</div>' +
             '</div>' +
-            '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
+            '<label class="field"><input id="brain-key" aria-label="API key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
             '<div id="brain-status" class="muted"></div>' +
             '<button id="brain-use" class="btn small" hidden>Use kept key</button>' +
             '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
@@ -536,15 +536,15 @@ function kommandPane() {
           '<div class="row"><span>Service</span><select id="voice-provider">' +
             Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
           '</select></div>' +
-          '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
+          '<label class="field"><input id="voice-key" aria-label="ElevenLabs API key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
           '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Voices</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Design a voice</h4>' +
             '<button id="voice-self-btn" class="btn">Let it design its own voice</button>' +
             '<div id="voice-self-why" class="muted"></div>' +
-            '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="Name" autocomplete="off" spellcheck="false" /></label>' +
-            '<label class="field"><textarea id="voice-desc" rows="3" placeholder="Describe the voice"></textarea></label>' +
+            '<label class="field"><input id="voice-name" aria-label="Name" type="text" maxlength="60" placeholder="Name" autocomplete="off" spellcheck="false" /></label>' +
+            '<label class="field"><textarea id="voice-desc" aria-label="Describe the voice" rows="3" placeholder="Describe the voice"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
@@ -560,7 +560,7 @@ function kommandPane() {
             '<option value="file">Files on this computer</option>' +
           '</select></div>' +
           '<div id="music-audius">' +
-            '<label class="field"><input id="music-q" type="search" placeholder="Search Audius" autocomplete="off" /></label>' +
+            '<label class="field"><input id="music-q" aria-label="Search Audius" type="search" placeholder="Search Audius" autocomplete="off" /></label>' +
             '<div class="row"><button id="music-search" class="btn small">Search</button>' +
             '<button id="music-trending" class="btn small">Trending</button></div>' +
           '</div>' +
@@ -621,14 +621,14 @@ function kommandPane() {
           '<div id="room-eye-note" class="muted"></div>' +
           '<h4>Share a camera between devices</h4>' +
           '<div class="muted">A device without a camera can use the camera of another device signed in to this account. Only hand positions are sent (about 20 KB per second), never video. Devices on the same network connect directly, which reduces lag.</div>' +
-          '<label class="field"><input id="dev-name" type="text" placeholder="Device name" autocomplete="off" maxlength="32" /></label>' +
+          '<label class="field"><input id="dev-name" aria-label="Device name" type="text" placeholder="Device name" autocomplete="off" maxlength="32" /></label>' +
           '<div class="muted">Lend this device\'s camera to:</div>' +
-          '<label class="field"><select id="lend-to">' +
+          '<label class="field"><select id="lend-to" aria-label="Lend this device\'s camera to">' +
             '<option value="">not lending</option>' +
           '</select></label>' +
           '<div id="lend-note" class="muted"></div>' +
           '<div class="muted">Use the camera of:</div>' +
-          '<label class="field"><select id="borrow-from">' +
+          '<label class="field"><select id="borrow-from" aria-label="Use the camera of">' +
             '<option value="">not borrowing</option>' +
           '</select></label>' +
           '<div id="phone-note" class="muted"></div>') +
@@ -678,9 +678,9 @@ function kommandPane() {
         pane('shelf',
           '<div class="muted">Give your presence a text to keep, such as an article, a story or a letter. It can reread anything on its shelf, and it also saves texts it finds on its own. The shelf holds 24 items; the oldest are removed first.</div>' +
           '<div id="shelf-drop" class="drop">' +
-            '<label class="field"><input id="shelf-title" type="text" placeholder="Title" autocomplete="off" /></label>' +
-            '<label class="field"><input id="shelf-by" type="text" placeholder="Author (optional)" autocomplete="off" /></label>' +
-            '<label class="field"><textarea id="shelf-text" rows="7" placeholder="Paste or type the text, or drop a file on this box"></textarea></label>' +
+            '<label class="field"><input id="shelf-title" aria-label="Title" type="text" placeholder="Title" autocomplete="off" /></label>' +
+            '<label class="field"><input id="shelf-by" aria-label="Author (optional)" type="text" placeholder="Author (optional)" autocomplete="off" /></label>' +
+            '<label class="field"><textarea id="shelf-text" aria-label="Text" rows="7" placeholder="Paste or type the text, or drop a file on this box"></textarea></label>' +
             '<div class="drop-hint">Drop a text file here, or <strong>choose one</strong> (.txt, .md, .json or other plain text).' +
               '<input id="shelf-file" type="file" accept=".txt,.md,.markdown,.json,.csv,.rtf,text/*" hidden /></div>' +
           '</div>' +
@@ -866,6 +866,7 @@ function kommandPane() {
       if (d.user.hasPassword === false) {
         $('acct-close-pw').type = 'text';
         $('acct-close-pw').placeholder = 'Type your username to confirm';
+        $('acct-close-pw').setAttribute('aria-label', 'Type your username to confirm');   // its name is what it asks for
         $('acct-close-pw').autocomplete = 'off';
       }
       paintBlocks();
@@ -1737,6 +1738,7 @@ function kommandPane() {
           : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
           : '';
         keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
+        keyEl.setAttribute('aria-label', keyEl.placeholder);   // a field's name follows what it asks for
         if (!isKey(v)) showModels(v);   // a key provider's menu comes with its key (applyKey)
       }
       function loadKey(v) {
@@ -2053,6 +2055,7 @@ function kommandPane() {
       providerSel.value = browsing;
       voiceKeyEl.value = getVoiceKey(browsing);
       voiceKeyEl.placeholder = VOICE_SERVICES[browsing].hint;
+      voiceKeyEl.setAttribute('aria-label', voiceKeyEl.placeholder);
     };
     let vkTimer = null;
     voiceKeyEl.addEventListener('input', () => {

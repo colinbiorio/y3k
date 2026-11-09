@@ -387,6 +387,7 @@ function setAuthMode(mode) {
   const email = $('login-email');
   email.type = signin ? 'text' : 'email';
   email.placeholder = signin ? 'email or username' : 'email';
+  email.setAttribute('aria-label', email.placeholder);   // its name is what it asks for (test/field-names.test.mjs)
   email.autocomplete = signin ? 'username' : 'email';
   $('login-pass').autocomplete = signin ? 'current-password' : 'new-password';
   $('login-toggle').textContent = signin ? 'new here? create an account' : 'have an account? sign in';
@@ -1411,6 +1412,7 @@ function enterRoom(p) {
   const ci = $('comment-input');
   ci.disabled = !account;
   ci.placeholder = account ? 'say something…' : 'sign in to talk';
+  ci.setAttribute('aria-label', ci.placeholder.replace(/…$/, ''));
   if (p.live) {
     social.watch(p, { onOffline: () => { document.body.classList.remove('streaming'); showCaption(`${p.name} has gone quiet.`, 'y3k'); } });
   } else {

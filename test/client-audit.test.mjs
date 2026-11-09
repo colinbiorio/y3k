@@ -1046,7 +1046,7 @@ await ok('entering someone\'s room takes your memories off the orb, and they can
   const calls = [];
   const { enterRoom } = makeEnter({
     body: recorder(calls), social: new Proxy({}, { get: () => () => {} }), windows: { recallHide: () => calls.push(['recallHide']) },
-    score: { cancel() {} }, $: () => ({}), showCaption() {}, setMoodTag() {}, applyBodyBlock: (b) => calls.push(['applyBodyBlock', b]),
+    score: { cancel() {} }, $: () => ({ setAttribute() {} }), showCaption() {}, setMoodTag() {}, applyBodyBlock: (b) => calls.push(['applyBodyBlock', b]),
     resetHistory() {}, history: { clear() {} }, document: { body: { classList: { add() {}, remove() {}, toggle() {} } } },
     leaveHomeHosting: () => calls.push(['leaveHomeHosting']),
   });
