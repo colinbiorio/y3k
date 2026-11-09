@@ -252,6 +252,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **In kode, a click to type is a click to type** (`styles.css`).
+  A new member's walk on desktop (1440x900, a throwaway server; kode's first
+  screen with no y3kode, nothing pressed, every other host refused: the page
+  never reached for one, as CODE.md promises): no errors, every control named.
+  But the kode card scrolls under the airden mark's place, and its last
+  control is the box you type the plan in: scrolled to its end, the middle of
+  "What are we building?" was the mark's, so a click to type set the presence
+  speaking aloud on its own key; scrolled 200px, it took a corner of "Have a
+  code from y3kode? Type it". With a project open the conversation scrolls
+  under the same place. In kode the mark is put away (by visibility), at any
+  width, unless airden is on, when it is the way to stop it. After: at every
+  scroll no control's click is taken.
+
 - **2026-11-08** — **On a phone, a panel's controls are not under the top and
   bottom grips** (`styles.css`). The grips that fold the bars rest inside the
   window, centred on its top and bottom edges, and a panel's content passes
