@@ -304,4 +304,17 @@ ok("on touch, the mine's tabs and book and Settings' small buttons have a finger
   assert.ok(!/\.btn\.small::before[^{]*\{[^}]*inset: -[^}]*\}/.test(css.slice(0, css.indexOf('@media (pointer: coarse), (hover: none) {'))), 'the reach is given off touch too');
 });
 
+ok("on touch, sign-up's two boxes are a finger's size, their rows reaching into the gap between them (a member's walk, 8 Nov)", () => {
+  const touch = css.slice(css.indexOf('@media (pointer: coarse), (hover: none) {'));
+  const block = touch.slice(0, touch.indexOf('\n}\n'));
+  assert.ok(block.includes('.login-agree input { width: 20px; height: 20px; margin: 0; }'), 'a 13px box: of 81 points around it, 30 ticked it');
+  assert.ok(block.includes('.login-agree label { padding: 6px 0; margin: -6px 0; }'), 'the rows do not reach above and below their text');
+  assert.ok(block.includes('.login-agree { gap: 10px; }'), 'the reaching rows overlap more than the 2px where they meet');
+  assert.ok(/\.login-agree input \{ margin: 2px 0 0; accent-color: #cdd5df; flex: none; \}/.test(css), 'the boxes changed off touch too');
+  // both places that ask (sign-up, and the terms card an older account meets) hold their boxes in a .login-agree
+  const html = read('index.html');
+  const groups = [...html.matchAll(/<div[^>]*class="login-agree"[^>]*>([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+  for (const id of ['login-age', 'login-terms', 'terms-age', 'terms-ok']) assert.ok(groups.some((g) => g.includes(`id="${id}"`)), `#${id} is not in a .login-agree: its box stays 13px`);
+});
+
 console.log(`\n${passed} entrance checks passed.`);

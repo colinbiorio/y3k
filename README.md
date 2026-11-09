@@ -252,6 +252,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **Sign-up's two boxes are a finger's size** (`styles.css`).
+  The first thing a new member touches: "I am 17 or older" and "I accept the
+  terms" were 13px boxes in 19px rows. Of 81 points a finger may land on in a
+  32px square around each box (measured on the live site, a phone at 360 and
+  390px), 30 ticked it and the rest touched nothing, or, below the first,
+  ticked the box above. On touch the boxes are 20px and each row reaches 6px
+  above and below into a 10px gap, so the rows stand where they stood: 56 of
+  81 now tick the box (the ones that do not lie nearer the other row), and the
+  card is no taller. The terms row's link stays a link, as before. The same
+  rows serve the terms card an older account meets.
+
 - **2026-11-08** — **A member's first game on a phone** (`styles.css`). A new
   member's first walk, on a throwaway server (sign up, the first home, every
   glyph, a post, the profile, every Settings tab; no other host reachable):
