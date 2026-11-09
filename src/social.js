@@ -13,6 +13,7 @@ import { createTwenty } from './twenty.js';
 import { createLifeView } from './life.js';
 import { createWorldView } from './world-view.js';
 import { createMine } from './mine.js';
+import { createFrequencies } from './frequencies.js';
 import { MEDIA_CAPS, MAX_MEDIA, POST_BODY_MAX, POST_TOO_LARGE, ANIMATED, tooLarge } from './media-rules.mjs';
 import { shrinkPicture, movingPicture } from './picture.js';
 
@@ -97,6 +98,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // wherever you are in the house.
   const onNeedsYou = (on) => $('nav-code')?.classList.toggle('needs-you', !!on);
   const mine = createMine({ toast: toastOnce });
+  const frequencies = createFrequencies({ toast: toastOnce });   // real physics is the invariant (9 Nov 2026)
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {
@@ -162,7 +164,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-twenty', 'mode-world', 'mode-mine', 'mode-code', 'mode-life');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-twenty', 'mode-world', 'mode-mine', 'mode-code', 'mode-life', 'mode-frequencies');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -172,6 +174,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // These three had no lit state at all: you could be standing in the world
     // and the rail would not say so. The glyph you are inside should be lit.
     $('nav-mine').classList.toggle('on', v === 'mine');
+    $('nav-frequencies')?.classList.toggle('on', v === 'frequencies');
     $('nav-world').classList.toggle('on', v === 'world');
     $('nav-games').classList.toggle('on', inGames);
     // the games' chooser: which game, under the title, in either of them
@@ -190,7 +193,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : inGames ? 'games' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : v === 'life' ? 'life' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : inGames ? 'games' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'frequencies' ? 'frequencies' : v === 'code' ? 'code' : v === 'life' ? 'life' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
@@ -199,6 +202,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     else if (v === 'twenty') twenty.open($('home-grid'));
     else if (v === 'world') worldView.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
+    else if (v === 'frequencies') frequencies.open($('home-grid'));
     else if (v === 'code') openCode();
     else if (v === 'life') lifeView.open($('home-grid'));
     if (v !== 'code' && codeView?.isOpen()) { codeView.close(); code?.react('closed'); }
@@ -206,6 +210,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (v !== 'twenty') twenty.close();
     if (v !== 'world') worldView.close();
     if (v !== 'mine') mine.close();
+    if (v !== 'frequencies') frequencies.close();
     if (v !== 'life') lifeView.close();
   }
   // THE GAMES' CHOOSER (2026-10-19): two chips under the title, chess and

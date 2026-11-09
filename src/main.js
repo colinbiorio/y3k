@@ -1484,6 +1484,11 @@ $('nav-world').addEventListener('click', () => {
 $('nav-mine').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('mine');
 });
+// FREQUENCIES (Colin, 9 Nov 2026): a room where real physics is the invariant. Open to
+// guests: nothing in it spends or signs anything (src/frequencies.js, FREQUENCIES.md).
+$('nav-frequencies')?.addEventListener('click', () => {
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('frequencies');
+});
 // LIFE, the moon at the top bar's right end (Colin, 2026-10-20): lucid on your
 // own computer, watched from here (src/life.js). A second press goes home.
 $('nav-life')?.addEventListener('click', () => {

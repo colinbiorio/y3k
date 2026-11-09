@@ -119,7 +119,7 @@ ok('a red dot above each mark whose mode is on — camera, voice, dance, kompute
 
 ok('every glyph is one lowercase word, and the mind is the komputer', () => {
   const want = { 'nav-profile': 'profile', 'nav-feed': 'feed', 'nav-post': 'post', broadcast: 'broadcast', 'nav-live': 'live', 'nav-search': 'search',
-    'nav-settings': 'settings', 'nav-code': 'kode', 'nav-world': 'world', 'nav-games': 'game', 'nav-mine': 'mine', 'nav-orb': 'orb',
+    'nav-settings': 'settings', 'nav-code': 'kode', 'nav-world': 'world', 'nav-games': 'game', 'nav-mine': 'mine', 'nav-frequencies': 'frequencies', 'nav-orb': 'orb',
     'brain-toggle': 'komputer', 'chat-dance': 'dance', 'chat-camera': 'camera', 'chat-voice': 'voice' };
   for (const [id, name] of Object.entries(want)) {
     const tag = (html.match(new RegExp('<button id="' + id + '"[^>]*>')) || [''])[0];

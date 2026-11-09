@@ -2700,6 +2700,7 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .home-grid.mode-twenty { max-width: 560px; margin: 0 auto; gap: 0; }
 .home-grid.mode-world { max-width: 860px; margin: 0 auto; gap: 0; }
 .home-grid.mode-mine { max-width: 640px; margin: 0 auto; gap: 0; }
+.home-grid.mode-frequencies { max-width: 980px; margin: 0 auto; gap: 0; }
 
 /* ===== THE MINE, whose classes are all shaft- =======================
    NOT mine-: this file already has .mine-tag and .compose-mine, where "mine"
@@ -2729,6 +2730,29 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .shaft-lex { font-size: 0.74rem; letter-spacing: 0.04em; }
 .shaft-lex a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .shaft-sub { margin-bottom: 12px !important; }
+
+/* FREQUENCIES (9 Nov 2026): a room where real physics is the invariant. Two
+   canvases drawn to scale; the controls in the mine's idiom. */
+.freq-root { display: flex; flex-direction: column; gap: 14px; }
+.freq-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.freq-sec h4 { margin: 0 0 8px; }
+.freq-sec .muted b { color: var(--ink); font-weight: 500; }
+.freq-pyr, .freq-sand { display: block; width: 100%; height: auto; border-radius: 10px; background: rgba(0, 0, 0, 0.22); margin: 6px 0 10px; }
+.freq-sand { cursor: crosshair; touch-action: none; }
+.freq-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.freq-row .freq-years { flex: 1; min-width: 160px; }
+.freq-read { font-size: 0.82rem; line-height: 1.55; color: #b8bfc9; }
+.freq-read b { color: var(--ink); font-weight: 500; }
+.freq-warn { color: #ffb4a2; }
+.freq-list { margin: 0; padding-left: 20px; display: grid; gap: 10px; line-height: 1.55; font-size: 0.84rem; }
+.freq-tools { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-bottom: 6px; font-size: 0.82rem; }
+.freq-ctl { display: inline-flex; align-items: center; gap: 6px; color: #b8bfc9; }
+.freq-ctl input { width: 6.5em; padding: 4px 6px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(0, 0, 0, 0.25); color: var(--ink); font: inherit; }
+.freq-seg { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.freq-small { font-size: 0.76rem !important; }
+.freq-horns { display: grid; gap: 8px; font-size: 0.8rem; line-height: 1.5; }
+.freq-horn { padding: 8px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.2); }
+.freq-horn b { color: var(--ink); font-weight: 500; }
 
 /* The dig itself. A fixed-height log so the room does not resize under the
    hand every time the miner answers at a different length. */
