@@ -252,6 +252,22 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-08** — **Every field says what it is** (`test/field-names.test.mjs`).
+  A screen-reader pass over the live site as a guest, phone and desktop,
+  reading the browser's own accessibility tree at each screen: every
+  control had a name but four fields, the sign-in card's email, username
+  and password and the API key in Settings. Each sits in a `<label>` with no
+  words of its own (it is there for the look), and a label is what gives a
+  field its name, so the name was nothing and the placeholder saying what
+  the field is was never read: a screen reader said "edit text". Twenty-three
+  fields are made so in the page and the views (profile edit, a live room's
+  line, Settings' keys and names, the mine, the chess token, two menus);
+  each now has an `aria-label` in the words it shows, and the five whose
+  placeholder changes (sign-in's "email or username", a guest's "sign in to
+  talk", the closing password, the API key, the voice key) take their name
+  along. The test finds any field alone in a label without a name, in
+  `index.html` and every view, so the next one cannot be made so.
+
 - **2026-11-08** — **A sheet holds the keys while it is open** (`src/inert-hidden.js`).
   Tabbing into Settings on the live site (desktop, a guest): opened from its
   glyph by the keyboard, focus stayed on the glyph behind the sheet's veil;

@@ -119,7 +119,7 @@ export function createMine({ toast } = {}) {
         <div class="shaft-log">${rows || '<div class="muted shaft-empty">Say something to it and the dig begins.</div>'}</div>
         ${cfg ? '' : '<p class="warn shaft-warn">The miner runs on your own API key — add one in settings before you dig.</p>'}
         <label class="field shaft-field">
-          <input id="shaft-say" type="text" autocomplete="off" placeholder="coach the miner…" ${busy || !cfg ? 'disabled' : ''} />
+          <input id="shaft-say" aria-label="coach the miner" type="text" autocomplete="off" placeholder="coach the miner…" ${busy || !cfg ? 'disabled' : ''} />
         </label>
         <div class="shaft-acts">
           <button type="button" class="login-alt" id="shaft-send" ${busy || !cfg ? 'disabled' : ''}>say</button>
@@ -146,8 +146,8 @@ export function createMine({ toast } = {}) {
         <h4>the author's bench</h4>
         <p class="muted">Yours alone. Every word of a phrase has to appear in the book, and the word count IS the
         difficulty — one word is 340 candidates, two is 115,600, three is 39 million.</p>
-        <label class="field shaft-field"><input id="shaft-answer" type="text" autocomplete="off" placeholder="the phrase…" /></label>
-        <label class="field shaft-field"><input id="shaft-hint-text" type="text" autocomplete="off" placeholder="a hint, for whoever gets stuck…" /></label>
+        <label class="field shaft-field"><input id="shaft-answer" aria-label="the phrase" type="text" autocomplete="off" placeholder="the phrase…" /></label>
+        <label class="field shaft-field"><input id="shaft-hint-text" aria-label="a hint, for whoever gets stuck" type="text" autocomplete="off" placeholder="a hint, for whoever gets stuck…" /></label>
         <div class="shaft-acts"><button type="button" class="login-alt shaft-dig" id="shaft-write">write the block</button></div>
         ${rows ? `<table class="usage-table">${rows}</table>` : ''}
       </div>`;
