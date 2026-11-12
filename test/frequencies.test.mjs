@@ -157,6 +157,24 @@ ok('under 160 dB the packing creeps toward random close packing and the bed sett
   assert.ok(bed.phi[k] > 0.6 && bed.phi[k] <= A.PACKING.close, `packing ${bed.phi[k]}`);
 });
 
+ok("a block's lattice: lines of horns on four sides at 155 dB lay ridges at the block pitch in 300 s; at a quiet level, nothing", () => {
+  const D = A.mouthDiameterFor(135);
+  const bed = S.createBed({ width: 6, depth: 6, cell: 0.05 });
+  const horns = S.presetBlock(bed, { mouthDb: 155, mouthDiameter: D });
+  assert.equal(horns.length, 24, 'six a side');
+  S.computeField(bed, horns, 135);
+  assert.ok(A.paToSpl(Math.max(...bed.p)) < A.THROAT_MAX_DB, 'the bed stays under the shock limit');
+  assert.equal(S.latticePitch(bed), null, 'a flat bed has no lattice');
+  for (let s = 0; s < 3000; s++) S.step(bed, 0.1);
+  const lat = S.latticePitch(bed);
+  assert.ok(lat && lat.strength > 0.3, `a lattice formed: ${JSON.stringify(lat)}`);
+  near(lat.pitch, A.wavelength(135) / 2, 0.2, 'at the block pitch');
+  const quiet = S.createBed({ width: 6, depth: 6, cell: 0.05 });
+  S.computeField(quiet, S.presetBlock(quiet, { mouthDb: 130, mouthDiameter: D }), 135);
+  for (let s = 0; s < 300; s++) S.step(quiet, 0.1);
+  assert.equal(S.latticePitch(quiet), null, 'below threshold no lattice forms');
+});
+
 console.log('frequencies, the pyramid:');
 
 ok("Petrie's pyramid: base 230.35 m, height 146.71 m, 51° 52′ (tan = 2H/b), 203 surveyed courses summing to 5451.8 in, the first 58.6 in, the 35th 49.8 in", () => {

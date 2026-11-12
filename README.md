@@ -252,6 +252,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-09** — **Frequencies: a block's lattice** (`src/frequencies/sand.mjs`).
+  A fourth arrangement in the sandbox: lines of horns on all four sides at
+  the lattice tone (135 Hz) and 155 dB mouths (1.6 kW each), the plan's
+  working course in small. Measured in the engine before it was offered:
+  over 300 s the sand forms a square lattice of ridges 1.35 m apart against
+  λ/2 = 1.27 m, with the bed under the 170 dB shock limit; at 150 dB the
+  middle lies below the grains' threshold and no lattice forms; at 160 dB
+  the bed passes 170 dB. The readout now gives the ridge pitch the sand has
+  formed (the height field's autocorrelation peak) beside λ/2, so the claim
+  on the pyramid tab is shown, not told. A check pins it (24 horns, under the
+  limit, a lattice at the block pitch in 300 s; nothing at a quiet level).
+
 - **2026-11-09** — **Frequencies: a room where real physics is the invariant**
   (`src/frequencies.js`, `src/frequencies/*.mjs`, `FREQUENCIES.md`). Colin:
   "physically simulate the construction of a pyramid using only sound, and
