@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLAUDE_MODELS, OPENAI_MODELS, modelsFor, makerOf, modelName, _resetCatalog } from '../src/models.js';
+import { CLAUDE_MODELS, OPENAI_MODELS, modelsFor, makerOf, modelName, _resetCatalog, claudeFromCatalog, claudeMenu } from '../src/models.js';
 import { thinking } from '../src/model-mark.js';
 import { AI_LOGOS } from '../src/ai-logos.js';
 import { createEngine } from '../y3k-code/engine.mjs';
@@ -29,18 +29,47 @@ await ok('Claude: every model Anthropic serves to everyone, no invitation-only o
   assert.ok(CLAUDE_MODELS.every((m) => /^Claude (Fable|Opus|Sonnet|Haiku) \d(\.\d)?$/.test(m.label)), 'plain names');
 });
 
-await ok('Claude Code: its own default first, then every Claude model; what it offered this plan wins when known', async () => {
-  const fixed = await modelsFor('claude');
+const down = async () => { throw new Error('offline'); };
+
+await ok('Claude Code: its own default first, then every Claude model; what it offered this plan first when known, the rest after', async () => {
+  _resetCatalog();
+  const fixed = await modelsFor('claude', { fetchFn: down });
   assert.equal(fixed[0].id, 'default');
   assert.equal(fixed.length, CLAUDE_MODELS.length + 1);
   const heard = [{ id: 'opus', label: 'Opus' }, { id: 'claude-fable-5-1[1m]', label: 'Fable 5.1 (1M context)' }];
-  const live = await modelsFor('claude', { live: heard });
-  assert.deepEqual(live.map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]']);
-  assert.deepEqual((await modelsFor('claude', { live: [{ id: 'default', label: 'Default' }, ...heard] })).map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]'], 'its own default is not added twice');
+  _resetCatalog();
+  const live = await modelsFor('claude', { live: heard, fetchFn: down });
+  assert.deepEqual(live.slice(0, 3).map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]'], 'what it offered, first');
+  assert.ok(!live.some((m) => m.id === 'claude-fable-5-1'), 'a model it offered (with its window suffix) is not listed twice');
+  assert.ok(live.some((m) => m.id === 'claude-fable-5-2') && live.some((m) => m.id === 'claude-haiku-4-5'), 'every other Claude model follows');
+  _resetCatalog();
+  assert.deepEqual((await modelsFor('claude', { live: [{ id: 'default', label: 'Default' }, ...heard], fetchFn: down })).slice(0, 3).map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]'], 'its own default is not added twice');
+  _resetCatalog();
 });
 
-await ok('Anthropic without a key: every Claude model', async () => {
-  assert.deepEqual(await modelsFor('anthropic'), CLAUDE_MODELS);
+await ok('Anthropic without a key: every Claude model, the floor when the catalog is down', async () => {
+  _resetCatalog();
+  assert.deepEqual(await modelsFor('anthropic', { fetchFn: down }), CLAUDE_MODELS);
+  _resetCatalog();
+});
+
+await ok("the menu updates itself: a Claude model the site's catalog knows and the floor does not is on the menu, in its family's place, under Anthropic's id; retired and invitation-only ones are not (Colin, 12 Nov 2026)", async () => {
+  const cat = [{ id: 'anthropic/claude-fable-5.3', name: 'Anthropic: Claude Fable 5.3' }, { id: 'anthropic/claude-fable-5.2', name: 'Anthropic: Claude Fable 5.2' },
+    { id: 'anthropic/claude-opus-4.5', name: 'Anthropic: Claude Opus 4.5' }, { id: 'anthropic/claude-opus-4.5:beta', name: 'beta' }, { id: 'anthropic/claude-3.7-sonnet', name: 'Anthropic: Claude 3.7 Sonnet' },
+    { id: 'anthropic/claude-sonnet-6', name: 'Anthropic: Claude Sonnet 6' }, { id: 'anthropic/claude-mythos-5', name: 'Mythos' }, { id: 'openai/gpt-5.1', name: 'OpenAI: GPT-5.1' }];
+  assert.deepEqual(claudeFromCatalog(cat).map((m) => m.id), ['claude-fable-5-3', 'claude-fable-5-2', 'claude-opus-4-5', 'claude-sonnet-6']);
+  assert.equal(claudeFromCatalog(cat)[1], CLAUDE_MODELS[0], "a model the floor names keeps the floor's entry");
+  const menu = claudeMenu(cat);
+  assert.deepEqual(menu.slice(0, 3).map((m) => m.id), ['claude-fable-5-3', 'claude-fable-5-2', 'claude-fable-5-1'], 'newest first in its family');
+  assert.equal(menu.find((m) => m.id === 'claude-fable-5-3').label, 'Claude Fable 5.3');
+  assert.ok(menu.findIndex((m) => m.id === 'claude-sonnet-6') > menu.findIndex((m) => m.id === 'claude-opus-4-0'), 'sonnets after every opus');
+  assert.equal(new Set(menu.map((m) => m.id)).size, menu.length, 'no id twice');
+  assert.deepEqual(claudeMenu([]), CLAUDE_MODELS, 'an empty catalog is the floor');
+  _resetCatalog();
+  assert.equal((await modelsFor('anthropic', { fetchFn: catalogOf(cat) }))[0].id, 'claude-fable-5-3');
+  _resetCatalog();
+  assert.deepEqual((await modelsFor('claude', { fetchFn: catalogOf(cat) })).slice(0, 2).map((m) => m.id), ['default', 'claude-fable-5-3']);
+  _resetCatalog();
 });
 
 await ok('OpenAI and OpenRouter without a key: the site\'s catalog, OpenAI\'s own names', async () => {
@@ -54,7 +83,6 @@ await ok('OpenAI and OpenRouter without a key: the site\'s catalog, OpenAI\'s ow
 
 await ok('the site cannot reach the catalog: OpenAI\'s long-standing models, and OpenRouter waits for a key', async () => {
   _resetCatalog();
-  const down = async () => { throw new Error('offline'); };
   assert.deepEqual(await modelsFor('openai', { fetchFn: down }), OPENAI_MODELS);
   _resetCatalog();
   assert.deepEqual(await modelsFor('openrouter', { fetchFn: down }), []);

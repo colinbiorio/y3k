@@ -252,6 +252,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-12** — **The model menu updates itself** (`src/models.js`). Colin:
+  "the model picker doesn't automatically update to include new models — it
+  should, let's always have every model from selected provider available."
+  Claude Code's and Anthropic's menus were a fixed list, so a model Anthropic
+  shipped (Fable 5.2 this week) waited for a release here. Now that list is
+  the floor, not the menu: the menu joins it with every Claude model the
+  site's catalog knows today (OpenRouter's public list, refreshed every six
+  hours server-side), each read for its family and version and given
+  Anthropic's own id (`anthropic/claude-fable-5.2` → `claude-fable-5-2`),
+  ordered by family, newest first; retired families (3.x and under), the
+  invitation-only Mythos and variants (`:beta`, snapshots) are left out. With
+  Claude Code, what it offered this plan comes first and the rest follow. Fable
+  5.2 is on the floor too. A check pins it with a catalog that knows a Fable
+  5.3 the floor does not.
+
 - **2026-11-09** — **Frequencies: a block's lattice** (`src/frequencies/sand.mjs`).
   A fourth arrangement in the sandbox: lines of horns on all four sides at
   the lattice tone (135 Hz) and 155 dB mouths (1.6 kW each), the plan's
