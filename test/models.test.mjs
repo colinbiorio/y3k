@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLAUDE_MODELS, OPENAI_MODELS, modelsFor, makerOf, modelName, _resetCatalog, claudeFromCatalog, claudeMenu } from '../src/models.js';
+import { CLAUDE_MODELS, OPENAI_MODELS, modelsFor, makerOf, modelName, _resetCatalog, claudeFromCatalog, claudeMenu, notOffered } from '../src/models.js';
 import { thinking } from '../src/model-mark.js';
 import { AI_LOGOS } from '../src/ai-logos.js';
 import { createEngine } from '../y3k-code/engine.mjs';
@@ -130,6 +130,16 @@ await ok('what is thinking: your own Claude Code first, then a key in use, else 
   assert.equal(thinking({ site: 'claude-opus-4-8' }), null, 'the site\'s own model is shown as thinking');
   const src = readFileSync(new URL('../src/model-mark.js', import.meta.url), 'utf8');
   assert.ok(!/site/.test(src.slice(src.indexOf('export function thinking'), src.indexOf('export function createModelMark'))), 'model-mark.js still takes a site model');
+});
+
+await ok("the models Claude Code did not name: the site's less what it offered, by bare id and by what an alias resolves to (Colin, 12 Nov 2026)", () => {
+  const every = [{ id: 'claude-fable-5-2', label: 'Claude Fable 5.2' }, { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' }, { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' }, { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' }];
+  const offered = [{ id: 'default', label: 'Default' }, { id: 'opus', label: 'Opus', resolved: 'claude-opus-5-5' }, { id: 'claude-fable-5-1[1m]', label: 'Fable 5.1 (1M)' }];
+  assert.deepEqual(notOffered(offered, every).map((m) => m.id), ['claude-fable-5-2', 'claude-haiku-5-5']);
+  assert.deepEqual(notOffered([], every), every, 'nothing offered: all of them');
+  assert.deepEqual(notOffered(offered, []), [], 'nothing known: none');
+  // the control: a naive join by id alone would offer Opus twice
+  assert.ok(every.filter((m) => !offered.some((o) => o.id === m.id)).some((m) => m.id === 'claude-opus-5-5'), 'the control is a control');
 });
 
 console.log('\ny3kode:');

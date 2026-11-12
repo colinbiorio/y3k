@@ -14,6 +14,7 @@ import * as engineProto from '../y3k-code/protocol.mjs';
 import * as pageProto from '../src/code/protocol.js';
 import { createState, apply, needsYou, openRequest, activeSession, turnCost, nowDoing } from '../src/code/state.js';
 import { createStore } from '../y3k-code/store.mjs';
+import { _resetCatalog } from '../src/models.js';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
 
@@ -778,6 +779,29 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.equal($('div.cv-row'), row, 'the same toolbar row');
     assert.ok($('details.cv-todos'), 'the todos came in beside it');
     ta.value = ''; ta.dispatch('input');
+  });
+
+  await ok("the view: the model picker offers every Claude model the site knows, after the ones this Claude Code named, none twice (Colin, 12 Nov 2026)", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ models: [
+      { id: 'anthropic/claude-fable-5.2', name: 'Anthropic: Claude Fable 5.2' }, { id: 'anthropic/claude-opus-5.5', name: 'Anthropic: Claude Opus 5.5' },
+      { id: 'anthropic/claude-opus-5.5:beta', name: 'beta' }, { id: 'openai/gpt-5.1', name: 'OpenAI: GPT-5.1' }] }) });
+    try {
+      _resetCatalog(); cv._forgetCatalog();
+      cv._feed({ type: 'provider.status', provider: 'claude', models: [{ id: 'default', label: 'Default' }, { id: 'opus', label: 'Opus', resolved: 'claude-opus-5-5' }] });
+      tick();
+      const ids = () => [...$('div.cv-controls select').querySelectorAll('option')].map((o) => o.value);
+      await tasks(() => { tick(); return ids().includes('claude-fable-5-2'); });
+      const got = ids();
+      assert.deepEqual(got.slice(0, 2), ['default', 'opus'], "what Claude Code named comes first, as it named it");
+      assert.ok(got.includes('claude-fable-5-2'), 'a model the site knows and this Claude Code does not is offered');
+      assert.equal(got.filter((x) => /opus-5-5/.test(x)).length, 0, 'the one Claude Code names "opus" is not offered again under its long id');
+      assert.ok(got.includes('claude-fable-5-1'), 'the floor is there too');
+      assert.ok(!got.some((x) => /gpt|beta/.test(x)), "nothing of another maker's, no :beta variant");
+      assert.equal(new Set(got).size, got.length, 'no id twice');
+      const op = $('div.cv-controls select').querySelectorAll('option').find((o) => o.value === 'claude-fable-5-2');
+      assert.match(op.dataset.desc || '', /not in this Claude Code/i, "and it says it is not in this Claude Code's own list");
+    } finally { globalThis.fetch = realFetch; _resetCatalog(); cv._forgetCatalog(); }
   });
 
   await ok('the view: a session started elsewhere (a second opinion, another browser) touches nothing on screen', () => {

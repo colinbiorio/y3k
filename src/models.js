@@ -60,7 +60,7 @@ export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', openro
 let catalog = null;
 export function siteCatalog({ fetchFn = globalThis.fetch } = {}) {
   if (!catalog) {
-    catalog = fetchFn('/api/brain/catalog', { cache: 'no-store' })
+    catalog = Promise.resolve().then(() => fetchFn('/api/brain/catalog', { cache: 'no-store' }))
       .then((r) => (r.ok ? r.json() : null)).then((d) => (Array.isArray(d?.models) ? d.models : []))
       .catch(() => []);
   }
@@ -110,6 +110,20 @@ export function claudeMenu(all) {
   return rows.map(({ id, label }) => ({ id, label }));
 }
 
+// THE MODELS CLAUDE CODE DID NOT NAME. Claude Code's own list is baked into
+// the version installed (2.1.312 knows no "claude-fable-5-2"), so a menu that
+// shows only what it offered goes stale the week a model ships. `every` (the
+// site's claudeMenu) less what `offered` already has — by id with the context
+// suffix taken off, and by the id an option says it resolves to ("opus" →
+// "claude-opus-5-5"). Checked 12 Nov 2026: Claude Code passes a name it does
+// not know on to the API all the same (it logs unrecognized_model and answers).
+export function notOffered(offered, every) {
+  const bare = (x) => String(x || '').replace(/\[[^\]]*\]$/, '');
+  const has = new Set();
+  for (const m of offered || []) { has.add(bare(m.id)); if (m.resolved) has.add(bare(m.resolved)); }
+  return (every || []).filter((m) => !has.has(m.id));
+}
+
 // The list a provider's menu offers before (or without) a key.
 export async function modelsFor(provider, { live = null, fetchFn } = {}) {
   if (provider === 'claude') {
@@ -117,8 +131,7 @@ export async function modelsFor(provider, { live = null, fetchFn } = {}) {
     const every = claudeMenu(await siteCatalog({ fetchFn }));
     if (heard) {
       // what Claude Code offered this plan first, then every other Claude model the site knows (Colin, 12 Nov 2026)
-      const ids = new Set(heard.map((m) => m.id.replace(/\[[^\]]*\]$/, '')));
-      const rest = every.filter((m) => !ids.has(m.id));
+      const rest = notOffered(heard, every);
       return [...(heard.some((m) => m.id === 'default') ? heard : [CLAUDE_CODE_DEFAULT, ...heard]), ...rest];
     }
     return [CLAUDE_CODE_DEFAULT, ...every];
