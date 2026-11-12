@@ -197,3 +197,43 @@ export function presetLattice(bed, opts) {
     { x, y: bed.depth - 0.2, z, aimX: 0, aimY: -1, aimZ: -0.25, mouthDb: opts.mouthDb ?? 160, mouthDiameter: opts.mouthDiameter, phase: 0 },
   ];
 }
+
+// Lines of horns along all four sides, shoulder to shoulder (spacing = one mouth), half a
+// metre in from the edge and half a metre up, aimed inward: the plan's working course in
+// small. At the lattice tone their crossed standing waves lay a square lattice of ridges at
+// the block module (measured in the engine, 9 Nov 2026: pitch 1.35 m against λ/2 = 1.27 m
+// over 300 s at 155 dB mouths; at 150 dB the middle is below threshold and no lattice forms;
+// at 160 dB the bed passes the 170 dB shock limit).
+export function presetBlock(bed, { mouthDb = 155, mouthDiameter }) {
+  const out = [], z = 0.5, inset = 0.5;
+  const along = (len) => { const n = Math.max(1, Math.floor((len - 2 * inset) / mouthDiameter)); const pad = (len - n * mouthDiameter) / 2; return Array.from({ length: n }, (_, i) => pad + (i + 0.5) * mouthDiameter); };
+  for (const t of along(bed.depth)) {
+    out.push({ x: 0.2, y: t, z, aimX: 1, aimY: 0, aimZ: -0.25, mouthDb, mouthDiameter, phase: 0 });
+    out.push({ x: bed.width - 0.2, y: t, z, aimX: -1, aimY: 0, aimZ: -0.25, mouthDb, mouthDiameter, phase: 0 });
+  }
+  for (const t of along(bed.width)) {
+    out.push({ x: t, y: 0.2, z, aimX: 0, aimY: 1, aimZ: -0.25, mouthDb, mouthDiameter, phase: 0 });
+    out.push({ x: t, y: bed.depth - 0.2, z, aimX: 0, aimY: -1, aimZ: -0.25, mouthDb, mouthDiameter, phase: 0 });
+  }
+  return out;
+}
+
+// The pitch of whatever lattice the sand has formed: the mean autocorrelation of the height
+// field along rows and columns, and its first peak past 0.5 m. Returns { pitch, strength }
+// (strength: the peak over the variance, 0..1) or null when there is no peak.
+export function latticePitch(bed, minLag = 0.5, maxLagM = 2.5) {
+  const { nx, ny, cell, h } = bed;
+  let mean = 0; for (let k = 0; k < nx * ny; k++) mean += h[k]; mean /= nx * ny;
+  const maxLag = Math.floor(maxLagM / cell), ac = new Float64Array(maxLag + 1);
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let s = 0, c = 0;
+    for (let j = 0; j < ny; j++) for (let i = 0; i + lag < nx; i++) { s += (h[j * nx + i] - mean) * (h[j * nx + i + lag] - mean); c++; }
+    for (let i = 0; i < nx; i++) for (let j = 0; j + lag < ny; j++) { s += (h[j * nx + i] - mean) * (h[(j + lag) * nx + i] - mean); c++; }
+    ac[lag] = c ? s / c : 0;
+  }
+  if (ac[0] <= 1e-12) return null;
+  const from = Math.floor(minLag / cell);
+  let best = -Infinity, at = 0;
+  for (let l = from + 1; l < maxLag; l++) if (ac[l] > ac[l - 1] && ac[l] >= ac[l + 1] && ac[l] > best) { best = ac[l]; at = l; }
+  return best > 0 ? { pitch: at * cell, strength: best / ac[0] } : null;
+}

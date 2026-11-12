@@ -14,7 +14,7 @@
 // ============================================================================
 import { AIR, splToPa, paToSpl, particleVelocity, mouthDiameterFor, acousticPower, inputPower, THROAT_MAX_DB, intensity, shockDistance,
   thresholdSpl, levitationSpl, absorptionDbPerM, wavelength, HORN_EFFICIENCY, GRAIN, mouthSpl } from './frequencies/acoustics.mjs';
-import { createBed, computeField, step, pour, addSand, readings, presetPair, presetLattice } from './frequencies/sand.mjs';
+import { createBed, computeField, step, pour, addSand, readings, presetPair, presetLattice, presetBlock, latticePitch } from './frequencies/sand.mjs';
 import { PETRIE, BASE_M, HEIGHT_M, courseTable, totals, recipeFor, RECIPE, BINDER_SOLIDS_FRACTION, SET, strengthAt, hornPlan, schedule,
   LATTICE_HZ, STONE, TOP_MEAN_M, INCH } from './frequencies/pyramid.mjs';
 
@@ -96,7 +96,7 @@ export function createFrequencies({ toast } = {}) {
       <section class="shaft-sec freq-sec">
         <h4>The method, in the numbers a physicist would check</h4>
         <ol class="freq-list muted">
-          <li><b>The tone.</b> Opposed horns make a standing wave; on the ground the grains gather where the air is still, every half wavelength (Kundt, 1866). For the block module of 1.27 m: <b>f = c / 2·1.27 m = ${fmt(LATTICE_HZ, 1)} Hz</b>, λ = ${fmt(wavelength(LATTICE_HZ), 2)} m. Two pairs crossed lay a square lattice at the block pitch: the sand is both mould and block.</li>
+          <li><b>The tone.</b> Opposed horns make a standing wave; on the ground the grains gather where the air is still, every half wavelength (Kundt, 1866). For the block module of 1.27 m: <b>f = c / 2·1.27 m = ${fmt(LATTICE_HZ, 1)} Hz</b>, λ = ${fmt(wavelength(LATTICE_HZ), 2)} m. Two pairs crossed lay a square lattice at the block pitch: the sand is both mould and block. The sandbox's "a block's lattice" shows it: lines of horns on four sides at 155 dB lay ridges 1.3 m apart in five minutes of sound.</li>
           <li><b>The horns.</b> Mouth circumference one wavelength at the tone (Olson, Beranek): <b>${fmt(plan.mouthDiameter * 100, 0)} cm</b> across. They stand shoulder to shoulder along the working course's edge, ${fmt(plan.spacing, 2)} m apart, mouths 0.5 m above the bed, aimed across it; each is driven to <b>${plan.mouthDb} dB at the mouth</b> (${sig(plan.acoustic / 1e3, 3)} kW acoustic, ~${sig(plan.input / 1e3, 3)} kW in at ${HORN_EFFICIENCY * 100} % efficiency; the throat at ${THROAT_MAX_DB} dB, the air's limit). The coherent line gives <b>${fmt(plan.surfaceDb, 1)} dB</b> at the bed one metre out: a surface air speed of ${sig(plan.uSurface, 3)} m/s rms, where a 0.25 mm limestone grain needs ${sig(2 * particleVelocity(splToPa(plan.thresholdDb)), 3)} m/s to move (incident ${fmt(plan.thresholdDb, 1)} dB).</li>
           <li><b>The rate.</b> Bagnold's law for sand carried by wind, at the effective friction velocity u* = u/8: <b>${sig(plan.flux * 1000, 3)} g per metre of front per second</b>. The first course (${fmt(rows[0].side, 1)} m a side, ${fmt(4 * rows[0].side, 0)} m of front, ${sched.rows[0].horns} horns, ${sig(sched.rows[0].inputMW, 3)} MW in) takes ${fmt(sched.rows[0].moveHours, 0)} hours to carry in and ${fmt(sched.rows[0].setHours, 0)} hours to set. All ${rows.length} courses: <b>${sig(sched.years, 3)} years</b> of continuous sound.</li>
           <li><b>The stone.</b> Davidovits' re-agglomerated limestone, as he made it in 2006: per <b>${fmt(RECIPE.limestone, 0)} kg</b> of nummulitic limestone gently disaggregated in water, <b>${RECIPE.kaolinite} kg kaolinitic clay</b> (Giza's limestone carries its own), <b>${RECIPE.natron} kg natron</b> (Na₂CO₃), <b>${RECIPE.lime} kg slaked lime</b>, <b>${RECIPE.water} L water</b>; 18–20 % water stays in the set stone. Na₂CO₃ + Ca(OH)₂ → 2 NaOH + CaCO₃; NaOH with kaolinite → hydrosodalite and calcite. Binder solids ${fmt(BINDER_SOLIDS_FRACTION * 100, 2)} %. One 2.5 t block: ${fmt(r.limestone, 0)} kg limestone, ${fmt(r.kaolinite, 0)} kg clay, ${fmt(r.natron, 0)} kg natron, ${fmt(r.lime, 0)} kg lime, ${fmt(r.water, 0)} L water. The whole pyramid: ${sig(tot.mass * (RECIPE.natron / 4800) / 1e6, 3)} kt of natron, ${sig(tot.mass * (RECIPE.lime / 4800) / 1e6, 3)} kt of lime, ${sig(tot.mass * (RECIPE.water / 4800) / 1e9, 3)} million tonnes of water.</li>
@@ -182,6 +182,7 @@ export function createFrequencies({ toast } = {}) {
           <span class="freq-seg" role="group" aria-label="arrangements">
             <button type="button" class="disc-chip" data-preset="pair">a pair</button>
             <button type="button" class="disc-chip" data-preset="lattice">the lattice</button>
+            <button type="button" class="disc-chip" data-preset="block">a block's lattice</button>
             <button type="button" class="disc-chip" data-preset="clear">clear</button>
           </span>
           <span class="freq-seg">
@@ -206,7 +207,15 @@ export function createFrequencies({ toast } = {}) {
       const spec = hornSpec(f, powerW);
       if (b.dataset.preset === 'clear') { horns = []; bed = createBed({ width: 12, depth: 8, cell: 0.05 }); }
       else if (b.dataset.preset === 'pair') horns = presetPair(bed, { f, mouthDb: spec.mouthDb, mouthDiameter: spec.mouthDiameter });
-      else horns = presetLattice(bed, { f, mouthDb: spec.mouthDb, mouthDiameter: spec.mouthDiameter });
+      else if (b.dataset.preset === 'block') {
+        // the plan's working course in small: lines of horns on all four sides at the lattice tone, at 1.6 kW each
+        // (155 dB mouths), so that the bed stays under the 170 dB shock limit and the middle is still above threshold
+        f = Math.round(LATTICE_HZ); powerW = 1600;
+        const bs = hornSpec(f, powerW);
+        el.querySelector('.freq-f').value = f; el.querySelector('.freq-w').value = powerW;
+        horns = presetBlock(bed, { mouthDb: bs.mouthDb, mouthDiameter: bs.mouthDiameter });
+        toast?.(`${horns.length} horns at ${f} Hz, ${fmt(bs.mouthDb, 0)} dB at the mouth: sound on, and watch the ridges come at the block pitch`);
+      } else horns = presetLattice(bed, { f, mouthDb: spec.mouthDb, mouthDiameter: spec.mouthDiameter });
       fieldDirty = true; draw(canvas, el);
     }));
     el.querySelector('[data-act="play"]').addEventListener('click', (e) => { playing = !playing; e.target.textContent = playing ? 'pause' : 'sound on'; if (playing) { lastT = performance.now(); loopSand(canvas, el); } });
@@ -311,7 +320,9 @@ export function createFrequencies({ toast } = {}) {
     const R = readings(bed);
     const read = el.querySelector('[data-read="sand"]');
     const over = R.maxP > 0 ? paToSpl(R.maxP) : 0;
-    if (read) read.innerHTML = `<b>${fmt(R.time, 0)} s</b> of sound · ${horns.length} horn${horns.length === 1 ? '' : 's'} at ${f} Hz (λ ${fmt(wavelength(f), 2)} m) · loudest on the bed <b>${fmt(over, 1)} dB</b>${over > THROAT_MAX_DB ? ' <span class="freq-warn">(shocks: the tone breaks up here)</span>' : ''} · surface wind up to ${sig(R.maxU, 3)} m/s · <b>${fmt(R.mobileShare * 100, 0)} %</b> of the bed is moving · ${fmt(R.displaced, 0)} kg displaced · sand ${fmt(R.hMin * 100, 0)}–${fmt(R.hMax * 100, 0)} cm · packing ${fmt(R.meanPhi, 3)} · ${R.wetCells ? `${R.setCells} of ${R.wetCells} wet cells set` : 'no binder poured'}`;
+    const lat = R.displaced > 50 ? latticePitch(bed) : null;
+    const ridgeLine = lat && lat.strength > 0.3 ? ` · <b>ridges ${fmt(lat.pitch, 2)} m apart</b> (λ/2 = ${fmt(wavelength(f) / 2, 2)} m)` : '';
+    if (read) read.innerHTML = `<b>${fmt(R.time, 0)} s</b> of sound · ${horns.length} horn${horns.length === 1 ? '' : 's'} at ${f} Hz (λ ${fmt(wavelength(f), 2)} m) · loudest on the bed <b>${fmt(over, 1)} dB</b>${over > THROAT_MAX_DB ? ' <span class="freq-warn">(shocks: the tone breaks up here)</span>' : ''} · surface wind up to ${sig(R.maxU, 3)} m/s · <b>${fmt(R.mobileShare * 100, 0)} %</b> of the bed is moving · ${fmt(R.displaced, 0)} kg displaced · sand ${fmt(R.hMin * 100, 0)}–${fmt(R.hMax * 100, 0)} cm · packing ${fmt(R.meanPhi, 3)} · ${R.wetCells ? `${R.setCells} of ${R.wetCells} wet cells set` : 'no binder poured'}${ridgeLine}`;
     const list = el.querySelector('.freq-horns');
     if (list) list.innerHTML = horns.length ? horns.map((h, i) => `<div class="freq-horn">horn ${i + 1}: at (${fmt(h.x, 2)}, ${fmt(h.y, 2)}) m, mouth 0.5 m up, aimed ${fmt((Math.atan2(h.aimY, h.aimX) * 180) / Math.PI, 0)}° · ${f} Hz, cut-off ${fmt(f, 0)} Hz → mouth <b>${fmt(spec.mouthDiameter * 100, 0)} cm</b>, throat ${fmt(spec.throatDiameter * 100, 1)} cm at ${THROAT_MAX_DB} dB, flare ${fmt(spec.length * 100, 0)} cm long · <b>${fmt(spec.mouthDb, 1)} dB at the mouth</b> · ${sig(spec.acousticW / 1000, 3)} kW acoustic, ${sig(spec.inputW / 1000, 3)} kW in · shocks at ${fmt(shockDistance(spec.mouthDb, f), 1)} m · air absorption ${sig(absorptionDbPerM(f) * 1000, 2)} dB/km</div>`).join('')
       : 'none yet: pick "place a horn" and click the bed, or choose an arrangement. A horn is sized by its physics: the tone sets its mouth (circumference = λ), the power sets its throat (the air\'s 170 dB limit), the flare follows.';

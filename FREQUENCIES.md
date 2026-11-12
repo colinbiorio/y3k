@@ -110,7 +110,7 @@ What this schedule leaves out, honestly: carrying 6 million tonnes of grains, 2.
 
 ## 6. The sandbox
 
-A bed 12 × 8 m of 0.25 mm calcite grains 0.3 m deep in 5 cm cells. Place horns (sized by the tone and the power you set, §4.2), aim them, choose a pair or the lattice, pour binder in 1.27 m rounds, tip sand, and let time run at ×1 to ×600. Shown: the sand's height, the level on the bed (110–170 dB), the wind and where it exceeds the grains' threshold; the loudest point and a shock warning past 170 dB; every horn's full specification. The edges are walls.
+A bed 12 × 8 m of 0.25 mm calcite grains 0.3 m deep in 5 cm cells. Place horns (sized by the tone and the power you set, §4.2), aim them, choose a pair, the lattice, or **a block's lattice** (lines of horns on all four sides at 135 Hz and 155 dB mouths, 1.6 kW each: the plan's working course in small; measured in the engine, the ridges come 1.35 m apart against λ/2 = 1.27 m within 300 s, the bed staying under the 170 dB shock limit; at 150 dB the middle is below threshold and no lattice forms; at other tones the measure is rougher: 67.5 Hz gave 2.75 m against 2.54, and 202.5 Hz read 1.75 m, the second lag of its 0.85 m pitch), pour binder in 1.27 m rounds, tip sand, and let time run at ×1 to ×600. The readout gives the ridge pitch the sand has formed (the height field's autocorrelation peak), beside λ/2. Shown: the sand's height, the level on the bed (110–170 dB), the wind and where it exceeds the grains' threshold; the loudest point and a shock warning past 170 dB; every horn's full specification. The edges are walls.
 
 ## 7. The tiers, and the argument about Giza
 
