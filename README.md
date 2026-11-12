@@ -252,6 +252,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-12** — **kode's model picker offers every Claude model too**
+  (`src/code/code-view.js` modelOptions, `src/models.js` notOffered). Colin,
+  after #106: "hmm i actually don't see 5.2 in the menu tho". The menu he
+  meant was kode's toolbar, which mirrored what the Claude Code on his
+  computer offered, and that list is baked into the version installed: the
+  2.1.312 here has no "claude-fable-5-2" in it at all. Now the toolbar joins
+  Claude Code's own list (first, unchanged) with every Claude model the site
+  knows (the floor and the site's catalog), none twice (an alias like "opus"
+  counts as the id it resolves to), each extra saying it is not in this
+  Claude Code's own list. Checked before building it: Claude Code 2.1.312 asked
+  for `claude-fable-5-2` logs unrecognized_model and answers on it all the
+  same, so a pick works today. Tests: the pure join (aliases, suffixes, the
+  empty cases, a control that a naive join doubles Opus) and the view (the
+  option appears after the catalog comes, in order, nothing of another maker's,
+  no :beta, the line it carries). A newer Claude Code (2.1.323 on npm) would
+  know 5.2 itself; `claude update` is Colin's to run.
+
 - **2026-11-12** — **The model menu updates itself** (`src/models.js`). Colin:
   "the model picker doesn't automatically update to include new models — it
   should, let's always have every model from selected provider available."

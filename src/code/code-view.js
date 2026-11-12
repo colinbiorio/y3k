@@ -18,6 +18,7 @@ import { mdStream } from './render/markdown.js';
 import { contextPanel } from './render/context-panel.js';
 import { makerOf, makerMark, modelName } from './render/maker.js';
 import { glassSelect } from '../glass-select.js';
+import { claudeMenu, siteCatalog, notOffered } from '../models.js';
 import { consent } from '../consent.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
@@ -1352,11 +1353,32 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return h('span.cv-chip', { title: p ? `${p.label}${p.version ? ' ' + p.version : ''}` : s.provider }, h('i.cv-live.' + (s.state === 'ended' ? 'off' : s.state === 'running' ? 'run' : 'ok')), AGENT_NAME[s.provider] || s.provider);
   }
 
+  // EVERY CLAUDE MODEL, NOT ONLY THE ONES THIS CLAUDE CODE NAMES. Colin, 12 Nov
+  // 2026, the week Fable 5.2 shipped: "the model picker doesn't automatically
+  // update to include new models — it should, let's always have every model
+  // from selected provider available." Claude Code's list is baked into the
+  // version installed, so the picker joins it with every Claude model the site
+  // knows (src/models.js claudeMenu: the floor and the site's catalog), the
+  // ones Claude Code named first and unchanged. The catalog is asked once, when
+  // first needed, and the toolbar redraws when it comes (schedule → keyed).
+  const NOT_NAMED = 'Not in this Claude Code\'s own list; it passes the name on all the same.';
+  let catalogClaude = null;   // claudeMenu of the site's catalog once it has come; [] while on its way
+  function catalogFor(provider) {
+    if (provider !== 'claude') return [];
+    if (catalogClaude === null) {
+      catalogClaude = [];
+      siteCatalog().then((all) => { catalogClaude = claudeMenu(all); if (catalogClaude.length) schedule('meta'); }).catch(() => {});
+    }
+    return catalogClaude;
+  }
   function modelOptions(provider) {
     const fromSession = S.models[provider];
-    if (fromSession?.length) return fromSession.map((m) => ({ id: m.id, label: m.label || m.id, description: m.description || '', efforts: m.efforts || [], resolved: m.resolved || '' }));
     const p = S.providers.find((x) => x.id === provider);
-    return (p?.models || [{ id: 'default', label: 'Default' }]).map((m) => ({ id: m.id, label: m.label, description: m.description || '', efforts: [] }));
+    const named = fromSession?.length
+      ? fromSession.map((m) => ({ id: m.id, label: m.label || m.id, description: m.description || '', efforts: m.efforts || [], resolved: m.resolved || '' }))
+      : (p?.models || [{ id: 'default', label: 'Default' }]).map((m) => ({ id: m.id, label: m.label, description: m.description || '', efforts: [] }));
+    const more = notOffered(named, catalogFor(provider)).map((m) => ({ id: m.id, label: m.label, description: NOT_NAMED, efforts: [], resolved: '' }));
+    return [...named, ...more];
   }
 
   // WHICH OPTION IS THE SESSION'S MODEL. Exact first — with or without the
@@ -3941,6 +3963,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // engine's, to watch the screen draw them
     _feed: (e) => onEvent(e),
     _show: showSession,
+    _forgetCatalog: () => { catalogClaude = null; },   // tests: ask the site's catalog again
   };
 }
 
