@@ -21,7 +21,9 @@ import * as B from '../src/game/body.js';
 import * as I from '../src/game/input.js';
 import * as R from '../src/game/rings.js';
 import * as Gt from '../src/game/gait.js';
+import * as Cr from '../src/game/crawl.js';
 import * as S from '../src/game/state.js';
+import * as K from '../src/game/kinds.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
@@ -651,25 +653,48 @@ ok('the water\'s shader is written from the same numbers', () => {
 
 console.log('the void: the body\'s carriage');
 
-ok('the leg\'s two bones put the ankle where the stride says', () => {
-  for (const [z, y] of [[0, -0.86], [0.3, -0.7], [-0.25, -0.75], [0.1, -0.5], [0.4, -0.4]]) {
-    const { thigh, knee } = Gt.legIK(z, y), a = Gt.ankleOf(thigh, knee);
+const MANTIS_LEGS = { thigh: 0.5, shin: 0.62, ankle: 0.06, ball: 0.08, hip: 0.07, stand: 1.0, pivot: 1.0, knee: -1 };
+
+ok('the leg\'s two bones put the ankle where the stride says, with a knee that bends forward or back', () => {
+  for (const bend of [1, -1]) for (const [z, y] of [[0, -0.86], [0.3, -0.7], [-0.25, -0.75], [0.1, -0.5], [0.4, -0.4]]) {
+    const { thigh, knee } = Gt.legIK(z, y, Gt.BUILD.thigh, Gt.BUILD.shin, bend), a = Gt.ankleOf(thigh, knee);
     near(a.z, z, 1e-9, 'ahead'); near(a.y, y, 1e-9, 'below');
-    assert.ok(knee >= 0 && knee < Math.PI, 'a knee bends one way: ' + knee);
+    assert.ok(bend * knee >= 0 && bend * knee < Math.PI, 'a knee bends one way: ' + knee);
   }
   const far = Gt.legIK(2, -2), a = Gt.ankleOf(far.thigh, far.knee);
   near(Math.atan2(a.z, -a.y), Math.PI / 4, 1e-6, 'out of reach, it reaches toward');
   near(Math.hypot(a.z, a.y), Gt.BUILD.thigh + Gt.BUILD.shin - 0.004, 1e-9, 'with a straight leg');
 });
 
+ok('a foot on the floor stays where it was put, whoever\'s legs they are', () => {
+  for (const build of [undefined, MANTIS_LEGS]) {
+    const g = Gt.createGait(build), Bd = g.build;
+    for (const v of [0.3, 1, B.WALK, 2.6, B.RUN, B.SPRINT]) {
+      const st = Gt.stride(v, Bd);
+      near((st.cadence * st.travel) / st.duty, v, 1e-12, 'the body goes over a planted foot as far as it travels');
+      for (let i = 0; i < 300; i++) {
+        const ph = (i / 300) * st.duty, p = Gt.poseAt(g, ph, v), phi = Math.max(0, p.legL.foot);
+        // the ball of the left foot on the floor: how far the body has come, and where the foot is from it
+        near(v * (ph / st.cadence) + p.legL.z + Bd.ball * Math.cos(phi) - Bd.ankle * Math.sin(phi), st.ahead + Bd.ball, 1e-9, `it does not slide at ${v} m/s`);
+        const sole = p.pelvis + p.legL.y - Bd.ball * Math.sin(phi) - Bd.ankle * Math.cos(phi);
+        assert.ok(sole > -1e-9 && sole < 0.0201, 'and its ball is on the floor: ' + sole);
+      }
+      // the other foot, half a stride on, is the same foot
+      const a = Gt.poseAt(g, 0.1, v), b = Gt.poseAt(g, 0.6, v);
+      near(a.legL.z, b.legR.z, 1e-12); near(a.legL.x, -b.legR.x, 1e-12); near(a.pelvis, b.pelvis, 1e-12);
+    }
+  }
+});
+
 ok('the feet come down as often as the speed asks, left and right in turn', () => {
-  near(Gt.cadence(B.WALK), 0.9625, 1e-9); near(Gt.cadence(B.RUN), 1.45, 1e-9); near(Gt.cadence(B.SPRINT), 1.825, 1e-9);
+  near(Gt.cadence(B.WALK), 1.1069, 1e-3); near(Gt.cadence(B.RUN), 1.6986, 1e-3); near(Gt.cadence(B.SPRINT), 1.892, 1e-3);
+  assert.ok(Gt.cadence(B.RUN, { ...Gt.BUILD, ...MANTIS_LEGS }) < Gt.cadence(B.RUN), 'longer legs take fewer steps');
   const g = Gt.createGait(), body = B.createBody({ v: [0, 0, B.RUN] });
   const falls = [];
   for (let i = 0; i < 600; i++) { const pose = Gt.stepGait(g, body, 1 / 60); for (const f of pose.footfalls) falls.push(f); }
   near(falls.length / 10, 2 * Gt.cadence(B.RUN), 0.25, 'steps a second');
   for (let i = 1; i < falls.length; i++) assert.ok(Math.sign(falls[i][0]) === -Math.sign(falls[i - 1][0]), 'in turn');
-  assert.ok(falls.every((f) => Math.abs(f[0]) === Gt.BUILD.hip && f[1] > 0.2 && f[1] < 0.9), 'each a hip\'s width to its side and ahead of the body');
+  assert.ok(falls.every((f) => Math.abs(f[0]) > 0.7 * Gt.BUILD.hip && Math.abs(f[0]) <= Gt.BUILD.hip + 1e-9 && f[1] > 0.2 && f[1] < 0.9), 'each to its own side and ahead of the body');
   const still = Gt.createGait(), stood = B.createBody();
   let n = 0; for (let i = 0; i < 300; i++) n += Gt.stepGait(still, stood, 1 / 60).footfalls.length;
   assert.equal(n, 0, 'standing, no foot falls');
@@ -678,21 +703,42 @@ ok('the feet come down as often as the speed asks, left and right in turn', () =
   assert.equal(n, 0, 'nor in the air, however fast it goes: no ring where no foot came down');
 });
 
-ok('no pose puts a foot through the floor or a leg past its reach', () => {
-  const reach = Gt.BUILD.thigh + Gt.BUILD.shin;
-  for (const [v, flags] of [[[0, 0, 0], {}], [[0, 0, B.WALK], {}], [[0, 0, B.RUN], {}], [[B.SPRINT, 0, 0], {}], [[0, 4, 3], { grounded: false }], [[0, -9, 3], { grounded: false }],
-    [[0, 0, 26], { dashT: 0.2 }], [[0, 0, 0], { flying: true, grounded: false }], [[0, 3, 40], { flying: true, grounded: false }]]) {
-    const g = Gt.createGait(), body = B.createBody({ v, ...flags });
-    for (let i = 0; i < 240; i++) {
-      const pose = Gt.stepGait(g, body, 1 / 60);
-      for (const leg of [pose.legL, pose.legR]) {
-        assert.ok(Number.isFinite(leg.z) && Number.isFinite(leg.y) && Number.isFinite(leg.foot));
-        assert.ok(Math.hypot(leg.z, leg.y) <= reach + 1e-9, 'within reach');
-        if (pose.state === 'ground') assert.ok(pose.pelvis + leg.y >= Gt.BUILD.ankle - 1e-9, `the ankle stays over the floor: ${pose.pelvis + leg.y} at ${v}`);
+ok('no pose puts a foot through the floor or a leg past its reach, the hips\' sway, tip and turn counted', () => {
+  for (const build of [undefined, MANTIS_LEGS]) {
+    for (const [v, flags] of [[[0, 0, 0], {}], [[0, 0, 0.4], {}], [[0, 0, B.WALK], {}], [[0, 0, 2.5], {}], [[0, 0, B.RUN], {}], [[B.SPRINT, 0, 0], {}], [[0, 4, 3], { grounded: false }], [[0, -9, 3], { grounded: false }],
+      [[0, 0, 26], { dashT: 0.2 }], [[0, 0, 0], { flying: true, grounded: false }], [[0, 3, 40], { flying: true, grounded: false }]]) {
+      const g = Gt.createGait(build), body = B.createBody({ v, ...flags }), reach = g.build.thigh + g.build.shin - 0.004;
+      for (let i = 0; i < 240; i++) {
+        const pose = Gt.stepGait(g, body, 1 / 60);
+        for (const side of [1, -1]) {
+          const leg = side > 0 ? pose.legL : pose.legR, t = Gt.fromHip(pose, side, g.build);
+          assert.ok([leg.x, leg.y, leg.z, leg.foot].every(Number.isFinite));
+          assert.ok(Math.hypot(t.x, t.y, t.z) <= reach + 1e-9, `within reach of its own hip: ${Math.hypot(t.x, t.y, t.z) - reach} over at ${v}`);
+          if (pose.state === 'ground') assert.ok(pose.pelvis + leg.y >= g.build.ankle - 1e-9, `the ankle stays over the floor: ${pose.pelvis + leg.y} at ${v}`);
+        }
+        assert.ok(pose.pelvis > 0.5 && pose.pelvis < 1.15 && [pose.sway, pose.roll, pose.hipYaw, pose.bank, pose.twist].every(Number.isFinite));
       }
-      assert.ok(pose.pelvis > 0.5 && pose.pelvis < 1.1 && Number.isFinite(pose.cape));
     }
   }
+  // standing, the hips are over the feet and nothing swings
+  const g = Gt.createGait(), stood = Gt.stepGait(g, B.createBody(), 1 / 60);
+  near(stood.legL.z, 0, 1e-12); near(stood.legR.z, 0, 1e-12); near(stood.sway, 0, 1e-12); near(stood.armL.swing, 0, 1e-12);
+  near(stood.legL.x, Gt.BUILD.hip, 1e-12); near(stood.legR.x, -Gt.BUILD.hip, 1e-12);
+});
+
+ok('a body leans into a turn on the ground, and not in the air', () => {
+  const turn = (flags) => {
+    const g = Gt.createGait(), body = B.createBody({ v: [0, 0, B.RUN], ...flags });
+    let pose = null;
+    for (let i = 0; i < 90; i++) { body.yaw += 2.4 / 60; pose = Gt.stepGait(g, body, 1 / 60); }
+    return pose.bank;
+  };
+  const left = turn({});
+  assert.ok(left > 0.15 && left <= 0.32, 'turning toward its left it leans: ' + left);
+  near(turn({ grounded: false }), 0, 1e-9, 'in the air there is nothing to lean on');
+  const g = Gt.createGait(), body = B.createBody({ v: [0, 0, B.RUN], yaw: 3.1 });
+  Gt.stepGait(g, body, 1 / 60); body.yaw = -3.1; const p = Gt.stepGait(g, body, 1 / 60);
+  assert.ok(Math.abs(p.bank) < 0.05, 'a turn past the half-circle is a small turn, not a spin: ' + p.bank);
 });
 
 ok('what the body is doing, of the four; and a landing is taken in the knees', () => {
@@ -712,13 +758,170 @@ ok('what the body is doing, of the four; and a landing is taken in the knees', (
   near(soft.crouch, 0.08, 1e-12, 'a small drop is a small bend: 4 cm for each m/s it came down at');
 });
 
+console.log('the void: a body on six arms');
+
+// the crawl, lived for a while at 60 frames a second: the body goes where its speed takes it
+const crawlFor = (s, body, at, seconds, each = null) => {
+  for (let f = 0; f < Math.round(seconds * 60); f++) { at[0] += body.v[0] / 60; at[2] += body.v[2] / 60; Cr.stepCrawl(s, body, at, 1 / 60); if (each) each(f); }
+};
+
+ok('at rest six tips stand on a ring round the body, sixty degrees apart, none of them straight ahead', () => {
+  const s = Cr.createCrawl(), body = B.createBody({ yaw: 0.7 }), at = [3, 0, -2];
+  Cr.stepCrawl(s, body, at, 1 / 60);
+  assert.equal(s.tips.length, 6); assert.equal(s.falls.length, 0, 'a body only just made rings no water');
+  s.tips.forEach((t, i) => {
+    assert.ok(t.down && t.y === 0, 'planted');
+    near(Math.hypot(t.x - at[0], t.z - at[2]), Cr.CRAWL.ring, 1e-12, 'on the ring');
+    const dx = t.x - at[0], dz = t.z - at[2], lx = dx * Math.cos(0.7) - dz * Math.sin(0.7), lz = dx * Math.sin(0.7) + dz * Math.cos(0.7);
+    near((Math.atan2(lx, lz) + 2 * Math.PI) % (2 * Math.PI), (i + 0.5) * Math.PI / 3, 1e-9, 'round from the front by the left');
+  });
+  let lifted = 0;
+  crawlFor(s, body, at, 3, () => { lifted += s.tips.filter((t) => !t.down).length + s.falls.length; });
+  assert.equal(lifted, 0, 'and standing, none of them stirs');
+  const long = Cr.createCrawl({ ring: 0.3 }); Cr.stepCrawl(long, body, at, 1 / 60);
+  near(Math.hypot(long.tips[2].x - at[0], long.tips[2].z - at[2]), 0.3, 1e-12, 'longer arms stand wider');
+});
+
+ok('a tip on the floor stays where it was put; three are always down; the two threes take turns evenly', () => {
+  for (const v of [0.4, B.WALK, 2.4]) {
+    const s = Cr.createCrawl(), body = B.createBody({ v: [0, 0, v] }), at = [0, 0, 0];
+    const was = s.tips.map(() => null), lifts = s.tips.map(() => 0), lands = [[], []];
+    let falls = 0, landed = 0, top = 0;
+    crawlFor(s, body, at, 8, (f) => {
+      let down = 0;
+      assert.ok([0, 1].some((g) => [0, 2, 4].every((i) => s.tips[i + g].down)), 'a whole three, every other one round the ring');
+      s.tips.forEach((t, i) => {
+        assert.ok(Math.hypot(t.x - at[0], t.z - at[2]) < Cr.CRAWL.ring + Cr.CRAWL.reach + 0.25, `no arm is asked to be longer than it is, at ${v} m/s`);
+        assert.ok(t.y >= 0 && t.y <= Cr.CRAWL.lift + 1e-12, 'nor lifted higher than a step');
+        if (!t.down) { if (was[i]) lifts[i] += 1; was[i] = null; top = Math.max(top, t.y); return; }
+        down += 1;
+        if (was[i]) { assert.equal(t.x, was[i][0], `it does not slide at ${v} m/s`); assert.equal(t.z, was[i][1]); assert.equal(t.y, 0); }
+        else if (f) {
+          landed += 1; if (i < 2) lands[i].push(f / 60);
+          if (f > 120) near(t.z - Cr.homeOf(s, i, at, 0)[1], Cr.CRAWL.reach * Math.min(1, v / 0.6), 1e-6, 'it comes down a stride ahead of where it would stand');
+        }
+        was[i] = [t.x, t.z];
+      });
+      assert.ok(down >= 3, `three on the floor at ${v} m/s: ${down}`);
+      falls += s.falls.length;
+      for (const [x, z] of s.falls) assert.ok(s.tips.some((t) => t.down && t.x === x && t.z === z), 'a fall is where a tip now stands');
+    });
+    assert.ok(lifts.every((n) => n >= 3), 'every tip steps: ' + lifts);
+    assert.ok(top > 0.6 * Cr.CRAWL.lift, 'and is lifted to do it: ' + top);
+    assert.equal(falls, landed, 'and each time one comes down it is told');
+    const a = lands[0], b = lands[1], P = a[a.length - 1] - a[a.length - 2], lag = (((b[b.length - 1] - a[a.length - 1]) % P) + P) % P;
+    assert.ok(lag > 0.35 * P && lag < 0.65 * P, `one three comes down half a stride after the other at ${v} m/s: ${lag / P}`);
+  }
+});
+
+ok('turning where it stands, the tips follow it round, and come to rest on the ring', () => {
+  const s = Cr.createCrawl(), body = B.createBody(), at = [0, 0, 0];
+  let steps = 0, least = 6;
+  crawlFor(s, body, at, 2, () => { body.yaw += 1.5 / 60; steps += s.falls.length; least = Math.min(least, s.tips.filter((t) => t.down).length); });
+  assert.ok(steps >= 12, 'they step: ' + steps); assert.ok(least >= 3, 'three at a time');
+  crawlFor(s, body, at, 1.5);
+  s.tips.forEach((t, i) => { const home = Cr.homeOf(s, i, at, body.yaw); assert.ok(t.down && Math.hypot(t.x - home[0], t.z - home[1]) <= 0.05 + 1e-9, 'home, or as near as makes no step'); });
+  const still = Cr.createCrawl(), stood = B.createBody(); Cr.stepCrawl(still, stood, at, 1 / 60);
+  stood.yaw = 0.2; steps = 0; crawlFor(still, stood, at, 1, () => { steps += still.falls.length + still.tips.filter((t) => !t.down).length; });
+  assert.equal(steps, 0, 'a turn of a few degrees is not worth a step');
+});
+
+ok('off the floor every tip is loose and goes with the body; the floor takes all six at once', () => {
+  const s = Cr.createCrawl(), body = B.createBody({ v: [0, 0, B.WALK] }), at = [0, 0, 0];
+  crawlFor(s, body, at, 1);
+  for (const flags of [{ grounded: false }, { dashT: 0.2 }, { flying: true, grounded: false }]) {
+    Object.assign(body, { grounded: true, dashT: 0, flying: false }, flags);
+    crawlFor(s, body, at, 0.5, () => assert.equal(s.falls.length, 0, 'no ring where no tip came down'));
+    assert.equal(s.state, Gt.stateOf(body));
+    assert.ok(s.tips.every((t) => !t.down && Math.hypot(t.x - at[0], t.z - at[2]) <= Cr.CRAWL.ring + Cr.CRAWL.reach + 1e-9), 'loose, and with it');
+    Object.assign(body, { grounded: true, dashT: 0, flying: false });
+    Cr.stepCrawl(s, body, at, 1 / 60);
+    assert.ok(s.tips.every((t) => t.down)); assert.equal(s.falls.length, 6, 'six rings');
+  }
+});
+
+ok('faster than a crawl can carry it, it jets; and it does not flicker between the two', () => {
+  assert.ok(B.WALK < Cr.CRAWL.jet[0] && Cr.CRAWL.jet[0] < Cr.CRAWL.jet[1] && B.RUN > Cr.CRAWL.jet[1], 'a walk crawls, a run jets');
+  const s = Cr.createCrawl(), body = B.createBody({ v: [0, 0, 2.9] }), at = [0, 0, 0];
+  crawlFor(s, body, at, 2); assert.equal(s.state, 'crawl', 'from below, 2.9 m/s is a crawl');
+  body.v[2] = B.RUN; crawlFor(s, body, at, 1); assert.equal(s.state, 'jet'); assert.ok(s.tips.every((t) => !t.down), 'nothing on the floor');
+  body.v[2] = 2.9; crawlFor(s, body, at, 2); assert.equal(s.state, 'jet', 'from above, 2.9 m/s is still a jet');
+  body.v[2] = B.WALK; crawlFor(s, body, at, 1); assert.equal(s.state, 'crawl'); assert.ok(s.tips.filter((t) => t.down).length >= 3, 'and it is on its arms again');
+});
+
+ok('the origin moved under it: the tips go with it, and none of them steps for that', () => {
+  const s = Cr.createCrawl(), body = B.createBody({ v: [0, 0, B.WALK] }), at = [0, 0, 0];
+  for (let f = 0; f < 600 && !s.tips.some((t) => !t.down && t.s > 0.3 && t.s < 0.7); f++) crawlFor(s, body, at, 1 / 60);
+  const before = s.tips.map((t) => ({ ...t }));
+  assert.ok(before.some((t) => !t.down && t.s > 0.3) && before.some((t) => t.down), 'some in the middle of a step, some planted');
+  Cr.shiftCrawl(s, -400, 800); at[0] -= 400; at[2] += 800;
+  Cr.stepCrawl(s, body, at, 0);
+  s.tips.forEach((t, i) => { near(t.x, before[i].x - 400, 1e-9); near(t.z, before[i].z + 800, 1e-9); assert.equal(t.down, before[i].down); assert.equal(t.s, before[i].s); });
+  assert.equal(s.falls.length, 0);
+});
+
+console.log('the void: the five kinds of body');
+
+ok('five kinds: the four he named and one of light; five choices each, five options a choice', () => {
+  assert.deepEqual(K.KIND_IDS, ['human', 'robot', 'mantis', 'octopus', 'light']);
+  for (const kind of K.KINDS) {
+    assert.equal(kind.choices.length, 5, kind.id + ' has five kinds of choice');
+    assert.equal(new Set(kind.choices.map((c) => c.id)).size, 5);
+    for (const c of kind.choices) {
+      assert.equal(c.options.length, 5, `${kind.id}'s ${c.id} has five`);
+      assert.equal(new Set(c.options).size, 5, 'each its own');
+      for (const o of c.options) assert.match(o, /^[a-z]+$/);
+    }
+    assert.ok(kind.line.length > 8 && kind.line.length < 40);
+  }
+  assert.equal(K.COUNT, 5 * 5 ** 5, '15,625 bodies');
+  // his example: "for the human -- 5 hair types, 5 body types, 5 clothing types, and two others with 5 options"
+  assert.deepEqual(K.kindOf('human').choices.map((c) => c.id), ['hair', 'build', 'clothing', 'skin', 'dye']);
+  assert.equal(K.FIRST_KIND, 'human');
+});
+
+ok('a look is one option of each choice; what is not one is the first; chance picks whole looks', () => {
+  for (const id of K.KIND_IDS) {
+    const fresh = K.freshLook(id);
+    assert.deepEqual(Object.keys(fresh), K.kindOf(id).choices.map((c) => c.id));
+    assert.deepEqual(Object.values(fresh), K.kindOf(id).choices.map((c) => c.options[0]), 'the first of each is the body as it was first drawn');
+    assert.deepEqual(K.cleanLook(id, null), fresh); assert.deepEqual(K.cleanLook(id, 'x'), fresh); assert.deepEqual(K.cleanLook(id, { __proto__: { hair: 'tail' }, hair: 7 }), fresh);
+    const last = K.randomLook(id, () => 0.999999), first = K.randomLook(id, () => 0), edge = K.randomLook(id, () => 1);
+    assert.deepEqual(first, fresh); assert.deepEqual(last, edge);
+    assert.deepEqual(Object.values(last), K.kindOf(id).choices.map((c) => c.options[4]));
+    assert.deepEqual(K.cleanLook(id, last), last, 'a whole look is kept whole');
+  }
+  assert.deepEqual(K.cleanLook('human', { hair: 'tail', build: 'giant', extra: 'x' }), { ...K.freshLook('human'), hair: 'tail' });
+  assert.equal(K.cleanKind('mantis'), 'mantis'); assert.equal(K.cleanKind('toString'), 'human'); assert.equal(K.cleanKind(null), 'human');
+  assert.deepEqual(Object.keys(K.cleanLooks({ human: { hair: 'curls' }, dragon: {} })), K.KIND_IDS);
+  assert.equal(K.cleanLooks({ human: { hair: 'curls' } }).human.hair, 'curls');
+});
+
+ok('a choice of colour shows its colours, a choice of shape none', () => {
+  const hex = /^#[0-9a-f]{6}$/;
+  let coloured = 0;
+  for (const kind of K.KINDS) for (const c of kind.choices) for (const o of c.options) {
+    const sw = K.swatchOf(kind.id, c.id, o);
+    if (c.swatch) { coloured += 1; assert.ok(Array.isArray(sw) && sw.length >= 1 && sw.length <= 2 && sw.every((x) => hex.test(x)), `${kind.id} ${c.id} ${o}`); }
+    else assert.equal(sw, null);
+  }
+  assert.equal(coloured, 7 * 5, 'seven of the twenty-five choices are colours');
+  assert.equal(K.swatchOf('human', 'skin', 'nope'), null); assert.equal(K.swatchOf('human', 'nope', 'sand'), null);
+  assert.deepEqual(K.swatchOf('light', 'colour', 'aurora'), K.AURA.aurora);
+});
+
 console.log('the void: what is kept, and the door');
 
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5 });
-  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456 });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12 });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null) });
+  const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
+  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks });
+  const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
+  assert.equal(odd.kind, 'human', 'a kind that is not one of the five is the first');
+  assert.deepEqual(odd.looks.human, { ...K.freshLook('human'), dye: 'moss' }, 'an option that is not one of the five is the first; the rest is kept');
+  assert.deepEqual(odd.looks.robot, K.freshLook('robot'));
   for (const junk of ['{', '[]', '"x"', '{"mode":"god","light":"noon","zoom":"near"}', '{"mode":7,"light":null,"zoom":null}'])
     assert.deepEqual(S.loadState(store({ [S.STATE_KEY]: junk })), S.freshState(), junk);
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"zoom":900}' })).zoom, S.ZOOM.max);
