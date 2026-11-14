@@ -301,8 +301,10 @@ build. Read the one for the part you are touching.
   and by touch at a phone's. Measured once outside the suite: every one of
   the 125 options changes the picture (two of the light's wakes only when it
   moves). A frame still takes 16.7 ms on an M2 MacBook Air with any of the
-  five running. Not looked at: the bodies under dusk and night, on the
-  low-detail tier, in Firefox and WebKit, on a real phone.
+  five running, and making a body again at every choice leaks nothing (150
+  made and put down, counted). Not looked at: the bodies in Firefox and
+  WebKit and on a real phone; under dusk and night and on the low-detail
+  tier, any look but the first.
 
 - **2026-11-13** — **The world tab opens on the void: the first stage of an
   open world** (`src/game/`, [`GAME.md`](GAME.md)). Colin: "i want to turn

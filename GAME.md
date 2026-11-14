@@ -246,10 +246,16 @@ pictures, 6 shader programs: the void's own and the tiles the bodies share),
 and the page's memory, read after its collector had run, stayed between 7.3
 and 7.8 megabytes. Changing bodies leaks nothing.
 
+And the five bodies as they came were drawn standing and running under dusk
+and night, and on the low-detail tier under the pale light and at night. All
+five read in each. At night the human and the mantis are dim, and the
+robot's bronze goes nearly black: its ceramic and its rim of light carry it.
+
 **Not looked at:** Safari itself and Firefox itself, with a real mouse and
 the pointer held; a real phone; a real controller (the smoke's is made up,
-answering for `navigator.getGamepads`). The five bodies under dusk and night,
-on the low-detail tier, and in Firefox and WebKit.
+answering for `navigator.getGamepads`). The five bodies in Firefox and
+WebKit. Under dusk and night and on the low-detail tier, any look but the
+first.
 
 ### Rough edges, known
 
@@ -289,8 +295,7 @@ tested, shipped.
 
 Owed from stage 2, small: a run that draws every option and counts what
 changes, so that "no choice does nothing" is held by a run and not by one
-measurement; the bodies looked at under dusk and night and on the low-detail
-tier; something that points a first visitor to the body button.
+measurement; something that points a first visitor to the body button.
 
 ## How it is built
 
