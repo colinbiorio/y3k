@@ -1,13 +1,15 @@
 // state.js — WHAT THE VOID KEEPS between visits, and which world the world tab
 // opens on. Small, plain, and not believed when it is not what it should be.
 import { LIGHT_NAMES } from './lights.js';
+import { FIRST_KIND, cleanKind, cleanLooks } from './kinds.js';
 
 export const STATE_KEY = 'y3k.game.state';
 export const WHICH_KEY = 'y3k.world.which';
 export const MODES = ['survival', 'creative'];
 export const ZOOM = { min: 2, max: 12, start: 5.5 };
 
-export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start });
+// mode, light and zoom; which of the five kinds of body the person is, and how each kind was last made to look
+export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null) });
 
 export function loadState(storage) {
   const s = freshState();
@@ -17,10 +19,12 @@ export function loadState(storage) {
   if (MODES.includes(kept.mode)) s.mode = kept.mode;
   if (LIGHT_NAMES.includes(kept.light)) s.light = kept.light;
   if (Number.isFinite(kept.zoom)) s.zoom = Math.min(ZOOM.max, Math.max(ZOOM.min, kept.zoom));
+  s.kind = cleanKind(kept.kind);
+  s.looks = cleanLooks(kept.looks);
   return s;
 }
 export function saveState(storage, s) {
-  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100 })); return true; } catch { return false; }
+  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks) })); return true; } catch { return false; }
 }
 
 // The world tab holds two worlds for now: the void (the game, new) and the

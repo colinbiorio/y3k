@@ -8,12 +8,14 @@
 // 2x", "omnidirectional dash", flight "only in 'creative' mode", "options for
 // both controller and keyboard/mouse, with a dedicated 'controls' menu").
 //
-//   node scripts/void-smoke.mjs <desk|pad|phone> [gpu] [firefox|webkit] [dpr=N] [--shots <dir>]
+//   node scripts/void-smoke.mjs <desk|pad|phone|bodies> [small] [gpu] [firefox|webkit] [dpr=N] [--shots <dir>]
 //
 //   desk   the keys and the mouse, the pointer held, the controls sheet, a key
 //          rebound, the three lights, the societies and back, leaving the tab
 //   pad    a controller (a made-up one: navigator.getGamepads answers for it)
 //   phone  a thumb on glass, 390 x 844 at two pixels a point, and frame times
+//   bodies the body sheet: the five kinds worn in turn, each of the 125 options put on once, the arrow keys,
+//          the sheet clear of the body, each kind walked; `small` does it at a phone's size, by touch
 //   gpu    the machine's own chip (the full Chromium, --use-angle=metal)
 //          instead of software drawing: only there do frame times mean anything
 //   firefox, webkit   another engine than Chromium, for desk and pad (the
@@ -33,10 +35,11 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies'].find((s) => argv.includes(s)) || 'desk';
+const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
-const dpr = +(argv.find((a) => a.startsWith('dpr='))?.slice(4) || (scene === 'phone' ? 2 : 1));
+const dpr = +(argv.find((a) => a.startsWith('dpr='))?.slice(4) || (scene === 'phone' || small ? 2 : 1));
 const tmp = mkdtempSync(join(tmpdir(), 'y3k-void-'));
 const SHOTS = argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : join(tmp, 'shots');
 const DATA = join(tmp, 'data');
@@ -81,7 +84,7 @@ const end = async (code) => {
   console.log(JSON.stringify(out, null, 1));
   process.exit(code);
 };
-const dog = setTimeout(() => { out.errors.push('watchdog: took too long'); end(3); }, 420000);
+const dog = setTimeout(() => { out.errors.push('watchdog: took too long'); end(3); }, scene === 'bodies' ? 1500000 : 420000);      // the bodies scene presses 125 options
 const check = (name, ok, got) => { out.checks[name] = ok ? 'ok' : 'NO: ' + JSON.stringify(got); if (!ok) out.errors.push('check failed: ' + name + ' ' + JSON.stringify(got)); };
 try {
   for (let i = 0; i < 80; i++) {
@@ -95,7 +98,7 @@ try {
   browser = engine !== 'chromium' ? await pw[engine].launch({ headless: true, env: { ...process.env, HOME: tmp, CFFIXED_USER_HOME: tmp } })
     : await pw.chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : gpu ? { channel: 'chromium' } : {}),
       args: gpu ? ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--mute-audio'] : ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio'] });
-  const phone = scene === 'phone';
+  const phone = scene === 'phone' || small;
   const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: dpr, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => out.errors.push('page: ' + String(e.message).slice(0, 300)));
@@ -109,7 +112,7 @@ try {
   await page.locator('#nav-world').click();
   await page.waitForSelector('.game-root canvas', { timeout: 30000 });
   const read = () => page.evaluate(() => window.Y3K?.game?.read?.() || null);
-  const shot = async (name) => { await page.screenshot({ path: join(SHOTS, scene + '-' + name + '.png') }); out.reads[name] = await read(); };
+  const shot = async (name) => { await page.screenshot({ path: join(SHOTS, scene + (small ? '-small-' : '-') + name + '.png') }); out.reads[name] = await read(); };
   const until = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const r = await read(); if (r && fn(r)) return r; await sleep(50); } out.notes.push('timed out waiting: ' + fn); return read(); };
   const peak = (ms) => page.evaluate(async (ms) => { let m = 0; const t0 = performance.now(); while (performance.now() - t0 < ms) { m = Math.max(m, window.Y3K.game.read().p[1]); await new Promise(requestAnimationFrame); } return Math.round(m * 1000) / 1000; }, ms);
   const frames = (ms = 2000) => page.evaluate(async (ms) => { const d = []; let last = 0; const t0 = performance.now(); while (performance.now() - t0 < ms) { const n = await new Promise(requestAnimationFrame); if (last) d.push(n - last); last = n; } d.sort((x, y) => x - y); const at = (q) => Math.round(d[Math.min(d.length - 1, Math.floor(q * d.length))] * 10) / 10; return { n: d.length, median: at(0.5), p95: at(0.95), worst: at(1) }; }, ms);
@@ -259,6 +262,96 @@ try {
     await page.locator('#game-menu-close').tap(); await sleep(400);
     await page.locator('#game-mode').tap(); await sleep(400); out.creative = await page.evaluate(() => ({ mode: window.Y3K.game.read().mode, sinkShown: !document.getElementById('game-t-sink').hidden, hint: document.querySelector('.game-hint').textContent }));
     await shot('04-creative'); out.framesAfter = await frames();
+  }
+
+  if (scene === 'bodies') {
+    // Colin, 13 Nov 2026: "5 different types of customizable characters ... all should have 5 different types of
+    // customization, with 5 subset levels"
+    const { KINDS, freshLook } = await import(pathToFileURL(join(ROOT, 'src', 'game', 'kinds.js')).href);
+    const press = (sel) => (phone ? page.locator(sel).tap() : page.locator(sel).click());
+    const sheet = () => page.evaluate(() => {
+      const s = document.getElementById('game-body'), b = s.querySelector('.sheet').getBoundingClientRect(), bar = document.querySelector('.game-bar').getBoundingClientRect();
+      return { open: !s.hidden, inside: s.contains(document.activeElement), kinds: s.querySelectorAll('.body-kind').length, rows: s.querySelectorAll('.body-row').length,
+        opts: s.querySelectorAll('.body-opt').length, on: [...s.querySelectorAll('.body-opt.on')].map((x) => x.dataset.option), box: [b.left, b.top, b.right, b.bottom].map(Math.round), bar: Math.round(bar.bottom),
+        size: [innerWidth, innerHeight], pictures: [...s.querySelectorAll('.body-kind img')].filter((i) => i.complete && i.naturalWidth > 0).length,
+        cut: [...s.querySelectorAll('.body-opt span, .body-kind span')].filter((x) => x.scrollWidth > x.parentElement.clientWidth).map((x) => x.textContent) };
+    });
+    // the sheet's rows scrolled to their end: is its X still on the sheet, and is it what a finger there would press?
+    const wayOut = () => page.evaluate(() => {
+      const s = document.querySelector('#game-body .sheet'), body = document.getElementById('game-body-body'); s.scrollTop = s.scrollHeight; body.scrollTop = body.scrollHeight;
+      const b = s.getBoundingClientRect(), x = document.getElementById('game-body-close').getBoundingClientRect(), at = document.elementFromPoint(x.left + x.width / 2, x.top + x.height / 2);
+      return { on: x.top >= b.top - 1 && x.bottom <= b.bottom + 1 && x.width > 0, pressed: !!at?.closest('#game-body-close'), x: [x.left, x.top, x.right, x.bottom].map(Math.round), box: [b.left, b.top, b.right, b.bottom].map(Math.round), scrolled: Math.round(Math.max(s.scrollTop, body.scrollTop)) };
+    });
+    await shot('01-as-it-came');
+    await press('#game-body-open'); await page.waitForFunction(() => !document.getElementById('game-body').hidden, null, { timeout: 5000 }); await sleep(1400 * slow);
+    const first = await sheet(), r0 = await read();
+    out.sheet = first;
+    check('the body sheet opens with five kinds and five rows of five, one of each on', first.open && first.kinds === 5 && first.rows === 5 && first.opts === 25 && first.on.length === 5, first);
+    check('the five pictures arrived', first.pictures === 5, first.pictures);
+    check('no name in the sheet is cut', first.cut.length === 0, first.cut);
+    check('the focus goes into the sheet', first.inside, first.inside);
+    check('the game is posing, and the body is the human as it came', r0.posing && r0.kind === 'human' && JSON.stringify(r0.look) === JSON.stringify(freshLook('human')), r0);
+    // the body stands in what the sheet leaves: beside it on a desk, over it on a phone, and under the bar
+    const clear = (r) => (phone ? r.seen[1] < first.box[1] - 40 : r.seen[0] < first.box[0] - 60) && r.seen[1] > first.bar && r.seen[0] > 30 && r.seen[0] < first.size[0] - 30;
+    check('the body stands clear of the sheet', clear(r0), [r0.seen, first.box, first.bar]);
+    const turnTo = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    check('the body has turned to face the eye', turnTo(r0.facing, r0.yaw) < 0.15, [r0.facing, r0.yaw]);
+    await shot('02-human');
+    // each kind is worn, and each of its 25 options is put on once
+    for (const k of KINDS) {
+      await press(`.body-kind[data-kind="${k.id}"]`); await sleep(900 * slow);
+      const r = await read(); check(`the ${k.id} is worn`, r.kind === k.id, r.kind);
+      check(`the ${k.id} stands clear of the sheet`, clear(r), r.seen);
+      if (k.id !== 'human') await shot(`02-${k.id}`);
+      const missed = [];
+      for (const c of k.choices) for (const o of c.options) {
+        await press(`.body-opt[data-choice="${c.id}"][data-option="${o}"]`); await sleep(140 * slow);
+        const g = await read(); if (g.kind !== k.id || g.look[c.id] !== o) missed.push(c.id + ':' + o);
+      }
+      check(`every option of the ${k.id} is put on`, missed.length === 0, missed);
+      const cut = (await sheet()).cut; check(`no name of the ${k.id}'s is cut`, cut.length === 0, cut);
+      const way = await wayOut(); check(`the ${k.id}'s sheet keeps its way out in reach, its rows scrolled to their end`, way.on && way.pressed, way); out.sheet.scrolled = Math.max(out.sheet.scrolled || 0, way.scrolled);
+      await sleep(700 * slow); await shot(`03-${k.id}-last`);
+    }
+    // the keys: along a row by the arrows, choosing as they go; then the two buttons under the rows
+    if (!phone) {
+      const c = KINDS.at(-1).choices[0];
+      await page.locator(`.body-opt[data-choice="${c.id}"][data-option="${c.options.at(-1)}"]`).focus();
+      await key.press('ArrowRight'); await sleep(200 * slow);
+      const a1 = await read(), f1 = await page.evaluate(() => document.activeElement?.dataset?.option || '');
+      check('an arrow key goes round the row and chooses', a1.look[c.id] === c.options[0] && f1 === c.options[0], [a1.look[c.id], f1]);
+      await key.press('ArrowLeft'); await sleep(200 * slow);
+      check('and back', (await read()).look[c.id] === c.options.at(-1), (await read()).look[c.id]);
+    }
+    const before = await read();
+    await press('#game-body-left'); await sleep(900 * slow);
+    const after = await read(); check('the turn button turns the body an eighth of the way round', Math.abs(turnTo(after.facing, before.facing) - Math.PI / 4) < 0.12, [before.facing, after.facing]);
+    await shot('04-turned');
+    await press('#game-body-fresh'); await sleep(500 * slow);
+    const fresh = await read(); check('as it came: the first of each', JSON.stringify(fresh.look) === JSON.stringify(freshLook(fresh.kind)), fresh.look);
+    // closed by Escape (a thumb presses the X): the game goes on, with the body that was chosen, and it is kept
+    if (phone) await press('#game-body-close'); else await key.press('Escape');
+    await page.waitForFunction(() => document.getElementById('game-body').hidden, null, { timeout: 5000 }); await sleep(900 * slow);
+    const shut = await read(), kept = await page.evaluate(() => JSON.parse(localStorage.getItem('y3k.game.state') || 'null'));
+    check('the sheet closes and the game goes on', !shut.posing && shut.kind === KINDS.at(-1).id, shut);
+    check('the body is kept for the next visit', kept?.kind === KINDS.at(-1).id && Object.keys(kept.looks || {}).length === 5, kept);
+    if (!phone) check('the focus goes home to the canvas', (await page.evaluate(() => document.activeElement?.tagName)) === 'CANVAS', await page.evaluate(() => document.activeElement?.tagName));
+    // each kind walks (a thumb's stick is the phone scene's; here the sheet is what is looked at)
+    if (!phone) {
+      out.frames = {};
+      for (const k of [...KINDS].reverse()) {
+        if (k.id !== KINDS.at(-1).id) {
+          await press('#game-body-open'); await page.waitForFunction(() => !document.getElementById('game-body').hidden, null, { timeout: 5000 });
+          await press(`.body-kind[data-kind="${k.id}"]`); await sleep(300 * slow); await key.press('Escape');
+          await page.waitForFunction(() => document.getElementById('game-body').hidden, null, { timeout: 5000 }); await sleep(600 * slow);
+        }
+        await key.down('KeyW'); const run = await until((r) => speed(r) > 5.2, 8000); await sleep(900 * slow);
+        check(`the ${k.id} runs`, run.kind === k.id && speed(run) > 5.2, [run.kind, speed(run)]);
+        out.frames[k.id] = await frames(1500); await shot(`05-${k.id}-run`);
+        await key.down('Space'); await sleep(260); await key.up('Space'); await sleep(250); await shot(`06-${k.id}-jump`);
+        await key.up('KeyW'); await until((r) => r.grounded && speed(r) < 0.1, 8000);
+      }
+    }
   }
 } catch (e) { out.errors.push('script: ' + String(e?.message || e).split('\n')[0].slice(0, 300)); }
 clearTimeout(dog);

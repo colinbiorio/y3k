@@ -83,10 +83,12 @@ of its own, hosted by their account. The rails around the room are its places.
   computes the same ground; only edits and settlements cross the wire. The
   long-term direction is a shared universe you have to physically travel.
 - **The void** (`src/game/`, [`GAME.md`](GAME.md)) — the open world, at its
-  first stage. The world tab opens on an endless void under one inch of still
+  second stage. The world tab opens on an endless void under one inch of still
   water, and a body that walks, runs, jumps (a tap 1.5 m; held, 3.0 m), dashes
   any way and, in creative, flies. Keys and mouse, a controller or a thumb,
-  and a controls sheet to change them. The planet above is one button away.
+  and a controls sheet to change them. The body is one of five kinds (human,
+  robot, mantis, octopus, light), each with five choices of five options,
+  chosen in the body sheet. The planet above is one button away.
 - **The mine** (`src/mine.js`, `phraszle.mjs`) — Phraszle: proof-of-work with a
   closed book of 340 words. You cannot guess the phrase; you coach a rented
   mind and make it commit. A ladder, and the seed of an in-world currency.
@@ -221,7 +223,7 @@ src/                   the client — body, environments, voice, perceive (eye),
                        handview/twohand/reach (hands), social, chess, world,
                        mine, settings, gfx, mercury, tend (the autonomous life)
 src/code/              kode's client: the room, state, transport, onboarding
-src/game/              the void: the open world's first stage (GAME.md)
+src/game/              the void and the five bodies: the open world's first two stages (GAME.md)
 y3k-code/              the y3kode engine (runs the person's coding tools locally)
 desktop/               the Electron window
 test/                  the suite
@@ -258,6 +260,51 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-11-14** — **Five kinds of body in the void, each with five choices
+  of five** (`src/game/kinds.js`, `bodies/`, `shape.js`, `chooser.js`,
+  `drape.js`, `crawl.js`; [`GAME.md`](GAME.md)). Colin: "There should be 5
+  different types of customizable characters -- 5 is our magic number for
+  now. One character type should be humanoid, one should be robotic, one
+  should be mantis/insectoid, one should be octopus/alienoid, and the 5th can
+  be your choosing, but all should have 5 different types of customization,
+  with 5 subset levels". The fifth is the orb's own kin, a body of light. So
+  the world tab's bar has a **body** button, and its sheet has five pictures
+  and five rows of five: the human's hair, build, clothing, skin and dye; the
+  robot's head, frame, finish, cloth and light; the mantis's antennae, shell,
+  wings, build and wear; the octopus's mantle, skin, marks, arms and collar;
+  the light's core, veil, colour, mood and wake. That is 15,625 bodies, and
+  none is a model file: each is drawn by arithmetic, as the void is. The
+  sheet does not cover what it is about. The body turns to face you, stands
+  in what the sheet leaves of the room (beside it on a desk, over it on a
+  phone), and is made again as you choose; each kind keeps the look it was
+  last given, on the device. Each moves in its own way on the same rules:
+  the human strides, the robot more stiffly, the mantis on long legs whose
+  knees bend backward with wings that open when it leaves the ground, the
+  octopus crawls on six of its arms with three tips always on the floor and
+  jets when a crawl cannot keep up, and the light hangs a hand's width over
+  the water and goes by leaning. "every theme and style of this game should
+  be a mix between ancient/natural, current, and futuristic": each body wears
+  all three. Coats, cloaks and veils are cloth that falls and trails. *A
+  finding on the way:* a knee came through a closed skirt in a run, because
+  a point of cloth inside a limb was put out by the nearest way and the
+  nearest way out of a lifted thigh is under it; a garment now says which
+  way is out (`drape.js`). *Higgsfield:* the five bodies were drawn from five
+  generated pictures, which are the sheet's cards, and six small grey
+  generated surfaces give the bodies their weave and grain (eleven files,
+  167 kilobytes; nothing was spent). Tests: `test/game.test.mjs` is 87
+  checks (the planted stride on three builds read from the bodies' own
+  files, the crawl, the kinds and that every option is named in the body
+  that draws it, the cloth, the sheet's keys and where the body stands), and
+  `scripts/void-smoke.mjs bodies` wears the five kinds and puts each of the
+  125 options on once in a real browser, by mouse and keys at a desk's size
+  and by touch at a phone's. Measured once outside the suite: every one of
+  the 125 options changes the picture (two of the light's wakes only when it
+  moves). A frame still takes 16.7 ms on an M2 MacBook Air with any of the
+  five running, and making a body again at every choice leaks nothing (150
+  made and put down, counted). Not looked at: the bodies in Firefox and
+  WebKit and on a real phone; under dusk and night and on the low-detail
+  tier, any look but the first.
 
 - **2026-11-13** — **The world tab opens on the void: the first stage of an
   open world** (`src/game/`, [`GAME.md`](GAME.md)). Colin: "i want to turn
