@@ -752,6 +752,15 @@
     </div>
   </div>
 
+  <!-- THE VOID'S CONTROLS (src/game/menu.js fills it; GAME.md): the mode, every key and button, the light.
+       Static, like the three above: the keeper of sheets (src/inert-hidden.js) finds each .modal as the page starts. -->
+  <div id="game-menu" class="modal" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span>controls</span><button id="game-menu-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
+      <div class="sheet-body game-menu-body" id="game-menu-body"></div>
+    </div>
+  </div>
+
   <div id="settings" class="modal" hidden>
     <div class="sheet">
       <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>

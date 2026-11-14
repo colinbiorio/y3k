@@ -316,7 +316,7 @@ import { faunaNear, FAUNA } from './fauna.js';
 import { due } from './pace.js';
 import { noBrain } from './brain.js';
 
-export function createWorldView({ getAccount, toast, play }) {
+export function createWorldView({ getAccount, toast, play, toVoid = null }) {
   let panel = null;
   let firsts = null;   // the list of firsts, top centre
   let build = null;    // the hammer: the build window
@@ -2676,6 +2676,7 @@ export function createWorldView({ getAccount, toast, play }) {
         <button type="button" id="world-ride" class="login-alt" title="ride a sprite — R; again for behind; again to step off">ride</button>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
+        ${toVoid ? '<button type="button" id="world-void" class="login-alt" title="the open world being built: an endless still water (GAME.md)">the void</button>' : ''}
         <button type="button" id="world-nearchip" class="login-alt world-nearchip" aria-controls="world-near" aria-expanded="false" hidden></button>
         <button type="button" id="world-home" class="login-alt" hidden>home</button>
       </div>
@@ -2702,6 +2703,7 @@ export function createWorldView({ getAccount, toast, play }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    root.querySelector('#world-void')?.addEventListener('click', () => toVoid());
     root.querySelector('#world-nearchip').addEventListener('click', askNear);
     root.querySelector('#world-ride').addEventListener('click', () => cycleRide());
     root.querySelector('#world-walk').addEventListener('click', () => cycleWalk());

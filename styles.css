@@ -5939,3 +5939,65 @@ body.in-code #caption { display: none !important; }
 .cv-note.cv-keepnote { color: #c3c8d2; }
 .code-root .it.us.auto { opacity: 0.82; }
 .code-root .it.us.auto .us-note { color: #9aa0ab; font-size: 0.74rem; }
+
+/* ── THE VOID (src/game/, GAME.md): the world tab's open world. Its root sits
+   where the societies' does (.world-root), and its bar is the same bar. ── */
+.game-root { position: fixed; inset: 0; z-index: 31; }
+.game-canvas { position: absolute; inset: 0; background: #dfe7ee; touch-action: none; }
+.game-root[data-light="dusk"] .game-canvas { background: #8e8492; }
+.game-root[data-light="night"] .game-canvas { background: #0c1119; }
+.game-canvas canvas { display: block; width: 100%; height: 100%; outline: none; }
+/* THE AIR MARK STOOD ON THE BODY. It floats over the panel's foot, on the centre line, which in the void is where the
+   body stands and its reflection lies (the first look, 13 Nov 2026: the mark at the feet in every picture). As in kode,
+   it is put away there, unless airden is on, when it is the way to stop it (and the hint steps up over it). */
+body.in-void:not(.airden) .chat-air { visibility: hidden; }
+body.in-void.airden .game-hint { translate: -50% -66px; }
+.game-root.locked .game-canvas { cursor: none; }
+.game-bar .game-mode { color: #eceef2; }
+/* the hint stands clear of the panel's bottom grip (20px over the hole's edge) and of the chat bar (#chat's own seat) */
+.game-hint { position: absolute; left: 50%; translate: -50% 0; z-index: 2;
+  bottom: max(calc(var(--hole-b, 90px) + 46px), calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b, 90px)) + 62px));
+  max-width: min(92vw, 780px); padding: 7px 14px; border-radius: 16px; font-size: 0.78rem; line-height: 1.4; text-align: center;
+  color: #dfe3ea; pointer-events: none; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(18px) saturate(1.3); }
+.game-hint[hidden], .game-touch[hidden], .game-tbtn[hidden] { display: none; }
+/* the thumb's buttons stand inside the panel's hole (on a phone its edge and the rail's glyphs are 58px in) */
+.game-touch { position: absolute; right: calc(var(--hole-r, 0px) + 12px); bottom: calc(var(--hole-b, 0px) + 30px); z-index: 2;
+  display: flex; align-items: flex-end; gap: 12px; }
+.game-tbtn { width: 62px; height: 62px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18); color: #eceef2; font: inherit;
+  font-size: 0.72rem; letter-spacing: 0.04em; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(14px) saturate(1.3); touch-action: none; user-select: none; -webkit-user-select: none; }
+.game-tbtn-main { width: 78px; height: 78px; }
+.game-tbtn:active { background: rgba(255, 255, 255, 0.28); }
+#game-menu .sheet { width: min(720px, 94vw); max-height: min(780px, 88vh); background: var(--frost-grain-xl, none), var(--frost-body-xl); background-blend-mode: overlay, normal; }
+.game-line { margin: 8px 0 0; }
+.game-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); }
+.game-segb { padding: 6px 14px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
+.game-segb:hover { color: var(--ink); }
+.game-segb.on { background: rgba(255, 255, 255, 0.16); color: var(--ink); }
+.game-binds { display: grid; gap: 2px; margin-top: 10px; }
+.game-bind { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; padding: 3px 0; }
+.game-bind-head { padding-bottom: 4px; font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
+.game-act { font-size: 0.86rem; color: var(--ink); }
+.game-act small { display: block; margin-top: 1px; font-size: 0.7rem; line-height: 1.3; color: var(--muted); }
+.game-fixed { padding: 0 10px; font-size: 0.8rem; color: var(--muted); }
+.game-key { width: 100%; min-height: 30px; padding: 5px 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05); color: var(--ink); font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-key:hover { background: rgba(255, 255, 255, 0.1); }
+.game-key.hearing { border-color: rgba(201, 243, 255, 0.75); background: rgba(201, 243, 255, 0.12); color: #c9f3ff; }
+.game-range { display: grid; grid-template-columns: 64px minmax(0, 1fr) 44px; gap: 10px; align-items: center; margin-top: 8px; font-size: 0.85rem; color: var(--ink); }
+.game-range input { width: 100%; accent-color: #c9cdd6; }
+.game-range output { font-variant-numeric: tabular-nums; font-size: 0.8rem; text-align: right; color: var(--muted); }
+.game-check { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 0.85rem; color: var(--ink); }
+.game-check input { width: 20px; height: 20px; accent-color: #c9cdd6; }
+@media (max-width: 560px) {
+  .game-bind { grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .game-key { padding: 5px 6px; font-size: 0.72rem; }
+  .game-fixed { padding: 0 6px; font-size: 0.72rem; }
+  /* on a phone the foot is the thumbs': what the void says is said under the bar */
+  .game-hint { bottom: auto; top: calc(var(--hole-t, 58px) + 76px); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 16px); }
+  body.in-void.airden .game-hint { translate: -50% 0; }
+  /* …and the hole is a slot there: the buttons stand one over the other at its right edge, jump lowest */
+  .game-touch { flex-direction: column-reverse; align-items: center; gap: 10px; }
+}
