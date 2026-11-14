@@ -14,7 +14,7 @@
 // (GAME.md, "how it is looked at"). Everything that decides anything is in the
 // modules below, which have no page in them.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as B from '../src/game/body.js';
@@ -24,6 +24,8 @@ import * as Gt from '../src/game/gait.js';
 import * as Cr from '../src/game/crawl.js';
 import * as S from '../src/game/state.js';
 import * as K from '../src/game/kinds.js';
+import * as Ch from '../src/game/chooser.js';
+import { leave } from '../src/game/drape.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
@@ -653,7 +655,10 @@ ok('the water\'s shader is written from the same numbers', () => {
 
 console.log('the void: the body\'s carriage');
 
-const MANTIS_LEGS = { thigh: 0.5, shin: 0.62, ankle: 0.06, ball: 0.08, hip: 0.07, stand: 1.0, pivot: 1.0, knee: -1 };
+// the builds two of the bodies stand on, as their own files give them: a number changed there is tried here
+const litOf = (file, re) => { const m = read(file).match(re); assert.ok(m, `${file} has ${re}`); return JSON.parse(m[1].replace(/(\w+):/g, '"$1":')); };
+const MANTIS_LEGS = litOf('src/game/bodies/mantis.js', /const LEGS = (\{[^}]*\});/);
+const ROBOT_BUILD = litOf('src/game/bodies/robot.js', /createBiped\(\{ scale: s, build: (\{[^}]*\}),/);
 
 ok('the leg\'s two bones put the ankle where the stride says, with a knee that bends forward or back', () => {
   for (const bend of [1, -1]) for (const [z, y] of [[0, -0.86], [0.3, -0.7], [-0.25, -0.75], [0.1, -0.5], [0.4, -0.4]]) {
@@ -667,7 +672,7 @@ ok('the leg\'s two bones put the ankle where the stride says, with a knee that b
 });
 
 ok('a foot on the floor stays where it was put, whoever\'s legs they are', () => {
-  for (const build of [undefined, MANTIS_LEGS]) {
+  for (const build of [undefined, MANTIS_LEGS, ROBOT_BUILD]) {
     const g = Gt.createGait(build), Bd = g.build;
     for (const v of [0.3, 1, B.WALK, 2.6, B.RUN, B.SPRINT]) {
       const st = Gt.stride(v, Bd);
@@ -704,7 +709,7 @@ ok('the feet come down as often as the speed asks, left and right in turn', () =
 });
 
 ok('no pose puts a foot through the floor or a leg past its reach, the hips\' sway, tip and turn counted', () => {
-  for (const build of [undefined, MANTIS_LEGS]) {
+  for (const build of [undefined, MANTIS_LEGS, ROBOT_BUILD]) {
     for (const [v, flags] of [[[0, 0, 0], {}], [[0, 0, 0.4], {}], [[0, 0, B.WALK], {}], [[0, 0, 2.5], {}], [[0, 0, B.RUN], {}], [[B.SPRINT, 0, 0], {}], [[0, 4, 3], { grounded: false }], [[0, -9, 3], { grounded: false }],
       [[0, 0, 26], { dashT: 0.2 }], [[0, 0, 0], { flying: true, grounded: false }], [[0, 3, 40], { flying: true, grounded: false }]]) {
       const g = Gt.createGait(build), body = B.createBody({ v, ...flags }), reach = g.build.thigh + g.build.shin - 0.004;
@@ -908,6 +913,296 @@ ok('a choice of colour shows its colours, a choice of shape none', () => {
   assert.equal(coloured, 7 * 5, 'seven of the twenty-five choices are colours');
   assert.equal(K.swatchOf('human', 'skin', 'nope'), null); assert.equal(K.swatchOf('human', 'nope', 'sand'), null);
   assert.deepEqual(K.swatchOf('light', 'colour', 'aurora'), K.AURA.aurora);
+});
+
+ok('each kind has a body of its own, and every option is named in it: none does nothing', () => {
+  const figure = read('src/game/figure.js');
+  for (const kind of K.KINDS) {
+    const Name = kind.id[0].toUpperCase() + kind.id.slice(1), src = read(`src/game/bodies/${kind.id}.js`);
+    assert.ok(figure.includes(`import { create${Name} } from './bodies/${kind.id}.js';`), 'figure.js has the ' + kind.id);
+    assert.ok(new RegExp(`\\b${kind.id}: create${Name}\\b`).test(figure), 'and makes it');
+    assert.ok(src.includes(`export function create${Name}(look, { lite = false } = {})`), kind.id + ' is made from a look');
+    for (const c of kind.choices) {
+      assert.ok(new RegExp(`\\blook\\.${c.id}\\b`).test(src), `the ${kind.id} reads its ${c.id}`);
+      if (c.swatch) continue;                          // a colour is looked up in its table (kinds.js), not named
+      c.options.forEach((o, i) => {
+        // the first is the body as it was first drawn, and wearing nothing needs no line: any other is named
+        if (i === 0 || ['bare', 'none', 'plain'].includes(o)) return;
+        assert.ok(new RegExp(`'${o}'|\\b${o}:`).test(src), `the ${kind.id}'s ${c.id} "${o}" is drawn by nothing`);
+      });
+    }
+  }
+  assert.ok(figure.includes('MAKE[cleanKind(kind)]'), 'a kind that is not one is the first');
+});
+
+ok('what every body shares: its limbs as cloth feels them, what goes with it when it is put somewhere, its shade on the water', () => {
+  const common = read('src/game/bodies/common.js');
+  assert.ok(common.includes('capsule(a, pa, b, pb, r) { const c = { a: [0, 0, 0], b: [0, 0, 0], r: r * s,'), 'a limb is as much bigger as the body is drawn');
+  // put somewhere, not gone there: further in a frame than any body goes
+  assert.ok(common.includes('if (had && (dx || dy || dz) && (dt <= 0 || Math.hypot(dx, dy, dz) > 2 + 80 * dt)) for (const w of world) w.shift(dx, dy, dz);'));
+  assert.ok(Math.max(B.SPRINT, B.DASH_SPEED, B.FLY_SPRINT) < 80, 'no body goes 80 m/s');
+  assert.ok(common.includes('c.cloth.step(dt, c.free ? [] : shapes, floor, c.stiff)'), 'a cloth is pushed out of the body, unless it is free of it');
+  assert.ok(common.includes('shade: rig.shade ?? 1,'));
+  assert.match(read('src/game/bodies/light.js'), /\bshade: 0\.3,/, 'the light goes through a body of light');
+  assert.ok(read('src/game/view.js').includes('V.update(K.clock, camera, [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }]);'));
+});
+
+console.log('the void: a cloth and the limb under it');
+
+const THIGH = { a: [0, 1, 0], b: [0, 0.6, 0.4], r: 0.1 };                 // a thigh lifted half way: from the hip forward and down to the knee
+const MID = [0, 0.8, 0.2], UP = [0, Math.SQRT1_2, Math.SQRT1_2];          // its middle, and the way across it that is up and forward
+// how far a point is from a limb's line, and how far along the limb that is
+const off = (p, sh) => {
+  const e = sh.b.map((x, i) => x - sh.a[i]), ee = e.reduce((n, x) => n + x * x, 0);
+  const t = ee > 0 ? Math.min(1, Math.max(0, p.reduce((n, x, i) => n + (x - sh.a[i]) * e[i], 0) / ee)) : 0;
+  return { t, dist: Math.hypot(...p.map((x, i) => x - sh.a[i] - e[i] * t)) };
+};
+const over = (p) => p.reduce((n, x, i) => n + (x - MID[i]) * UP[i], 0);
+const UNDER = [0.02, MID[1] - 0.04 * UP[1], MID[2] - 0.04 * UP[2]];       // a point of cloth that has got in under the thigh
+
+ok('a point inside a limb is put on its surface by the nearest way; one outside is left', () => {
+  const sh = { a: [0, 0, 0], b: [0, 1, 0], r: 0.1 };
+  const P = [0.03, 0.5, 0.04];
+  assert.equal(leave(P, 0, sh), true);
+  near(P[0], 0.06, 1e-12); near(P[1], 0.5, 1e-12); near(P[2], 0.08, 1e-12);
+  const Q = [0.2, 0.5, 0]; assert.equal(leave(Q, 0, sh), false); assert.deepEqual(Q, [0.2, 0.5, 0]);
+  const end = [0, 1.05, 0]; assert.equal(leave(end, 0, sh), true); near(end[1], 1.1, 1e-12, 'past its end a limb is round');
+  const start = [0, -0.05, 0]; assert.equal(leave(start, 0, sh), true); near(start[1], -0.1, 1e-12, 'and before its start');
+  const axis = [0, 0.5, 0]; assert.equal(leave(axis, 0, sh), false, 'on the line itself no way is nearer than another'); assert.deepEqual(axis, [0, 0.5, 0]);
+  const ball = { a: [1, 1, 1], b: [1, 1, 1], r: 0.2 }, R = [1.1, 1, 1];     // a limb with no length is a ball
+  assert.equal(leave(R, 0, ball), true); near(R[0], 1.2, 1e-12);
+});
+
+ok('the nearest way out of a lifted thigh is under it: that is how a knee came through a skirt', () => {
+  const P = [...UNDER];
+  assert.equal(leave(P, 0, THIGH), true);
+  near(off(P, THIGH).dist, THIGH.r, 1e-12); assert.ok(over(P) < 0, 'left under the thigh');
+});
+
+ok('a garment that says which way is out is put over the limb, and not slid along it', () => {
+  const P = [...UNDER], O = [0, 0, 1], was = off(P, THIGH);              // a skirt's front: out is forward
+  assert.equal(leave(P, 0, THIGH, O, 0), true);
+  const now = off(P, THIGH);
+  near(now.dist, THIGH.r, 1e-12, 'on its surface'); near(now.t, was.t, 1e-12, 'as far along the limb as it was');
+  near(over(P), (-over(UNDER) * THIGH.r) / was.dist, 1e-12, 'as far over the thigh as it was under it');
+  near(P[0], (UNDER[0] * THIGH.r) / was.dist, 1e-12, 'and to the same side');
+  // one that is already on the outer side leaves by the nearest way
+  const A = [0.02, MID[1] + 0.04 * UP[1], MID[2] + 0.04 * UP[2]], N = [...A];
+  leave(A, 0, THIGH, O, 0); leave(N, 0, THIGH);
+  assert.deepEqual(A, N); assert.ok(over(A) > 0);
+  // and once it is out it stays where it is
+  const again = [...P]; leave(again, 0, THIGH, O, 0);
+  for (let i = 0; i < 3; i++) near(again[i], P[i], 1e-12);
+});
+
+ok('askew, in no axis\'s favour: what of it was against the way out is turned round, and the rest is kept', () => {
+  const sh = { a: [0.1, 1, -0.2], b: [0.45, 0.72, 0.31], r: 0.12 }, out = [0.3, 0.5, 0.8];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2], add = (u, v, k = 1) => u.map((x, i) => x + k * v[i]), unit = (u) => u.map((x) => x / Math.hypot(...u));
+  const e = add(sh.b, sh.a, -1), E = unit(e);
+  const N = unit(add(out, E, -dot(out, E)));                               // across the limb, the way out
+  const W = [E[1] * N[2] - E[2] * N[1], E[2] * N[0] - E[0] * N[2], E[0] * N[1] - E[1] * N[0]];   // across the limb, neither out nor in
+  const foot = add(sh.a, e, 0.37);
+  for (const [n, w] of [[-0.05, 0.03], [-0.02, -0.06], [-0.09, 0], [0.04, 0.05]]) {
+    const P = [7, 7, 7, ...add(add(foot, N, n), W, w)], O = [9, 9, 9, ...out];
+    assert.equal(leave(P, 3, sh, O, 3), true);
+    const k = sh.r / Math.hypot(n, w), want = add(add(foot, N, Math.abs(n) * k), W, w * k);
+    for (let i = 0; i < 3; i++) near(P[3 + i], want[i], 1e-12, `${n} against the way out, ${w} beside it`);
+    assert.deepEqual(P.slice(0, 3), [7, 7, 7]);
+  }
+});
+
+ok('at a limb\'s round ends the whole way out counts; beside its length, only what lies across it', () => {
+  // a ball (a shoulder): a point behind its middle is put in front, as high as it was
+  const ball = { a: [0, 1, 0], b: [0, 1, 0], r: 0.1 }, P = [0, 1.01, -0.05];
+  assert.equal(leave(P, 0, ball, [0, 0, 1], 0), true);
+  near(Math.hypot(P[0], P[1] - 1, P[2]), 0.1, 1e-12); assert.ok(P[2] > 0);
+  near(P[1] - 1, (0.01 * 0.1) / Math.hypot(0.01, 0.05), 1e-12, 'only what was against the way out is turned round');
+  // past the knee, the thigh's round end: the same, though forward is half along the thigh
+  const Q = [THIGH.b[0], THIGH.b[1] - 0.04, THIGH.b[2] - 0.02];
+  assert.equal(off(Q, THIGH).t, 1);
+  assert.equal(leave(Q, 0, THIGH, [0, 0, 1], 0), true);
+  near(Math.hypot(Q[0] - THIGH.b[0], Q[1] - THIGH.b[1], Q[2] - THIGH.b[2]), THIGH.r, 1e-12);
+  near(Q[2] - THIGH.b[2], (0.02 * THIGH.r) / Math.hypot(0.04, 0.02), 1e-12, 'in front of the knee'); assert.ok(Q[1] < THIGH.b[1]);
+  // a way out that lies along the limb says nothing about its sides: then the nearest way
+  const level = { a: [0, 1, 0], b: [0, 1, 0.4], r: 0.1 };
+  for (const [across, side] of [[0, -1], [0.09, -1], [0.11, 1], [0.6, 1]]) {
+    const U = [0.01, 0.96, 0.2];
+    assert.equal(leave(U, 0, level, [0, across, Math.sqrt(1 - across * across)], 0), true);
+    assert.equal(Math.sign(U[1] - 1), side, `a way out with ${across} of it across the limb`);
+    near(Math.hypot(U[0], U[1] - 1), 0.1, 1e-12); near(U[2], 0.2, 1e-12);
+  }
+});
+
+ok('each point is put out by its own column\'s way, and no other point is touched', () => {
+  const ball = { a: [0, 1, 0], b: [0, 1, 0], r: 0.1 };
+  const O = [0, 0, -1, 0, 0, 1];                                          // two columns: the back's and the front's
+  const P = [5, 5, 5, 0.01, 1, 0.03, 0.01, 1, 0.03];                      // a point far off, and one point twice
+  assert.equal(leave(P, 3, ball, O, 3), true); assert.equal(leave(P, 6, ball, O, 0), true); assert.equal(leave(P, 0, ball, O, 0), false);
+  assert.deepEqual(P.slice(0, 3), [5, 5, 5]);
+  assert.ok(P[5] > 0 && P[8] < 0, 'the front\'s goes forward, the back\'s goes back'); near(P[5], -P[8], 1e-15); near(P[3], P[6], 1e-15);
+});
+
+ok('the cloth asks it of every point and every limb; the skirt and the cape say which way is out; what they lie on is fatter than what is drawn', () => {
+  const shape = read('src/game/shape.js'), drape = read('src/game/drape.js'), human = read('src/game/bodies/human.js');
+  assert.ok(!/^\s*import\b/m.test(drape), 'drape.js has no page and no three in it: it is run here');
+  assert.ok(shape.includes("import { leave } from './drape.js';"));
+  assert.ok(shape.includes('for (const sh of shapes) leave(P, o, sh, OW, (i % cols) * 3);'), 'each point, each limb, its column\'s way out');
+  assert.ok(shape.includes('scale = 1, out = null })'), 'a cloth that says nothing leaves by the nearest way, as before');
+  assert.ok(shape.includes('const O = out ? new Float32Array(cols * 3) : null, OW = out ? new Float32Array(cols * 3) : null;'), 'said in the bone\'s numbers, turned into the world\'s as the bone moves');
+  assert.equal((human.match(/\bout: \(\w\) => \[Math\.cos\(ring\(\w\)\), [\d.]+, Math\.sin\(ring\(\w\)\)\],/g) || []).length, 2, 'the skirt (open or all the way round) and the cape');
+  // a cloth is flat between its points and cuts corners: the shin showed between them (14 Nov 2026)
+  const fattest = (name) => Math.max(...JSON.parse(human.match(new RegExp(`const ${name} = (\\[\\[.*\\]\\]);`))[1]).flatMap(([, w, d]) => [w, d]));
+  const felt = (re) => +human.match(re)[1];
+  assert.ok(felt(/rig\.capsule\(l\.hip, \[0, 0, 0\], l\.knee, \[0, 0, 0\], ([\d.]+) \* kl\)/) > fattest('THIGH'), 'the thigh');
+  assert.ok(felt(/rig\.capsule\(l\.knee, \[0, 0, 0\], l\.ankle, \[0, 0, 0\], ([\d.]+) \* kl\)/) > fattest('SHIN'), 'the shin');
+});
+
+console.log('the void: the body sheet');
+
+ok('along a row the arrows go round, choosing as they go; Home and End go to its ends', () => {
+  const row = ['a', 'b', 'c'];
+  assert.equal(Ch.stepTo(row, 'a', 'ArrowRight'), 'b'); assert.equal(Ch.stepTo(row, 'c', 'ArrowRight'), 'a'); assert.equal(Ch.stepTo(row, 'b', 'ArrowDown'), 'c');
+  assert.equal(Ch.stepTo(row, 'a', 'ArrowLeft'), 'c'); assert.equal(Ch.stepTo(row, 'c', 'ArrowUp'), 'b');
+  assert.equal(Ch.stepTo(row, 'b', 'Home'), 'a'); assert.equal(Ch.stepTo(row, 'b', 'End'), 'c');
+  for (const key of ['Enter', ' ', 'Tab', 'Escape', 'a']) assert.equal(Ch.stepTo(row, 'b', key), null, key + ' is not the row\'s');
+  assert.equal(Ch.stepTo(row, 'nope', 'ArrowRight'), 'b', 'from what is not in the row: from its first');
+  for (const kind of K.KINDS) for (const c of kind.choices) {
+    let at = c.options[0]; for (let i = 0; i < 5; i++) at = Ch.stepTo(c.options, at, 'ArrowRight');
+    assert.equal(at, c.options[0], 'five steps go round five');
+  }
+});
+
+ok('the sheet shows a kind as it looks: five rows of five, one on in each, the colours on those that are colours', () => {
+  for (const kind of K.KINDS) {
+    const look = K.randomLook(kind.id, () => 0.5), rows = Ch.rowsOf(kind.id, look);
+    assert.deepEqual(rows.map((r) => r.id), kind.choices.map((c) => c.id));
+    rows.forEach((r, i) => {
+      assert.deepEqual(r.options.map((o) => o.id), kind.choices[i].options);
+      assert.deepEqual(r.options.filter((o) => o.on).map((o) => o.id), [look[r.id]], 'the one it wears');
+      for (const o of r.options) assert.deepEqual(o.swatch, K.swatchOf(kind.id, r.id, o.id));
+      assert.equal(r.options.every((o) => Array.isArray(o.swatch)), !!kind.choices[i].swatch);
+    });
+    assert.ok(Ch.rowsOf(kind.id, null).every((r) => r.options.every((o) => !o.on)), 'a look that is not there: none on, and no fall');
+  }
+  assert.deepEqual(Ch.rowsOf('dragon', {}).map((r) => r.id), K.kindOf('human').choices.map((c) => c.id), 'a kind that is not one: the first');
+});
+
+ok('the five pictures the kinds were drawn from are in the house, and small', () => {
+  for (const id of K.KIND_IDS) {
+    const url = Ch.cardOf(id);
+    assert.ok(url.endsWith(`/src/game/art/v1/${id}.webp`), url);
+    const f = fileURLToPath(url);
+    assert.ok(existsSync(f), id + '.webp'); assert.ok(statSync(f).size < 12000, 'a picture in a sheet is a few kilobytes');
+  }
+  assert.equal(Ch.cardOf('dragon'), Ch.cardOf('human'));
+});
+
+const DESK = { canvas: { left: 0, top: 0, right: 1280, bottom: 800 }, room: { left: 90, top: 90, right: 1190, bottom: 710 }, sheet: { left: 858, top: 79, right: 1266, bottom: 721 } };
+const PHONE = { canvas: { left: 0, top: 0, right: 390, bottom: 844 }, room: { left: 55, top: 120, right: 335, bottom: 790 }, sheet: { left: 0, top: 371, right: 390, bottom: 844 } };
+const TAN = Math.tan((55 * Math.PI) / 360);
+
+ok('the body stands in what the sheet leaves of the room: beside it on a desk, over it on a phone', () => {
+  assert.deepEqual(Ch.FILL, [0.86, 0.9]);
+  // a desk: the room is 90..1190 across and the sheet begins at 858, so the body's middle is at 474, 166 left of the picture's
+  const d = Ch.standIn(DESK.canvas, DESK.room, DESK.sheet);
+  assert.equal(d.x, 640 - (90 + 858) / 2); assert.equal(d.y, 0);
+  near(d.d, (1.8 * 800) / (2 * TAN * 0.86 * 620), 1e-12, 'far enough for 1.8 m to take 86% of the room\'s height');
+  // a phone: the sheet is its foot, so the body stands between the bar and the sheet
+  const p = Ch.standIn(PHONE.canvas, PHONE.room, PHONE.sheet);
+  assert.equal(p.x, 0); assert.equal(p.y, 422 - (120 + 371) / 2);
+  near(p.d, (1.8 * 844) / (2 * TAN * 0.86 * 251), 1e-12);
+  assert.ok(p.d > d.d, 'smaller on a phone: it stands further off');
+  // a wide body in a narrow place is fitted by its width
+  const wide = Ch.standIn(PHONE.canvas, PHONE.room, PHONE.sheet, { tall: 1, wide: 3 });
+  near(wide.d, (3 * 844) / (2 * TAN * 0.9 * 280), 1e-12);
+  // a taller body stands further off; a wider angle of view, nearer
+  assert.ok(Ch.standIn(DESK.canvas, DESK.room, DESK.sheet, { tall: 2.6 }).d > d.d);
+  assert.ok(Ch.standIn(DESK.canvas, DESK.room, DESK.sheet, { fov: 70 }).d < d.d);
+  // beside and over the same size: beside
+  const tie = Ch.standIn({ left: 0, top: 0, right: 100, bottom: 100 }, { left: 0, top: 0, right: 100, bottom: 100 }, { left: 50, top: 50, right: 100, bottom: 100 });
+  assert.deepEqual([tie.x, tie.y], [25, 0]);
+  // where on the page the canvas lies changes nothing; nor does a room that goes past the canvas: what is seen ends with it
+  const moved = (r, dx, dy) => ({ left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
+  const past = (r) => ({ left: r.left - 100, right: r.right + 100, top: r.top - 50, bottom: r.bottom + 50 });
+  for (const at of [DESK, PHONE]) {
+    assert.deepEqual(Ch.standIn(moved(at.canvas, 30, 40), moved(at.room, 30, 40), moved(at.sheet, 30, 40)), Ch.standIn(at.canvas, at.room, at.sheet));
+    assert.deepEqual(Ch.standIn(at.canvas, past(at.canvas), at.sheet), Ch.standIn(at.canvas, at.canvas, at.sheet));
+  }
+});
+
+ok('with no room, a sheet over everything or no canvas, it still stands somewhere', () => {
+  const c = DESK.canvas;
+  // a room that is not there (not measured yet, or off the canvas): the canvas is the room
+  for (const room of [{ left: 0, top: 0, right: 0, bottom: 0 }, { left: 2000, top: 0, right: 2400, bottom: 800 }]) {
+    const r = Ch.standIn(c, room, DESK.sheet);
+    assert.equal(r.x, 640 - 858 / 2); assert.equal(r.y, 0);
+  }
+  // the sheet over all of the room: the room's middle
+  const all = Ch.standIn(c, DESK.room, { left: 0, top: 0, right: 1280, bottom: 800 });
+  assert.deepEqual([all.x, all.y], [0, 0]); near(all.d, (1.8 * 800) / (2 * TAN * 0.86 * 620), 1e-12);
+  // a canvas with no size (the tab not laid out yet)
+  for (const cv of [{ left: 0, top: 0, right: 0, bottom: 800 }, { left: 0, top: 0, right: 1280, bottom: 0 }, { left: 0, top: 0, right: NaN, bottom: 800 }]) assert.deepEqual(Ch.standIn(cv, DESK.room, DESK.sheet), { x: 0, y: 0, d: 4 });
+  // never nearer than 1.6 m nor further than 16
+  assert.equal(Ch.standIn(c, DESK.room, DESK.sheet, { tall: 0.2, wide: 0.2 }).d, 1.6);
+  assert.equal(Ch.standIn(c, { left: 600, top: 380, right: 640, bottom: 420 }, DESK.sheet, { tall: 3, wide: 3 }).d, 16);
+});
+
+ok('with no page there is no sheet, and nothing falls', () => {
+  for (const doc of [null, undefined, {}, { getElementById: () => null }]) {
+    const c = Ch.createChooser({ doc, get: () => { throw new Error('not asked'); }, set: () => { throw new Error('not set'); } });
+    c.open(); c.close(); c.off();
+    assert.equal(c.isOpen(), false); assert.equal(c.rect(), null);
+  }
+});
+
+ok('the body sheet is a sheet like the others, but does not cover what it is about', () => {
+  const html = read('index.html');
+  const at = html.indexOf('<div id="game-body" class="modal" hidden>');
+  assert.ok(at > 0, 'static in index.html, so the keeper of sheets finds it as the page starts');
+  const sheet = html.slice(at, html.indexOf('<div id="settings"', at));
+  assert.match(sheet, /<button id="game-body-close" class="x mercury" aria-label="Close">/); assert.match(sheet, /<div class="sheet-body game-body-body" id="game-body-body"><\/div>/);
+  assert.match(read('src/mercury-mount.js'), /\['game-body-close', [\d.]+\]/, 'the liquid X is mounted (an unmounted one is an empty button)');
+  const ch = read('src/game/chooser.js');
+  for (const piece of ['role="radiogroup"', 'role="radio"', 'aria-checked="${isOn}"', 'tabindex="${isOn ? 0 : -1}"', 'aria-labelledby="game-body-l-${esc(r.id)}"', 'id="game-body-left"', 'id="game-body-right"',
+    'id="game-body-random"', 'id="game-body-fresh"', "el.style.background = b ? `linear-gradient(135deg, ${a} 50%, ${b} 50%)` : a;", "import { KINDS, kindOf, freshLook, randomLook, swatchOf } from './kinds.js';"]) assert.ok(ch.includes(piece), 'chooser.js: ' + piece);
+  assert.ok(!/\bfetch\(|localStorage|\bstyle="/.test(ch), 'it asks the network for nothing, keeps nothing itself, and writes no style into markup');
+  const css = read('styles.css');
+  // no veil over the body and no frost over a live canvas (a frosted sheet over one is blurred again every frame)
+  assert.ok(css.includes('#game-body { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; justify-content: flex-end; pointer-events: none; }'));
+  const own = css.slice(css.indexOf('#game-body .sheet {'), css.indexOf('.body-kinds {'));
+  assert.match(own, /pointer-events: auto;/); assert.match(own, /background: rgba\(15, 17, 23, 0\.9\); backdrop-filter: none;/);
+  // its head stays and its rows scroll below it: on a phone the X had gone off with the rows
+  assert.match(own, /display: flex; flex-direction: column; overflow: hidden; \}/);
+  assert.match(own, /#game-body \.sheet-head \{ flex: none; background: transparent; backdrop-filter: none;/);
+  assert.match(own, /#game-body \.sheet-body \{ flex: 1 1 auto; min-height: 0; overflow: auto;/);
+  // one height for every option, taller under a finger
+  assert.match(css, /\.body-opt \{[^}]*min-height: 42px;/); assert.ok(css.includes('@media (pointer: coarse) { .body-opt { min-height: 46px; } }'));
+  // a phone: the sheet is the foot of the page and all but solid; the bar's four words are on one line; the thumbs are put away
+  assert.ok(css.includes('#game-body .sheet { width: 100vw; max-height: 56vh; margin: 0; border-radius: 18px 18px 0 0; background: rgba(15, 17, 23, 0.97); }'));
+  assert.ok(css.includes('.game-bar { gap: 4px 2px; padding-left: 6px; padding-right: 6px; }'));
+  assert.ok(css.includes('body:has(#game-body:not([hidden])) .game-touch { display: none; }'));
+});
+
+ok('while the sheet is open the body poses: the hands are not read, it is made again as it is chosen, and the game goes on when it closes', () => {
+  const view = read('src/game/view.js');
+  assert.ok(view.includes("import { createChooser, standIn } from './chooser.js';"));
+  assert.ok(view.includes('<button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog"'), 'the bar has the button');
+  assert.ok(view.includes("press('#game-body-open', openBody);"));
+  assert.ok(view.includes('const posing = chooser.isOpen();')); assert.ok(view.includes('const paused = !posing && (root.inert || menu.isOpen());'), 'its own sheet does not stop the picture');
+  assert.ok(view.includes('const inp = paused || posing ? IDLE : input.frame(dt);'), 'the hands are not read');
+  assert.match(view, /function hint\(\) \{\s+if \(chooser\?\.isOpen\(\)\) return '';/, 'nor told what the keys do');
+  // the body is fitted to the room that is seen (the page's frame stands over the rest of the canvas), under the bar
+  assert.ok(view.includes('if ((posing || stand) && !K.size) K.size = sized(figure, pos);'));
+  assert.ok(view.includes('stand = standIn(cv, { left: room.left, right: room.right, bottom: room.bottom, top: Math.max(room.top, bar ? bar.bottom : room.top) }, sheet, { fov: FOV, tall: K.size.tall, wide: K.size.wide });'));
+  assert.ok(view.includes('camera.setViewOffset(cv.clientWidth || 1, cv.clientHeight || 1, stand.x * u, stand.y * u, cv.clientWidth || 1, cv.clientHeight || 1);'));
+  assert.ok(view.includes('stand = null; pose = 0; camera.clearViewOffset();'), 'and the picture is put back');
+  // a body that cannot be made is said, and the one that was stays
+  assert.ok(view.includes("toast('that body could not be made'); return false;"));
+  assert.ok(view.includes('K.figure = made; K.worn = worn(st); K.size = null; standT = 0;'), 'a new body is measured again');
+  assert.match(view, /kind: st\.kind, look: \{ \.\.\.st\.looks\[st\.kind\] \}, posing: !!chooser\?\.isOpen\(\), facing: K\.body\.yaw, seen: seen\(\)/, 'what the smoke reads');
+  const smoke = read('scripts/void-smoke.mjs');
+  assert.ok(smoke.includes('<desk|pad|phone|bodies>')); assert.ok(smoke.includes('each of the 125 options put on once'));
+  assert.ok(smoke.includes('keeps its way out in reach, its rows scrolled to their end'));
 });
 
 console.log('the void: what is kept, and the door');

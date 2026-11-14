@@ -21,6 +21,7 @@
 // back (-Z) by the left (+X) to the front (+Z) and on, so a skin's seam is
 // behind it.
 import * as THREE from 'three';
+import { leave } from './drape.js';
 
 const spow = (c, p) => Math.sign(c) * Math.pow(Math.abs(c), p);
 const TAU = Math.PI * 2;
@@ -266,11 +267,16 @@ export function through(points, per = 4) {
 // to hang (`dir(c, r)`, in the bone's space: stiff says how firmly), falls, keeps its distance from its
 // neighbours across, and is pushed out of `shapes` (capsules { a, b, r } in the world) and kept over the
 // water. The points are in the world: the mesh must be a child of something that never moves.
-export function cloth({ anchor, cols, rows, top, dir, len, closed = false, hem = 0, tile = 0.3, stiff = 0.15, damp = 0.9, gravity = 7, lift = 0, scale = 1 }) {
+// `out(c)`: which way is outside for that column, in the bone's space. A garment that has one is put on
+// that side of every limb it meets, whichever side of the limb its point fell on: a skirt lies over a
+// lifted knee. Without it a point leaves by the nearest way, and the knee comes through the skirt (./drape.js).
+export function cloth({ anchor, cols, rows, top, dir, len, closed = false, hem = 0, tile = 0.3, stiff = 0.15, damp = 0.9, gravity = 7, lift = 0, scale = 1, out = null }) {
   const R1 = rows + 1, N = cols * R1, P = new Float32Array(N * 3), Q = new Float32Array(N * 3);
   const L = Array.from({ length: R1 }, (_, r) => (r ? (Array.isArray(len) ? len[r - 1] : len) * scale : 0));     // `scale`: how much bigger the bone's body is drawn than it was measured
   const D = new Float32Array(N * 3), DW = new Float32Array(N * 3), A = new Float32Array(cols * 3), A0 = new Float32Array(cols * 3);
   for (let c = 0; c < cols; c++) for (let r = 1; r < R1; r++) { const d = dir(c, r), l = Math.hypot(d[0], d[1], d[2]) || 1, o = (r * cols + c) * 3; D[o] = d[0] / l; D[o + 1] = d[1] / l; D[o + 2] = d[2] / l; }
+  const O = out ? new Float32Array(cols * 3) : null, OW = out ? new Float32Array(cols * 3) : null;
+  if (out) for (let c = 0; c < cols; c++) { const d = out(c), l = Math.hypot(d[0], d[1], d[2]) || 1; O[c * 3] = d[0] / l; O[c * 3 + 1] = d[1] / l; O[c * 3 + 2] = d[2] / l; }
   // how far apart neighbours across are, as it was cut
   const W = new Float32Array(N), rest = new Float32Array(N * 3);
   for (let c = 0; c < cols; c++) { rest[c * 3] = top[c][0] * scale; rest[c * 3 + 1] = top[c][1] * scale; rest[c * 3 + 2] = top[c][2] * scale; }
@@ -296,6 +302,7 @@ export function cloth({ anchor, cols, rows, top, dir, len, closed = false, hem =
     const e = M(), k = 1 / (Math.hypot(e[0], e[1], e[2]) || 1);
     for (let c = 0; c < cols; c++) { const [x, y, z] = top[c]; A[c * 3] = e[0] * x + e[4] * y + e[8] * z + e[12]; A[c * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]; A[c * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14]; }
     for (let i = cols; i < N; i++) { const o = i * 3, x = D[o], y = D[o + 1], z = D[o + 2]; DW[o] = (e[0] * x + e[4] * y + e[8] * z) * k; DW[o + 1] = (e[1] * x + e[5] * y + e[9] * z) * k; DW[o + 2] = (e[2] * x + e[6] * y + e[10] * z) * k; }
+    if (O) for (let c = 0; c < cols; c++) { const o = c * 3, x = O[o], y = O[o + 1], z = O[o + 2]; OW[o] = (e[0] * x + e[4] * y + e[8] * z) * k; OW[o + 1] = (e[1] * x + e[5] * y + e[9] * z) * k; OW[o + 2] = (e[2] * x + e[6] * y + e[10] * z) * k; }
   }
   function write() {
     for (let r = 0; r < R1; r++) for (let c = 0; c < MC; c++) {
@@ -348,12 +355,7 @@ export function cloth({ anchor, cols, rows, top, dir, len, closed = false, hem =
           }
           for (let i = cols; i < N; i++) {
             const o = i * 3;
-            for (const sh of shapes) {
-              const ax = sh.a[0], ay = sh.a[1], az = sh.a[2], ex = sh.b[0] - ax, ey = sh.b[1] - ay, ez = sh.b[2] - az, ee = ex * ex + ey * ey + ez * ez;
-              const t = ee > 1e-9 ? Math.min(1, Math.max(0, ((P[o] - ax) * ex + (P[o + 1] - ay) * ey + (P[o + 2] - az) * ez) / ee)) : 0;
-              const dx = P[o] - ax - ex * t, dy = P[o + 1] - ay - ey * t, dz = P[o + 2] - az - ez * t, d2 = dx * dx + dy * dy + dz * dz;
-              if (d2 < sh.r * sh.r && d2 > 1e-10) { const g = sh.r / Math.sqrt(d2); P[o] = ax + ex * t + dx * g; P[o + 1] = ay + ey * t + dy * g; P[o + 2] = az + ez * t + dz * g; }
-            }
+            for (const sh of shapes) leave(P, o, sh, OW, (i % cols) * 3);
             if (P[o + 1] < floor) P[o + 1] = floor;
           }
         }

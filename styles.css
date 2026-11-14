@@ -5947,6 +5947,8 @@ body.in-code #caption { display: none !important; }
 .game-root[data-light="dusk"] .game-canvas { background: #8e8492; }
 .game-root[data-light="night"] .game-canvas { background: #0c1119; }
 .game-canvas canvas { display: block; width: 100%; height: 100%; outline: none; }
+/* the room the page's bars leave of the canvas: nothing is drawn in it, it is there to be measured (view.js stands the body in it while the body sheet is open) */
+.game-room { position: absolute; left: var(--hole-l, 0px); top: var(--hole-t, 0px); right: var(--hole-r, 0px); bottom: var(--hole-b, 0px); visibility: hidden; pointer-events: none; }
 /* THE AIR MARK STOOD ON THE BODY. It floats over the panel's foot, on the centre line, which in the void is where the
    body stands and its reflection lies (the first look, 13 Nov 2026: the mark at the feet in every picture). As in kode,
    it is put away there, unless airden is on, when it is the way to stop it (and the hint steps up over it). */
@@ -5970,6 +5972,42 @@ body.in-void.airden .game-hint { translate: -50% -66px; }
 .game-tbtn-main { width: 78px; height: 78px; }
 .game-tbtn:active { background: rgba(255, 255, 255, 0.28); }
 #game-menu .sheet { width: min(720px, 94vw); max-height: min(780px, 88vh); background: var(--frost-grain-xl, none), var(--frost-body-xl); background-blend-mode: overlay, normal; }
+/* THE BODY SHEET (src/game/chooser.js): which of the five kinds, and how it looks. It does not cover what it is
+   about: no veil, and it stands at the right (at the foot, on a phone) while the body stands in what is left of the
+   canvas, turned to face the person. It is not frosted: the canvas behind it is live, and a frosted sheet over a
+   live canvas is blurred again every frame (32 ms a frame at a phone's size, measured for the controls). */
+#game-body { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; justify-content: flex-end; pointer-events: none; }
+#game-body .sheet { pointer-events: auto; width: min(408px, 94vw); max-height: min(780px, calc(100vh - 28px)); margin-right: max(14px, env(safe-area-inset-right, 0px));
+  background: rgba(15, 17, 23, 0.9); backdrop-filter: none; -webkit-backdrop-filter: none; display: flex; flex-direction: column; overflow: hidden; }
+/* its head stays and its rows scroll below it (a phone's sheet is 56vh tall; a short window's is the window): the way
+   out is always in reach. Every other sheet's head goes with its rows (.sec, .sheet-head are position: relative). */
+#game-body .sheet-head { flex: none; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+#game-body .sheet-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.body-kinds { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
+.body-kind { display: grid; gap: 4px; padding: 0 0 5px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04); color: var(--muted); font: inherit; font-size: 0.72rem; cursor: pointer; }
+.body-kind img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+.body-row { margin-top: 12px; }
+.body-label { display: block; margin-bottom: 5px; font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
+.body-opts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.body-opt { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 42px; padding: 4px 2px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px; background: rgba(255, 255, 255, 0.04); color: var(--muted); font: inherit; font-size: 0.72rem; cursor: pointer; }
+.body-opt.dotted { flex-direction: column; }
+.body-opt:hover, .body-kind:hover { color: var(--ink); }
+.body-opt.on, .body-kind.on { border-color: rgba(255, 255, 255, 0.62); background: rgba(255, 255, 255, 0.14); color: var(--ink); }
+.body-opt:focus-visible, .body-kind:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.8); outline-offset: 2px; }
+.body-dot { flex: none; width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.body-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 16px; }
+@media (pointer: coarse) { .body-opt { min-height: 46px; } }
+@media (max-width: 720px) {
+  #game-body { align-items: flex-end; justify-content: center; }
+  /* over the foot of a phone the sheet covers the page's own bar: it is all but solid there, so nothing reads through it */
+  #game-body .sheet { width: 100vw; max-height: 56vh; margin: 0; border-radius: 18px 18px 0 0; background: rgba(15, 17, 23, 0.97); }
+  /* the bar's four words on one line at 390px */
+  .game-bar { gap: 4px 2px; padding-left: 6px; padding-right: 6px; }
+}
+/* the thumbs are put away while a body is chosen: on a phone the sheet stands where they do */
+body:has(#game-body:not([hidden])) .game-touch { display: none; }
 .game-line { margin: 8px 0 0; }
 .game-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); }
 .game-segb { padding: 6px 14px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
