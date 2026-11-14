@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { HIDE } from '../kinds.js';
 import { createCrawl, stepCrawl, shiftCrawl } from '../crawl.js';
-import { loft, ball, hoop, placed, kit, tube, pipe, panel, on, cloth, stuff, TILE } from '../shape.js';
+import { loft, ball, hoop, placed, kit, tube, pipe, panel, on, cloth, stuff, shade, TILE } from '../shape.js';
 import { bodyOf, node, wide, capsules, carried } from './common.js';
 
 const PI = Math.PI, TAU = 2 * PI, sat = (x) => Math.min(1, Math.max(0, x)), smooth = (a, b, x) => { const t = sat((x - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -26,17 +26,18 @@ const ARMS = {
   curled: { H: 0.7, thick: 1, spare: 0.46, crawl: { ring: 0.27 } },
   long: { H: 0.92, thick: 0.88, spare: 0.34, crawl: { ring: 0.28, reach: 0.4 } },
   stout: { H: 0.58, thick: 1.3, spare: 0.28, crawl: { ring: 0.27, reach: 0.3 } },
-  webbed: { H: 0.74, thick: 1, spare: 0.33, crawl: { ring: 0.26 }, web: true },
+  webbed: { H: 0.66, thick: 1, spare: 0.3, crawl: { ring: 0.36 }, web: true },
 };
 // the body between the arms and the mantle: shoulders, and a neck for the collar
 const COLUMN = [[-0.05, 0.085, 0.085], [-0.01, 0.132, 0.12], [0.04, 0.138, 0.122], [0.085, 0.108, 0.1], [0.12, 0.09, 0.09], [0.17, 0.078, 0.078]];
 // the mantle, from the neck up (it leans back): its sections, its face flatter than its back, and how high
 // the dome over the last of them is (in that section's half-widths)
 const MANTLES = {
-  dome: [[[0, 0.084, [0.088, 0.084]], [0.06, 0.096, [0.102, 0.09], 0.004], [0.14, 0.112, [0.1, 0.112]], [0.23, 0.127, [0.106, 0.128], -0.008], [0.31, 0.124, [0.104, 0.126], -0.012]], 1],
+  dome: [[[0, 0.084, [0.088, 0.084]], [0.06, 0.1, [0.104, 0.092], 0.004], [0.14, 0.122, [0.104, 0.118]], [0.23, 0.138, [0.11, 0.134], -0.008], [0.3, 0.134, [0.108, 0.132], -0.012]], 0.95],
   round: [[[0, 0.088, [0.09, 0.088]], [0.05, 0.114, [0.112, 0.104], 0.004], [0.12, 0.142, [0.124, 0.138]], [0.19, 0.152, [0.13, 0.152], -0.006], [0.23, 0.15, [0.128, 0.15], -0.008]], 0.86],
   point: [[[0, 0.084, [0.088, 0.084]], [0.06, 0.096, [0.102, 0.09], 0.004], [0.14, 0.112, [0.1, 0.112]], [0.24, 0.118, [0.1, 0.122], -0.012], [0.34, 0.094, [0.08, 0.1], -0.03], [0.44, 0.06, [0.05, 0.064], -0.06], [0.52, 0.03, [0.027, 0.032], -0.095]], 1.6],
 };
+MANTLES.fins = MANTLES.dome; MANTLES.crown = MANTLES.dome;
 const LEAN = -0.3;
 // an arm it stands on: how many rings it is drawn with (closer together toward its end), and round it
 const N = 40, SEG = 10, CROWD = 1.7, along = (t) => 1 - (1 - t) ** CROWD;
@@ -98,6 +99,13 @@ export function createOctopus(look, { lite = false } = {}) {
     put(M.skin, ball([0.043, 0.02, 0.034], 12), [0, 0.025, 0.016]);
     put(M.skin, ball([0.041, 0.015, 0.032], 12), [0, -0.026, 0.015]);
   }
+  if (look.mantle === 'fins') {
+    // two fins, high on its sides, swept back
+    for (const sd of [1, -1]) K.put(mantle, M.skin, placed(ball([0.06, 0.078, 0.011], 14), dome(0.235, sd > 0 ? 0.12 : PI - 0.12, 0.034), [0.1, -sd * 0.5, -sd * 0.42]));
+  } else if (look.mantle === 'crown') {
+    // a ring of knobs round its top
+    for (let i = 0; i < 7; i++) { const th = PI / 2 + i * TAU / 7, at = dome(top + 0.42 * crown, th, 0.006); K.put(mantle, M.skin, placed(ball([0.017, 0.034, 0.017], 10), at, [0.42 * Math.sin(th), 0, -0.42 * Math.cos(th)])); }
+  }
   // ── its marks: light of its second colour, on the mantle
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const spot = (y, th, r) => K.put(mantle, M.mark, placed(ball([r, r, r], 6), dome(y, th)));
@@ -116,15 +124,15 @@ export function createOctopus(look, { lite = false } = {}) {
   }
 
   // ── what it wears round its neck: it rests behind and hangs in front
-  const glassy = look.collar === 'glass', collar = node(body, glassy ? [0, 0.105, 0.03] : [0, 0.09, 0.012]), brass = () => S.bronze('#c79a55', { soft: 0.4, relief: 0.4, roughness: 0.3 });
-  collar.rotation.x = glassy ? 0.35 : 0.16;
+  const glassy = look.collar === 'glass', collar = node(body, glassy ? [0, 0.108, 0.016] : [0, 0.09, 0.012]), brass = () => S.bronze('#c79a55', { soft: 0.4, relief: 0.4, roughness: 0.3 });
+  collar.rotation.x = glassy ? 0.3 : 0.16;
   if (glassy) {
     // a ring of brass with three clasps, and a band of glass standing on it
     const m = brass(), glass = K.mat(new THREE.MeshStandardMaterial({ color: '#dff4ff', transparent: true, opacity: 0.3, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide }));
-    K.put(collar, m, hoop(0.152, 0.011, [1, 1], 40));
-    for (const a of [PI / 2, PI / 2 + 1.9, PI / 2 - 1.9]) K.put(collar, m, placed(loft([[-0.016, 0.013, 0.008, 0, 5], [0.016, 0.013, 0.008, 0, 5]], { seg: 8, cap: [0.25, 0.25] }), [0.156 * Math.cos(a), 0, 0.156 * Math.sin(a)], [0, PI / 2 - a, 0]));
-    K.put(collar, glass, loft([[0.006, 0.153, 0.153], [0.052, 0.16, 0.16]], { seg: 40, sub: 1, cap: [0, 0] }));
-    K.put(collar, K.mat(new THREE.MeshStandardMaterial({ color: '#f4fbff', transparent: true, opacity: 0.6, roughness: 0.04, metalness: 0, depthWrite: false })), placed(hoop(0.16, 0.0022, [1, 1], 40), [0, 0.052, 0]));
+    K.put(collar, m, hoop(0.14, 0.011, [1, 1], 40));
+    for (const a of [PI / 2, PI / 2 + 1.9, PI / 2 - 1.9]) K.put(collar, m, placed(loft([[-0.016, 0.013, 0.008, 0, 5], [0.016, 0.013, 0.008, 0, 5]], { seg: 8, cap: [0.25, 0.25] }), [0.144 * Math.cos(a), 0, 0.144 * Math.sin(a)], [0, PI / 2 - a, 0]));
+    K.put(collar, glass, loft([[0.006, 0.141, 0.141], [0.052, 0.148, 0.148]], { seg: 40, sub: 1, cap: [0, 0] }));
+    K.put(collar, K.mat(new THREE.MeshStandardMaterial({ color: '#f4fbff', transparent: true, opacity: 0.6, roughness: 0.04, metalness: 0, depthWrite: false })), placed(hoop(0.148, 0.0022, [1, 1], 40), [0, 0.052, 0]));
   } else if (look.collar === 'woven') {
     K.put(collar, S.wool('#8f7150'), hoop(0.122 * kw, 0.026, [1, 1], 32));
   } else if (look.collar === 'shells') {
@@ -147,8 +155,37 @@ export function createOctopus(look, { lite = false } = {}) {
   const legs = Array.from({ length: C.c.arms }, (_, i) => {
     const a = (i + 0.5) * TAU / C.c.arms, t = skinned(tube(N, { seg: SEG, radius: (u) => thick(along(u)) }), SEG, ms, rs);
     K.own(group, t.geo, M.arm, { cull: false });
-    return { t, lx: Math.sin(a), lz: Math.cos(a), d: [0, 0], T: [0, -1, 0], set: false, at: i * 1.9, F: new Float32Array(N * 3), Q: new Float32Array(N * 3) };
+    return { t, lx: Math.sin(a), lz: Math.cos(a), d: [0, 0], T: [0, -1, 0], set: false, at: i * 1.9, F: new Float32Array(N * 3), Q: new Float32Array(N * 3), P: null };
   });
+  // the web (one of its choices): skin from each arm to the next, down the first half of them; its hem is
+  // higher between two arms than at them. Laid from where the arms are, every frame.
+  const WR = 17, WC = 3, web = A.web ? new THREE.BufferGeometry() : null;
+  if (web) {
+    const n = legs.length * WR * WC, uv = new Float32Array(n * 2), idx = [];
+    for (let g = 0; g < legs.length; g++) for (let r = 0; r < WR; r++) for (let c = 0; c < WC; c++) {
+      const o = (g * WR + r) * WC + c;
+      uv[o * 2] = c * 0.09 / TILE.skin; uv[o * 2 + 1] = ms[r] / TILE.skin;
+      if (r < WR - 1 && c < WC - 1) idx.push(o, o + WC, o + 1, o + 1, o + WC, o + WC + 1);
+    }
+    web.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3)); web.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    web.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); web.setIndex(idx);
+    K.own(group, web, S.skin(shade(main, 0.1), { roughness: 0.5, side: THREE.DoubleSide }), { cull: false });
+  }
+  function webbed() {
+    const p = web.attributes.position.array;
+    for (let g = 0; g < legs.length; g++) {
+      const a = legs[g].P, b = legs[(g + 1) % legs.length].P;
+      for (let r = 0; r < WR; r++) {
+        // between them, it is as far along as 0.8 of the way: a hem that rises
+        const o = ((g * WR + r) * WC) * 3, m = 0.8 * r, m0 = Math.floor(m), f = m - m0, i0 = m0 * 3, i1 = Math.min(WR - 1, m0 + 1) * 3;
+        for (let k = 0; k < 3; k++) {
+          p[o + k] = a[r * 3 + k]; p[o + 6 + k] = b[r * 3 + k];
+          p[o + 3 + k] = 0.5 * (a[i0 + k] + (a[i1 + k] - a[i0 + k]) * f + b[i0 + k] + (b[i1 + k] - b[i0 + k]) * f);
+        }
+      }
+    }
+    web.attributes.position.needsUpdate = true; web.computeVertexNormals();
+  }
   // the way down from the body to where it meets the floor, measured (a curve, in so many pieces)
   const BZ = 16, bx = new Float32Array(BZ + 1), by = new Float32Array(BZ + 1), bz = new Float32Array(BZ + 1), bl = new Float32Array(BZ + 1);
   // On the floor: from the body (R, leaving it along rd) down to G, and the rest of its length rolled up
@@ -200,7 +237,7 @@ export function createOctopus(look, { lite = false } = {}) {
 
   // ── the two that hang at its sides: chains, drawn as arms
   const hang = [1, -1].map((sd) => {
-    const c = cloth({ anchor: body, cols: 1, rows: 10, top: [[sd * 0.128 * kw, 0.035, 0.012]], dir: (_, r) => [sd * (0.5 - 0.085 * r), -1, 0.06], len: 0.062, stiff: 0.3, gravity: 5 });
+    const c = cloth({ anchor: body, cols: 1, rows: 10, top: [[sd * 0.128 * kw, 0.035, 0.012]], dir: (_, r) => [sd * (0.34 - 0.07 * r), -1, 0.06], len: 0.062, stiff: 0.3, gravity: 5 });
     const slim = (u) => kt * (0.005 + 0.024 * (1 - u) ** 0.8), far = Float32Array.from({ length: 11 }, (_, i) => 0.062 * i), fat = far.map((m) => slim(m / 0.62));
     const t = skinned(tube(11, { seg: 7, radius: slim }), 7, far, fat), link = { cloth: c, stiff: 0.3 };
     K.own(group, t.geo, M.arm, { cull: false }); cloths.push(link);
@@ -258,8 +295,10 @@ export function createOctopus(look, { lite = false } = {}) {
           loose(leg, R, rd, ox / nl, 0.35 / nl, oz / nl, 0.25 + 0.2 * jet, 1.6 * TAU * t, leg.Q);
           if (stream < 1) for (let j = 0; j < N * 3; j++) leg.F[j] += (leg.Q[j] - leg.F[j]) * stream;
         }
-        leg.t.set(stream < 1 ? leg.F : leg.Q, [-ox, 0, -oz]);
+        leg.P = stream < 1 ? leg.F : leg.Q;
+        leg.t.set(leg.P, [-ox, 0, -oz]);
       }
+      if (web) webbed();
       for (const a of hang) a.link.stiff = 0.3 - 0.2 * stream;
       pose.falls.length = 0; pose.speed = C.speed; pose.state = st;
       for (const f of C.falls) if (heard++ % 2 === 0) pose.falls.push([f[0], f[1]]);          // every other one rings the water: six tips are many
