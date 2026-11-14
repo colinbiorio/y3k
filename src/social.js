@@ -12,6 +12,7 @@ import { createChess, wantsChessReturn } from './chess.js';
 import { createTwenty } from './twenty.js';
 import { createLifeView } from './life.js';
 import { createWorldView } from './world-view.js';
+import { createWorldGate } from './game/gate.js';
 import { createMine } from './mine.js';
 import { createFrequencies } from './frequencies.js';
 import { MEDIA_CAPS, MAX_MEDIA, POST_BODY_MAX, POST_TOO_LARGE, ANIMATED, tooLarge } from './media-rules.mjs';
@@ -66,7 +67,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // Which game the games glyph opens: the one chosen last on this visit,
   // chess until another is. A chess invitation still opens chess.
   let lastGame = 'chess';
-  const worldView = createWorldView({ getAccount, toast: toastOnce, play });
+  // THE WORLD TAB'S DOOR (src/game/gate.js, 2026-11-13): the tab holds the
+  // void (the open world being built: GAME.md) and the societies (the world
+  // that was here first). It opens on the one last chosen; each has a button
+  // to the other.
+  const worldView = createWorldView({ getAccount, toast: toastOnce, play, toVoid: () => world.go('void') });
+  const world = createWorldGate({ societies: worldView, toast: toastOnce });
   // life (src/life.js): lucid on your own computer, watched from here; its words
   // in the presence's own voice, and the way to kode (main.js `life`)
   // `?life=<username>` watches someone's shared, published life (life.js):
@@ -200,7 +206,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
     else if (v === 'chess') chess.open($('home-grid'));
     else if (v === 'twenty') twenty.open($('home-grid'));
-    else if (v === 'world') worldView.open($('home-grid'));
+    else if (v === 'world') world.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
     else if (v === 'frequencies') frequencies.open($('home-grid'));
     else if (v === 'code') openCode();
@@ -208,7 +214,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (v !== 'code' && codeView?.isOpen()) { codeView.close(); code?.react('closed'); }
     if (v !== 'chess') chess.close();
     if (v !== 'twenty') twenty.close();
-    if (v !== 'world') worldView.close();
+    if (v !== 'world') world.close();
     if (v !== 'mine') mine.close();
     if (v !== 'frequencies') frequencies.close();
     if (v !== 'life') lifeView.close();

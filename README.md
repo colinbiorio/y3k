@@ -82,6 +82,11 @@ of its own, hosted by their account. The rails around the room are its places.
   wrapping planet, 4096 blocks a side, generated from a seed so every client
   computes the same ground; only edits and settlements cross the wire. The
   long-term direction is a shared universe you have to physically travel.
+- **The void** (`src/game/`, [`GAME.md`](GAME.md)) — the open world, at its
+  first stage. The world tab opens on an endless void under one inch of still
+  water, and a body that walks, runs, jumps (a tap 1.5 m; held, 3.0 m), dashes
+  any way and, in creative, flies. Keys and mouse, a controller or a thumb,
+  and a controls sheet to change them. The planet above is one button away.
 - **The mine** (`src/mine.js`, `phraszle.mjs`) — Phraszle: proof-of-work with a
   closed book of 340 words. You cannot guess the phrase; you coach a rented
   mind and make it commit. A ladder, and the seed of an in-world currency.
@@ -216,6 +221,7 @@ src/                   the client — body, environments, voice, perceive (eye),
                        handview/twohand/reach (hands), social, chess, world,
                        mine, settings, gfx, mercury, tend (the autonomous life)
 src/code/              kode's client: the room, state, transport, onboarding
+src/game/              the void: the open world's first stage (GAME.md)
 y3k-code/              the y3kode engine (runs the person's coding tools locally)
 desktop/               the Electron window
 test/                  the suite
@@ -231,6 +237,7 @@ build. Read the one for the part you are touching.
 - [`CODE.md`](CODE.md) — kode: the seven non-negotiable lines.
 - [`HANDS.md`](HANDS.md) — when a presence may reach past the room.
 - [`WORLD.md`](WORLD.md) — one planet for small minds.
+- [`GAME.md`](GAME.md) — the open world: the ask, the stages, where it stands.
 - [`MIND.md`](MIND.md) — how a presence stays alive between moments.
 - [`LANGUAGE.md`](LANGUAGE.md) — what a mind says to become light.
 - [`MOTION.md`](MOTION.md), [`MERCURY-BUTTONS.md`](MERCURY-BUTTONS.md) — one substance, mercury.
@@ -251,6 +258,39 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-11-13** — **The world tab opens on the void: the first stage of an
+  open world** (`src/game/`, [`GAME.md`](GAME.md)). Colin: "i want to turn
+  this into a full-fledged open-world video game", and then, to begin: "let's
+  just start with an endless void -- think assassin's creed, but with 1 inch
+  of still water". So the world tab opens on an endless still water with a
+  figure standing in it, and the body moves the way he asked. "tap to jump or
+  hold to jump higher -- allowing the character to defy gravity by 2x, but
+  still be affected": a tap rises 1.5 m and a held jump 3.0 m, the pull halved
+  while rising with the key down and whole on the way down. "omnidirectional
+  dash": 6.24 m any way the hands point, once more in the air. Flight "only
+  in 'creative' mode". "options for both controller and keyboard/mouse, with
+  a dedicated 'controls' menu": the controls sheet lists every action with
+  two keys and a controller button, each changed by pressing it, and a phone
+  gets a thumb stick and buttons. The sky, the water, its rings and the figure
+  are arithmetic, so nothing is fetched and nothing has pixels: the water
+  mirrors the sky and whatever stands in it, and each footfall drops a ring
+  that travels at the speed one inch of water gives it (0.499 m/s). The
+  societies are one button away and the tab remembers which was last; where
+  the void cannot be drawn the tab says so and opens them. Measured on an M2
+  MacBook Air: 16.7 ms a frame at 1280 × 800, and the same on a phone-sized
+  canvas at two pixels a point. Tests: `test/game.test.mjs` (59 checks on the
+  modules that decide: the two heights, the dash in eight directions,
+  flight's rules, the bindings, the controller, the page's keys, the rings,
+  the legs, the door) and `scripts/void-smoke.mjs`, which walks the body
+  through all of it in a real browser with keys, a controller and a thumb.
+  Looked at headless in three engines: Chromium on the Mac's own chip, and
+  Firefox 157 and WebKit 27.2 (Safari's engine) as Playwright builds them.
+  Not yet in Safari or Firefox themselves with a real mouse, on a real phone,
+  or with a real controller. `GAME.md` keeps the whole ask in his words, the
+  stages to come (five bodies, five buildings, five ships, the binding and
+  five plasma weapons, then Earth and the solar system) and what was learned
+  on the way.
 
 - **2026-11-12** — **kode's model picker offers every Claude model too**
   (`src/code/code-view.js` modelOptions, `src/models.js` notOffered). Colin,
