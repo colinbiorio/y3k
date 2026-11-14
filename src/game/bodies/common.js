@@ -54,6 +54,8 @@ export function bodyOf(rig, K, { eye, cloths = [], frame = null }) {
   const floor = WATER + 0.012;
   return {
     group: rig.group, gait: rig.gait, look: eye * rig.scale,
+    // how much of the sky it keeps off the water under it (1: a body; less: one the light goes through)
+    shade: rig.shade ?? 1,
     // a landing at `speed`: the knees take it
     land(speed) { rig.land(speed); },
     // the void's own light, wrapped round the body: more of it in the dark

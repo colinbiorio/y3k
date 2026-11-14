@@ -19,8 +19,9 @@ import { createHuman } from './bodies/human.js';
 import { createRobot } from './bodies/robot.js';
 import { createMantis } from './bodies/mantis.js';
 import { createOctopus } from './bodies/octopus.js';
+import { createLight } from './bodies/light.js';
 
-const MAKE = { human: createHuman, robot: createRobot, mantis: createMantis, octopus: createOctopus };
+const MAKE = { human: createHuman, robot: createRobot, mantis: createMantis, octopus: createOctopus, light: createLight };
 
 export function createFigure({ kind, look = null, lite = false } = {}) {
   const k = MAKE[cleanKind(kind)] ? cleanKind(kind) : 'human';

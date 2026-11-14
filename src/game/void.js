@@ -325,7 +325,7 @@ export function createVoid({ renderer, lite = false, light = 'pale' } = {}) {
       water.position.set(camera.position.x, WATER, camera.position.z);
       moteU.uEye.value.copy(camera.position);
       const B = waterU.uBodies.value; B.fill(0);
-      bodies.slice(0, BODIES).forEach((b, i) => B.set([b.x, b.z, 0.42 + 0.55 * Math.min(b.y, 6), 0.5 / (1 + 1.4 * b.y)], i * 4));
+      bodies.slice(0, BODIES).forEach((b, i) => B.set([b.x, b.z, 0.42 + 0.55 * Math.min(b.y, 6), (b.k ?? 1) * 0.5 / (1 + 1.4 * b.y)], i * 4));
       key.target.position.set(camera.position.x, 0, camera.position.z);
       key.position.set(camera.position.x + sky.uGlowDir.value.x * 30, 34, camera.position.z + sky.uGlowDir.value.z * 30);
     },
