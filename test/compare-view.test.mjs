@@ -230,7 +230,8 @@ await ok('the group is opened as /compare starts its asides, each joining as it 
   assert.match(cmp, /if \(!asked\.length\) closeCompare\(S, g\.id\);/);
   // the strip and the view follow every session in a group, whichever tab it is in
   assert.match(view, /if \(out\.sid && S\.compares\.size\) cmpDirty = true;/);
-  assert.match(view, /if \(cmpDirty \|\| switched\) \{ cmpDirty = false; renderCompareStrip\(\); renderCompareView\(\); \}/);
+  // (each a part of the frame of its own since 2026-11-16: one that throws leaves the other drawn)
+  assert.match(view, /if \(cmpDirty \|\| switched\) \{ cmpDirty = false; part\(renderCompareStrip\); part\(renderCompareView\); \}/);
 });
 
 await ok('Esc closes the view before anything else and stops nothing; the strip stays; /compare alone opens it; the keys list says so', () => {

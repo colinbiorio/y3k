@@ -31,6 +31,7 @@ function newSession(sid, e = {}) {
     waiting: 0,           // permission/question/plan cards open
     unread: false,
     turn: null,           // the turn under way (openTurn), until it ends
+    openReply: new Map(), // thread (a subagent card's uid, or 0: the conversation itself) → the reply being written in it
   };
 }
 
@@ -49,6 +50,29 @@ function place(s, it, parentCallId) {
   if (parent) { (parent.children ||= []).push(it); it.parentUid = parent.uid; return parent; }
   s.items.push(it);
   return null;
+}
+
+// A reply is over, and every block in it with it. A block left open on a reply
+// that had ended read "thinking…" for good: the turn's end closed the reply
+// and not its blocks, and nothing came for them afterwards (2026-11-15).
+// Says whether anything changed.
+function closeReply(it) {
+  let changed = !it.done;
+  it.done = true;
+  for (const b of it.blocks) if (!b.done) { b.done = true; changed = true; }
+  return changed;
+}
+
+// ONE REPLY AT A TIME, in the conversation itself and in each subagent's: a
+// reply that begins ends the one before it in its thread, if that one was
+// still open (its end never came: lost with a gap in the stream, or it was a
+// reply made from a stray fragment). Open replies used to gather, each one
+// "thinking…" under every reply that followed it (2026-11-15).
+function begun(s, it, touch) {
+  const k = it.parentUid ?? 0;
+  const before = s.openReply.get(k);
+  if (before && before !== it && closeReply(before)) touch(before);
+  s.openReply.set(k, it);
 }
 
 // the numbers Claude Code gives as a task goes on: tokens, tool uses, time
@@ -325,6 +349,9 @@ export function apply(S, e, { replay = false } = {}) {
       for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) { it.resolved = 'cancelled'; touch(it); }
       for (const it of s.byKey.values()) if (it.kind === 'tool' && it.status === 'running') { it.status = 'stopped'; touch(it); }
       for (const a of s.agents.values()) if (a.status === 'running') a.status = 'stopped';
+      // ...and nothing more is coming for a reply it was in the middle of
+      for (const it of s.byKey.values()) if (it.kind === 'assistant' && closeReply(it)) touch(it);
+      s.openReply.clear();
       s.waiting = 0;
       if (e.reason && !/^(exited|stopped)$/.test(e.reason)) {
         const n = item('notice', { level: 'error', text: e.reason === 'not-installed' ? 'The coding tool is not installed on this computer.' : `The session ended (${e.reason})${e.detail ? ': ' + String(e.detail).split('\n').slice(-3).join(' ') : ''}` });
@@ -344,7 +371,8 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     case 'turn.ended': {
       s.usage.turns++;
-      for (const it of s.byKey.values()) if (it.kind === 'assistant' && !it.done) { it.done = true; touch(it); }
+      for (const it of s.byKey.values()) if (it.kind === 'assistant' && closeReply(it)) touch(it);
+      s.openReply.clear();
       if (e.status !== 'success') {
         const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth });
         s.items.push(n); touch(n);
@@ -386,6 +414,7 @@ export function apply(S, e, { replay = false } = {}) {
         it = item('assistant', { id: e.id, model: e.model || null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
         place(s, it, e.parentCallId);
+        begun(s, it, touch);
       }
       touch(it);
       break;
@@ -396,10 +425,13 @@ export function apply(S, e, { replay = false } = {}) {
         it = item('assistant', { id: e.id, model: null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
         place(s, it, e.parentCallId);
+        begun(s, it, touch);
       }
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
-      if (!b) { b = { i, kind: e.kind, text: '', done: false }; it.blocks.push(b); it.blocks.sort((a, c) => a.i - c.i); }
+      // (a block that begins on a reply that has ended begins closed: a late
+      // fragment may still bring its words, and can never leave it "thinking…")
+      if (!b) { b = { i, kind: e.kind, text: '', done: !!it.done }; it.blocks.push(b); it.blocks.sort((a, c) => a.i - c.i); }
       // A block the coder sent whole takes no more fragments: one that comes
       // after it is a late copy (held while the session was read from disk,
       // which already had the whole block) and would write its words twice.
@@ -413,7 +445,7 @@ export function apply(S, e, { replay = false } = {}) {
     }
     case 'message.end': {
       const it = s.byKey.get('m:' + e.id);
-      if (it) { it.done = true; for (const b of it.blocks) b.done = true; touch(it); }
+      if (it) { closeReply(it); if (s.openReply.get(it.parentUid ?? 0) === it) s.openReply.delete(it.parentUid ?? 0); touch(it); }
       break;
     }
 

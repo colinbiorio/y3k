@@ -14,11 +14,12 @@
 //   (PORT=<n> serves the site on that port, and SMOKE_SLOW=<n> makes every
 //   wait n times as long, where several runs share a machine)
 import { spawn, execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:net';
+import { createRequire } from 'node:module';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { createPairing } from '../y3k-code/pair.mjs';
@@ -31,10 +32,21 @@ const shots = argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : nul
 const [W, H] = (argv.includes('--size') ? argv[argv.indexOf('--size') + 1] : '1440x900').split('x').map(Number);
 const PASSWORD = 'smoke-founder-' + Math.random().toString(36).slice(2);
 
+// Playwright where it is installed. Failing that, a playwright-core in the
+// folder PW_CORE names, with the Chromium already in this computer's cache
+// (as void-smoke.mjs finds its own).
 async function loadPlaywright() {
-  try { return await import('playwright'); } catch { /* not local */ }
-  const g = execSync('npm root -g').toString().trim();
-  return import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href);
+  try { return { pw: await import('playwright') }; } catch { /* not local */ }
+  try {
+    const g = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    return { pw: await import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href) };
+  } catch { /* not global */ }
+  if (!process.env.PW_CORE) throw new Error('no playwright: npm i -g playwright, or PW_CORE=<a folder holding playwright-core>');
+  const pw = createRequire(join(process.env.PW_CORE, 'x.js'))('playwright-core');
+  const cache = join(homedir(), 'Library', 'Caches', 'ms-playwright');
+  const hit = existsSync(cache) && readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell-')).sort().at(-1);
+  const exe = hit ? join(cache, hit, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell') : null;
+  return { pw, exe: exe && existsSync(exe) ? exe : null };
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
@@ -42,6 +54,10 @@ const freePort = () => new Promise((res) => { const s = createServer(); s.listen
 // under SwiftShader takes a long while, and Playwright's waits poll on frames.
 let failures = 0;
 const check = (name, cond, detail = '') => { console.log(`${cond ? '  ✓' : '  ✗'} ${name}${!cond && detail ? ` — ${detail}` : ''}`); if (!cond) failures++; };
+
+// (found before anything is started: a run that cannot find its browser
+// leaves no server running and no folder behind)
+const { pw, exe } = await loadPlaywright();
 
 const tmp = mkdtempSync(join(tmpdir(), 'y3k-smoke-'));
 const repo = realpathSync(mkdtempSync(join(homedir(), 'y3k-smoke-repo-')));
@@ -96,8 +112,7 @@ enginePort = await http.listen(0);
 const code = pairing.issueCode();
 
 // --- the browser ------------------------------------------------------------------
-const { chromium } = await loadPlaywright();
-const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const browser = await pw.chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'], ...(exe ? { executablePath: exe } : {}) });
 // Chromium now asks before a page reaches this computer's own ports (Local
 // Network Access): the person's Allow, given here. Without it Playwright
 // 1.56's Chromium refuses the page's knock on y3kode at once, and it never
@@ -118,6 +133,11 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (route) => {
   if (m) return route.fulfill({ path: join(threeDir, 'package', m[1].split('?')[0]), contentType: 'application/javascript' });
   return route.abort();
 });
+// A y3kode of the person's own may be running on this computer, on one of its
+// ten ports. The engines here listen elsewhere (a port the system picks), so
+// when the front door looks for an engine it must find none, and it never
+// knocks on theirs.
+await ctx.route(/^http:\/\/127\.0\.0\.1:478(2\d|30)\//, (route) => route.abort());
 const page = await ctx.newPage();
 // a machine shared with other runs, drawing in software: the first load alone
 // can outlast Playwright's 30s, and SMOKE_SLOW stretches every wait below

@@ -374,10 +374,11 @@ function patchAssistant(it, el, ctx) {
   for (const b of it.blocks) {
     let v = V.blocks.get(b.i);
     if (b.kind === 'thinking') {
-      if (!b.text && b.done) continue;
+      // (a reply that is over is not thinking, whatever its block says)
+      if (!b.text && (b.done || it.done)) continue;
       if (!v || v.kind !== 'thinking' || (v.empty && b.text)) { v?.el.remove(); v = thinkingView(b); }
       if (!v.empty) {
-        const said = b.done ? 'thought' : 'thinking…';
+        const said = b.done || it.done ? 'thought' : 'thinking…';
         if (v.head.textContent !== said) v.head.textContent = said;
         if (v.text && v.text.data !== b.text) v.text.data = b.text;
       }

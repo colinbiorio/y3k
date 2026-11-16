@@ -261,6 +261,90 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-16** — **A reload of kode keeps the conversation, and a reply that
+  is over never says "thinking…"** (`src/code/state.js`, `render/items.js`,
+  `code-view.js`; `scripts/reload-smoke.mjs`). Colin: "we gotta fix this bug
+  where the koding conversation isn't correctly preserved when you reload the
+  page". His picture, after a reload: a column of ten or more small bubbles
+  down the left of the conversation, each reading only "thinking…". Two ways
+  to that picture were found and reproduced against a real engine, and both
+  are closed by rule rather than one at a time. *One:* the engine remembers
+  its last ten thousand events, fragments of replies among them, and a
+  session's file gives a page the newest 5,000 of the events it keeps
+  (fragments are not kept). A page that loaded while the engine's memory still
+  reached back past those 5,000 was sent fragments of replies it did not hold,
+  took each for a new reply and drew it at the foot, thinking. *Two:* a page
+  holds what comes in until the engine has said hello, but for fifteen seconds
+  at most, and not past a hello that fails. When a stream came back past what
+  the engine remembered and that wait ran out before the sessions were read
+  again, what had waited went into them first; the reading, which adds only
+  what is newer than what a page has, could then never bring what they had
+  missed: a hole in the conversation, and the reply open across it left open.
+  **What holds now.** A reply that is over is not thinking: a reply's end, its
+  turn's end and its session's end close every block of it, a new reply in the
+  same thread closes the one before, and an empty thought on a finished reply
+  is not drawn. A fragment of a reply the page does not hold, from before what
+  it has read, is dropped. A session that took an event before the reading it
+  was owed, or whose file begins after what the page already has, is read
+  whole again instead of being left with a hole: the room's own lines (what
+  was said to the presence, notes, shell runs) are put back where they were
+  said, and a conversation it continues stays above it, drawn once (also one
+  that was still on its way from its own file when the reading landed). For
+  an engine that is only slow the wait lasts up to two minutes, and what
+  waited goes in after the reading, in the order it came. A hello or a file
+  the engine could not give is asked for again 3, 10 and 30 seconds later; a
+  running conversation that could not be read is still the one in the room,
+  and an older one is never continued in its place. *And when something
+  throws:* an event whose handling threw used to pass for a dropped
+  connection, so the stream reopened and played the same events again. Now the
+  event, a line that cannot be drawn (it says so in its place) or a part of
+  the frame that throws is caught, reported once as the kind of error and its
+  file and line (never a word of the conversation), and the conversation is
+  drawn again a second later. *Not found:* the way his own picture was drawn.
+  His engine had run for three days, its memory long since rolled over, and
+  against an engine like that a plain reload went right in every reproduction,
+  before the fix as after it; each way above needs something more (an engine
+  that has heard fewer than ten thousand events since it started, or a stream
+  that comes back to a reset). The rules do not depend on the way: with them
+  "thinking…" can stand only on the newest reply of its thread, while its turn
+  runs. *Not changed:* a reload shows the newest 5,000 events of a long
+  conversation and no more (nor, past that length, the conversation it
+  continues, above it); the rest is whole on disk, and showing it is the
+  engine's to do (a y3kode release). Tests: `test/code-client.test.mjs` is
+  136 checks, 19 of them new, each failing on the code before (17 for a reason
+  of its own; the last two guard what the fix itself made reachable), and the
+  fix's rules were undone one at a time, 36 of them, each noticed by a check.
+  `scripts/reload-smoke.mjs` is new, the site and a real engine in a real
+  browser: a turn that edits a file and a reload after it, a reply
+  half-written with a reload under it and the turn then stopped, a reload
+  again, the conversation read back line for line each time; then the two
+  rules in a real DOM, where the code before leaves the finished reply
+  thinking and draws ten late fragments as ten bubbles down the left, his
+  picture (12 checks; 10 pass before). Measured outside the suite: a real
+  engine replaying a recorded reply over and over as one long slow turn while
+  the page's own code reloads against it with random delays of up to 1.6
+  seconds, the page's fifteen-second wait made half a second so that a reading
+  slower than the wait is met in a minute's run; a reload is read once its
+  hello and its files are all answered, and counted wrong only if it is still
+  wrong half a second later. With the engine's memory whole, 15 of 33 reloads
+  went wrong before (a hole, and 183 to 350 replies left "thinking…") and 0 of
+  80 after. With the stream dropped and brought back to a reset (the file's
+  5,000 events made 400 there), the first of 5 drops left a hole before that
+  was still there after every later one, and none of 11 drops left one after;
+  the longer wait alone did that, and no conversation there had to be read
+  whole. So the 5,000 were made 60, or the wait made short: before, the first
+  drop of each of two runs left a hole that was still there after all five
+  (and, in a conversation that continues another, 3 or 4 replies left
+  "thinking…"); after, none of 29 drops left one, 15 of them read whole, 8 of
+  those in a conversation that continues another, which stood above it each
+  time. With the memory rolled over and plain reloads, 0 of 166 before and 0 of
+  171 after. *Owed:* `scripts/code-smoke.mjs` stops where it clicks a tab, and
+  there have been no tabs since 29 Oct; eight of its checks before that are
+  behind the site as well (the same on the code before). It now finds its
+  browser before it starts anything (a run that could not find one left a
+  server running), takes `PW_CORE`, and never knocks on a y3kode of the
+  person's own; bringing its scenes up to the one conversation is not done.
+
 - **2026-11-14** — **Five kinds of body in the void, each with five choices
   of five** (`src/game/kinds.js`, `bodies/`, `shape.js`, `chooser.js`,
   `drape.js`, `crawl.js`; [`GAME.md`](GAME.md)). Colin: "There should be 5
