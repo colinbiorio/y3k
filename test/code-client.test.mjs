@@ -1754,6 +1754,893 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     } finally { offline(); globalThis.fetch = realFetch; }
   });
 
+  // THE RELOAD THAT LEFT A COLUMN OF "thinking…" (2026-11-15), and what was
+  // found beside it. The tests below drive the page with an engine whose
+  // answers and stream are in their hands, and with the page's long waits
+  // too: the fifteen seconds and the two minutes of the hold after a reset,
+  // the hello asked for again, the redraw after an event that threw.
+  const helloOf = (...rows) => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: rows });
+  const answer = (eng, name, j) => {
+    const i = eng.cmds.findIndex((c) => c.cmd === name);
+    assert.ok(i >= 0, `no ${name} is waiting`);
+    eng.cmds.splice(i, 1)[0].answer(j);
+  };
+  // kept, not timed, and fired by name (`release` is what the hold's wait was
+  // called before that day)
+  const longWaits = () => {
+    const set = globalThis.setTimeout, clear = globalThis.clearTimeout;
+    const waits = [];
+    globalThis.setTimeout = (fn, ms, ...a) => {
+      if (!(ms >= 1000 && ['holdOver', 'release', 'helloOnceMore', 'mend'].includes(fn?.name))) return set(fn, ms, ...a);
+      const w = { fn, ms, unref() {} };
+      waits.push(w);
+      return w;
+    };
+    globalThis.clearTimeout = (w) => { const i = waits.indexOf(w); if (i >= 0) waits.splice(i, 1); else clear(w); };
+    return {
+      has: (...names) => waits.some((w) => names.includes(w.fn.name)),
+      ms: (...names) => waits.filter((w) => names.includes(w.fn.name)).map((w) => w.ms),
+      fire: (...names) => { const i = waits.findIndex((w) => names.includes(w.fn.name)); if (i < 0) return false; waits.splice(i, 1)[0].fn(); return true; },
+      restore: () => { globalThis.setTimeout = set; globalThis.clearTimeout = clear; },
+    };
+  };
+  // a move of the orb is never held: one sent after other events says that
+  // they have all reached the page
+  const reached = async (eng, marks, seq) => {
+    eng.send({ v: 1, epoch: EPOCH, seq, t: Date.now(), type: 'orb.move', id: 'k' + seq, kommand: 'k' + seq });
+    await until(() => marks.includes('k' + seq));
+  };
+  const orbLink = (marks, more = {}) => ({ kommand: (k) => { marks.push(k); return { ok: true }; }, ...more });
+  const thinking = () => [...$$('span.th-shimmer')].filter((x) => x.textContent === 'thinking…').length;
+  const drawn = () => $('div.cv-list').childNodes.map((n) => ['us', 'as', 'tl', 'pm', 'or', 'sys'].find((c) => n.classList?.contains(c)) || '?');
+  // (the words of the last reply drawn, without the "pass to" button a finished one carries)
+  const lastReply = () => $$('div.cv-list > div.it.as').pop().childNodes.filter((n) => !n.classList?.contains('pass-row')).map((n) => n.textContent).join('');
+  const sayToPresence = async (words) => {
+    $('button.cv-who').click();
+    const ta = $('textarea.cv-input');
+    ta.value = words;
+    ta.dispatch('keydown', { key: 'Enter' });
+    $('button.cv-who').click();
+    await settle();
+    tick();
+  };
+  const dropAndReturn = async (eng) => {
+    const streams = eng.streams;
+    eng.end();
+    await until(() => eng.streams > streams && eng.stream, 3000);
+  };
+  const indexed = { sid, provider: 'claude', cwd: '/tmp/live1', mode: 'ask', title: 'change world to y3k', started: 1 };
+  // what the session's file hands over later on: its newest events, beginning
+  // at ones the page already has
+  const laterWindow = () => ({ ok: true, sid, live: true, meta: indexed, events: [...onDisk.slice(5), ...[
+    { type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 150 },
+    { type: 'message.user', text: 'second', seq: 151 },
+    { type: 'message.start', id: 'm2', seq: 152 },
+    { type: 'message.block', id: 'm2', block: 0, kind: 'text', text: 'Changed.', seq: 153 },
+    { type: 'message.end', id: 'm2', seq: 154 },
+    { type: 'turn.ended', status: 'success', seq: 155 },
+    { type: 'message.user', text: 'third', seq: 299 },
+    { type: 'message.start', id: 'b', seq: 301 },
+  ].map((e) => ({ sid, ...e }))] });
+
+  await ok('a reply that is over never says "thinking…": its end, its turn\'s end and its session\'s end each close what it left open, and a fragment that arrives after is born closed (2026-11-15)', () => {
+    for (const end of [{ type: 'message.end', id: 'a' }, { type: 'turn.ended', status: 'success' }, { type: 'session.ended', reason: 'exited' }]) {
+      const S = createState();
+      const feed = (e) => apply(S, { sid: 'th1', ...e });
+      feed({ type: 'session.started', provider: 'claude', cwd: '/tmp/th', mode: 'ask' });
+      feed({ type: 'turn.started' });
+      feed({ type: 'message.start', id: 'a' });
+      feed({ type: 'message.delta', id: 'a', block: 0, kind: 'thinking', text: '' });
+      const a = S.sessions.get('th1').byKey.get('m:a');
+      assert.deepEqual([a.done, a.blocks.map((b) => b.done)], [false, [false]], 'open while it thinks');
+      assert.equal(renderItem(a, noCtx).querySelectorAll('span.th-shimmer').length, 1);
+      feed(end);
+      assert.deepEqual([a.done, a.blocks.map((b) => b.done)], [true, [true]], end.type + ' closes it');
+      // fragments that were on their way when it ended
+      feed({ type: 'message.delta', id: 'a', block: 2, kind: 'thinking', text: '' });
+      feed({ type: 'message.delta', id: 'a', block: 3, kind: 'text', text: 'late words' });
+      assert.deepEqual(a.blocks.map((b) => [b.i, b.done, b.text]), [[0, true, ''], [2, true, ''], [3, true, 'late words']], 'after ' + end.type);
+      assert.equal(renderItem(a, noCtx).querySelectorAll('span.th-shimmer').length, 0, 'drawn without "thinking…"');
+    }
+    // and one as an older page could leave it: over, with blocks still open
+    const left = { uid: 9300, kind: 'assistant', id: 'x', blocks: [{ i: 0, kind: 'thinking', text: '', done: false }, { i: 1, kind: 'thinking', text: 'hmm', done: false }], done: true };
+    const el = renderItem(left, noCtx);
+    assert.equal(el.querySelectorAll('span.th-shimmer').length, 0);
+    assert.equal(el.querySelector('span.th-head').textContent, 'thought');
+  });
+
+  await ok('one reply at a time is open in a thread: the next one closes it though its end was never heard, and a subagent\'s replies are a thread of their own (2026-11-15)', () => {
+    const S = createState();
+    const feed = (e) => apply(S, { sid: 'th2', ...e });
+    feed({ type: 'session.started', provider: 'claude', cwd: '/tmp/th', mode: 'ask' });
+    feed({ type: 'turn.started' });
+    feed({ type: 'message.start', id: 'a' });
+    feed({ type: 'message.delta', id: 'a', block: 0, kind: 'thinking', text: '' });
+    feed({ type: 'tool.call', callId: 'task1', name: 'Task', kind: 'task', title: 'look around', input: { description: 'look around' } });
+    feed({ type: 'message.start', id: 'sub1', parentCallId: 'task1' });
+    feed({ type: 'message.delta', id: 'sub1', block: 0, kind: 'thinking', text: '' });
+    const s = S.sessions.get('th2');
+    const open = (id) => { const it = s.byKey.get('m:' + id); return [it.done, it.blocks.map((b) => b.done)]; };
+    assert.deepEqual(open('a'), [false, [false]], 'a subagent\'s reply does not close the main one');
+    feed({ type: 'message.start', id: 'b' });
+    feed({ type: 'message.delta', id: 'b', block: 0, kind: 'thinking', text: '' });
+    assert.deepEqual(open('a'), [true, [true]], 'the one before it is over');
+    assert.deepEqual(open('sub1'), [false, [false]], 'the subagent\'s is not');
+    assert.deepEqual(open('b'), [false, [false]]);
+    feed({ type: 'message.start', id: 'sub2', parentCallId: 'task1' });
+    assert.deepEqual(open('sub1'), [true, [true]], 'until its own next one');
+    assert.deepEqual(open('b'), [false, [false]]);
+  });
+
+  await ok('the view: a page loaded while the engine still remembers replies older than the history it reads does not draw them again as "thinking…" at the foot of the conversation (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    const marks = [];
+    try {
+      const cv = await viewWith('stale-a', { link: orbLink(marks) });
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      // the engine's ring is still whole, so the stream begins with all it
+      // has sent since it started, fragments too
+      const ring = [
+        { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 1 },
+        { type: 'message.user', text: 'first', seq: 2 },
+        { type: 'message.start', id: 'old1', seq: 3 },
+        { type: 'message.delta', id: 'old1', block: 0, kind: 'thinking', text: '', seq: 4 },
+        { type: 'message.block', id: 'old1', block: 0, kind: 'thinking', text: '', seq: 5 },
+        { type: 'tool.call', callId: 'c7', messageId: 'old1', name: 'Read', kind: 'read', title: 'a.js', input: { file_path: 'a.js' }, seq: 6 },
+        { type: 'message.end', id: 'old1', seq: 7 },
+        { type: 'tool.result', callId: 'c7', status: 'ok', output: { text: 'x' }, seq: 8 },
+        { type: 'message.start', id: 'old2', seq: 9 },
+        { type: 'message.delta', id: 'old2', block: 0, kind: 'thinking', text: '', seq: 10 },
+        { type: 'message.delta', id: 'old2', block: 1, kind: 'text', text: 'An old ', seq: 11 },
+        { type: 'message.delta', id: 'old2', block: 1, kind: 'text', text: 'answer.', seq: 12 },
+        { type: 'message.block', id: 'old2', block: 1, kind: 'text', text: 'An old answer.', seq: 13 },
+        { type: 'message.end', id: 'old2', seq: 14 },
+        { type: 'turn.ended', status: 'success', seq: 15 },
+        // …and thousands of events later:
+        { type: 'message.user', text: 'and now?', seq: 5210 },
+        { type: 'message.start', id: 'n1', seq: 5211 },
+        { type: 'message.delta', id: 'n1', block: 0, kind: 'thinking', text: '', seq: 5212 },
+        { type: 'message.block', id: 'n1', block: 0, kind: 'thinking', text: '', seq: 5213 },
+        { type: 'message.delta', id: 'n1', block: 1, kind: 'text', text: 'Here it is.', seq: 5214 },
+        { type: 'message.block', id: 'n1', block: 1, kind: 'text', text: 'Here it is.', seq: 5215 },
+        { type: 'message.end', id: 'n1', seq: 5216 },
+        { type: 'turn.ended', status: 'success', seq: 5217 },
+      ];
+      for (const e of ring) eng.send(live(e));
+      await reached(eng, marks, 5218);
+      const S = cv._state;
+      assert.equal(S.sessions.size, 0, 'held until the hello has read the session');
+      // its file hands over only its newest events, and never a fragment:
+      // the old replies are not among them
+      let loads = 0;
+      eng.auto['session.load'] = () => { loads += 1; return { ok: true, sid, live: true, meta: indexed, events: ring.filter((e) => e.seq >= 5210 && e.type !== 'message.delta').map((e) => ({ sid, ...e })) }; };
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'idle' }));
+      await until(() => loads === 1 && S.sessions.get(sid)?.items.length);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.equal(thinking(), 0, 'nothing says "thinking…"');
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant'], 'the history its file handed over, and nothing made of what the engine remembered');
+      assert.ok(!s.byKey.has('m:old1') && !s.byKey.has('m:old2'));
+      assert.deepEqual(s.byKey.get('m:n1').blocks.map((b) => b.text), ['', 'Here it is.'], 'a fragment of a reply it does hold changes nothing either');
+      assert.deepEqual(drawn(), ['us', 'as']);
+      assert.equal(s.cwd, '/tmp/live1');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: after a reset an engine that is only slow tears nothing: the events of a session that is owed a reading wait for the hello on its way, past the fifteen seconds, and the reading adds what was missed (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'waiting' });
+    const sid2 = 'f0e1d2c3b4a59687';
+    const began2 = { sid: sid2, type: 'session.started', provider: 'codex', cwd: '/tmp/live2', mode: 'ask', seq: 303 };
+    const files = { [sid]: { ok: true, sid, live: true, meta: null, events: onDisk }, [sid2]: { ok: true, sid: sid2, live: true, meta: null, events: [began2] } };
+    let loads = 0;
+    eng.auto['session.load'] = (c) => { loads += 1; return files[c.sid]; };
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('slow-a', { link: orbLink(marks) });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      // the stream drops and comes back past the ring, and the engine is long
+      // in answering the hello
+      eng.auto['engine.hello'] = null;
+      await dropAndReturn(eng);
+      await until(() => eng.waiting('engine.hello').length);
+      eng.send({ epoch: EPOCH, seq: 300 }, 'reset');
+      eng.send(live({ type: 'message.start', id: 'b', seq: 301 }));
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'Third ', seq: 302 }));
+      eng.send({ v: 1, epoch: EPOCH, t: Date.now(), ...began2 });
+      await reached(eng, marks, 304);
+      assert.ok(!s.byKey.has('m:b') && !S.sessions.has(sid2), 'held from the reset');
+      // fifteen seconds on: what is owed no reading goes in, the session's
+      // own events go on waiting for theirs
+      assert.ok(W.fire('holdOver', 'release'));
+      assert.ok(S.sessions.has(sid2), 'another session\'s start is let in');
+      assert.ok(!s.byKey.has('m:b'), 'the session owed a reading waits for it');
+      assert.ok(W.has('holdOver'), '…two minutes in all');
+      // the hello comes, and the file's newest events meet what the page has
+      files[sid] = laterWindow();
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'running' }, { sid: sid2, state: 'idle' }));
+      await until(() => loads === 3 && s.byKey.get('m:b')?.blocks.length);
+      await settle(20);
+      tick();
+      assert.equal(S.sessions.get(sid), s, 'the session is the one it was');
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'user', 'assistant', 'user', 'assistant'], 'what it missed, then the reply in progress');
+      assert.deepEqual(s.items.filter((i) => i.kind === 'user').map((i) => i.text), ['change world to y3k', 'second', 'third']);
+      assert.deepEqual(s.byKey.get('m:b').blocks.map((b) => b.text), ['Third '], 'its streamed words, once');
+      assert.deepEqual(drawn(), ['us', 'as', 'tl', 'pm', 'us', 'as', 'us', 'as']);
+      assert.ok(!W.has('holdOver', 'release'), 'the hold is over');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a session the hold let go of before its reading, two minutes after a reset, is read whole when the engine answers: no hole, the reply in progress keeps its words, and a line to the presence stands where it was said (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'waiting' });
+    let file = { ok: true, sid, live: true, meta: null, events: onDisk };
+    let loads = 0;
+    eng.auto['session.load'] = () => { loads += 1; return file; };
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('torn-a', { link: orbLink(marks, { companion: () => ({ name: 'Orion' }), talk: () => {} }) });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      await sayToPresence('is this edit safe?');
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'orion']);
+      eng.auto['engine.hello'] = null;
+      await dropAndReturn(eng);
+      await until(() => eng.waiting('engine.hello').length);
+      eng.send({ epoch: EPOCH, seq: 300 }, 'reset');
+      eng.send(live({ type: 'message.start', id: 'b', seq: 301 }));
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'Third ', seq: 302 }));
+      await reached(eng, marks, 303);
+      // the engine says nothing for two minutes: the hold lets go
+      W.fire('holdOver', 'release');
+      W.fire('holdOver', 'release');
+      assert.ok(s.byKey.has('m:b'), 'an engine that does not answer never holds the screen for good');
+      // then it answers; its file has what the page missed
+      file = laterWindow();
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'running' }));
+      await until(() => loads === 2);
+      await settle(20);
+      tick();
+      const now = S.sessions.get(sid);
+      assert.deepEqual(now.items.filter((i) => i.kind === 'user').map((i) => i.text), ['second', 'third'], 'the lines it missed are there: no hole');
+      assert.deepEqual(now.items.map((i) => i.kind), ['tool', 'permission', 'orion', 'user', 'assistant', 'user', 'assistant'], 'read as a page just loaded reads it, with the line to the presence after the card it followed');
+      assert.deepEqual(drawn(), ['tl', 'pm', 'or', 'us', 'as', 'us', 'as']);
+      assert.equal(now.items.find((i) => i.kind === 'orion').text, 'is this edit safe?');
+      assert.deepEqual(now.byKey.get('m:b').blocks.map((b) => b.text), ['Third '], 'the streamed words of the reply in progress');
+      assert.deepEqual([now.cwd, now.provider], ['/tmp/live1', 'claude'], 'its folder and tool, from the engine\'s index');
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      // and it goes on from there
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'answer.', seq: 304 }));
+      eng.send(live({ type: 'message.end', id: 'b', seq: 305 }));
+      await until(() => now.byKey.get('m:b').done);
+      tick();
+      assert.equal(lastReply(), 'Third answer.');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a gap wider than what a session\'s file hands over leaves no hole: it is read whole, the reply that was open across the gap is not left "thinking…", and a line to the presence from before stands above (2026-11-15)', async () => {
+    const eng = companionEngine();
+    let state = 'waiting';
+    eng.auto['engine.hello'] = () => helloOf({ sid, state });
+    let file = { ok: true, sid, live: true, meta: null, events: onDisk };
+    let loads = 0;
+    eng.auto['session.load'] = () => { loads += 1; return file; };
+    try {
+      const cv = await viewWith('wide-a', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      await sayToPresence('what is this repo?');
+      eng.send(live({ type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 110 }));
+      eng.send(live({ type: 'message.start', id: 'a', seq: 111 }));
+      eng.send(live({ type: 'message.delta', id: 'a', block: 0, kind: 'thinking', text: '', seq: 112 }));
+      await until(() => s.byKey.get('m:a')?.blocks.length === 1);
+      tick();
+      assert.equal(thinking(), 1, 'the reply in progress says so');
+      // the computer sleeps; hours of work later the file's newest events
+      // begin long after the last the page saw
+      file = { ok: true, sid, live: true, meta: indexed, events: [
+        { type: 'message.user', text: 'much later', seq: 9000 },
+        { type: 'message.start', id: 'z', seq: 9001 },
+        { type: 'message.block', id: 'z', block: 0, kind: 'text', text: 'All done.', seq: 9002 },
+        { type: 'message.end', id: 'z', seq: 9003 },
+        { type: 'turn.ended', status: 'success', seq: 9004 },
+      ].map((e) => ({ sid, ...e })) };
+      state = 'idle';
+      await dropAndReturn(eng);
+      eng.send({ epoch: EPOCH, seq: 9100 }, 'reset');
+      await until(() => loads === 2);
+      await settle(20);
+      tick();
+      const now = S.sessions.get(sid);
+      assert.equal(thinking(), 0, 'nothing is left thinking');
+      assert.deepEqual(now.items.map((i) => i.kind), ['orion', 'user', 'assistant'], 'what a page just loaded would show, below what was said to the presence before it');
+      assert.deepEqual(drawn(), ['or', 'us', 'as']);
+      assert.equal(lastReply(), 'All done.');
+      assert.equal(now.cwd, '/tmp/live1', 'its folder, from the engine\'s index');
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a conversation read whole again still stands below the one it continues, and what was said to the presence up there is not said again under the line (2026-11-15)', async () => {
+    const eng = companionEngine();
+    const next = 'b2c3d4e5f6071829';
+    let rows = [{ sid, state: 'waiting' }];
+    eng.auto['engine.hello'] = () => helloOf(...rows);
+    const files = { [sid]: { ok: true, sid, live: true, meta: null, events: onDisk } };
+    const loads = [];
+    eng.auto['session.load'] = (c) => { loads.push(c.sid); return files[c.sid] || { ok: false, error: 'Unknown session.' }; };
+    try {
+      const cv = await viewWith('wide-prior', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      await sayToPresence('what is this repo?');
+      // it ends and the engine continues it: a new session there, the same
+      // conversation here, drawn below the one it continues
+      const on = (e) => eng.send(live({ sid: next, ...e }));
+      eng.send(live({ type: 'session.ended', reason: 'exited', seq: 119 }));
+      on({ type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', prior: sid, priorCut: null, seq: 120 });
+      on({ type: 'message.user', text: 'go on', seq: 121 });
+      on({ type: 'message.start', id: 'a', seq: 122 });
+      on({ type: 'message.delta', id: 'a', block: 0, kind: 'thinking', text: '', seq: 123 });
+      await until(() => S.sessions.get(next)?.byKey.get('m:a')?.blocks.length === 1);
+      await settle(20);
+      tick();
+      assert.deepEqual(userTexts(), ['change world to y3k', 'go on'], 'the conversation so far, above');
+      const above = drawn().slice(0, -2);
+      assert.equal(above.filter((c) => c === 'or').length, 1, 'with what was said to the presence in it');
+      // the computer sleeps; hours of work later its file's newest events
+      // begin long after the last the page saw, and after its own start
+      files[next] = { ok: true, sid: next, live: true, meta: { ...indexed, sid: next }, events: [
+        { type: 'message.user', text: 'much later', seq: 9000 },
+        { type: 'message.start', id: 'z', seq: 9001 },
+        { type: 'message.block', id: 'z', block: 0, kind: 'text', text: 'All done.', seq: 9002 },
+        { type: 'message.end', id: 'z', seq: 9003 },
+        { type: 'turn.ended', status: 'success', seq: 9004 },
+      ].map((e) => ({ sid: next, ...e })) };
+      rows = [{ sid: next, state: 'idle' }];
+      await dropAndReturn(eng);
+      eng.send({ epoch: EPOCH, seq: 9100 }, 'reset');
+      await until(() => loads.includes(next));
+      await settle(20);
+      tick();
+      const now = S.sessions.get(next);
+      assert.equal(thinking(), 0, 'nothing is left thinking');
+      assert.ok($('div.cv-priorline')?.textContent.includes('Continued here'), 'the one it continues is still above it');
+      assert.deepEqual(userTexts(), ['change world to y3k', 'much later']);
+      assert.equal(count(now, 'orion'), 1, 'said once');
+      assert.deepEqual(drawn(), [...above, 'us', 'as'], 'above the line as it was, and what a page just loaded would show below it');
+      assert.equal(lastReply(), 'All done.');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a conversation read whole again while the one it continues was still on its way from its file has that one above it all the same (2026-11-16)', async () => {
+    const eng = companionEngine();
+    const next = 'b2c3d4e5f6071829';
+    let rows = [{ sid: next, state: 'running' }];
+    eng.auto['engine.hello'] = () => helloOf(...rows);
+    // each file is handed over by hand here, when the story wants it
+    const asked = (which) => eng.cmds.filter((c) => c.cmd === 'session.load' && c.sid === which);
+    const give = (which, j) => { for (const c of asked(which)) { eng.cmds.splice(eng.cmds.indexOf(c), 1); c.answer(j); } };
+    const mine = (events) => ({ ok: true, sid: next, live: true, meta: { ...indexed, sid: next }, events: events.map((e) => ({ sid: next, ...e })) });
+    const before = { ok: true, sid, live: false, meta: indexed, events: [...onDisk.slice(0, 6),
+      { sid, type: 'turn.ended', status: 'success', seq: 110 }, { sid, type: 'session.ended', reason: 'exited', seq: 111 }] };
+    try {
+      const cv = await viewWith('link-on-its-way', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      const S = cv._state;
+      // a page just loaded on a conversation that continues another: its own
+      // file comes at once, the long one it continues is slow in coming
+      await until(() => asked(next).length === 1);
+      give(next, mine([
+        { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', prior: sid, priorCut: null, seq: 120 },
+        { type: 'message.user', text: 'go on', seq: 121 },
+        { type: 'message.start', id: 'a', seq: 122 },
+        { type: 'message.block', id: 'a', block: 0, kind: 'text', text: 'On it.', seq: 123 },
+        { type: 'message.end', id: 'a', seq: 124 },
+      ]));
+      await until(() => asked(sid).length === 1);
+      assert.ok(!S.sessions.get(next).priorLinked, 'the one it continues is still on its way');
+      // the stream drops, and is back at a reset with this conversation's
+      // file beginning long after all the page has: it is read whole
+      rows = [{ sid: next, state: 'idle' }];
+      await dropAndReturn(eng);
+      eng.send({ epoch: EPOCH, seq: 9100 }, 'reset');
+      await until(() => asked(next).length === 1);
+      give(next, mine([
+        { type: 'message.user', text: 'much later', seq: 9000 },
+        { type: 'message.start', id: 'z', seq: 9001 },
+        { type: 'message.block', id: 'z', block: 0, kind: 'text', text: 'All done.', seq: 9002 },
+        { type: 'message.end', id: 'z', seq: 9003 },
+        { type: 'turn.ended', status: 'success', seq: 9004 },
+      ]));
+      await until(() => S.sessions.get(next)?.items.some((it) => it.kind === 'user' && it.text === 'much later'));
+      await settle(20);
+      // only now does the long one arrive, to each that asked for it
+      give(sid, before);
+      await settle(20);
+      give(sid, before);
+      await settle(20);
+      tick();
+      assert.equal(thinking(), 0, 'nothing is left thinking');
+      assert.equal($$('div.cv-priorline').length, 1, 'the one it continues is above it, once');
+      assert.deepEqual(userTexts(), ['change world to y3k', 'much later']);
+      assert.equal(lastReply(), 'All done.');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: in a session the page held only bare, a line said to the presence goes below the history it had not read yet, above what came after it (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: [...onDisk, live({ type: 'message.start', id: 'g1', seq: 130 })] });
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('bare-b', { link: orbLink(marks, { companion: () => ({ name: 'Orion' }), talk: () => {} }) });
+      cv.open();
+      const S = cv._state;
+      // the engine is long in answering the first hello, and the hold lets go
+      await until(() => eng.waiting('engine.hello').length && eng.stream);
+      eng.send(live({ type: 'session.state', state: 'running', seq: 129 }));
+      await reached(eng, marks, 129.5);
+      assert.equal(S.sessions.size, 0, 'held until the hello, or fifteen seconds');
+      assert.ok(W.fire('holdOver', 'release'));
+      assert.ok(S.sessions.has(sid) && !S.sessions.get(sid).cwd, 'a bare session: no folder, no history');
+      cv._show(sid);
+      tick();
+      await sayToPresence('what is this repo?');
+      eng.send(live({ type: 'message.start', id: 'g1', seq: 130 }));
+      eng.send(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'This repo is ', seq: 131 }));
+      await until(() => S.sessions.get(sid).byKey.get('m:g1')?.blocks.length);
+      assert.deepEqual(S.sessions.get(sid).items.map((i) => i.kind), ['orion', 'assistant']);
+      // the hello comes, and the session is read for the first time
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'running' }));
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'orion', 'assistant'], 'after everything the page had not seen yet, before the reply that followed it');
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is '], 'the streamed words, never in its file');
+      assert.deepEqual(drawn(), ['us', 'as', 'tl', 'pm', 'or', 'as']);
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: what the hold lets go of while a session is being read goes in ahead of what that reading has held since: a reply\'s words stay in the order they came (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('order-a', { link: orbLink(marks) });
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      // a reply is streaming as the page loads: two fragments before the
+      // hello is answered…
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'Hel', seq: 201 }));
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'lo', seq: 202 }));
+      await reached(eng, marks, 203);
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'running' }));
+      await until(() => eng.waiting('session.load').length === 1);
+      // …and one while its file is read, which takes the engine longer than
+      // the hold lasts
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: ' world', seq: 204 }));
+      await reached(eng, marks, 205);
+      assert.ok(W.fire('holdOver', 'release'));
+      answer(eng, 'session.load', { ok: true, sid, live: true, meta: null, events: [
+        { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 190 },
+        { type: 'message.user', text: 'say hello', seq: 191 },
+        { type: 'message.start', id: 'b', seq: 199 },
+      ].map((e) => ({ sid, ...e })) });
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.byKey.get('m:b')?.blocks.length);
+      await settle(20);
+      tick();
+      assert.deepEqual(S.sessions.get(sid).byKey.get('m:b').blocks.map((b) => b.text), ['Hello world']);
+      assert.equal(lastReply(), 'Hello world');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a hello the engine could not answer is asked for again, a little later (2026-11-15)', async () => {
+    const eng = companionEngine();
+    let hellos = 0;
+    let said = { ok: false, error: 'busy' };
+    eng.auto['engine.hello'] = () => { hellos += 1; return said; };
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: onDisk });
+    const W = longWaits();
+    try {
+      const cv = await viewWith('retry-a', {});
+      cv.open();
+      const S = cv._state;
+      await until(() => hellos === 1);
+      await settle(20);
+      assert.equal(S.sessions.size, 0);
+      assert.ok(W.has('helloOnceMore'), 'it used to be left at that, with the stream up and nothing on screen');
+      said = helloOf({ sid, state: 'waiting' });
+      W.fire('helloOnceMore');
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      assert.equal(hellos, 2);
+      assert.equal(S.active, sid);
+      assert.deepEqual(drawn(), ['us', 'as', 'tl', 'pm']);
+      assert.ok(!W.has('helloOnceMore'), 'and no more once it has answered');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a hello that goes on failing is asked for three more times, 3, 10 and 30 seconds apart, and then left to the next thing that asks; one that is answered starts the count again (2026-11-15)', async () => {
+    const eng = companionEngine();
+    let hellos = 0;
+    let said = { ok: false, error: 'busy' };
+    eng.auto['engine.hello'] = () => { hellos += 1; return said; };
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: onDisk });
+    const W = longWaits();
+    try {
+      const cv = await viewWith('retry-b', {});
+      cv.open();
+      const S = cv._state;
+      await until(() => hellos === 1);
+      await settle(20);
+      const waited = [];
+      for (let n = 2; n <= 4; n++) {
+        waited.push(...W.ms('helloOnceMore'));
+        assert.ok(W.fire('helloOnceMore'), 'asked for again');
+        await until(() => hellos === n);
+        await settle(20);
+      }
+      assert.deepEqual(waited, [3000, 10000, 30000], 'a little later each time');
+      assert.ok(!W.has('helloOnceMore'), 'and not a fifth time: the engine is not asked without end');
+      // the next thing that asks is a stream that comes back
+      said = helloOf({ sid, state: 'waiting' });
+      await dropAndReturn(eng);
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      assert.equal(hellos, 5);
+      assert.deepEqual(drawn(), ['us', 'as', 'tl', 'pm']);
+      assert.ok(!W.has('helloOnceMore'));
+      // and after an answer, a hello that fails is asked for again from the start
+      said = { ok: false, error: 'busy' };
+      eng.send({ epoch: EPOCH, seq: 500 }, 'reset');
+      await until(() => hellos === 6);
+      await settle(20);
+      assert.deepEqual(W.ms('helloOnceMore'), [3000]);
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a running conversation whose file could not be read is still the one in the room, known by its line in the hello: an older one is never continued beside it, and its reading is asked for again (2026-11-15)', async () => {
+    const eng = companionEngine();
+    const asked = { list: 0, resume: 0 };
+    let file = { ok: false, error: 'could not read it' };
+    let loads = 0;
+    eng.auto['engine.hello'] = () => helloOf({ sid, provider: 'claude', cwd: '/tmp/live1', mode: 'ask', title: 'change world to y3k', state: 'running', started: 5 });
+    eng.auto['session.load'] = () => { loads += 1; return file; };
+    eng.auto['session.list'] = () => { asked.list += 1; return { ok: true, sessions: [{ sid: '00aa11bb22cc33dd', provider: 'claude', cwd: '/tmp/older', title: 'an older one', providerSessionId: 'p-older', live: false }] }; };
+    eng.auto['session.resume'] = () => { asked.resume += 1; return { ok: false, error: 'not in this test' }; };
+    const W = longWaits();
+    try {
+      const cv = await viewWith('unread-a', {});
+      cv.open();
+      const S = cv._state;
+      await until(() => loads === 1);
+      await settle(20);
+      tick();
+      assert.deepEqual([asked.list, asked.resume], [0, 0], 'no older conversation is picked up beside the one at work');
+      assert.equal(S.active, sid, 'the running conversation is the one in the room');
+      assert.deepEqual([S.sessions.get(sid).cwd, S.sessions.get(sid).state], ['/tmp/live1', 'running'], 'as its line in the hello says');
+      assert.ok(W.has('helloOnceMore'), 'its reading is asked for again');
+      // and then it can be read
+      file = { ok: true, sid, live: true, meta: null, events: onDisk };
+      W.fire('helloOnceMore');
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      assert.equal(S.active, sid);
+      assert.deepEqual(drawn(), ['us', 'as', 'tl', 'pm']);
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      assert.ok(!W.has('helloOnceMore'));
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: nor is an older conversation continued when the one that could not be read has nothing to stand in for it (2026-11-15)', async () => {
+    const eng = companionEngine();
+    const asked = { list: 0, resume: 0 };
+    let loads = 0;
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'running' });   // (a line that names no folder)
+    eng.auto['session.load'] = () => { loads += 1; return { ok: false, error: 'could not read it' }; };
+    eng.auto['session.list'] = () => { asked.list += 1; return { ok: true, sessions: [{ sid: '00aa11bb22cc33dd', provider: 'claude', cwd: '/tmp/older', title: 'an older one', providerSessionId: 'p-older', live: false }] }; };
+    eng.auto['session.resume'] = () => { asked.resume += 1; return { ok: false, error: 'not in this test' }; };
+    const W = longWaits();
+    try {
+      const cv = await viewWith('unread-b', {});
+      cv.open();
+      const S = cv._state;
+      await until(() => loads === 1);
+      await settle(20);
+      tick();
+      assert.equal(S.sessions.size, 0, 'nothing to show of it yet');
+      assert.deepEqual([asked.list, asked.resume], [0, 0], 'and no older conversation is picked up meanwhile');
+      assert.ok(W.has('helloOnceMore'), 'its reading is asked for again');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: after a reset, a session whose reading failed is read when the engine can, though the page holds it: what it missed is not left out (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'running' });
+    let file = { ok: true, sid, live: true, meta: null, events: onDisk };
+    let loads = 0;
+    eng.auto['session.load'] = () => { loads += 1; return file; };
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('unread-c', { link: orbLink(marks) });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 4);
+      await settle(20);
+      tick();
+      // the stream drops and comes back past the ring, and this time the
+      // file cannot be read
+      file = { ok: false, error: 'could not read it' };
+      await dropAndReturn(eng);
+      eng.send({ epoch: EPOCH, seq: 300 }, 'reset');
+      eng.send(live({ type: 'message.start', id: 'b', seq: 301 }));
+      eng.send(live({ type: 'message.delta', id: 'b', block: 1, kind: 'text', text: 'Third ', seq: 302 }));
+      await reached(eng, marks, 303);
+      await until(() => loads === 2 && S.sessions.get(sid).byKey.has('m:b'));
+      await settle(20);
+      assert.deepEqual(S.sessions.get(sid).items.filter((i) => i.kind === 'user').map((i) => i.text), ['change world to y3k'], 'for now, what it missed is missing');
+      assert.ok(W.has('helloOnceMore'), 'its reading is asked for again');
+      // then it can be read
+      file = laterWindow();
+      assert.ok(W.fire('helloOnceMore'));
+      await until(() => loads === 3);
+      await settle(20);
+      tick();
+      const now = S.sessions.get(sid);
+      assert.deepEqual(now.items.filter((i) => i.kind === 'user').map((i) => i.text), ['second', 'third'], 'the lines it missed are there');
+      assert.deepEqual(now.byKey.get('m:b').blocks.map((b) => b.text), ['Third '], 'and the reply in progress has its words');
+      assert.deepEqual(drawn(), ['tl', 'pm', 'us', 'as', 'us', 'as']);
+      assert.ok(!W.has('helloOnceMore', 'holdOver', 'release'), 'nothing is left waiting');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  // a conversation at rest: one request, answered
+  const calm = [
+    { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 101 },
+    { type: 'message.user', text: 'change world to y3k', seq: 103 },
+    { type: 'message.start', id: 'm1', seq: 104 },
+    { type: 'message.block', id: 'm1', block: 0, kind: 'text', text: 'Done.', seq: 106 },
+    { type: 'message.end', id: 'm1', seq: 107 },
+    { type: 'turn.ended', status: 'success', seq: 108 },
+  ].map((e) => ({ sid, ...e }));
+  // what the room says of an error it caught: to the house's log, and to this
+  // computer's console
+  const hearErrors = () => {
+    const realReport = globalThis.reportError, realError = console.error;
+    const heard = { reports: [], logged: [] };
+    globalThis.reportError = (err) => { heard.reports.push(String(err?.message)); };
+    console.error = (...a) => { heard.logged.push(a); };
+    heard.restore = () => { if (realReport) globalThis.reportError = realReport; else delete globalThis.reportError; console.error = realError; };
+    return heard;
+  };
+
+  await ok('the view: an event whose handling throws does not stop the stream or the screen; it is said once, as what kind of error and where, without a word of it, and the conversation is drawn again a second later (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'idle' });
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: calm });
+    const heard = hearErrors();
+    const marks = [];
+    let threw = 0;
+    const W = longWaits();
+    try {
+      const cv = await viewWith('throws-a', { link: orbLink(marks, { react: (st) => { if (st === 'running') { threw += 1; throw new Error('the orb choked on: change world to y3k'); } } }) });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 2);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      const streams = eng.streams;
+      // a turn begins, and the house's reaction to it throws
+      eng.send(live({ type: 'turn.started', seq: 120 }));
+      await until(() => heard.reports.length === 1 || eng.streams > streams);
+      assert.equal(eng.streams, streams, 'the stream is not taken for one that dropped');
+      assert.equal(s.state, 'running', 'the event is in');
+      // the conversation goes on, on the same stream
+      eng.send(live({ type: 'message.start', id: 'm9', seq: 121 }));
+      eng.send(live({ type: 'message.block', id: 'm9', block: 0, kind: 'text', text: 'Still here.', seq: 122 }));
+      eng.send(live({ type: 'message.end', id: 'm9', seq: 123 }));
+      await until(() => s.byKey.get('m:m9')?.done);
+      tick();
+      assert.equal(lastReply(), 'Still here.', 'and is drawn');
+      assert.equal(eng.streams, streams);
+      // said once: its kind and its place go to the house's log, its words
+      // stay on this computer
+      assert.equal(heard.reports.length, 1);
+      assert.match(heard.reports[0], /^kode: Error at [\w.-]+\.mjs:\d+:\d+$/);
+      assert.equal(heard.logged.length, 1, 'in full on this computer\'s console');
+      assert.match(String(heard.logged[0][0]?.message), /the orb choked on: change world to y3k/);
+      // the same thing breaking again is not said again
+      eng.send(live({ type: 'turn.ended', status: 'success', seq: 124 }));
+      eng.send(live({ type: 'turn.started', seq: 125 }));
+      await reached(eng, marks, 126);
+      assert.equal(threw, 2, 'it broke again, in the same place');
+      assert.equal(s.state, 'running');
+      assert.deepEqual([heard.reports.length, heard.logged.length], [1, 1], 'said once');
+      // and a second later the conversation is drawn again from what the page holds
+      const before = $('div.cv-list').childNodes.slice();
+      assert.ok(W.fire('mend'), 'a redraw was asked for');
+      tick();
+      const after = $('div.cv-list').childNodes;
+      assert.deepEqual(drawn(), ['us', 'as', 'as', 'sys'], 'the request, its answer, the reply that came after the throw, and what that turn amounted to');
+      assert.ok(after.every((el) => !before.includes(el)), 'drawn anew');
+      cv.close();
+    } finally { W.restore(); heard.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a line that cannot be drawn says so in its place, and everything after it is drawn (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'idle' });
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: calm });
+    const heard = hearErrors();
+    const W = longWaits();
+    try {
+      const cv = await viewWith('undrawn-a', {});
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 2);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      // a question whose list of questions is not a list
+      eng.send(live({ type: 'question.request', requestId: 'q1', questions: 5, seq: 120 }));
+      eng.send(live({ type: 'message.start', id: 'm9', seq: 121 }));
+      eng.send(live({ type: 'message.block', id: 'm9', block: 0, kind: 'text', text: 'Still here.', seq: 122 }));
+      eng.send(live({ type: 'message.end', id: 'm9', seq: 123 }));
+      await until(() => s.byKey.get('m:m9')?.done);
+      assert.doesNotThrow(() => tick(), 'the frame goes on');
+      assert.deepEqual(drawn(), ['us', 'as', 'sys', 'as']);
+      assert.match($('div.cv-list > div.it.sys.st-error').textContent, /^A line here could not be drawn\.$/);
+      assert.equal(lastReply(), 'Still here.');
+      assert.ok(heard.reports.length >= 1, 'said');
+      for (const r of heard.reports) assert.match(r, /^kode: \w+ at [\w.-]+\.js:\d+:\d+$/);
+      cv.close();
+    } finally { W.restore(); heard.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a part of the frame that throws does not leave the rest undrawn: the conversation goes on though the composer could not be drawn (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'idle' });
+    eng.auto['session.load'] = () => ({ ok: true, sid, live: true, meta: null, events: calm });
+    const heard = hearErrors();
+    const W = longWaits();
+    let deaf = false;
+    try {
+      // (the composer asks the house whether this browser can hear)
+      const cv = await viewWith('dock-a', { link: { dictate: () => () => {}, canDictate: () => { if (deaf) throw new Error('could not ask about the microphone'); return true; } } });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 2);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual([drawn(), heard.reports.length], [['us', 'as'], 0]);
+      deaf = true;
+      eng.send(live({ type: 'turn.started', seq: 120 }));
+      eng.send(live({ type: 'message.start', id: 'm9', seq: 121 }));
+      eng.send(live({ type: 'message.block', id: 'm9', block: 0, kind: 'text', text: 'Still here.', seq: 122 }));
+      await until(() => s.byKey.get('m:m9')?.blocks.length);
+      assert.doesNotThrow(() => tick(), 'the frame goes on');
+      assert.deepEqual(drawn(), ['us', 'as', 'as'], 'what came is drawn');
+      assert.equal(lastReply(), 'Still here.');
+      assert.equal(heard.reports.length, 1, 'said, once');
+      assert.match(heard.reports[0], /^kode: Error at [\w.-]+\.mjs:\d+:\d+$/);
+      // and the composer is drawn again as soon as it can be
+      deaf = false;
+      eng.send(live({ type: 'message.end', id: 'm9', seq: 123 }));
+      eng.send(live({ type: 'turn.ended', status: 'success', seq: 124 }));
+      await until(() => s.byKey.get('m:m9').done && s.state !== 'running');
+      assert.doesNotThrow(() => tick());
+      assert.equal(heard.reports.length, 1);
+      cv.close();
+    } finally { W.restore(); heard.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: after a whole re-reading, an older line that changes off screen is not drawn again at the foot of the conversation (2026-11-15)', async () => {
+    const eng = companionEngine();
+    eng.auto['orb.done'] = () => ({ ok: true });
+    // a long conversation: a build still running near its start, then more
+    // lines than the screen keeps drawn
+    const long = [
+      { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 1 },
+      { type: 'tool.call', callId: 'c0', name: 'Bash', kind: 'shell', title: 'make', input: { command: 'make' }, seq: 2 },
+      ...Array.from({ length: 420 }, (_, k) => ({ type: 'message.user', text: 'line ' + k, seq: 3 + k })),
+      { type: 'message.start', id: 'z', seq: 430 },
+      { type: 'message.block', id: 'z', block: 0, kind: 'text', text: 'The newest words.', seq: 431 },
+      { type: 'message.end', id: 'z', seq: 432 },
+    ].map((e) => ({ sid, ...e }));
+    let loads = 0;
+    eng.auto['engine.hello'] = () => helloOf({ sid, state: 'running' });
+    eng.auto['session.load'] = () => { loads += 1; return { ok: true, sid, live: true, meta: null, events: long }; };
+    const marks = [];
+    const W = longWaits();
+    try {
+      const cv = await viewWith('foot-a', { link: orbLink(marks, { companion: () => ({ name: 'Orion' }), talk: () => {} }) });
+      cv.open();
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length === 422);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      await sayToPresence('how long will the build take?');
+      assert.equal(s.items[s.items.length - 1].kind, 'orion');
+      // a reset the engine is two minutes in answering, with an event of the
+      // session let in meanwhile: read whole
+      eng.auto['engine.hello'] = null;
+      await dropAndReturn(eng);
+      await until(() => eng.waiting('engine.hello').length);
+      eng.send({ epoch: EPOCH, seq: 500 }, 'reset');
+      eng.send(live({ type: 'session.state', state: 'running', seq: 501 }));
+      await reached(eng, marks, 502);
+      W.fire('holdOver', 'release');
+      W.fire('holdOver', 'release');
+      answer(eng, 'engine.hello', helloOf({ sid, state: 'running' }));
+      await until(() => loads === 2);
+      await settle(20);
+      tick();
+      const now = S.sessions.get(sid);
+      assert.notEqual(now, s, 'read whole');
+      assert.equal(now.items.length, 423);
+      assert.equal(now.items[422].kind, 'orion', 'the line to the presence is still the last thing said');
+      const foot = () => $('div.cv-list').childNodes.slice(-1)[0];
+      assert.ok(foot().classList.contains('or'));
+      // the build near the start of the conversation ends
+      eng.send(live({ type: 'tool.result', callId: 'c0', status: 'ok', output: { text: 'built' }, seq: 503 }));
+      await until(() => now.byKey.get('t:c0').status === 'ok');
+      tick();
+      assert.ok(foot().classList.contains('or'), 'nothing is added below the last thing said');
+      assert.equal($$('div.cv-list > div.it.tl').length, 0, 'its card is not drawn at the foot');
+      cv.close();
+    } finally { W.restore(); offline(); globalThis.fetch = realFetch; }
+  });
+
   await ok('the view: a session the engine no longer lists has ended, and is never picked as the one to show', async () => {
     const eng = companionEngine();
     eng.auto['engine.hello'] = null;

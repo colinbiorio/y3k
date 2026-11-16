@@ -43,6 +43,25 @@ const SLICE_MS = 8;
 const PAGE = 100;
 const ENTER_LAST = 4;      // on a rebuild only the newest few rise in
 
+// AN ERROR THE ROOM CAUGHT so that one event or one line that broke could not
+// stop the conversation (take, flush, draw). Said once each and never thrown
+// on: in full on this computer's console, and to the house's log of its own
+// hurts (main.js hears reportError) only as what kind it was and where in the
+// code. An error's own words can quote what it choked on, and a
+// conversation's words do not leave this computer.
+const told = new Set();
+function report(err) {
+  try {
+    const line = String(err?.stack || '').split('\n').find((l) => /\.m?js/.test(l)) || '';
+    const at = (/([\w.-]+\.m?js)(?:\?[^:)]*)?:(\d+):(\d+)/.exec(line) || []).slice(1).join(':');
+    const key = `${err?.name || 'Error'} at ${at || 'kode'}`;
+    if (told.has(key) || told.size > 40) return;
+    told.add(key);
+    console.error(err);
+    if (typeof globalThis.reportError === 'function') globalThis.reportError(new Error('kode: ' + key));
+  } catch { /* saying so must not break anything either */ }
+}
+
 let controller = null;
 
 export function createCodeView(opts = {}) {
@@ -135,7 +154,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function connect() {
     if (transport) return;
     let first = true;
-    const hold = () => { if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); } };
+    const hold = () => { if (!holdAll) { holdAll = []; holdTimer = setTimeout(holdOver, 15000); } };
     const handlers = {
       onEvent,
       onStatus: (st) => {
@@ -171,14 +190,37 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let reloadLive = false;    // a reset: read every live session from disk again
   let reborn = false;        // ...from a NEW engine (another epoch): the conversation that ended with the old one goes on (doHello)
   let holdAll = null;        // events held from a reset until that is done
+  let holdFor = null;        // ...only those of these sessions, once the hold has lasted fifteen seconds (holdOver)
   let holdTimer = 0;
+  // WHAT A RESET OWES (2026-11-15). The hold above ends after fifteen seconds
+  // whatever has happened, and at once when the hello is not answered: the
+  // events it held then went into sessions that had not been read yet, the
+  // newest the page had of them (`have`) moved past everything they had
+  // missed, and the reading that came afterwards, which adds only what is
+  // newer than that, could never bring it: a hole in the conversation, for
+  // good, with whatever reply was open across it left open. Now every session
+  // held whole at a reset is owed its reading (`owed`); one that takes an
+  // event before it is torn (`torn`), and is then read whole, as a page just
+  // loaded reads it (loadInto). And a reading that could not be done is asked
+  // for again (retryHello): nothing else would, while the stream stays up.
+  // Reading it whole mends the hole and costs the page whatever it held of the
+  // conversation from before the file's newest events, so an engine that is
+  // only slow never comes to that: while the hello that will read them is on
+  // its way, the events of the sessions owed a reading wait for it past the
+  // fifteen seconds, two minutes in all (holdOver).
+  const owed = new Set();    // sids held whole at a reset, until each is read again
+  const torn = new Set();    // ...that took an event before that
+  let helloRetry = 0;
+  let helloTries = 0;
   function refreshHello(reset = false, { fresh = false } = {}) {
     if (reset) {
       reloadLive = true;
       if (fresh) reborn = true;
-      // never held for good: an engine that does not answer lets them through
-      if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); }
+      for (const sid of have.keys()) { owed.add(sid); holdFor?.add(sid); }
     }
+    // never held for good: an engine that does not answer lets them through
+    // (a reading still owed from a hello that failed holds them as its reset did)
+    if (reloadLive && !holdAll) { holdAll = []; holdTimer = setTimeout(holdOver, 15000); }
     if (helloRun) { helloAgain = true; return helloRun; }
     helloRun = (async () => {
       try { do { helloAgain = false; await doHello(); } while (helloAgain); } finally { helloRun = null; release(); }
@@ -190,7 +232,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // what this page held as running when it asked (see below)
     const before = liveSessions(S).map((x) => x.sid);
     const r = await cmd({ cmd: 'engine.hello' });
-    if (!r?.ok) return;
+    if (!r?.ok) { if (reloadLive) retryHello(); return; }
     // anything asked for while this one was on its way, it answers
     helloAgain = false;
     const reload = reloadLive;
@@ -210,11 +252,22 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
     // sessions still running in the engine come back with their transcripts
+    let unread = false;   // ...but for one that could not be read just now
     for (const live of r.sessions || []) {
-      if (reload || !have.has(live.sid) || !S.sessions.has(live.sid)) await loadInto(live.sid);
+      if (reload || !have.has(live.sid) || !S.sessions.has(live.sid)) {
+        if ((await loadInto(live.sid)) === false) {
+          unread = true;
+          // Its line in the hello stands in for it until it can be: the room
+          // stays on the conversation that is running. With nothing here for
+          // it, the lines below took the room for empty and continued the
+          // conversation BEFORE it, beside the one at work.
+          if (!S.sessions.has(live.sid) && live.cwd) apply(S, { sid: live.sid, type: 'session.started', provider: live.provider, cwd: live.cwd, mode: live.mode, title: live.title, t: live.started }, { replay: true });
+        }
+      }
       const s = S.sessions.get(live.sid);
       if (s) s.state = live.state;
     }
+    if (unread) { if (reload) reloadLive = true; retryHello(); } else helloTries = 0;
     // A session this page held as running that the engine does not list has
     // ended: in a gap the stream did not cover, or with the engine itself (it
     // restarted, or this browser was paired with another one). It used to stay
@@ -223,6 +276,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // instead of its folders. Only sessions held before the hello was asked
     // for — one that started since may not be in its list yet.
     const listed = new Set((r.sessions || []).map((x) => x.sid));
+    for (const sid of owed) if (!listed.has(sid)) { owed.delete(sid); torn.delete(sid); }   // (no longer running: nothing to read it for)
     for (const sid of before) {
       const s = S.sessions.get(sid);
       if (listed.has(sid) || !s || s.state === 'ended') continue;
@@ -237,9 +291,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the folders' one button started a new one (2026-11-01).
     if (fresh && S.active && !viewingSid && S.sessions.get(S.active)?.state === 'ended') S.active = null;
     if (!S.active) { const l = liveSessions(S).filter((x) => !x.closing); if (l.length) S.active = l[l.length - 1].sid; }
-    if (!S.active && !home.wantsFolders) continueLast();   // (not awaited: an engine that never answers must not hold the hello)
+    if (!S.active && !home.wantsFolders && !unread) continueLast();   // (not awaited: an engine that never answers must not hold the hello)
     schedule('engine'); schedule('meta'); rebuildTranscript();
   }
+
+  // A hello, or a session's reading, that could not be done is asked for once
+  // more, a little later each time, and then left to the next thing that asks
+  // (a reconnection, a reset): reading a long conversation is heavy work for
+  // the engine, and it is not to be asked for it without end.
+  function retryHello() {
+    if (helloRetry || helloTries >= 3) return;
+    helloRetry = setTimeout(helloOnceMore, [3000, 10000, 30000][helloTries++]);
+    helloRetry.unref?.();
+  }
+  function helloOnceMore() { helloRetry = 0; if (transport && S.conn === 'connected') refreshHello(); }
 
   // ONE CONVERSATION, FOREVER: with nothing running, the newest conversation
   // in the engine's own index is continued where it was — in its folder, with
@@ -367,12 +432,40 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       .then((r) => { if (!r?.ok) toast(r?.error || 'could not compact the conversation'); }).catch(() => {});
   }
 
-  // What was held since a reset, played in order.
+  // What was held since a reset, played in order. (What was held of a session
+  // that is being read at this moment is older than everything its reading has
+  // held since: it goes in ahead of that. It used to go in behind it.)
   function release() {
     clearTimeout(holdTimer);
     const q = holdAll;
-    holdAll = null;
-    for (const e of q || []) onEvent(e, true);
+    holdAll = null; holdFor = null;
+    play(q || []);
+  }
+  function play(q) {
+    const ahead = new Map();   // a reading's queue → what goes in before it
+    for (const e of q) {
+      const held = e.sid ? holding.get(e.sid) : null;
+      if (!held) { onEvent(e, true); continue; }
+      if (!ahead.has(held)) ahead.set(held, []);
+      ahead.get(held).push(e);
+    }
+    for (const [held, first] of ahead) { const rest = held.splice(0, held.length); for (const e of first) held.push(e); for (const e of rest) held.push(e); }
+  }
+  // The hold has lasted fifteen seconds: an engine that does not answer must
+  // not hold the screen for good, so what was held goes in. All of it but the
+  // events of the sessions owed a reading, while the hello that will read
+  // them is still on its way: those wait for it (see WHAT A RESET OWES), and
+  // go in with everything else if it has not come two minutes after the reset.
+  function holdOver() {
+    if (!holdAll) return;
+    if (holdFor || !helloRun || !owed.size) { release(); return; }
+    holdFor = new Set(owed);
+    const q = holdAll;
+    holdAll = [];
+    const go = [];
+    for (const e of q) (e.sid && holdFor.has(e.sid) ? holdAll : go).push(e);
+    holdTimer = setTimeout(holdOver, 105000);
+    play(go);
   }
 
   // A session read from the engine's disk. The file holds every event the
@@ -390,8 +483,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // whose block the file had whole.
   const holding = new Map(); // sid → its events held while it is read
   const have = new Map();    // sid → the newest event in of a session held whole (begun on the stream, or read from its file)
+  // (Says whether it was read: true, false, or null when it is being read
+  // already and that reading will bring it.)
   async function loadInto(sid) {
-    if (holding.has(sid)) return false;
+    if (holding.has(sid)) return null;
     const q = [];
     holding.set(sid, q);
     let r = null;
@@ -399,7 +494,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (r?.ok) {
       if (!Array.isArray(r.events)) r.events = [];
       const old = S.sessions.get(sid);
-      if (old && have.has(sid)) { for (const e of r.events) take(e, true); }
+      // What it missed is added to what the page has only when the two meet.
+      // They do not when the page let events into it before this reading
+      // (torn: see refreshHello), nor when the file's newest events, all that
+      // it hands over, begin after the newest the page has: what lies between
+      // is in neither. Then it is read whole, as a page just loaded reads it.
+      const meets = old && have.has(sid) && !torn.has(sid)
+        && !(r.events.length && r.events[0].seq > have.get(sid) && !r.events.some((e) => e.type === 'session.started'));
+      owed.delete(sid); torn.delete(sid);
+      if (meets) { for (const e of r.events) take(e, true); }
       else readWhole(sid, r, old);
       const s = S.sessions.get(sid);
       if (s && !r.live) s.state = 'ended';
@@ -424,32 +527,65 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const s = S.sessions.get(sid);
     if (!s) { if (old) S.sessions.set(sid, old); return; }
     if (at >= 0 && S.order.lastIndexOf(sid) !== at) S.order.splice(S.order.lastIndexOf(sid), 1);
-    if (old) keepFrom(old, s);
+    if (old) keepFrom(old, s, have.has(sid));
     have.set(sid, last);
   }
 
-  // What a bare session knew that its file does not: the line back and the
-  // todos as the person left them, when it started (the file keeps no times),
-  // whether there is anything new to read in it (every reloaded session
-  // read as unread), the words of a block that were only streamed (never on
-  // disk), what the presence already said over the coder's words (a reloaded
-  // reply went back to the coder's own), and the lines to and from the
-  // presence (never sent to the engine), after its history.
-  function keepFrom(old, s) {
+  // What the session the page had knew that its file does not: the line back
+  // and the todos as the person left them, when it started (the file keeps no
+  // times), whether there is anything new to read in it (every reloaded
+  // session read as unread), the words of a block that were only streamed
+  // (never on disk), what the presence already said over the coder's words (a
+  // reloaded reply went back to the coder's own), and the room's own lines:
+  // to and from the presence, a note, a shell line (never sent to the engine).
+  // Each of those goes back where it was said: after the line it followed,
+  // when the file still has that one. One said before all the file hands over
+  // goes above it, in a session the page held whole (`whole`); in one it held
+  // bare, which is read for the first time, it was said after everything the
+  // page had not seen yet, and goes below that. (They all went to the end,
+  // whenever they were said: right for a bare one, and wrong for one read
+  // whole after a reset, where words said hours ago closed the conversation.)
+  // The conversation it continues, drawn above it (linkPrior), is not its own:
+  // that is drawn again from where it came, so the room's own lines up there
+  // are passed over here, or each stood twice, above the line and under it.
+  // And which conversation that is is kept too: a file longer than
+  // session.load sends back no longer has the start that named it.
+  const own = (it) => it.kind === 'orion' || it.kind === 'note' || it.kind === 'shell';
+  function keepFrom(old, s, whole = false) {
     s.noteBack = old.noteBack;
     s.todosOpen = old.todosOpen;
     s.startedAt = old.startedAt || s.startedAt;
     s.closing = old.closing;           // a reset hello mid-stop must not bring it back
-    if (s.items.length <= old.items.length) s.unread = old.unread;
+    if (!s.prior && old.prior) { s.prior = old.prior; s.priorCut = old.priorCut; }
+    const mine = old.priorLen ? old.items.slice(old.priorLen) : old.items;
+    if (s.items.length <= mine.length) s.unread = old.unread;
+    const keyOf = new Map();           // a line of the old one → what it is known by
     for (const [k, it] of old.byKey) {
+      keyOf.set(it, k);
+      if (own(it)) s.byKey.set(k, it); // (one still being written goes on being written)
       const now = k.startsWith('m:') ? s.byKey.get(k) : null;
       for (const b of now ? it.blocks : []) {
-        if (b.text && !now.blocks.some((x) => x.i === b.i)) { now.blocks.push({ i: b.i, kind: b.kind, text: b.text, done: b.done }); now.blocks.sort((a, c) => a.i - c.i); }
+        if (b.text && !now.blocks.some((x) => x.i === b.i)) { now.blocks.push({ i: b.i, kind: b.kind, text: b.text, done: b.done || !!now.done }); now.blocks.sort((a, c) => a.i - c.i); }
         const nb = typeof b.voice === 'string' && now.blocks.find((x) => x.i === b.i && x.text === b.text);
         if (nb) nb.voice = b.voice;
       }
     }
-    for (const it of old.items) if (it.kind === 'orion') s.items.push(it);
+    const pos = new Map();             // a line the file has → where it stands
+    s.items.forEach((it, i) => pos.set(it, i));
+    const where = (it) => (own(it) ? -1 : pos.get(s.byKey.get(keyOf.get(it))) ?? -1);
+    let after = -1;                    // the file's line that the next of the room's own goes below (-1: above them all)
+    if (!whole) { after = s.items.length - 1; for (const it of mine) { const i = where(it); if (i >= 0) { after = i - 1; break; } } }
+    const below = new Map();           // that line → the room's own that go below it
+    for (const it of mine) {
+      if (!own(it)) { after = Math.max(after, where(it)); continue; }
+      if (!below.has(after)) below.set(after, []);
+      below.get(after).push(it);
+    }
+    if (!below.size) return;
+    const all = [...(below.get(-1) || [])];
+    s.items.forEach((it, i) => { all.push(it); for (const x of below.get(i) || []) all.push(x); });
+    s.items.length = 0;
+    for (const it of all) s.items.push(it);
   }
 
   function cmd(obj) {
@@ -466,9 +602,23 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (e.type === 'orb.move') { moveOrb(e); return; }
     const held = e.sid ? holding.get(e.sid) : null;
     if (held) { held.push(e); return; }
-    if (holdAll) { holdAll.push(e); return; }
-    take(e, late);
+    if (holdAll && (!holdFor || (e.sid && holdFor.has(e.sid)))) { holdAll.push(e); return; }
+    try { take(e, late); } catch (err) { mishap(err); }
   }
+
+  // An event whose handling threw. It used to throw into the stream's loop,
+  // which took it for a dropped connection: the event counted as seen, the
+  // stream was opened again, and whatever the throw had cut short (the
+  // marking of what to draw comes late in take) never reached the screen.
+  // Now it is said, the next event comes in as if nothing had happened, and
+  // the conversation on screen is drawn again from what the page holds, so
+  // that the two agree: at most once a second, however many throw.
+  let mendTimer = 0;
+  function mishap(err) {
+    report(err);
+    if (!mendTimer) mendTimer = setTimeout(mend, 1000);
+  }
+  function mend() { mendTimer = 0; if (root && shown) { shown = null; frame(); } }
 
   // One event into the page and onto the screen: from the stream, held, or
   // one a session missed, from its file (loadInto). Every one but a fragment
@@ -476,6 +626,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function take(e, late) {
     const kept = !!e.sid && e.type !== 'message.delta';
     if (kept && e.seq <= have.get(e.sid)) return;   // in already
+    // A fragment from before what the page has of its session, for a reply the
+    // page does not hold: that reply is older than the history that was read
+    // (its file hands over only its newest events). It is never written to the
+    // file, so the rule above let it in, and it made a new reply at the END of
+    // the conversation that said "thinking…" for good: one for every old reply
+    // the engine still remembered when the page loaded (2026-11-15).
+    if (e.type === 'message.delta' && e.sid && e.seq <= have.get(e.sid) && !S.sessions.get(e.sid)?.byKey.has('m:' + e.id)) return;
+    if (e.sid && owed.has(e.sid)) torn.add(e.sid);   // let in before the reading a reset owes it: see refreshHello
     const was = e.sid ? S.sessions.get(e.sid) : null;
     const wasUnread = !!was?.unread;
     const out = apply(S, e, { replay: late });
@@ -659,30 +817,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     raf = 0;
     if (!root) { dirty.clear(); agentDirty.clear(); return; }
     const s = currentSession();
-    if (engineDirty) { engineDirty = false; renderChrome(); if (!s) renderHome(); }
-    else if (metaDirty) renderBar(s);
+    // Each part of a frame on its own (2026-11-15). The bar or the dock
+    // throwing left the transcript undrawn, for as long as they went on
+    // throwing; one item throwing left every item after it undrawn, and what
+    // was waiting to be drawn was never put down.
+    const part = (fn) => { try { fn(); } catch (err) { report(err); } };
+    if (engineDirty) { engineDirty = false; part(renderChrome); if (!s) part(renderHome); }
+    else if (metaDirty) part(() => renderBar(s));
     // home listing the sessions running (start, too-many): one of them ended or changed
-    if (!s && home.full && tabsDirty) renderHome();
-    if (metaDirty) renderDock();
+    if (!s && home.full && tabsDirty) part(renderHome);
+    if (metaDirty) part(renderDock);
     metaDirty = false;
     tabsDirty = false;
     // a session became the one to show without anyone asking for it (started
     // from another page, or by the engine): draw it, don't patch into another
     const switched = !!s && (s !== shown || viewingSid !== shownAs);
-    if (switched) rebuildTranscript();
+    if (switched) part(rebuildTranscript);
     else if (s && (dirty.size || agentDirty.size)) {
       fresh.clear();
-      for (const it of dirty) patchItem(it);
+      for (const it of dirty) part(() => patchItem(it));
       for (const id of agentDirty) {
         const a = s.agents.get(id);
         const t = a?.callId && s.byKey.get('t:' + a.callId);
-        if (t) agentLine(els.get(t.uid), a.text, taskSummary(t));
+        if (t) part(() => agentLine(els.get(t.uid), a.text, taskSummary(t)));
       }
       fresh.clear();
       if (!ro && atBottom) ui.scroll.scrollTop = ui.scroll.scrollHeight; // no ResizeObserver: the old way
     }
     // the comparison follows every session in its group, and the session on screen
-    if (cmpDirty || switched) { cmpDirty = false; renderCompareStrip(); renderCompareView(); }
+    if (cmpDirty || switched) { cmpDirty = false; part(renderCompareStrip); part(renderCompareView); }
     dirty.clear();
     agentDirty.clear();
   }
@@ -1719,8 +1882,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     openChanges: () => { if (drawerKind === 'changes') renderChanges(); else toggleDrawer('changes'); },
   };
 
+  // (A line that cannot be drawn says so in its place: thrown on, it cut a
+  // conversation being opened short at that line, for good.)
   function draw(it) {
-    const el = renderItem(it, ctx);
+    let el;
+    try { el = renderItem(it, ctx); } catch (err) { report(err); el = h('div.it.sys.st-error', 'A line here could not be drawn.'); }
     el.dataset.uid = String(it.uid);
     els.set(it.uid, el);
     fresh.add(it.uid);
@@ -1871,7 +2037,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     fresh.clear();
     shownFrom = sync;
-    lastUid = items.length ? items[items.length - 1].uid : 0;
+    // (The highest number among them, not the last one's. The lines to and
+    // from the presence that a re-reading carries over stand last with the
+    // numbers they had (keepFrom): with one of those for the mark, every
+    // older line not on screen that changed was taken for a new one and
+    // drawn again at the foot of the conversation.)
+    lastUid = 0;
+    for (const it of items) if (it.uid > lastUid) lastUid = it.uid;
     if (!items.length) ui.list.appendChild(emptySession(s));
     olderButton();
     if (sync > from) prepend(s, from);
@@ -1887,11 +2059,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // message it went back to, then a line, then this session's own. From the
   // page if it holds that session, else from its file, read on the side —
   // never a tab of its own.
+  // (Who is being read for is the session itself, not its id: one read whole
+  // again while the reading was on its way is another session under the same
+  // id, and was left with nothing above it until the next hello.)
   const linking = new Set();
   function linkPrior(s) {
-    if (!s.prior || s.priorLinked || linking.has(s.sid)) return;
+    if (!s.prior || s.priorLinked || linking.has(s)) return;
     const done = (items) => {
-      linking.delete(s.sid);
+      linking.delete(s);
       if (s.priorLinked) return;
       s.priorLinked = true;
       if (!items.length) return;
@@ -1902,8 +2077,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const held = S.sessions.get(s.prior);
     // held whole: spliced in at once, before it is drawn
     if (held && held.items.length && (!held.prior || held.priorLinked)) { done(cutAt(held.items, s.priorCut)); return; }
-    linking.add(s.sid);
-    pastItems(s.prior, s.priorCut).then(done, () => linking.delete(s.sid));
+    linking.add(s);
+    pastItems(s.prior, s.priorCut).then(done, () => linking.delete(s));
   }
   async function pastItems(sid, cut, depth = 0) {
     let old = S.sessions.get(sid);
