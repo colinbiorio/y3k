@@ -429,4 +429,13 @@ ok('the land and the air are wired: the pyramid stands on its land under its haz
   for (const m of ["'stone', {\n    air,", "'working', {\n    air,", 'glowing(bronze(), air)', "'post', air", "'outline', air", "'person', air"]) assert.ok(pyr.includes(m), 'not hazed: ' + m);
 });
 
+ok('the course being made: ridges at dry sand\'s angle of repose where the sound reaches, then the binder wet, then stone with the joints where the ridges were', () => {
+  const pyr = read('src/frequencies/pyramid3d.js');
+  near(S.DRY_SLOPE, Math.tan((34 * Math.PI) / 180), 1e-12, 'tan 34°');
+  assert.ok(pyr.includes("import { DRY_SLOPE } from './sand.mjs';") && (pyr.match(/\$\{DRY_SLOPE\.toFixed\(4\)\}/g) || []).length === 3, 'the ridges are not at the sand\'s own slope');
+  assert.ok(pyr.includes('float reached = exp(-max(uHalf - max(abs(vWp.x), abs(vWp.z)), 0.0) / uReach);') && /float A = [^;]*\* reached \*/.test(pyr), 'ridges where the sound does not reach');
+  assert.ok(pyr.includes('wave.uPart.value = current ? part : 0; wave.uWet.value = current && setPart > 0 ? 1 : 0; wave.uSet.value = setPart;'), 'the course does not follow the schedule');
+  assert.ok(/float mob = uOn \* reached \* onTop \* \(1\.0 - uWet\)/.test(pyr), 'grains hop when no tone sounds, or in wet paste');
+});
+
 console.log(`\n${passed} checks passed.`);

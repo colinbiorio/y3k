@@ -261,6 +261,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning, later still) — **The pyramid's working course
+  forms before your eyes** (`src/frequencies/pyramid3d.js`). Up close, the
+  course being made now shows the method itself: dry sand heaped by the
+  sound into ridges a block apart, at dry sand's angle of repose (34°, the
+  sand engine's own `DRY_SLOPE`), only as far in as the horns' sound reaches;
+  the low sun shading each ridge's lee; grains glinting where the air moves
+  between the ridges while the tone sounds; then the binder, dark and wet
+  and mirroring the sky, drying to stone from the edges inward, the ridge
+  lines left as the joints. Seen from afar, a setting course is a dark wet
+  square that pales from its edges. What is drawn rather than derived:
+  FREQUENCIES.md §9. Suite 34 (1 new); desk smoke 33/33 and phone 26/26 on
+  the GPU, 60 frames a second through the build.
+
 - **2026-11-17** (morning, later) — **The pyramid stands in its land**
   (`src/frequencies/giza.mjs`, `land.js`, `air.js`; `stage.js`, `kit.js`,
   `pyramid3d.js`). The flat brown plane is gone: the Great Pyramid now stands
