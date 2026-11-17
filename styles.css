@@ -6131,6 +6131,29 @@ body.in-void.airden .game-hint { translate: -50% -66px; }
   font-size: 0.74rem; color: #dfe3ea; pointer-events: none; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal; backdrop-filter: blur(14px); }
 .game-foes[hidden] { display: none; }
 .game-tbtn:active { background: rgba(255, 255, 255, 0.28); }
+/* the world's settings in two tabs (menu.js): the controls, and the map */
+.game-tabs { display: flex; gap: 4px; width: fit-content; margin: 0 0 14px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); }
+.game-tab { padding: 6px 18px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 0.86rem; cursor: pointer; }
+.game-tab:hover { color: var(--ink); }
+.game-tab.on { background: rgba(255, 255, 255, 0.16); color: var(--ink); }
+.game-places { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.game-place { padding: 12px 14px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; background: rgba(255, 255, 255, 0.04); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.game-place:hover { background: rgba(255, 255, 255, 0.08); }
+.game-place b { display: block; font-size: 0.95rem; font-weight: 500; }
+.game-place small { display: block; margin-top: 4px; font-size: 0.74rem; line-height: 1.35; color: var(--muted); }
+.game-place.on { border-color: rgba(201, 243, 255, 0.6); background: rgba(201, 243, 255, 0.08); }
+/* Lord Howe drawn (island/map.js): its own coast, its lagoon and reef, its peaks; metres in the drawing's own units */
+.game-map { margin-top: 10px; border-radius: 14px; overflow: hidden; }
+.game-map-svg { display: block; width: 100%; height: auto; max-height: 62vh; }
+.game-map-svg .sea { fill: #0d2a3f; }
+.game-map-svg .lagoon { fill: #2f8f93; fill-opacity: 0.6; stroke: #bfe9e2; stroke-opacity: 0.6; stroke-width: 16; }
+.game-map-svg .land { fill: #6f8a55; stroke: #d9cfa8; stroke-width: 22; }
+.game-map-svg .peak path { fill: #efe8d6; }
+.game-map-svg text { font-size: 240px; fill: #eef2f4; font-family: inherit; }
+.game-map-svg .arrive { fill: #f2e3b8; }
+.game-map-svg .you circle, .game-map-svg .you path { fill: #c9f3ff; stroke: #0d2a3f; stroke-width: 36; }
+.game-map-svg .scale path, .game-map-svg .away path { fill: none; stroke: #eef2f4; stroke-width: 40; }
+.game-map-svg .north path { fill: #eef2f4; }
 #game-menu .sheet { width: min(720px, 94vw); max-height: min(780px, 88vh); background: var(--frost-grain-xl, none), var(--frost-body-xl); background-blend-mode: overlay, normal; }
 /* THE BODY SHEET (src/game/chooser.js): which of the five kinds, and how it looks. It does not cover what it is
    about: no veil, and it stands at the right (at the foot, on a phone) while the body stands in what is left of the

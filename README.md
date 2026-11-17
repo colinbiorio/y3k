@@ -225,7 +225,7 @@ src/                   the client — body, environments, voice, perceive (eye),
                        handview/twohand/reach (hands), social, chess, world,
                        mine, settings, gfx, mercury, tend (the autonomous life)
 src/code/              kode's client: the room, state, transport, onboarding
-src/game/              the void and the five bodies: the open world's first two stages (GAME.md)
+src/game/              the open world (GAME.md): the void, the five bodies, buildings, the fight, the island (island/)
 y3k-code/              the y3kode engine (runs the person's coding tools locally)
 desktop/               the Electron window
 test/                  the suite
@@ -262,6 +262,23 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-11-17** (evening) — **The first place on the map: Lord Howe Island**
+  (`src/game/island/`, `scripts/island/`; `world.js`, `body.js`, `view.js`,
+  `menu.js`, `state.js`). Colin: "let's pick a random small island on earth
+  ... then add this island under the world settings as a new tap called 'map".
+  The controls sheet now has a **map** tab: the void, or Lord Howe Island, drawn
+  from its own coast. The island's ground is measured (the AWS Terrain Tiles,
+  SRTM about 30 m apart, on a 16 m grid): a crescent 11.7 km long, Mount Gower
+  851 m (875 really; the data trims summits), 18.9 km² of land (14.55 really;
+  it blurs the shore). Its lagoon and reef are made by rule; Ball's Pyramid,
+  missing from the data, is modelled 28 km off. Arrive on the lagoon's beach
+  facing Gower; walk its hills, wade the lagoon, swim the deep sea with your
+  head out, run along its cliffs. The sea's colour is its depth, with surf on
+  the reef and the shore; a sky with a real sun for the three lights. Its
+  animals and palms are next. Game suite 129 (4 new); the void smoke's new
+  `island` scene 11/11 at 60 frames a second; desk 16/16, phone 5/5, build
+  20/20, fight 15/15, wall 8/8 (the frame checks back to 16.7 ms on power).
 
 - **2026-11-17** (late afternoon) — **The wall run** (`src/game/body.js`,
   `house.js`, `world.js`; `view.js`, `bodies/biped.js`). Colin's third feature

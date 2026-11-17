@@ -12,7 +12,10 @@ export const ZOOM = { min: 2, max: 12, start: 5.5 };
 // mode, light and zoom; which of the five kinds of body the person is, and how each kind was last made to look;
 // the building last chosen; the level of bot last called (1..5)
 export const cleanLevel = (n) => (Number.isInteger(n) && n >= 1 && n <= 5 ? n : 1);
-export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter', level: 1 });
+// where the body is: the void, or the first place of the map, Lord Howe Island (the map tab, menu.js)
+export const PLACES = ['void', 'island'];
+export const cleanPlace = (p) => (PLACES.includes(p) ? p : 'void');
+export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter', level: 1, place: 'void' });
 
 export function loadState(storage) {
   const s = freshState();
@@ -26,10 +29,11 @@ export function loadState(storage) {
   s.looks = cleanLooks(kept.looks);
   s.building = cleanBuilding(kept.building);
   s.level = cleanLevel(kept.level);
+  s.place = cleanPlace(kept.place);
   return s;
 }
 export function saveState(storage, s) {
-  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building), level: cleanLevel(s.level) })); return true; } catch { return false; }
+  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building), level: cleanLevel(s.level), place: cleanPlace(s.place) })); return true; } catch { return false; }
 }
 
 // The world tab holds two worlds for now: the void (the game, new) and the

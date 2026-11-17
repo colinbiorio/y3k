@@ -49,11 +49,16 @@ import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
+import { createIsland } from './island/island.js';
+import { loadIsland, createGround } from './island/ground.js';
+import { SHAPE } from './island/lordhowe-shape.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
 const POSE = { pitch: -0.05, every: 200 };     // the body sheet: how the eye is tipped while it looks at the body, and how often (ms) the page is asked where the sheet is      // the body sheet: the eye nearly level; a body is this much taller than its eyes; where on it the eye looks; how wide it is taken to be
 const FOV = 55;
+const ISLAND_URL = 'src/game/island/lordhowe.bin';
+const FAR = { void: 20000, island: 45000 };   // how far the eye sees: the island's needs Ball's Pyramid, 28 km off
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -96,7 +101,7 @@ let kept = null;
 function stage(lite, st) {
   if (kept && (kept.renderer.getContext().isContextLost() || kept.lite !== lite)) {
     kept.figure.dispose(); kept.fight?.dispose(); kept.void.dispose(); kept.renderer.dispose(); kept.renderer.domElement.remove();
-    kept = { body: kept.body, world: kept.world, combat: kept.combat, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
+    kept = { body: kept.body, worlds: kept.worlds, at: kept.at, island: kept.island, combat: kept.combat, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
   }
   if (!kept?.renderer) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });       // edges smoothed, whatever else is plain
@@ -111,14 +116,15 @@ function stage(lite, st) {
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
     camera.layers.enable(1);            // the sky's dome is on layer 1: this eye sees it, the mirror's does not
     // the body begins with its back to the eye, looking where the eye looks
-    kept = { body: createBody({ yaw: Math.PI }), world: createWorld(), combat: createCombat({ seed: (Math.random() * 1e9) | 0 }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1, fallen: 0 };
+    kept = { body: createBody({ yaw: Math.PI }), worlds: { void: createWorld(), island: createWorld() }, at: {}, combat: createCombat({ seed: (Math.random() * 1e9) | 0 }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1, fallen: 0, place: 'void' };
+    kept.world = kept.worlds.void;
     // the ring and the bots, drawn in the void's scene (combat.js's numbers are kept in kept.combat)
     kept.fight = createFightArt(v.scene, { lite }); kept.fight.setDrop((x, z, a) => kept.void.drop(x, z, a));
     // the hearths' light: always in the scene (a light that came and went would make every material be compiled again)
     kept.hearth = new THREE.PointLight(0x8fb4ff, 0, 7, 2);
     v.scene.add(kept.hearth);
   }
-  kept.body.world = kept.world;
+  kept.world = kept.worlds[kept.place]; kept.body.world = kept.world;
   return kept;
 }
 
@@ -188,7 +194,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // one that cannot be made leaves what was.
   function plain() {
     let v = null, made = null;
-    try { v = createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
+    try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
     K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
     K.arts.clear();
@@ -224,6 +230,43 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
+  // ---- the places (the map tab): the void, or Lord Howe Island. Everything that lives in a scene goes to the new one;
+  // each place keeps its own buildings and where the body last stood in it; the first time on the island, its beach
+  let placing = null;
+  async function placeTo(name, tell = true) {
+    name = name === 'island' ? 'island' : 'void';
+    if (!K || placing || name === K.place) return;
+    placing = name;
+    try {
+      if (name === 'island' && !K.island) {
+        say('the island is coming…', 30);
+        const { head, hts } = await loadIsland(ISLAND_URL);
+        K.island = { ground: createGround(head, hts) }; K.worlds.island.ground = K.island.ground;
+      }
+      if (!root) return;
+      const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
+      K.at[K.place] = { p: [...K.body.p], yaw: K.body.yaw };
+      K.void.scene.remove(K.figure.group, K.hearth);
+      for (const art of K.arts.values()) art.dispose();
+      K.arts.clear(); K.fight.dispose(); clearBots(K.combat); K.combat.bolts = []; K.combat.events.length = 0;
+      K.void.dispose();
+      K.void = made; K.place = name; K.world = K.worlds[name]; K.body.world = K.world;
+      made.scene.add(K.figure.group, K.hearth);
+      K.fight = createFightArt(made.scene, { lite: K.lite }); K.fight.setDrop((x, z, a) => K.void.drop(x, z, a));
+      const back = K.at[name], a = SHAPE.arrive;
+      if (back) { K.body.p = [...back.p]; K.body.yaw = back.yaw; }
+      else if (name === 'island') { K.body.p = [a.x, K.island.ground.floor(a.x, a.z), a.z]; K.body.yaw = a.facing; }
+      else { K.body.p = [0, 0, 0]; K.body.yaw = Math.PI; }
+      K.body.v = [0, 0, 0]; K.body.was = [...K.body.p]; K.body.grounded = true; K.body.rising = false; K.body.wallrun = null; K.body.climbing = false;
+      K.eye.yaw = K.body.yaw + Math.PI; K.eye.has = false;
+      K.camera.far = FAR[name]; K.camera.updateProjectionMatrix();
+      K.figure.setEnv(LIGHTS[st.light].env); root.dataset.place = name;
+      st.place = name; save(); size(); still = 0;
+      if (tell) say(name === 'island' ? `${SHAPE.name} · on the lagoon's beach, Mount Gower ahead · the map is under controls` : 'the void', name === 'island' ? 7 : 3);
+    } catch (e) { console.error('[void] the island could not be opened', e); say('the island could not be opened here', 5); }
+    finally { placing = null; }
+  }
+
   // ---- the fight. The bar's bots list: the five levels (the one last chosen marked), and a line to clear them
   function listBots(show) {
     const el = $('#game-bot-list'), btn = $('#game-bots'); if (!el || !btn) return;
@@ -376,7 +419,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     K.lean = (K.lean || 0) + (lean - (K.lean || 0)) * ease(12, dt);
     tip(figure, pos, body.yaw, K.fallen, K.lean);
     // far from where the numbers began, they begin again under the body
-    const far = rebase(body.p[0], body.p[2]);
+    const far = K.place === 'island' ? null : rebase(body.p[0], body.p[2]);
     if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen, K.lean || 0); }
 
     // the eye. While the body sheet is open it stands back far enough for the whole body, level with its middle,
@@ -402,7 +445,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     eye.wall = (eye.wall || 0) + ((onWall ? 1 : 0) - (eye.wall || 0)) * ease(onWall ? 9 : 2.5, dt);     // and steps a metre out from it
     // a building in the way: the eye comes in rather than go into a wall or a dome; where that would leave it too near
     // the body (its back to a wall), the eye rises instead and looks down over it
-    const from = [eye.at.x, eye.at.y, eye.at.z], walls = K.world.buildings.length && !stand;
+    const from = [eye.at.x, eye.at.y, eye.at.z], walls = (K.world.buildings.length || K.world.ground) && !stand;
     const room = (p, dd) => { const f = along(p), s0 = eye.side * (SHOULDER * Math.min(1, dd / 4) + eye.wall); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(WATER + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0]); };
     let lift = 0;
     if (walls) {
@@ -492,6 +535,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (K.worn !== worn(st)) dress();                   // chosen somewhere else since it was last here
 
     menu = createMenu({ input, storage, getMode: () => K.body.mode, setMode: (m) => modeTo(m, false), getLight: () => st.light, setLight: lightTo,
+      getPlace: () => K.place, setPlace: (p) => { placeTo(p); }, where: () => (K.place === 'island' ? { p: [...K.body.p], yaw: K.body.yaw } : null),
       onClose: () => { menuShut = performance.now(); input.clear(); standing = ''; } });
     chooser = createChooser({ get: () => ({ kind: st.kind, look: st.looks[st.kind] }), set: wear, turn: (by) => { turned += by; },
       onClose: () => { menuShut = performance.now(); input.clear(); standing = ''; } });
@@ -538,11 +582,14 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
-        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
+        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
+        ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100) })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
+    root.dataset.place = K.place;
+    if (st.place !== K.place) placeTo(st.place, false);           // the island, where the person was last
     focusCanvas();
     last = 0; standing = '';
     raf = requestAnimationFrame(frame);

@@ -88,7 +88,7 @@ Said to Colin before starting, and standing until he says otherwise.
 
 | asked | where it stands |
 |---|---|
-| "traverse the entire planet of Earth" | stage 7. The heights and the colours are fetched and packed (below). |
+| "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
 | "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **two of five**: the shelter and the house, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder. The workshop, the tower and the hall are next. |
@@ -101,7 +101,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
 | "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
-| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | next: Lord Howe Island. |
+| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | **done**: Lord Howe Island, chosen from the controls sheet's **map** tab. Its animals are next. |
 | "a mix between ancient/natural, current, and futuristic" | each of the five bodies wears all three (below). Every building and ship must. |
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
@@ -117,6 +117,55 @@ and choose who you are there. **Stage 3 is begun** (17 November): press
 **build** (or B) and a shelter goes up in front of you. **The first weapon and
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
+
+### The first place on the map: Lord Howe Island (17 November 2026)
+
+Colin: "let's pick a random small island on earth, generate the entire
+environment for it ... just the general shape and size and expected fauna of a
+small island of your choice -- then add this island under the world settings
+as a new tap called 'map". The island chosen is **Lord Howe**, 31.55 S
+159.08 E in the Tasman Sea: a crescent, two sheer mountains at its south end,
+a coral lagoon in its hollow, found empty in 1788 (so nothing on it needs
+taking away to be the clean Earth the brief asks for).
+
+- **Its ground is measured** (`scripts/island/`, `src/game/island/`): the AWS
+  Terrain Tiles at zoom 13 (here SRTM, about 30 m apart), read without a
+  library and laid on a 16 m grid in the game's frame (x east, z south). It
+  comes out a crescent 11.7 km long. Mount Gower reads 851 m (it is 875),
+  Mount Lidgbird 689 (777), Malabar Hill 183 (209), Mount Eliza 166 (147): the
+  data trims summits. Its land comes to 18.9 km² where the island's own figure
+  is 14.55: the data blurs the shore outward.
+- **Its sea floor is made by rule**, because the tiles' sea is far too coarse
+  to show a lagoon. The lagoon lies inside the island's convex hull, north of
+  Mount Lidgbird's foot and within 1.4 km of the shore, shallow sand closed
+  by a reef crest. Outside it the floor falls from the land and the reef to the
+  shelf, about 45 m down. Mount Gower's cliffs drop into deep water. A low
+  shore is drawn smooth (a blurred mask), and cliffs keep their drop.
+- **Ball's Pyramid** is not in the tiles (they read 30 m where it stands
+  551 m), so it is modelled from its published size, 28 km south-east, faint
+  in the haze.
+- **The body there**: it stands on the same triangles the ground is drawn
+  with, walks up anything gentler than 50 degrees and is held at the foot of
+  anything steeper, wades the shallows (rings on the water), and swims in deep
+  water with its head out (2.2 m/s, a small kick for a jump). Cliffs are walls
+  to run along. The eye keeps out of the hills; bolts stop in the ground.
+- **Drawn** (`island/island.js`): the land coloured by what it is (palm
+  forest's canopy, grass on the low flats, basalt where it is too steep, moss
+  on Gower's top, a beach worked out per pixel from the true height); one sea
+  whose colour is its depth (the lagoon's turquoise over its sand, blue to ink
+  offshore), surf in thin lines along the reef and the shore, the sky and the
+  sun's glitter in it; a sky with a real sun for the three lights; haze over
+  the distance.
+- **The map tab** (`island/map.js`, `menu.js`): the controls sheet now has
+  two tabs, **controls** and **map**. The map offers the void or the island
+  and draws Lord Howe from its own coast: its shallows, its peaks named, where
+  a body arrives, where the body is now and which way it faces, 2 km to
+  measure by, and an arrow toward Ball's Pyramid. Each place keeps its own
+  buildings and where the body last stood.
+- Not yet: **its animals** (the woodhen, red-tailed tropicbirds and sooty
+  terns on the cliffs, green turtles in the lagoon, the stick insect) and its
+  palms as trees rather than a coloured canopy, both next; the ground is
+  16 m triangles close up; the lagoon's west edge is a straight rule.
 
 ### The wall run (17 November 2026)
 
@@ -486,10 +535,10 @@ from the front, the three-quarter and the side.
 Each stage ends the way the first two did: playable, looked at in a browser,
 tested, shipped.
 
-This round (Colin, 17 November): **wall running** (done), then **the first map**,
-Lord Howe Island (a crescent ten kilometres long off Australia: two sheer
-mountains, a coral lagoon, its woodhens, tropicbirds, terns and turtles),
-under a new **map** tab in the controls sheet. Then the buildings again.
+This round (Colin, 17 November): **wall running** (done); **the first map**,
+Lord Howe Island, under a new **map** tab (done: its ground, sea and map).
+Next: its animals and its palms (woodhens, tropicbirds, terns, turtles, the
+stick insect). Then the buildings again.
 
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
@@ -537,6 +586,10 @@ suite runs them; those that draw are read as text and looked at.
 | `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
 | `combat.js` | the fight as numbers: the ring's five ways, the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
 | `fight.js` | the ring, its trail and shield, the bots, bolts, sparks, debris and the slam's wave (draws) |
+| `island/ground.js` | the island's ground as numbers: the file read, the height on the drawn triangles, slopes, water, cliffs, the eye's line |
+| `island/island.js` | Lord Howe drawn: sky and sun, the land, the sea by its depth, haze; it stands where the void stands (draws) |
+| `island/map.js` | the island as an SVG for the map tab |
+| `island/lordhowe.bin`, `lordhowe-shape.js` | made by `scripts/island/lordhowe-build.mjs` from the elevation tiles: the heights (300 KB), the coast, shallows, peaks, arrival |
 | `buildings/` | `shelter.js`, `house.js`: the two drawn (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
