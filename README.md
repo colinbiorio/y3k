@@ -261,6 +261,39 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** — **The frequencies room in the round: the pyramid and the
+  sandbox in 3D, the tone heard from where you stand** (`src/frequencies.js`,
+  `src/frequencies/{stage,pyramid3d,sandbox3d,kit,orbit,sound}.js`,
+  `acoustics.mjs`; `scripts/frequencies-smoke.mjs`; FREQUENCIES.md §9).
+  Colin: "i'd love to see the simulation as a 3d environment instead of a 2d
+  one, with ability to pan, zoom, etc. highest quality resolution would be
+  nice, and it would also be cool if we could actually hear the frequencies
+  being played and see where each sound is coming from. also, just making the
+  whole page look really professional would be great". Both scenes are now
+  three-dimensional at their true size, drawn at the screen's own pixels (up
+  to 3 a point, never the site's graphics tier) and only while something moves
+  or sounds: drag turns, shift- or right-drag slides, the wheel (once the stage
+  is clicked) or a pinch comes nearer to the point under the hand, a double
+  click centres, the keys work, and the stage fills the screen. The pyramid
+  rises course by course under a low sun, jointed on the 1.27 m module, its
+  horns at their true size ringing the working course on posts, their fronts
+  crossing it, the plan's lattice breathing where that sound reaches; it opens
+  a third of the way up, and glides to the whole, the working course, beside
+  the horns, or the foot. In the sandbox the sand is its own height field in a
+  glass tray, and every horn's wavefronts leave its mouth on the same slowed
+  clock as the pressure drawn on the sand. The tone plays as it reaches the
+  camera: every horn and its echo in the ground with their true phases, two
+  oscillators and four gains, placed between the speakers by where each horn
+  lies to your right and compressed 2:1 in decibels for speakers (both stated
+  as conventions); tap a horn to hear it, and see its waves, alone. The page:
+  one stage with its readouts in its corners (the scene, the view buttons, a
+  scale bar, the slowing, the level at your ear), captioned control groups,
+  ten number tiles a tab, the method as numbered cards, and a list of what is
+  physics and what is the picture's. Three.js loads only when the room opens.
+  `test/frequencies.test.mjs`: 29 checks (10 new: the listener, the speakers,
+  the eye, the pixels, the build at any time, the course's horns, the wiring);
+  the smoke passes on the Mac's GPU at 2× and at a phone's size.
+
 - **2026-11-16** — **A reload of kode keeps the conversation, and a reply that
   is over never says "thinking…"** (`src/code/state.js`, `render/items.js`,
   `code-view.js`; `scripts/reload-smoke.mjs`). Colin: "we gotta fix this bug
