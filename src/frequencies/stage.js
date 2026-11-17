@@ -63,11 +63,27 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, uniforms: air,
     vertexShader: `varying vec3 vD;
       void main() { vD = position; vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position, 1.0); gl_Position = p.xyww; }`,
-    fragmentShader: `${SKY_HEAD} varying vec3 vD;
+    fragmentShader: `${SKY_HEAD} uniform vec3 uGalPole; uniform vec3 uGalCentre; uniform float uGalGlow; varying vec3 vD;
+      float gh(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float gn(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(gh(i), gh(i + vec3(1, 0, 0)), f.x), mix(gh(i + vec3(0, 1, 0)), gh(i + vec3(1, 1, 0)), f.x), f.y),
+                   mix(mix(gh(i + vec3(0, 0, 1)), gh(i + vec3(1, 0, 1)), f.x), mix(gh(i + vec3(0, 1, 1)), gh(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+      // the Milky Way: a band along the galaxy's equator, broader and brighter toward its centre, broken by dust
+      vec3 milky(vec3 d) {
+        if (uGalGlow <= 0.0) return vec3(0.0);
+        float sb = dot(d, uGalPole);
+        vec3 inPlane = normalize(d - uGalPole * sb + 1e-6);
+        float cl = dot(inPlane, uGalCentre), b = asin(clamp(sb, -1.0, 1.0));
+        float width = 0.13 + 0.09 * max(cl, 0.0);
+        float band = exp(-b * b / (width * width)) * (0.45 + 0.55 * pow(0.5 + 0.5 * cl, 2.0));
+        float clouds = 0.55 + 0.45 * gn(d * 9.0) + 0.25 * gn(d * 23.0);
+        float rift = 1.0 - 0.6 * exp(-pow((b - 0.02) / 0.035, 2.0)) * smoothstep(-0.1, 0.6, cl) * gn(d * 5.0 + 3.0);
+        return vec3(0.075, 0.08, 0.1) * band * clouds * rift * uGalGlow * smoothstep(0.0, 0.3, d.y);
+      }
       void main() {
         vec3 d = normalize(vD);
         float s = max(dot(d, uSunDir), 0.0);
-        gl_FragColor = vec4(skyAt(d) + uSunCol * uSunGlow * 6.0 * smoothstep(0.99955, 0.99975, s) * smoothstep(-0.02, 0.01, d.y), 1.0);
+        gl_FragColor = vec4(skyAt(d) + milky(d) + uSunCol * uSunGlow * 6.0 * smoothstep(0.99955, 0.99975, s) * smoothstep(-0.02, 0.01, d.y), 1.0);
         #include <colorspace_fragment>
       }`,
   }));
@@ -153,6 +169,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     sunDir.set(...s.sun.dir).normalize(); air.uSunDir.value.copy(sunDir);
     sunUp = L.sun[1] > 0;
     if (step) sun.castShadow = sunUp && step.shadow > 0;
+    air.uGalGlow.value = 0; s.onLight?.();                // a scene with stars puts its own Milky Way back
     const k = L.env ?? 1;
     s.group.traverse((o) => { for (const m of [].concat(o.material || [])) if (m && 'envMapIntensity' in m) { m.userData.env0 ??= m.envMapIntensity; m.envMapIntensity = m.userData.env0 * k; } });
     aimSun();

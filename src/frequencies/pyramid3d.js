@@ -8,7 +8,8 @@
 // finished outline; and a person, 1.75 m, at a corner of the base. A low
 // morning sun, and the land round it all (land.js) under the morning's haze.
 // When the last course is in, the casing is dressed from the top down: the
-// pyramid white, as it stood.
+// pyramid white, as it stood. The sun at any hour of the day; and at night,
+// the stars as they stood in Khufu's reign (starfield.js).
 //
 // While the sound is on, the fronts leave each line of horns a wavelength
 // apart on the slowed clock and die out where the tone shocks; on the course,
@@ -25,6 +26,7 @@ import { createLand } from './land.js';
 import { ELDERS, RIVER, heightAt } from './giza.mjs';
 import { DRY_SLOPE } from './sand.mjs';
 import { sunAt, sunDirection, lightFor } from './sun.mjs';
+import { createStarfield } from './starfield.js';
 
 const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ), HORN_NEAR = 40;      // m: nearer than this, the horns in their finer facets
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
@@ -40,6 +42,7 @@ export function skyAt(hours) {
 
 export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 }) {
   const group = new THREE.Group(), labels = [], air = stage.air;
+  const first = skyAt(hours);         // the sun where the room opens: a November morning's, a quarter past eight by the sun
 
   // ---------------------------------------------------------------- the courses built
   const box = new THREE.BoxGeometry(1, 1, 1);
@@ -285,6 +288,11 @@ export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 
   { const z = -2600, x = RIVER[2][0] + ((RIVER[3][0] - RIVER[2][0]) * (z - RIVER[2][1])) / (RIVER[3][1] - RIVER[2][1]) + 210 * Math.sin(z / 2300 + 1.1) + 80 * Math.sin(z / 870);
     far('the Nile', x, heightAt(x, z) + 30, z); }
 
+  // the night's stars, as they stood then
+  const stars = createStarfield(stage, labels);
+  group.add(stars.points);
+  stars.at(hours, first.at.elevation);
+
   const lBase = stage.label(labels).say(`${BASE_M.toFixed(2)} m`), lTop = stage.label(labels).say(`${HEIGHT_M.toFixed(2)} m`), lCourse = stage.label(labels, 'tag on'), lPerson = stage.label(labels).say('a person, 1.75 m');
   lBase.pos.set(0, 0, BASE_M / 2 + 9); lBase.on = true;
   lTop.pos.set(0, HEIGHT_M + 5, 0); lTop.on = true;
@@ -296,7 +304,10 @@ export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 
   // its horns (x and y from the axis, z above the working surface); tau: the slowed clock;
   // sound: whether the tone is on. True while the casing is being dressed (the stage keeps drawing).
   let top = 0, shownCourse = -1, shownTop = -1, doneAt = 0;
+  // a name of a star is not laid over the pyramid that stands between it and the eye
+  const blocked = (o, d) => hit({ ray: { origin: o, direction: d } }) !== null;
   function set({ built = 0, current = null, part = 0, setPart = 0, list = [], tau = 0, sound = false } = {}) {
+    if (stars.points.visible) stars.frame(stage.ear().eye, blocked);
     const done = !current && built >= rows.length;
     let dressing = false;
     if (done) {
@@ -377,7 +388,6 @@ export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 
     return { on: 'pyramid', point: [o.x + d.x * best, o.y + d.y * best, o.z + d.z * best] };
   }
 
-  const first = skyAt(hours);         // the sun where the room opens: a November morning's, a quarter past eight by the sun
   return {
     name: 'pyr', group, labels,
     say: 'the Great Pyramid in three dimensions, at its true size, as far as the sound has built it',
@@ -390,7 +400,9 @@ export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 
     look: { ...first.look, ground: rgb(150, 125, 96), line: rgb(132, 110, 86), grid: 0, dunes: 0 },
     hit, set, glow, lite: (on) => land.lite(on),
     // the sun to an hour of the day (by the sun): the sky, the light and the shadows follow
-    sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); return k.at; }, get cased() { return casing.visible && casingU.uFront.value <= 0; },
+    sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); stars.at(h, k.at.elevation); return k.at; },
+    get night() { return stars.read(); },
+    onLight: () => stars.applyGlow(), get cased() { return casing.visible && casingU.uFront.value <= 0; },
     get hornsNear() { return horns.visible && horns.count > 0; },
   };
 }

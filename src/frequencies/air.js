@@ -17,6 +17,8 @@ export function createAir() {
     // the haze: x, an even haze (per metre); y, a mist at the valley floor (per metre); z, how fast the
     // mist thins going up (metres); w, the height of the floor it lies on
     uHaze: { value: new THREE.Vector4(0, 0, 30, 0) },
+    // the Milky Way, in a scene with stars: the galaxy's north pole and its centre (the scene's directions), and how much
+    uGalPole: { value: new THREE.Vector3(0, 1, 0) }, uGalCentre: { value: new THREE.Vector3(1, 0, 0) }, uGalGlow: { value: 0 },
   };
 }
 

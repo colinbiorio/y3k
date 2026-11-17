@@ -44,6 +44,8 @@ export const clock = (hours) => { const m = Math.round(hours * 60); return `${Ma
 // from the sun and under it, the sun's own colour and strength (none once it is down), the sky's and the ground's
 // light on things, how much of the room's reflections, and the exposure. Between two heights, a blend.
 export const SKY = [
+  { at: -18, top: [3, 5, 13], mid: [6, 8, 20], low: [12, 14, 28], warm: [13, 14, 29], sun: [255, 120, 60], power: 0, glow: 0, hemi: [[40, 50, 92], [16, 15, 20], 0.24], env: 0.1, exposure: 2.2 },
+  { at: -12, top: [5, 8, 22], mid: [13, 16, 38], low: [25, 27, 50], warm: [40, 34, 56], sun: [255, 120, 60], power: 0, glow: 0.04, hemi: [[46, 56, 100], [24, 22, 28], 0.27], env: 0.15, exposure: 1.9 },
   { at: -8, top: [8, 12, 34], mid: [26, 30, 64], low: [46, 48, 80], warm: [92, 66, 82], sun: [255, 120, 60], power: 0, glow: 0.15, hemi: [[56, 66, 112], [34, 30, 36], 0.32], env: 0.25, exposure: 1.6 },
   { at: -4, top: [18, 28, 70], mid: [58, 60, 108], low: [104, 92, 124], warm: [214, 124, 92], sun: [255, 120, 60], power: 0, glow: 0.55, hemi: [[86, 96, 146], [64, 54, 56], 0.42], env: 0.4, exposure: 1.4 },
   { at: 0, top: [28, 46, 104], mid: [104, 100, 146], low: [184, 154, 160], warm: [255, 158, 92], sun: [255, 136, 66], power: 1.4, glow: 1, hemi: [[116, 118, 168], [116, 86, 66], 0.48], env: 0.6, exposure: 1.18 },
