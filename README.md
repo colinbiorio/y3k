@@ -261,6 +261,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **kode's other two smokes run again**
+  (`scripts/code-pane-smoke.mjs`, `scripts/history-smoke.mjs`). Both can now
+  find Playwright the way the others do (`PW_CORE`, the cached Chromium); the
+  pane smoke walks the one conversation (a fresh start asking first mid-turn,
+  Esc, `/clear` back to the folders; its tab and four-sessions walks are gone
+  with the tabs) and expects tokens a second in its lines. Pane: 12 checks;
+  history: 4; all pass. `scripts/kode-shot.mjs` is left as it is: it signs in
+  with the real founder password and opens kode without a guard on y3kode's
+  own ports, so it is not run from here.
+
 - **2026-11-17** (morning) — **kode's plan panel keeps a model's own weekly
   window, and kode's browser smoke runs again** (`src/code/state.js`,
   `render/context-panel.js`; `scripts/code-smoke.mjs`). Found by bringing the

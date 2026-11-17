@@ -8,10 +8,11 @@
 //
 //   node scripts/history-smoke.mjs [--shots <dir>]
 import { spawn, execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,8 +20,19 @@ const argv = process.argv.slice(2);
 const shots = argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : null;
 async function loadPlaywright() {
   try { return await import('playwright'); } catch { /* not local */ }
-  const g = execSync('npm root -g').toString().trim();
-  return import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href);
+  try {
+    const g = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    return await import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href);
+  } catch { /* not global */ }
+  // a playwright-core in the folder PW_CORE names, with the headless Chromium already in this computer's cache
+  // (a core newer than the cache asks for a build that is not there, so it is handed the path)
+  if (!process.env.PW_CORE) throw new Error('no playwright: npm i -g playwright, or PW_CORE=<a folder holding playwright-core>');
+  const pw = createRequire(join(process.env.PW_CORE, 'x.js'))('playwright-core');
+  const cache = join(homedir(), 'Library', 'Caches', 'ms-playwright');
+  const hit = existsSync(cache) && readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell-')).sort().at(-1);
+  const exe = hit && join(cache, hit, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
+  if (exe && existsSync(exe)) { const launch = pw.chromium.launch.bind(pw.chromium); pw.chromium.launch = (o = {}) => launch({ executablePath: exe, ...o }); }
+  return pw;
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 let failures = 0;

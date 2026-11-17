@@ -6,20 +6,22 @@
 // on a machine busy drawing other rooms in software that knock can lose to a
 // starved main thread (a 0ms timer measured 3s late), and this one still runs.
 //
-// What it walks (2026-10-08): a turn's summary under its reply, the turn's own
-// line while it works, a session closed from its tab (asked first mid-turn,
-// at once at rest), /clear stopping the session it leaves, and the folder
-// screen listing the four running, each with a Stop, when a fifth is refused.
+// What it walks: a turn's summary under its reply, the turn's own line while
+// it works, a fresh start (/new) asking first mid-turn, Esc stopping the turn,
+// and /clear stopping the conversation it leaves for the folders. (Until 9 Nov
+// it also walked tabs: a session closed from its tab, four running and a fifth
+// refused. kode is one conversation now, with no tabs.)
 //
 //   node scripts/code-pane-smoke.mjs [--shots <dir>] [--size 1280x800]
 //   (PORT=<n> serves the page on that port; SMOKE_SLOW=<n> makes every wait
 //   n times as long)
 import { execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, statSync, existsSync, readdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
@@ -36,8 +38,19 @@ const check = (name, cond, detail = '') => { console.log(`${cond ? '  ✓' : '  
 
 async function loadPlaywright() {
   try { return await import('playwright'); } catch { /* not local */ }
-  const g = execSync('npm root -g').toString().trim();
-  return import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href);
+  try {
+    const g = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    return await import(pathToFileURL(join(g, 'playwright', 'index.mjs')).href);
+  } catch { /* not global */ }
+  // a playwright-core in the folder PW_CORE names, with the headless Chromium already in this computer's cache
+  // (a core newer than the cache asks for a build that is not there, so it is handed the path)
+  if (!process.env.PW_CORE) throw new Error('no playwright: npm i -g playwright, or PW_CORE=<a folder holding playwright-core>');
+  const pw = createRequire(join(process.env.PW_CORE, 'x.js'))('playwright-core');
+  const cache = join(homedir(), 'Library', 'Caches', 'ms-playwright');
+  const hit = existsSync(cache) && readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell-')).sort().at(-1);
+  const exe = hit && join(cache, hit, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
+  if (exe && existsSync(exe)) { const launch = pw.chromium.launch.bind(pw.chromium); pw.chromium.launch = (o = {}) => launch({ executablePath: exe, ...o }); }
+  return pw;
 }
 
 // --- a folder, the engine, the stand-in coder -----------------------------------
@@ -109,16 +122,6 @@ const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }
 const until = async (fn, ms) => { for (const end = Date.now() + T(ms); Date.now() < end;) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
 const toast = () => page.evaluate(() => window.__toasts.at(-1) || '');
 const send = async (text) => { await page.fill('.cv-input', text); await page.keyboard.press('Enter'); };
-const anotherSession = async (n) => {
-  await page.click('.cv-tab.cv-new');
-  await page.click('.cv-folderrow', { timeout: T(15000) });
-  await page.waitForFunction((k) => document.querySelectorAll('.cv-tabwrap').length === k, n, { timeout: T(20000) });
-  // the tab comes with session.started; the start's own answer lands a moment
-  // later. Wait for the session to be on screen, so the next + is not raced.
-  await page.waitForSelector('.cv-tabwrap.on .cv-tab', { timeout: T(15000) });
-  await page.waitForSelector('.cv-input:not([disabled])', { timeout: T(15000) });
-  await page.waitForTimeout(T(400));
-};
 
 try {
   await page.goto(SITE + '/pane.html', { timeout: T(60000) });
@@ -135,7 +138,7 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForSelector('.cv-list .it.cv-turnsum', { timeout: T(20000) });
   const sum = await page.textContent('.cv-list .it.cv-turnsum');
-  check('under its reply: how long, its file, its tokens, its cost, who pays', /^Worked \S+ · 1 file \+1 −1 · \d[\d.]*k? tokens · \$\d+\.\d\d covered$/.test(sum || ''), sum);
+  check('under its reply: how long, its file, its tokens, its cost, who pays', /^Worked \S+ · 1 file \+1 −1 · \d[\d.]*k? tokens( · \d+ tok\/s)? · \$\d+\.\d\d covered$/.test(sum || ''), sum);
   check('and only one', (await page.$$('.cv-list .it.cv-turnsum')).length === 1);
   check('no working line once it has landed', !(await page.$('.cv-working')));
   await shot('1-turn-summary');
@@ -150,15 +153,15 @@ try {
   const w0 = await page.textContent('.cv-working');
   await until(async () => (await page.textContent('.cv-working')) !== w0, 6000);
   const w1 = await page.textContent('.cv-working');
-  check('while it works: for how long, and at what; the clock moves', /^Working 0:\d\d · Writing$/.test(w0 || '') && /^Working 0:\d\d · Writing$/.test(w1 || '') && w1 !== w0, `${w0} → ${w1}`);
+  check('while it works: for how long, and at what; the clock moves', /^Working 0:\d\d · Writing( · ~\d+ tok\/s)?$/.test(w0 || '') && /^Working 0:\d\d · Writing( · ~\d+ tok\/s)?$/.test(w1 || '') && w1 !== w0, `${w0} → ${w1}`);
   check('at the head of the strip, over the composer', await page.evaluate(() => document.querySelector('.cv-strip')?.firstElementChild?.classList.contains('cv-working')));
   await shot('3-working');
 
-  // its × mid-turn asks first; Cancel leaves it working
-  await page.click('.cv-tabwrap.on .cv-tabx');
+  // a fresh start mid-turn asks first; Cancel leaves it working
+  await send('/new');
   await page.waitForSelector('.cv-dlg', { timeout: T(10000) });
   const dlg = await page.evaluate(() => [document.querySelector('.cv-dlg-title')?.textContent, document.querySelector('.cv-dlg-text')?.textContent]);
-  check('closing it mid-turn asks first', /^Stop Claude in y3k-pane-smoke-repo-\w+\?$/.test(dlg[0] || '') && dlg[1] === 'It is in the middle of a turn. What it has done to files stays done, and the session stays in Past sessions.', JSON.stringify(dlg));
+  check('a fresh start mid-turn asks first', /^Stop Claude in y3k-pane-smoke-repo-\w+\?$/.test(dlg[0] || '') && dlg[1] === 'It is in the middle of a turn. What it has done to files stays done, and the conversation is kept.', JSON.stringify(dlg));
   await page.waitForTimeout(800);   // its fade in, before the picture
   await shot('4-stop-asks');
   await page.click('.cv-dlg-no');
@@ -168,47 +171,10 @@ try {
   await page.waitForSelector('.it.sys.st-stopped', { timeout: T(10000) });
   check('Esc stops the turn, and its line goes with it', await until(async () => !(await page.$('.cv-working')), 5000));
 
-  // A SECOND SESSION, CLOSED FROM ITS TAB: at rest, it stops at once
-  await anotherSession(2);
-  check('a second session, in a tab of its own', engine.sessionCount === 2, String(engine.sessionCount));
-  // the strip scrolls sideways: the tab on screen is brought into view, its ×
-  // with it (asked before any hover: Playwright's hover scrolls its own target in)
-  await page.waitForTimeout(300);
-  const inView = await page.evaluate(() => { const x = document.querySelector('.cv-tabwrap.on .cv-tabx').getBoundingClientRect(), t = document.querySelector('.cv-tabs').getBoundingClientRect(); return [Math.round(x.left), Math.round(x.right), Math.round(t.left), Math.round(t.right)]; });
-  check('the × of the tab on screen is in view, though the strip overflows', inView[0] >= inView[2] - 1 && inView[1] <= inView[3] + 1, JSON.stringify(inView));
-  await shot('5-two-tabs');
-  await page.hover('.cv-tabwrap:not(.on) .cv-tab');
-  await page.waitForTimeout(300);
-  const xs = await page.evaluate(() => [...document.querySelectorAll('.cv-tabx')].map((x) => [getComputedStyle(x).opacity, x.closest('.cv-tab') ? 'inside' : 'beside', x.getAttribute('aria-label')]));
-  check('each tab has its × beside it, shown on the one on screen and the one under the pointer', xs.length === 2 && xs.every(([o, where, label]) => o === '1' && where === 'beside' && /^Stop and close /.test(label)), JSON.stringify(xs));
-  await shot('5b-hover');
-  await page.click('.cv-tabwrap.on .cv-tabx');   // (its click scrolls it back into view)
-  await page.waitForFunction(() => document.querySelectorAll('.cv-tabwrap').length === 1, null, { timeout: T(10000) });
-  check('nothing asked; its tab goes; the engine runs one session', !(await page.$('.cv-dlg')) && await until(() => engine.sessionCount === 1, 10000), String(engine.sessionCount));
-  check('and it says where it went', /^Stopped\. It is in Past sessions(; Continue picks it up)?\.$/.test(await toast()), await toast());
-  await page.waitForSelector('.cv-list .it.cv-turnsum', { timeout: T(10000) });
-  check('the session left takes the screen', true);
-  await shot('6-closed');
-
-  // FOUR RUNNING, AND A FIFTH: the folder screen lists the four, each with a Stop
-  for (let k = 2; k <= 4; k++) await anotherSession(k);
-  check('four running', engine.sessionCount === 4, String(engine.sessionCount));
-  await page.click('.cv-tab.cv-new');
-  await page.click('.cv-folderrow', { timeout: T(15000) });
-  await page.waitForSelector('.cv-full .cv-fullrow', { timeout: T(15000) });
-  const full = await page.evaluate(() => ({ err: document.querySelector('.cv-note.err')?.textContent, rows: [...document.querySelectorAll('.cv-fullrow')].map((r) => r.textContent) }));
-  check('a fifth is refused, and the four are listed, each with a Stop', full.err === 'y3kode is running as many sessions as it can at once. Stop one here, then choose the folder again.' && full.rows.length === 4 && full.rows.every((t) => /Claude · y3k-pane-smoke-repo-\w+Stop$/.test(t)), JSON.stringify(full));
-  await shot('7-four-running');
-  await page.click('.cv-fullrow:last-child .btn');
-  check('Stop: one fewer, and the refusal and its list go', await until(async () => engine.sessionCount === 3 && !(await page.$('.cv-full')) && !(await page.$('.cv-note.err')), 10000), String(engine.sessionCount));
-  await page.click('.cv-folderrow');
-  check('then the folder starts', await until(() => engine.sessionCount === 4, 20000), String(engine.sessionCount));
-
   // /clear stops the session it leaves (it used to stay running in its tab)
   await page.waitForSelector('.cv-input:not([disabled])', { timeout: T(15000) });
   await send('/clear');
-  check('/clear: the session it leaves is stopped, and the folders come up', await until(async () => engine.sessionCount === 3 && !!(await page.$('.cv-folderrow')), 10000), String(engine.sessionCount));
-  check('its tab went with it', (await page.$$('.cv-tabwrap')).length === 3);
+  check('/clear: the conversation it leaves is stopped, and the folders come up', await until(async () => engine.sessionCount === 0 && !!(await page.$('.cv-folderrow')), 10000), String(engine.sessionCount));
   await shot('8-cleared');
 
   check('no page errors', errors.length === 0, errors.join(' | '));
