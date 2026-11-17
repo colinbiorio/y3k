@@ -11,7 +11,7 @@
 //
 // Five kinds, five choices each, five options a choice: 5 x 5^5 = 15,625
 // bodies. The first option of every choice is the body as it was first drawn
-// (the pictures in ./art/v1/, made with Higgsfield from our brief).
+// (the pictures in ./art/v2/, made with Higgsfield from our brief).
 
 // what a colour is called, and the colour (a pair: the body's, then its second)
 export const SKIN = { sand: '#cf9f7a', ochre: '#b07a4e', sienna: '#8a5536', umber: '#563727', pearl: '#ecd2bd' };

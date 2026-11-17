@@ -6,7 +6,7 @@
 // small hands below them; wings that lie down its back and open when it
 // leaves the ground; antennae that lean with its speed.
 //
-// The picture it was drawn from is ../art/v1/mantis.webp. Ancient: the woven
+// The picture it was drawn from is ../art/v2/mantis.webp. Ancient: the woven
 // sash. Now: the bands of alloy. To come: a people who are not us.
 import { DoubleSide } from 'three';
 import { SHELL } from '../kinds.js';

@@ -13,7 +13,7 @@
 // has been. It does not touch the water, so the water does not ring under it
 // unless rings are its wake.
 //
-// The picture it was drawn from is ../art/v1/light.webp. Ancient: a veiled
+// The picture it was drawn from is ../art/v2/light.webp. Ancient: a veiled
 // figure. Now: the cut of the veil. To come: a body with nothing in it but
 // light.
 import * as THREE from 'three';

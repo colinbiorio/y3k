@@ -58,6 +58,12 @@ Said to Colin before starting, and standing until he says otherwise.
   fetched are six small grey tiles that give a surface its weave or its
   grain, and five cards in the body sheet. ("prioritize high quality, smooth
   graphics with the least pixelation".)
+- **The void keeps its own measure of how fine it is drawn** (Colin, 15 Nov:
+  "is the pixelation necessary?" It was not). It had taken the room's tier,
+  which begins in the middle and only steps down. Now it is the screen's own
+  pixels, two a point at the most, edges always smoothed; it turns itself down
+  only when trying fewer pixels makes its frames clearly shorter, and gives
+  them back when it does not (`src/game/fine.js`).
 - **Light speed is real time.** A trip will be a record of two clock times,
   not a countdown that runs while the page is open. Logging off does not stop
   it and nothing skips it.
@@ -257,6 +263,17 @@ answering for `navigator.getGamepads`). The five bodies in Firefox and
 WebKit. Under dusk and night and on the low-detail tier, any look but the
 first.
 
+17 November 2026, the same Mac (`void-smoke.mjs fine gpu`): the void at the
+screen's own pixels, 2560 × 1600 at two a point with its edges smoothed, a
+steady 16.7 ms a frame. A page slowed sixty-fold with its own work (frames of
+50 ms) and a browser held to thirty a second (33 ms) each had fewer pixels
+tried once, for two seconds, given back, and kept the sharp picture (a first
+rule, which timed a read-back of one pixel, measured 8 to 10 ms there
+whatever the drawing cost, and turned the void down for nothing). The bronze
+and skin tiles are now 512 pixels, from the same pictures (`art/v2/`). The
+octopus's arms end in points, turned toward their own side
+("the octopus is pretty close besides the cut off tentacle arms").
+
 ### Rough edges, known
 
 - The human: the shaved head is a cap of stubble with a hard edge; the heavy
@@ -320,7 +337,7 @@ suite runs them; those that draw are read as text and looked at.
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |
 | `bodies/` | `biped.js`, the bones of a body on two legs; `human.js`, `robot.js`, `mantis.js`, `octopus.js`, `light.js`; `common.js`, what all five share (draws) |
 | `figure.js` | one of the five, made as the person chose it, and the few things every body answers to |
-| `art/v1/` | eleven small pictures: the five the kinds were drawn from, and six grey seamless surfaces |
+| `art/v2/` | eleven small pictures: the five the kinds were drawn from, and six grey seamless surfaces (bronze and skin at 512 pixels since 17 Nov) |
 | `view.js` | the frame: hands, eye, body, rings, figure, mirror, picture (draws) |
 
 Fixed in the code, so nobody has to find them again:
@@ -432,7 +449,7 @@ cephalopod skin, limestone, alloy). What the game took from them:
   of its own. The colour is the person's choice, and the tile gives it a
   weave, a grain or a cut.
 
-All eleven are in `src/game/art/v1/`, 167 kilobytes together. The pictures
+All eleven are in `src/game/art/v2/`, 293 kilobytes together (the bronze and the skin made again at 512 pixels on 17 November, from the same pictures). The pictures
 they were made from are kept outside the repository.
 
 A 3D model, music and sound cannot be had from it without spending, so the
