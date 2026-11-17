@@ -260,6 +260,26 @@ try {
     check('its life is there: palms round the body, terns in the air, tropicbirds on the cliffs, woodhens near, turtles in the lagoon', r.world.life && r.world.life.palms > 200 && r.world.life.terns > 100 && r.world.life.tropicbirds === 8 && r.world.life.hens >= 6 && r.world.life.turtles === 6, r.world.life);
     out.frames = { island: await frames(2500) };
     await shot('03-inland');
+    // a house on the island: facing downhill (the beach, west), its way in at the ground's height, walked into
+    await faceYaw(Math.PI / 2); await key.down('KeyW'); await sleep(350); await key.up('KeyW'); await until((r) => speed(r) < 0.1, 3000);   // a step that way turns the body to it
+    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    out.houseSaid = await hintText();
+    r = await until((r) => r.world.buildings.some((b) => b.kind === 'house' && b.built), 15000);
+    const hb = r.world.buildings.find((b) => b.kind === 'house');
+    check('a house goes up on the island, raised to its ground', !!hb && hb.y > 1, { hb, said: out.houseSaid });
+    await shot('03b-island-house');
+    if (hb) {
+      // round to its front and in (it faces the body: its front is toward where the body stood)
+      await faceYaw(hb.yaw); await key.down('KeyW'); r = await until((r) => r.world.inside === 'house', 9000); await sleep(300); await key.up('KeyW'); r = await read();
+      check('walked up its steps and in, standing on its floor at its height', r.world.inside === 'house' && Math.abs(r.p[1] - (hb.y + 0.5)) < 0.01, { inside: r.world.inside, y: r.p[1], floor: hb.y + 0.5 });
+      await shot('03c-in-the-island-house');
+      await key.press('KeyB'); await until((r) => !r.world.buildings.some((b) => b.kind === 'house' && b.down < 0), 6000);
+    }
+    // a bot over the island's land: it hovers over the ground, not inside it
+    await page.locator('#game-bots').click(); await sleep(250); await page.locator('#game-bot-list [data-bot="1"]').click();
+    r = await until((r) => r.fight.bots[0]?.mode === 'fight', 6000); await sleep(800); r = await read();
+    check('a bot called on the island hovers over its ground', r.fight.bots[0] && r.fight.bots[0].over > 0.6 && r.fight.bots[0].over < 4, r.fight.bots[0]);
+    await page.locator('#game-bots').click(); await sleep(250); await page.locator('#game-bot-list [data-bot="clear"]').click(); await sleep(300);
     // back west into the lagoon's shallows
     await faceYaw(Math.PI / 2); await key.down('KeyW'); r = await until((r) => r.world.depth > 0.12, 9000); await sleep(300); await key.up('KeyW');
     r = await read();

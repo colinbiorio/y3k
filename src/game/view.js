@@ -213,6 +213,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
     else if (r.did === 'down') say(`the ${r.b.kind} comes down`, 3);
     else if (r.did === 'blocked') say(`too near the ${r.b.kind}: step away from it and build`, 4);
+    else if (r.did === 'steep') say(r.rises ? `the ground rises ${r.fall.toFixed(1)} m behind it here: face downhill, or find flatter ground` : `the ground falls ${r.fall.toFixed(1)} m under it here: find flatter ground to build`, 4);
   }
   function buildHere(kind = null) {
     if (K.body.flying || !K.body.grounded || K.body.climbing) { say('stand on the ground to build'); return; }
@@ -323,7 +324,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       let art = K.arts.get(b);
       if (!art) { art = (b.kind === 'house' ? createHouseArt : createShelterArt)({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
       seen.add(b);
-      const [dx, dz] = KINDS[b.kind].door(b), inIt = KINDS[b.kind].inside(b, K.body.p[0], K.body.p[2], K.body.p[1]);
+      const [dx, dz] = KINDS[b.kind].door(b), inIt = K.world.within(b, K.body.p);
       const near = Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || inIt;
       const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol, night: L.stars });
       // the light of the fire nearest the body (one light for all of them: a light that came and went would make every material again)
@@ -476,7 +477,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     camera.updateMatrixWorld();
 
     builds(dt);
-    if (V.live && !paused) V.live(dt, K.clock, body);            // the island's palms, birds, woodhens and turtles
+    if (V.live && !paused) V.live(dt, K.clock, body, K.world);   // the island's palms, birds, woodhens and turtles
     K.fight.update(K.combat, paused ? 0 : dt, camera, body);
     hud(dt);
     V.setScale(camera);
@@ -584,11 +585,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
-      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
+      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
-        bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100) })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
+        bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     root.dataset.place = K.place;

@@ -30,7 +30,8 @@ function profile(R, cap, base, top, sky, n) {
 // GLSL shared by every surface: the shelter's frame, the earth's bands and the stones' cells, value noise
 const COMMON = `
   uniform vec2 uCentre; uniform float uYaw; uniform float uGrow; uniform float uRest;
-  vec3 toLocal(vec3 w) { vec2 d = w.xz - uCentre; float c = cos(uYaw), s = sin(uYaw); return vec3(c * d.x - s * d.y, w.y, s * d.x + c * d.y); }
+  uniform float uBase;
+  vec3 toLocal(vec3 w) { vec2 d = w.xz - uCentre; float c = cos(uYaw), s = sin(uYaw); return vec3(c * d.x - s * d.y, w.y - uBase, s * d.x + c * d.y); }
   float h1(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   float n2(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
     return mix(mix(h1(i), h1(i + vec2(1.0, 0.0)), u.x), mix(h1(i + vec2(0.0, 1.0)), h1(i + vec2(1.0, 1.0)), u.x), u.y); }
@@ -94,7 +95,7 @@ const INSIDE = `
 
 export function createShelterArt({ lite = false } = {}) {
   const group = new THREE.Group(), seg = SEG(lite), U = {
-    uCentre: { value: new THREE.Vector2() }, uYaw: { value: 0 }, uGrow: { value: 0 }, uRest: { value: 0 }, uTime: { value: 0 },
+    uCentre: { value: new THREE.Vector2() }, uYaw: { value: 0 }, uGrow: { value: 0 }, uRest: { value: 0 }, uTime: { value: 0 }, uBase: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uSky: { value: new THREE.Color() },
     uHearth: { value: new THREE.Vector3() }, uHearthCol: { value: new THREE.Color() }, uDoor: { value: 1 }, uOpen: { value: 1 },
   };
@@ -303,6 +304,10 @@ export function createShelterArt({ lite = false } = {}) {
   shade.renderOrder = 1;
   group.add(shade);
 
+  // its foundation, where it stands raised on uneven ground (the island): its stone ring carried down 1.6 m
+  const found = new THREE.Mesh(geo(new THREE.CylinderGeometry(S.out, S.out + 0.15, 1.6, seg, 1, true).translate(0, -0.8, 0)), keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.4, 0.38, 0.34), roughness: 0.95, side: THREE.DoubleSide })));
+  found.visible = false; group.add(found);
+
   // the last phase: the door, the glass and its rim, the awning and its poles, then the room's things, one after another
   const jars = group.children.filter((o) => o.geometry?.type === 'LatheGeometry' && o !== outer && o !== inner);
   const poles = group.children.filter((o) => o.geometry?.type === 'CylinderGeometry' && o.material === bronze);
@@ -313,9 +318,9 @@ export function createShelterArt({ lite = false } = {}) {
     group, flameAt,
     // where it stands and how far up it is; what light the room has; whether a body is near its door
     update(b, { t = 0, dt = 0, sun = [0, 1, 0], sunCol = new THREE.Color(1, 1, 1), sky = new THREE.Color(0.2, 0.2, 0.25), near = false, hearthCol = new THREE.Color(0.5, 0.65, 1) } = {}) {
-      group.position.set(b.x, 0, b.z); group.rotation.y = b.yaw;
+      group.position.set(b.x, b.y || 0, b.z); group.rotation.y = b.yaw;
       const ph = phase(b);
-      U.uCentre.value.set(b.x, b.z); U.uYaw.value = b.yaw; U.uTime.value = t;
+      U.uCentre.value.set(b.x, b.z); U.uYaw.value = b.yaw; U.uTime.value = t; U.uBase.value = b.y || 0;
       U.uGrow.value = ph.stones < 1 ? S.base * ph.stones : S.base + (S.top - S.base + 0.02) * ph.walls;
       U.uRest.value = ph.rest; U.uOpen.value = 1 - ph.walls;
       U.uSunDir.value.set(sun[0], sun[1], sun[2]); U.uSunCol.value.copy(sunCol); U.uSky.value.copy(sky);
@@ -326,6 +331,7 @@ export function createShelterArt({ lite = false } = {}) {
       U.uDoor.value = 0.35 + 0.65 * doorOpen;
       for (const [o, at] of things) o.visible = ph.rest > at;
       floor.visible = sill.visible = ph.stones > 0.5;
+      found.visible = (b.y || 0) > 0.01 && ph.stones > 0.2;
       shaft.visible = ph.walls > 0.95;
       return { flame: ph.rest, door: doorOpen };
     },

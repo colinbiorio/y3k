@@ -178,6 +178,17 @@ taking away to be the clean Earth the brief asks for).
     a dash scatters them.
   - **green turtles** cruise the lagoon under its surface and come up to
     breathe, ringing the water.
+- **Building and fighting there** (`world.js`, the two buildings' drawings,
+  `combat.js`): a building put up on the island stands with its way in at the
+  ground's height, on stone foundations carried down 1.6 m where the ground
+  falls away under it. Where the ground rises behind it more than it can take
+  (the house's piers lift it 0.45 m clear; the half-sunk shelter takes 0.55)
+  or falls away more than its foundations reach, it is not built, and the game
+  says which. Each building keeps its own height. The world takes every point
+  into the building's own frame and its answers back out, so the buildings'
+  own rules did not change. No palm grows where a building stands. Bots rise
+  out of the ground where they are called and hover over whatever is under
+  them.
 - Not yet: the Lord Howe stick insect (by night); banyans and pandanus; the
   ground is 16 m triangles close up; the lagoon's west edge is a straight
   rule.

@@ -2292,4 +2292,48 @@ ok('green turtles cruise the lagoon under its surface and come up to breathe; a 
   assert.ok(Math.hypot(body.p[0] - palm.x, body.p[2] - palm.z) >= BODY.rad + LF.PALM.trunk - 1e-6, 'held off the trunk: ' + Math.hypot(body.p[0] - palm.x, body.p[2] - palm.z).toFixed(3));
 });
 
+// ---- building and fighting on the island: a building stands on its ground; bots hover over it
+ok('on the island a house stands with its way in at the ground\'s height, is walked into, its floor under the body; where the ground falls away or rises behind, nothing is built', () => {
+  const w = createWorld(); w.ground = islandGround;
+  const a = SHAPE.arrive;
+  // facing inland (east) from the beach the ground rises behind where it would stand: not built, and why
+  const up = B.createBody({ world: w, yaw: Math.PI / 2 }); up.p = [a.x + 30, islandGround.floor(a.x + 30, a.z), a.z];
+  const r0 = w.build(up, 'house'); assert.equal(r0.did, 'steep'); assert.equal(r0.rises, true);
+  // from the flats behind the beach, facing the lagoon (downhill): it goes up between the body and the beach
+  const body = B.createBody({ world: w, yaw: -Math.PI / 2 }); body.p = [a.x + 40, islandGround.floor(a.x + 40, a.z), a.z]; body.was = [...body.p];
+  const r = w.build(body, 'house');
+  assert.equal(r.did, 'up', 'built: ' + JSON.stringify(r.did === 'steep' ? r.fall : r.did));
+  const b = r.b; w.update(10);
+  const [ex, ez] = KINDS.house.entry(b);
+  near(b.y, islandGround.height(ex, ez), 1e-9, 'its way in at the ground\'s height'); assert.ok(b.y > 1, 'raised to it: ' + b.y.toFixed(2));
+  // its door, walked to and in: the body stands on its floor, at its height
+  const [dx, dz] = HO.doorWorld(b); body.p = [dx + Math.sin(b.yaw) * 3, islandGround.floor(dx + Math.sin(b.yaw) * 3, dz + Math.cos(b.yaw) * 3), dz + Math.cos(b.yaw) * 3]; body.was = [...body.p];
+  const eyeYaw = b.yaw;                                  // the eye looking along the house's −z (into it, from its front)
+  for (let t = 0; t < 5 && !w.inside(body.p); t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: eyeYaw, pitch: 0 }, B.STEP); }
+  assert.ok(w.inside(body.p)?.kind === 'house', 'in at its door: ' + body.p.map((v) => v.toFixed(2)));
+  near(body.p[1], b.y + HO.HOUSE.floor, 1e-6, 'on its floor, at its height');
+  assert.equal(w.within(b, body.p), true);
+  assert.ok(w.built(b.x, b.z) && !w.built(b.x + 30, b.z), 'its footprint is built on (no palm grows there; no trunk is in the way in it)');
+  // where the ground falls away (Mount Lidgbird's flank): not built
+  const lid = SHAPE.peaks.find((p) => p.name === 'Mount Lidgbird');
+  const steep = B.createBody({ world: w, yaw: 0 }); steep.p = [lid.x + 300, islandGround.height(lid.x + 300, lid.z), lid.z];
+  const r2 = w.build(steep, 'shelter');
+  assert.equal(r2.did, 'steep'); assert.ok(r2.fall > 1.4);
+  // and in the void, as before: at the water's height
+  const v = createWorld(), vb = B.createBody({ world: v, yaw: 0 }); assert.equal(v.build(vb, 'house').b.y, 0);
+});
+
+ok('on the island a bot comes up out of the ground where it is called and hovers over whatever is under it, never inside a hill', () => {
+  const w = createWorld(); w.ground = islandGround;
+  const c = CB.createCombat({ seed: 4 }), hills = [-1500, -4000], body = B.createBody({ world: w, yaw: 0 });
+  body.p = [hills[0], islandGround.height(hills[0], hills[1]), hills[1]];
+  const b = CB.spawnBot(c, body, Math.PI / 2, 2);
+  for (let t = 0; t < 8; t += 1 / 60) {
+    CB.stepCombat(c, 1 / 60, { body, aim: { from: [body.p[0], body.p[1] + 2, body.p[2]], dir: [1, 0, 0] }, hands: {}, creative: true, world: w });
+    if (b.mode === 'fight') assert.ok(b.p[1] > islandGround.height(b.p[0], b.p[2]) + 0.5, 'over the ground: ' + (b.p[1] - islandGround.height(b.p[0], b.p[2])).toFixed(2));
+  }
+  assert.equal(b.mode, 'fight');
+  within(b.p[1] - Math.max(0, islandGround.height(b.p[0], b.p[2])), 0.8, 3.5, 'hovering its height over the ground');
+});
+
 console.log(`\n${passed} checks passed.`);
