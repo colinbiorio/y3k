@@ -17,7 +17,8 @@
 // ============================================================================
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { clamp, pose, right as rightOf, turn, pan, zoom, focus, reset, above, settle, key as orbitKey, pixelRatio } from './orbit.mjs';
+import { clamp, pose, right as rightOf, turn, pan, zoom, focus, reset, above, settle, key as orbitKey, ladder } from './orbit.mjs';
+import { createWatch, watch, rest } from '../game/fine.js';
 import { patch, rgb } from './kit.js';
 import { createAir, SKY_HEAD } from './air.js';
 
@@ -165,11 +166,18 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     }
   }
 
-  // ---------------------------------------------------------------- its size: the screen's own pixels
-  let ratio = 1;
+  // ---------------------------------------------------------------- its size: the screen's own pixels, unless the frames say otherwise
+  // (orbit.mjs's ladder; the watch is fine.js's, told how long each drawn frame took after the one before)
+  let ratio = 1, steps = null, step = null;
+  const fine = createWatch();
   function size() {
     const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
-    ratio = pixelRatio(window.devicePixelRatio, w, h);
+    steps = ladder(window.devicePixelRatio, w, h);
+    step = steps[Math.min(fine.level, steps.length - 1)];
+    ratio = step.ratio;
+    sun.castShadow = step.shadow > 0;
+    if (step.shadow && sun.shadow.mapSize.x !== step.shadow) { sun.shadow.mapSize.set(step.shadow, step.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; if (cur) aimSun(); }
+    cur?.lite?.(step.lite);
     renderer.setPixelRatio(ratio);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -195,6 +203,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   function tick(now) {
     raf = 0;
     if (dead || !cur) return;
+    const since = last ? now - last : 0;
     const dt = last ? Math.min((now - last) / 1000, 0.1) : 1 / 60;
     last = now; dirty = false;
     const o = cur.orbit, moving = settle(o, dt, o.rate || 14), e = pose(o.now);
@@ -208,6 +217,9 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     renderer.render(scene, camera);
     place();
     frames++;
+    // a first frame after a rest says nothing of the frames' length (a try under way is taken back)
+    if (!since) { if (rest(fine) === 'ratio') size(); }
+    else if (steps && watch(fine, since, steps) === 'ratio') size();
     if (moving || live || dirty) { if (!raf) raf = requestAnimationFrame(tick); } else last = 0;
   }
 
@@ -295,6 +307,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   const ear = () => ({ eye: pose(cur.orbit.now), right: rightOf(cur.orbit.now) });
   const read = () => ({ scene: cur?.name || null, css: [host.clientWidth, host.clientHeight], px: [canvas.width, canvas.height], ratio: r3(ratio), dpr: window.devicePixelRatio,
     calls: renderer.info.render.calls, tris: renderer.info.render.triangles, frames, running: !!raf, full: isFull(),
+    fine: step ? { level: fine.level, steps: steps.length, ratio: r3(step.ratio), shadow: step.shadow, lite: step.lite, trying: fine.why, trials: fine.trials, mean: Math.round(fine.mean * 10) / 10 } : null,
     eye: cur ? pose(cur.orbit.now).map(r3) : null, target: cur ? cur.orbit.now.target.map(r3) : null, dist: cur ? r3(cur.orbit.now.dist) : null, polar: cur ? r3(cur.orbit.now.polar) : null, az: cur ? r3(cur.orbit.now.az) : null });
   function dispose() {
     dead = true; cancelAnimationFrame(raf); raf = 0; ro.disconnect();
