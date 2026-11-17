@@ -15,6 +15,10 @@
 // world tab hands back the drawing buffers (they are large) and stops the
 // frame, and coming back finds the body standing where it was left.
 //
+// How fine it is drawn is the void's own to decide (fine.js): the screen's own
+// pixels, edges smoothed, turned down only when its own drawing is what makes
+// the frames long. The page's guess at a tier (../gfx.js) is not read.
+//
 // The body is one of five kinds (kinds.js), made by figure.js as the body
 // sheet (chooser.js) says. While that sheet is open the game does not wait
 // as it does under the controls: the hands are not read, the body turns to
@@ -31,8 +35,8 @@ import { loadState, saveState, ZOOM } from './state.js';
 import { cleanKind, cleanLook } from './kinds.js';
 import { createMenu } from './menu.js';
 import { createChooser, standIn } from './chooser.js';
+import { ratios, createWatch, watch, rest, chosen } from './fine.js';
 
-const DPR = { high: 2, mid: 1.5, low: 1.25, smooth: 1 };
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
 const POSE = { pitch: -0.05, every: 200 };     // the body sheet: how the eye is tipped while it looks at the body, and how often (ms) the page is asked where the sheet is      // the body sheet: the eye nearly level; a body is this much taller than its eyes; where on it the eye looks; how wide it is taken to be
@@ -41,7 +45,7 @@ const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const worn = (st) => st.kind + ' ' + JSON.stringify(st.looks[st.kind]);
-const tierNow = () => globalThis.window?.Y3K?.gfx?.profile?.()?.tier || document.documentElement.dataset.gfx || '';
+const PX = new Uint8Array(4);       // one pixel read back: the drawing is over when it answers (frame, below)
 const LEARNED = 14;        // seconds of moving after which the standing hint is put away
 const IDLE = { move: [0, 0], look: [0, 0], zoom: 0, jump: false, jumpPressed: false, dash: false, flyToggle: false, sprint: false, walk: false, up: false, down: false, modeToggle: false, menu: false, device: 'keys' };
 
@@ -63,10 +67,10 @@ let kept = null;
 function stage(lite, st) {
   if (kept && (kept.renderer.getContext().isContextLost() || kept.lite !== lite)) {
     kept.figure.dispose(); kept.void.dispose(); kept.renderer.dispose(); kept.renderer.domElement.remove();
-    kept = { body: kept.body, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned };
+    kept = { body: kept.body, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
   }
   if (!kept?.renderer) {
-    const renderer = new THREE.WebGLRenderer({ antialias: !lite, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });       // edges smoothed, whatever else is plain
     renderer.toneMapping = THREE.NoToneMapping;
     // the canvas takes the keys: it is focused when the void opens, so the jump key is the body's and not
     // a second press of whatever button brought the person here
@@ -78,7 +82,7 @@ function stage(lite, st) {
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
     camera.layers.enable(1);            // the sky's dome is on layer 1: this eye sees it, the mirror's does not
     // the body begins with its back to the eye, looking where the eye looks
-    kept = { body: createBody({ yaw: Math.PI }), eye: null, clock: 0, ms: 16.7, learned: 0, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null };
+    kept = { body: createBody({ yaw: Math.PI }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null };
   }
   return kept;
 }
@@ -87,6 +91,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   let root = null, raf = 0, ro = null, wire = null, menu = null, chooser = null, K = null, input = null, st = null;
   let pose = 0, turned = 0, stand = null, standT = 0;      // the body sheet: how far the eye has gone to it (0..1), how far its buttons have turned the body, where the body stands, when that is asked again
   let last = 0, wake = 0, sayUntil = 0, standing = '', menuShut = 0, saveT = 0, locked = false, touch = false, still = 0;
+  let hand = 0, cost = null;        // how fine it is drawn (fine.js): a person's own choice of fewer pixels (0: none), and what the last frame took when the watch asked: [making it, waiting for it]
   const offs = [];
   const pos = [0, 0, 0];
   const $ = (sel) => root?.querySelector(sel);
@@ -144,12 +149,24 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (worn(st) === K.worn) return;
     if (dress()) save(); else { st.kind = was.kind; st.looks[k] = was.look; }
   }
+  // the same canvas, of plainer stuff: the watch asked for it (fine.js). The void and the body are made again;
+  // one that cannot be made leaves what was.
+  function plain() {
+    let v = null, made = null;
+    try { v = createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
+    K.figure.dispose(); K.void.dispose();
+    v.scene.add(made.group); made.setEnv(LIGHTS[v.light].env);
+    K.void = v; K.figure = made; K.lite = true; K.worn = worn(st); K.size = null; standT = 0;
+    shown(K.body, pos); made.update(K.body, 0, pos);
+    size();
+  }
 
   function size() {
     const holder = $('.game-canvas'); if (!holder || !K) return;
     const w = holder.clientWidth, h = holder.clientHeight;
     if (!w || !h) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, DPR[tierNow()] || 2);
+    K.rs = ratios(window.devicePixelRatio || 1, w, h, hand);
+    const dpr = K.rs[Math.min(K.fine.level, K.rs.length - 1)];
     K.renderer.setPixelRatio(dpr); K.renderer.setSize(w, h, false);
     K.camera.aspect = w / h; K.camera.updateProjectionMatrix();
     K.void.resize(w, h, dpr);
@@ -160,14 +177,20 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     raf = requestAnimationFrame(frame);
     if (!root || document.hidden) { last = 0; return; }
     if (last) K.ms += (now - last - K.ms) * 0.05;       // how long a frame takes, lately (read below)
+    const since = last ? now - last : 0, began = performance.now();
     const dt = last ? clamp((now - last) / 1000, 0, 0.1) : 1 / 60; last = now;
-    const { body, eye, camera, figure } = K, V = K.void;
     const posing = chooser.isOpen();                   // the body sheet is open: the body stands to be looked at, and the hands are not read
     const paused = !posing && (root.inert || menu.isOpen());        // another sheet is open over the game: it waits
     wire.poll();
     // …and a waiting picture is not drawn again (a frosted sheet over a live canvas re-blurs every frame: 32 ms a frame
     // at a phone's size, measured), except for the few frames after something it shows has changed
     if (!paused) still = 0; else if (++still > 4) return;
+    // how fine it is drawn (fine.js). The watch is told how long the frames are, and what the last one's
+    // drawing took when it had asked; what it changes, it changes before this frame is drawn
+    if (!since) rest(K.fine);
+    else if (!paused && K.rs) { const did = watch(K.fine, since, cost, K.rs); if (did === 'ratio') size(); else if (did === 'plain' && !K.lite) plain(); }
+    cost = null;
+    const { body, eye, camera, figure } = K, V = K.void;
     const inp = paused || posing ? IDLE : input.frame(dt);
     if (!paused) {
       K.clock += dt;
@@ -234,6 +257,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     V.update(K.clock, camera, [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }]);
     V.renderMirror(camera);
     K.renderer.render(V.scene, camera);
+    // the watch asked what this costs: one pixel is read back, which answers only when the drawing is over
+    if (K.fine.asking && !paused) { const made = performance.now(), gl = K.renderer.getContext(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, PX); cost = [made - began, performance.now() - made]; }
 
     if (!paused && Math.hypot(body.v[0], body.v[2]) > 1) K.learned += dt;
     if (sayUntil && now > sayUntil) sayUntil = 0;
@@ -243,7 +268,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
   function open() {
     if (root) return;
-    const lite = ['low', 'smooth'].includes(tierNow());
+    hand = chosen(globalThis.window?.Y3K?.gfx?.profile?.());      // a person's own choice of a lighter page; the page's guess is not asked
+    const lite = !!hand || !!kept?.fine?.plain;
     st = loadState(storage);
     K = stage(lite, st);                                // throws where a canvas cannot be had: the door (gate.js) answers that
     if (!K.eye) K.eye = { yaw: 0, pitch: -0.1, at: new THREE.Vector3(), has: false, d: st.zoom, fov: FOV };
@@ -301,6 +327,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const seen = () => { const cv = K.renderer.domElement, v = new THREE.Vector3(pos[0], pos[1] + (K.size ? K.size.tall / 2 : K.figure.look), pos[2]).project(K.camera); return [Math.round(((v.x + 1) / 2) * cv.clientWidth), Math.round(((1 - v.y) / 2) * cv.clientHeight)]; };
     (globalThis.Y3K ||= {}).game = { read: () => (K ? { p: [...K.body.p], v: [...K.body.v], mode: K.body.mode, flying: K.body.flying, grounded: K.body.grounded,
       dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
+      fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, cost: Math.round(K.fine.cost * 10) / 10, waited: Math.round(K.fine.waited * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen() } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open

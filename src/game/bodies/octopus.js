@@ -44,6 +44,11 @@ const N = 40, SEG = 10, CROWD = 1.7, along = (t) => 1 - (1 - t) ** CROWD;
 // how tightly its end is rolled (the radius there), and how much wider the roll is for each metre further from the end
 const ROLL = [0.02, 0.168];
 const FLOOR = 0.004;
+// and which way: the way the arm reached, turned by up to this much toward its own side of the body. From in
+// front and from behind a roll is then seen from its side, a curl; rolled straight at the eye it is a stump.
+const SPLAY = 0.5;
+// an arm's end: over this much of its length (the last of it) it thins to this much of what it would be
+const TIP = [0.3, 0.12], fine = (x) => 1 - (1 - TIP[1]) * sat((x - 1 + TIP[0]) / TIP[0]) ** 2;
 
 // the suckers: two rows of pale rings down the side of an arm that faces what it holds
 function suckers() {
@@ -149,13 +154,15 @@ export function createOctopus(look, { lite = false } = {}) {
   felt.capsule(body, [0, -0.05, 0], body, [0, 0.1, 0], 0.11 * kw); felt.capsule(body, [0, -0.1, 0], body, [0, -0.6, 0], 0.12 * kw);
 
   // ── the six it stands on. Each is laid in the world's numbers, every frame.
-  const R0 = 0.085 * kw, RY = 0.02, thick = (x) => kt * (0.007 + 0.038 * (1 - x) ** 0.55), RG = thick(0.72), END = ROLL[0] * kt;
+  // how thick an arm is, from the body (0) to its end (1): it thins slowly down to the floor, and over the
+  // last of it (TIP) to a point. An arm that ends as thick as a finger looks cut off (15 Nov 2026).
+  const R0 = 0.085 * kw, RY = 0.02, thick = (x) => kt * (0.007 + 0.038 * (1 - x) ** 0.55) * fine(x), RG = thick(0.72), END = ROLL[0] * kt;
   const L = 1.03 * Math.hypot(H + RY - RG, C.c.ring - R0) + A.spare;
   const ms = Float32Array.from({ length: N }, (_, i) => L * along(i / (N - 1))), rs = ms.map((m) => thick(m / L));
   const legs = Array.from({ length: C.c.arms }, (_, i) => {
     const a = (i + 0.5) * TAU / C.c.arms, t = skinned(tube(N, { seg: SEG, radius: (u) => thick(along(u)) }), SEG, ms, rs);
     K.own(group, t.geo, M.arm, { cull: false });
-    return { t, lx: Math.sin(a), lz: Math.cos(a), d: [0, 0], T: [0, -1, 0], set: false, at: i * 1.9, F: new Float32Array(N * 3), Q: new Float32Array(N * 3), P: null };
+    return { t, lx: Math.sin(a), lz: Math.cos(a), sc: Math.cos(SPLAY * Math.sin(2 * a)), ss: Math.sin(SPLAY * Math.sin(2 * a)), d: [0, 0], T: [0, -1, 0], set: false, at: i * 1.9, F: new Float32Array(N * 3), Q: new Float32Array(N * 3), P: null };
   });
   // the web (one of its choices): skin from each arm to the next, down the first half of them; its hem is
   // higher between two arms than at them. Laid from where the arms are, every frame.
@@ -238,7 +245,7 @@ export function createOctopus(look, { lite = false } = {}) {
   // ── the two that hang at its sides: chains, drawn as arms
   const hang = [1, -1].map((sd) => {
     const c = cloth({ anchor: body, cols: 1, rows: 10, top: [[sd * 0.128 * kw, 0.035, 0.012]], dir: (_, r) => [sd * (0.34 - 0.07 * r), -1, 0.06], len: 0.062, stiff: 0.3, gravity: 5 });
-    const slim = (u) => kt * (0.005 + 0.024 * (1 - u) ** 0.8), far = Float32Array.from({ length: 11 }, (_, i) => 0.062 * i), fat = far.map((m) => slim(m / 0.62));
+    const slim = (u) => kt * (0.005 + 0.024 * (1 - u) ** 0.8) * fine(u), far = Float32Array.from({ length: 11 }, (_, i) => 0.062 * i), fat = far.map((m) => slim(m / 0.62));
     const t = skinned(tube(11, { seg: 7, radius: slim }), 7, far, fat), link = { cloth: c, stiff: 0.3 };
     K.own(group, t.geo, M.arm, { cull: false }); cloths.push(link);
     return { c, t, sd, link };
@@ -280,7 +287,8 @@ export function createOctopus(look, { lite = false } = {}) {
         // the roll at the floor points the way the arm reached; it is turned only while the tip is up
         if (!tip.down || !leg.set) {
           const hx = tip.x - R[0], hz = tip.z - R[2], hl = Math.hypot(hx, hz), w = hl > 1e-6 ? 1.2 * Math.min(1, hl / 0.25) / hl : 0;
-          let dx = ox + hx * w, dz = oz + hz * w; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+          let dx = ox + hx * w, dz = oz + hz * w; const dl = Math.hypot(dx, dz) || 1;
+          [dx, dz] = [(dx * leg.sc + dz * leg.ss) / dl, (dz * leg.sc - dx * leg.ss) / dl];          // turned toward its side of the body
           const g = leg.set ? k(12) : 1; dx = leg.d[0] + (dx - leg.d[0]) * g; dz = leg.d[1] + (dz - leg.d[1]) * g;
           const l = Math.hypot(dx, dz) || 1; leg.d[0] = dx / l; leg.d[1] = dz / l;
         }

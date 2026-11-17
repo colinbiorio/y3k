@@ -26,6 +26,7 @@ import * as S from '../src/game/state.js';
 import * as K from '../src/game/kinds.js';
 import * as Ch from '../src/game/chooser.js';
 import { leave } from '../src/game/drape.js';
+import * as F from '../src/game/fine.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
@@ -1398,6 +1399,159 @@ ok('a waiting picture is not drawn again, and the standing hint is put away once
   assert.match(view, /function lightTo\(name\) \{[^\n]*still = 0;/, 'a light chosen in the sheet is drawn');
   assert.match(view, /still = 0;\s+\/\/ a canvas that changed size/);
   assert.match(view, /if \(touch \|\| K\.learned > LEARNED\) return '';/);
+});
+
+// ── how fine it is drawn (fine.js). Colin, 15 Nov 2026: "is the pixelation necessary?" It was not: the void had
+// taken its measure from the room's tier, which begins in the middle and only ever steps down.
+const VS = 1000 / 60, r3 = (a) => a.map((x) => Math.round(x * 1000) / 1000);
+// A machine, for the watch: a sixty-a-second screen and a frame that costs `costOf(w)` = [making it, waiting for
+// its picture] ms. A frame not done by the screen's next turn waits for the one after; `cap`: a browser that holds
+// its pages to that many ms a frame. Answers what the watch did ([what, the step, the second]) and how many
+// frames it asked the cost of.
+function play(w, rs, seconds, costOf, { cap = 0 } = {}) {
+  const did = []; let c = null, ms = VS, asked = 0;
+  for (let t = 0; t < seconds * 1000; t += ms) {
+    const d = F.watch(w, ms, c, rs); if (d) did.push([d, w.level, Math.round(t / 1000)]);
+    const cost = costOf(w);
+    c = w.asking ? cost : null; if (c) asked += 1;
+    ms = Math.max(cap, Math.ceil((cost[0] + cost[1]) / VS - 1e-9) * VS);
+  }
+  return { did, asked };
+}
+// a frame the page makes in `made` ms, whose picture takes `wait` ms at the finest step, all of that pixels
+const machine = (rs, made, wait) => (w) => [made, wait * (rs[w.level] / rs[0]) ** 2];
+const MAC = F.ratios(2, 1470, 880);
+
+ok('the void is drawn with the screen\'s own pixels, two a point at the most; the room\'s guess at a tier is not read', () => {
+  assert.deepEqual(r3(MAC), [2, 1.75, 1.5, 1.25, 1], 'his Mac: the whole screen at its own pixels, and four steps under it');
+  assert.deepEqual(r3(F.ratios(1, 1280, 800)), [1, 0.875, 0.75], 'a one-pixel screen has three steps, none under three quarters');
+  assert.deepEqual(r3(F.ratios(3, 390, 844)), [2, 1.75, 1.5, 1.25, 1], 'a phone: two at the most');
+  const wide = F.ratios(2, 2560, 1440);
+  assert.ok(2560 * 1440 * wide[0] ** 2 <= F.FINE.pixels * 1.0001 && wide[0] > 1.4, 'a very large canvas: a 4K screen\'s worth of pixels and no more');
+  for (const rs of [MAC, F.ratios(1.5, 1280, 720), F.ratios(1, 3000, 2000), F.ratios(2.625, 412, 915), F.ratios(0.5, 800, 600)])
+    for (let i = 0; i < rs.length; i += 1) { assert.ok(rs[i] >= F.FINE.least); if (i) assert.ok(rs[i] < rs[i - 1] - 0.04, 'each step is a real one'); }
+  for (const bad of [0, NaN, undefined, -2]) assert.equal(F.ratios(bad, 800, 600)[0], 1);
+  // a person's own choice of a lighter page is kept (Settings; ?gfx=); what the page guessed for itself is not
+  assert.equal(F.chosen({ tier: 'low', manual: false }), 0); assert.equal(F.chosen({ tier: 'smooth', manual: false }), 0);
+  assert.equal(F.chosen({ tier: 'low', manual: true }), 1.25); assert.equal(F.chosen({ tier: 'smooth', manual: true }), 1);
+  assert.equal(F.chosen({ tier: 'mid', manual: true }), 0); assert.equal(F.chosen({ tier: 'high', manual: true }), 0);
+  for (const none of [null, undefined, {}]) assert.equal(F.chosen(none), 0);
+  assert.equal(F.ratios(2, 1470, 880, 1.25)[0], 1.25); assert.equal(F.ratios(1, 1280, 800, 1.25)[0], 1);
+  // …and the view: edges smoothed always, nothing of the tier but that choice, the cost asked of the drawing itself
+  const view = read('src/game/view.js');
+  assert.match(view, /new THREE\.WebGLRenderer\(\{ antialias: true, /); assert.doesNotMatch(view, /antialias: !/);
+  assert.doesNotMatch(view, /dataset\.gfx|tierNow|const DPR\b/);
+  assert.match(view, /hand = chosen\(globalThis\.window\?\.Y3K\?\.gfx\?\.profile\?\.\(\)\);/);
+  assert.match(view, /K\.rs = ratios\(window\.devicePixelRatio \|\| 1, w, h, hand\);/);
+  assert.match(view, /gl\.readPixels\(0, 0, 1, 1, gl\.RGBA, gl\.UNSIGNED_BYTE, PX\); cost = \[made - began, performance\.now\(\) - made\];/);
+  assert.match(view, /if \(did === 'ratio'\) size\(\); else if \(did === 'plain' && !K\.lite\) plain\(\);/);
+});
+
+ok('good frames are left alone; so is a hitch, and so is a browser that holds its pages to thirty a second', () => {
+  // his Mac, measured: 7 ms a frame at two pixels a point
+  let w = F.createWatch(), got = play(w, MAC, 120, machine(MAC, 2, 5));
+  assert.deepEqual([got.did, got.asked, w.level, w.plain], [[], 0, 0, false]);
+  // three frames of 400 ms every five seconds: a hitch is not a slow machine, and nothing is asked
+  w = F.createWatch(); let n = 0; got = play(w, MAC, 120, () => ((n += 1) % 300 < 3 ? [400, 5] : [2, 5]));
+  assert.deepEqual([got.did, got.asked, w.level], [[], 0, 0]);
+  // thirty a second, and the drawing costs 7 ms: it asks, hears that, and leaves the picture as fine as it was
+  w = F.createWatch(); got = play(w, MAC, 120, machine(MAC, 2, 5), { cap: 2 * VS });
+  assert.deepEqual([got.did, w.level, w.plain], [[], 0, false]);
+  assert.ok(got.asked >= F.FINE.asks && got.asked <= 6 * F.FINE.asks, 'asked, and seldom: ' + got.asked);
+  near(w.cost, 7, 1e-9); near(w.waited, 5, 1e-9);
+});
+
+ok('a drawing that is the cause is turned down as far as it needs and no further; at the bottom its stuff is made plain', () => {
+  // 20 ms a frame, 18 of them pixels: every frame misses the screen's turn
+  let w = F.createWatch(), m = machine(MAC, 2, 18), got = play(w, MAC, 120, m);
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['ratio', 3]]);
+  assert.ok(got.did[0][2] <= 5, 'within a few seconds: ' + got.did[0][2]);
+  const costAt = (level) => m({ level }).reduce((a, b) => a + b);
+  assert.ok(costAt(3) <= F.FINE.aim && costAt(2) > F.FINE.aim, 'the first step that is enough');
+  assert.equal(w.plain, false);
+  // a machine that draws in software: 153 ms. To the bottom in one go, then plain, then nothing more
+  w = F.createWatch(); got = play(w, MAC, 300, machine(MAC, 3, 150));
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['ratio', 4], ['plain', 4]]);
+  assert.ok(got.did[1][2] <= 12, 'both within a few seconds: ' + got.did[1][2]);
+  assert.ok(got.asked <= 3 * F.FINE.asks + 5 * F.FINE.asks, 'and then it is asked about once a minute: ' + got.asked);
+  // a screen with one step has nothing to turn down but its stuff
+  const one = F.ratios(0.5, 800, 600); assert.equal(one.length, 1);
+  w = F.createWatch(); got = play(w, one, 60, () => [3, 30]);
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['plain', 0]]);
+});
+
+ok('fewer pixels are not tried where they would buy nothing: a slow page keeps its sharp picture', () => {
+  // the page's own work is the cause (40 ms of making, 5 of waiting): the bottom step would cost 41 of the 45
+  let w = F.createWatch(), got = play(w, MAC, 300, () => [40, 5]);
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['plain', 0]]);
+  assert.equal(w.level, 0);
+  // half and half (9 and 9): the bottom reaches near enough the aim to be worth it
+  w = F.createWatch(); got = play(w, MAC, 60, machine(MAC, 9, 9));
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['ratio', 4]]);
+});
+
+ok('where there is room again it is turned back up, a step at a time; a step up that had to be taken back makes it slower to try', () => {
+  // turned down to the fourth step, and then the machine has room (5 ms at the finest)
+  let w = F.createWatch(); w.level = 3;
+  let got = play(w, MAC, 40, machine(MAC, 1, 4));
+  assert.deepEqual(got.did.map((d) => d.slice(0, 2)), [['ratio', 2]], 'one step in the first forty seconds');
+  got = play(w, MAC, 120, machine(MAC, 1, 4));
+  assert.deepEqual(got.did.map((d) => d[1]), [1, 0]); assert.equal(w.level, 0);
+  assert.ok(got.did[1][2] - got.did[0][2] >= F.FINE.look, 'and the next no sooner than the wait');
+  assert.equal(w.wait, F.FINE.look, 'no step was taken back: it is as quick to look as it was');
+  got = play(w, MAC, 120, machine(MAC, 1, 4)); assert.deepEqual(got.did, []);
+  // …but not where the step finer would cost too much: 9 ms now, 12 a step up
+  w = F.createWatch(); w.level = 3; got = play(w, MAC, 120, machine(MAC, 2, 18));
+  assert.deepEqual(got.did, []); assert.ok(got.asked >= F.FINE.asks, 'it looked');
+  // a machine with a cliff the watch cannot foresee: cheap from the third step down, dear above it. Each time
+  // the step up is taken back, it waits twice as long before the next; in an hour it is taken back a handful of times
+  w = F.createWatch(); w.level = 3;
+  got = play(w, MAC, 3600, (x) => (x.level >= 2 ? [2, 3] : [2, 18]));
+  const back = got.did.filter((d, i) => i && d[1] > got.did[i - 1][1]).map((d) => d[2]);
+  assert.ok(back.length >= 3 && back.length <= 6, 'taken back ' + back.length + ' times in the hour (without the wait: about forty)');
+  for (let i = 2; i < back.length; i += 1) assert.ok(back[i] - back[i - 1] > 1.5 * (back[i - 1] - back[i - 2]), 'each wait longer than the last: ' + back);
+  assert.ok(w.wait > F.FINE.look && w.wait <= F.FINE.wary * F.FINE.look);
+});
+
+ok('a watch that was away drops what it was in the middle of; a frame of no length tells it nothing', () => {
+  const w = F.createWatch(); w.hold = 0; w.asking = 'down'; w.costs = [[1, 1], [2, 2]]; w.slow = 1.2;
+  F.rest(w); assert.deepEqual([w.asking, w.costs, w.slow], ['', [], 0]); assert.ok(w.hold >= F.FINE.settle / 2);
+  const before = JSON.stringify(w);
+  for (const ms of [0, -5, NaN, undefined]) assert.equal(F.watch(w, ms, null, MAC), null);
+  assert.equal(JSON.stringify(w), before);
+  // a canvas that came to have fewer steps (another screen): the step is brought within them
+  const v = F.createWatch(); v.level = 4; F.watch(v, VS, null, F.ratios(1, 1280, 800)); assert.equal(v.level, 2);
+});
+
+ok('an octopus arm ends in a point and its roll is turned to its own side: it does not look cut off', () => {
+  const o = read('src/game/bodies/octopus.js');
+  const tip = /const TIP = \[([\d.]+), ([\d.]+)\], fine = \(x\) => 1 - \(1 - TIP\[1\]\) \* sat\(\(x - 1 \+ TIP\[0\]\) \/ TIP\[0\]\) \*\* 2;/.exec(o);
+  assert.ok(tip, 'the taper is where it was');
+  const over = Number(tip[1]), to = Number(tip[2]), sat = (x) => Math.min(1, Math.max(0, x)), fine = (x) => 1 - (1 - to) * sat((x - 1 + over) / over) ** 2;
+  assert.ok(over >= 0.2 && over <= 0.4 && to <= 0.15, 'over the last few tenths, to a small share');
+  // the six it stands on (thick) and the two that hang (slim) both carry it
+  const thick = /thick = \(x\) => kt \* \(([\d.]+) \+ ([\d.]+) \* \(1 - x\) \*\* ([\d.]+)\) \* fine\(x\)/.exec(o);
+  const slim = /slim = \(u\) => kt \* \(([\d.]+) \+ ([\d.]+) \* \(1 - u\) \*\* ([\d.]+)\) \* fine\(u\)/.exec(o);
+  assert.ok(thick && slim);
+  for (const m of [thick, slim]) {
+    const was = (x) => Number(m[1]) + Number(m[2]) * (1 - x) ** Number(m[3]), r = (x) => was(x) * fine(x);
+    assert.ok(was(1) >= 0.005, 'what it ended as: a stump as thick as a finger\'s bone');
+    assert.ok(r(1) < 0.0012, 'what it ends as now, in metres: ' + r(1));
+    near(r(0.6), was(0.6), 1e-12, 'above the tip it is as thick as it was');
+    for (let i = 1; i <= 50; i += 1) assert.ok(r(i / 50) < r((i - 1) / 50), 'it only ever thins');
+  }
+  // the roll at the floor is turned toward the arm's own side of the body (a body's front is +Z): the two at the
+  // front and the two at the back turn outward, the two at the sides stay; none is turned across the body
+  const splay = Number(/const SPLAY = ([\d.]+);/.exec(o)[1]); assert.ok(splay >= 0.3 && splay <= 0.8);
+  assert.match(o, /sc: Math\.cos\(SPLAY \* Math\.sin\(2 \* a\)\), ss: Math\.sin\(SPLAY \* Math\.sin\(2 \* a\)\)/);
+  assert.match(o, /\[dx, dz\] = \[\(dx \* leg\.sc \+ dz \* leg\.ss\) \/ dl, \(dz \* leg\.sc - dx \* leg\.ss\) \/ dl\];/);
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i + 0.5) * Math.PI / 3, c = Math.cos(splay * Math.sin(2 * a)), s = Math.sin(splay * Math.sin(2 * a));
+    const x = Math.sin(a) * c + Math.cos(a) * s, z = Math.cos(a) * c - Math.sin(a) * s;      // an arm that reached straight out, turned as the code turns it
+    assert.ok(Math.sign(x) === Math.sign(Math.sin(a)) && Math.abs(x) >= Math.abs(Math.sin(a)) - 1e-12, 'arm ' + i + ' is turned toward its side');
+    assert.ok(Math.sign(z) === Math.sign(Math.cos(a)) || Math.abs(Math.cos(a)) < 1e-9, 'arm ' + i + ' still points fore or aft as it did');
+    near(Math.hypot(x, z), 1, 1e-12);
+  }
 });
 
 ok('GAME.md keeps the asks in his own words, and what has been done about each', () => {
