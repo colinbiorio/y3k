@@ -29,7 +29,8 @@
 //   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
 //          Howe Island, the island chosen and come to (its ground fetched and inflated), the body on its beach facing
 //          Mount Gower, walked inland and up, into the lagoon's shallows (rings on the water), flown out over the
-//          deep sea and let down into it to swim with its head out; the map with where the body is; the frames;
+//          deep sea and let down into it to swim with its head out; its palms, birds, woodhens and turtles counted;
+//          the map with where the body is; the frames;
 //          and back to the void
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
@@ -255,6 +256,8 @@ try {
     await faceYaw(-Math.PI / 2); const g0 = (await read()).world.ground;
     await key.down('KeyW'); await sleep(2600); await key.up('KeyW'); r = await until((r) => speed(r) < 0.1, 3000);
     check('walked inland, the ground rises under it', r.world.ground > g0 + 1 && Math.abs(r.p[1] - r.world.ground) < 0.05, { from: g0, to: r.world.ground });
+    await sleep(2500); r = await read(); out.life = r.world.life;
+    check('its life is there: palms round the body, terns in the air, tropicbirds on the cliffs, woodhens near, turtles in the lagoon', r.world.life && r.world.life.palms > 200 && r.world.life.terns > 100 && r.world.life.tropicbirds === 8 && r.world.life.hens >= 6 && r.world.life.turtles === 6, r.world.life);
     out.frames = { island: await frames(2500) };
     await shot('03-inland');
     // back west into the lagoon's shallows

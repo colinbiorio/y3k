@@ -19,6 +19,7 @@ import * as HO from './house.js';
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
 export const REACH = 9;                               // m: within this of a building's door, the build key takes it down
+export const TRUNK = 0.22;                            // m: a palm's trunk, to a body (life.js PALM.trunk)
 
 // the kinds, each as its module answers: placing, solving, inside, the eye, the sun, how it goes up, where its door is
 export const KINDS = {
@@ -37,6 +38,7 @@ export function createWorld() {
   const w = {
     buildings: [],
     ground: null,                       // the island's ground (island/ground.js), or none: the void's still water
+    trunks: null,                       // the palms' trunks near a point (island/life.js), or none
     // a building of a kind put up in front of the body: another of its kind comes down; one would stand on another: not built
     build(body, kind = 'shelter') {
       const k = KINDS[cleanBuilding(kind)], b = k.place(body);
@@ -77,6 +79,11 @@ export function createWorld() {
         const G = w.ground, at = s.p[1] < G.height(s.p[0], s.p[2]) + 0.6 ? G.step(s.was || s.p, s.p) : s.p;
         s.p[0] = at[0]; s.p[2] = at[2];
         floor = G.floor(s.p[0], s.p[2]); s.depth = G.depth(s.p[0], s.p[2]); s.swim = floor > G.height(s.p[0], s.p[2]) + 0.01;
+        // the palms' trunks round it (life.js): out of them the short way
+        if (w.trunks) for (const t of w.trunks(s.p[0], s.p[2])) {
+          const dx = s.p[0] - t.x, dz = s.p[2] - t.z, d = Math.hypot(dx, dz), min = BODY.rad + TRUNK;
+          if (d < min && s.p[1] < t.y + t.h && d > 1e-6) { s.p[0] = t.x + (dx / d) * min; s.p[2] = t.z + (dz / d) * min; }
+        }
       } else { s.depth = 0; s.swim = false; }
       for (const b of w.buildings) {
         if (b.down >= 0) continue;

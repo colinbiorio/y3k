@@ -15,6 +15,8 @@
 import * as THREE from 'three';
 import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
 import { SEA_FLOOR } from './ground.js';
+import { vnoise } from './life.js';
+import { createLife } from './creatures.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -56,11 +58,6 @@ function groundColour(h, s, n, out) {
   // to the light's own units (the drawing works in linear light)
   out[0] = r ** 2.2 * 2.2; out[1] = g ** 2.2 * 2.2; out[2] = b ** 2.2 * 2.2;
 }
-const vnoise = (x, z) => {
-  const i = Math.floor(x), j = Math.floor(z), fx = x - i, fz = z - j, u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
-  const hh = (a, b) => { let t = (a * 374761393 + b * 668265263) | 0; t = (t ^ (t >>> 13)) * 1274126177; return ((t ^ (t >>> 16)) >>> 0) / 4294967296; };
-  return (hh(i, j) * (1 - u) + hh(i + 1, j) * u) * (1 - v) + (hh(i, j + 1) * (1 - u) + hh(i + 1, j + 1) * u) * v;
-};
 
 // One grid as a mesh: the cells any corner of which is above `deepest`, as the two triangles ground.js stands on
 function gridMesh(a, w, h, x0, z0, S, deepest) {
@@ -226,6 +223,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = 2; sea.frustumCulled = false;
   scene.add(sea);
 
+  // ---- what grows and lives there (creatures.js, from life.js)
+  const life = createLife(scene, { lite, ground, shape });
+
   // ---- the lights, by name
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null, lightName = 'pale', indoor = 1;
@@ -249,7 +249,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   setLight(light);
 
   return {
-    scene, drops, place: 'island', ground, shape,
+    scene, drops, place: 'island', ground, shape, life,
     get light() { return lightName; },
     setLight,
     setIndoor(k) { indoor = k; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; },
@@ -263,8 +263,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       key.target.position.set(camera.position.x, 0, camera.position.z);
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
     },
+    // the island's life, a frame on: the palms round the body, the birds, the woodhens, the turtles
+    live(dt, t, body) { life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a)); },
     renderMirror() {},
     setScale() {},
-    dispose() { envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
+    dispose() { life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
   };
 }
