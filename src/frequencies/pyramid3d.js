@@ -7,6 +7,8 @@
 // on a post from the ledge below, riding half a metre above the surface; the
 // finished outline; and a person, 1.75 m, at a corner of the base. A low
 // morning sun, and the land round it all (land.js) under the morning's haze.
+// When the last course is in, the casing is dressed from the top down: the
+// pyramid white, as it stood.
 //
 // While the sound is on, the fronts leave each line of horns a wavelength
 // apart on the slowed clock and die out where the tone shocks; on the course,
@@ -67,6 +69,63 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   }
   courses.count = 0; courses.castShadow = true; courses.receiveShadow = true; courses.frustumCulled = false;
   group.add(courses);
+
+  // ---------------------------------------------------------------- the casing, once the last course is in
+  // White Tura limestone on the ideal faces (Petrie's 230.35 m and 146.71 m), in the courses' own
+  // bands. Its joints were half a millimetre (Petrie), so they are only the faintest lines close by.
+  // When the build is done it is dressed from the top down, a course at a time, over DRESS_S
+  // seconds of the clock on the wall. Drawn, not simulated (the dossier's §5 leaves the casing out);
+  // no pyramidion of the Great Pyramid survives, so the apex is in the casing's own stone, as the
+  // one found beside Sneferu's Red Pyramid is.
+  const DRESS_S = 4, still = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const casingU = { uFront: { value: HEIGHT_M + 1 }, uFresh: { value: 0 } };
+  const casing = new THREE.Mesh((() => {
+    const pos = [], band = [], b2 = BASE_M / 2, half = (y) => b2 * Math.max(0, 1 - y / HEIGHT_M);
+    const quad = (a, b, c, d) => { for (const v of [a, b, d, a, d, c]) pos.push(...v); };      // a b along the foot, c d above them
+    for (let i = 0; i < rows.length; i++) {
+      const y0 = rows[i].bottom, y1 = Math.min(rows[i].top, HEIGHT_M), h0 = half(y0), h1 = half(y1);
+      for (const [nx, nz] of SIDES) {
+        // seen from outside, going anticlockwise round the pyramid from above: left foot, right foot
+        const tx = nz, tz = -nx;
+        quad([nx * h0 - tx * h0, y0, nz * h0 - tz * h0], [nx * h0 + tx * h0, y0, nz * h0 + tz * h0],
+             [nx * h1 - tx * h1, y1, nz * h1 - tz * h1], [nx * h1 + tx * h1, y1, nz * h1 + tz * h1]);
+        for (let k = 0; k < 6; k++) band.push(i, y0, y1);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('aBand', new THREE.Float32BufferAttribute(band, 3));
+    g.computeVertexNormals();
+    return g;
+  })(), patch(new THREE.MeshStandardMaterial({ color: rgb(230, 222, 204), roughness: 0.42, metalness: 0, envMapIntensity: 0.2 }), 'casing', {
+    air, uniforms: casingU,
+    vertexHead: 'attribute vec3 aBand;\nvarying vec3 vBand;\n', vertex: 'vBand = aBand;\n',
+    fragmentHead: `uniform float uFront; uniform float uFresh; varying vec3 vBand;
+      float caseTone(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float caseNoise(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(caseTone(i), caseTone(i + vec2(1.0, 0.0)), u.x), mix(caseTone(i + vec2(0.0, 1.0)), caseTone(i + vec2(1.0, 1.0)), u.x), u.y); }\n`,
+    // dressed down to the front only; a bed joint at each course's foot and upright joints a block
+    // apart, staggered course by course, hairlines a pixel at most and gone once a pixel is wider than
+    // a few centimetres; each course and each block a shade of its own (the courses read as faint bands
+    // from afar, as the Bent Pyramid's casing does); the stone's own mottle close by; sand blown against
+    // its foot; the face just dressed a little brighter
+    fragment: `
+      if (vWp.y < uFront - 0.001) discard;
+      vec3 cN = normalize(cross(dFdx(vWp), dFdy(vWp)));
+      float bw = 1.5 + fract(sin(vBand.x * 12.9898) * 43758.5453);
+      float uq = (abs(cN.x) > abs(cN.z) ? vWp.z : vWp.x) / bw + fract(vBand.x * 0.618034);
+      float py = max(fwidth(vWp.y), 1e-5), pu = max(fwidth(uq) * bw, 1e-5);
+      float bed = (1.0 - smoothstep(0.0, py * 1.2, vWp.y - vBand.y)) * (1.0 - smoothstep(0.02, 0.08, py));
+      float rise = (1.0 - min(abs(fract(uq - 0.5) - 0.5) * bw / (pu * 1.2), 1.0)) * (1.0 - smoothstep(0.02, 0.08, pu));
+      float bandSeen = 1.0 - smoothstep(0.25, 0.6, py / max(vBand.z - vBand.y, 0.05));
+      float tone = 1.0 + bandSeen * 0.05 * (caseTone(vec2(vBand.x, 3.7)) - 0.5) + 0.07 * (caseTone(vec2(floor(uq), vBand.x)) - 0.5) * (1.0 - smoothstep(0.1, 0.5, pu));
+      tone *= 1.0 + 0.06 * (caseNoise(vec2(uq * bw, vWp.y) / 0.45) - 0.5) * (1.0 - smoothstep(0.02, 0.1, max(py, pu)));
+      diffuseColor.rgb *= (1.0 - 0.2 * max(bed, rise)) * tone;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.47, 0.3), 0.22 * (1.0 - smoothstep(0.0, 9.0, vWp.y)));
+      totalEmissiveRadiance += vec3(1.0, 0.93, 0.8) * uFresh * 0.35 * (1.0 - smoothstep(0.0, 2.5, vWp.y - uFront));`,
+  }));
+  casing.visible = false; casing.castShadow = true; casing.receiveShadow = true;
+  group.add(casing);
 
   // ---------------------------------------------------------------- the course being made
   // While its aggregate arrives (part 0..1) the sand is dry, and the sound heaps it where the air is
@@ -188,13 +247,15 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   fronts.setColorAt(0, C.setRGB(0, 0, 0));
   group.add(fronts);
 
-  // ---------------------------------------------------------------- the finished outline, and a person
+  // ---------------------------------------------------------------- the finished outline (until the casing stands on it), and a person
+  let outline = null;
   { const b = BASE_M / 2, p = [];
     const corners = [[-b, 0, -b], [b, 0, -b], [b, 0, b], [-b, 0, b]];
     for (let i = 0; i < 4; i++) p.push(...corners[i], ...corners[(i + 1) % 4], ...corners[i], 0, HEIGHT_M, 0);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(p), 3));
-    group.add(new THREE.LineSegments(g, hazed(new THREE.LineBasicMaterial({ color: rgb(236, 226, 206), transparent: true, opacity: 0.35, depthWrite: false }), 'outline', air))); }
+    outline = new THREE.LineSegments(g, hazed(new THREE.LineBasicMaterial({ color: rgb(236, 226, 206), transparent: true, opacity: 0.35, depthWrite: false }), 'outline', air));
+    group.add(outline); }
   const person = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.31, 4, 12), hazed(new THREE.MeshStandardMaterial({ color: rgb(236, 238, 246), roughness: 0.6, emissive: rgb(90, 100, 130) }), 'person', air));
   person.position.set(BASE_M / 2 + 4, 0.875, BASE_M / 2 + 4); person.castShadow = true;
   group.add(person);
@@ -220,10 +281,22 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   // built: how many courses are done; current: the course being made (a schedule row) or null;
   // part: how much of its aggregate has arrived, 0..1; setPart: how far it has set, 0..1; list:
   // its horns (x and y from the axis, z above the working surface); tau: the slowed clock;
-  // sound: whether the tone is on.
-  let top = 0, shownCourse = -1, shownTop = -1;
+  // sound: whether the tone is on. True while the casing is being dressed (the stage keeps drawing).
+  let top = 0, shownCourse = -1, shownTop = -1, doneAt = 0;
   function set({ built = 0, current = null, part = 0, setPart = 0, list = [], tau = 0, sound = false } = {}) {
-    courses.count = built;
+    const done = !current && built >= rows.length;
+    let dressing = false;
+    if (done) {
+      // the front steps down a course at a time; the courses below it are as built, undressed
+      const now = performance.now();
+      if (!doneAt) doneAt = now;
+      const r = still ? 1 : Math.min(1, (now - doneAt) / (DRESS_S * 1000)), yf = HEIGHT_M * (1 - r);
+      let k = rows.length;
+      while (k > 0 && rows[k - 1].top > yf + 1e-6) k--;
+      courses.count = k; casingU.uFront.value = k ? rows[k - 1].top : 0;
+      dressing = r < 1; casingU.uFresh.value = dressing ? 1 : 0;
+    } else { doneAt = 0; courses.count = built; }
+    casing.visible = done; outline.visible = !done;
     slab.visible = !!current; lCourse.on = !!current;
     let nf = 0;
     if (current) {
@@ -259,6 +332,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     if (nf) { fronts.instanceMatrix.needsUpdate = true; fronts.instanceColor.needsUpdate = true; frontU.uPix.value = stage.pix() * 3.2; }
     wave.uTau.value = tau; wave.uOn.value = sound && current ? 1 : 0; wave.uHalf.value = current ? current.side / 2 : 1;
     wave.uPart.value = current ? part : 0; wave.uWet.value = current && setPart > 0 ? 1 : 0; wave.uSet.value = setPart; wave.uTime.value = (performance.now() / 1000) % 600;
+    return dressing;
   }
 
   // each horn's share of what is heard where the camera stands, 0..1 (null: none)
@@ -300,6 +374,6 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     sun: { center: [0, 40, 0], radius: 300, dir: sunDir, follow: true, least: 14, reach: 700, beyond: 900 },
     look: { top: rgb(46, 86, 160), mid: rgb(122, 154, 200), low: rgb(204, 202, 202), warm: rgb(246, 222, 186), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
       sun: [rgb(255, 222, 186), 3.5], hemi: [rgb(150, 176, 222), rgb(150, 122, 90), 0.72], exposure: 1.0, glow: 1, grid: 0, dunes: 0 },
-    hit, set, glow,
+    hit, set, glow, get cased() { return casing.visible && casingU.uFront.value <= 0; },
   };
 }

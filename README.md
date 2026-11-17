@@ -261,6 +261,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning, last) — **The finished pyramid is cased white,
+  dressed from the top down** (`src/frequencies/pyramid3d.js`). When the
+  last course goes in, the casing sweeps down the pyramid a course at a time
+  over four seconds (at once with reduced motion): white Tura limestone on
+  the ideal faces, in the courses' own bands, hairline joints close by (they
+  were half a millimetre, Petrie) and faint banding from afar, sand blown
+  against its foot. The apex is the casing's own stone, since no pyramidion
+  of the Great Pyramid survives (the one found beside Sneferu's Red Pyramid
+  is white Tura limestone). Drawn, not simulated: FREQUENCIES.md §9. Suite
+  35 (1 new); the smokes now wait for the casing: desk 34/34, phone 27/27 on
+  the GPU, 60 frames a second.
+
 - **2026-11-17** (morning, later still) — **The pyramid's working course
   forms before your eyes** (`src/frequencies/pyramid3d.js`). Up close, the
   course being made now shows the method itself: dry sand heaped by the
