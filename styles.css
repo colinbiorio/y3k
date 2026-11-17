@@ -2769,6 +2769,11 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 }
 .freq-label.far::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 9px; background: rgba(255, 252, 244, 0.65); box-shadow: 0 0 2px rgba(24, 16, 8, 0.5); }
 .freq-label.far.east { --ax: -3px; } .freq-label.far.east::after { left: 2px; }
+/* a star's name, just to the right of it */
+.freq-label.star {
+  --ax: 9px; padding: 0; font-size: 10.5px; letter-spacing: 0.04em; color: rgba(214, 224, 255, 0.82); background: none; border: 0;
+  -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: 0 0 6px rgba(4, 6, 14, 0.9);
+}
 .freq-label.far.west { --ax: calc(-100% + 3px); } .freq-label.far.west::after { left: auto; right: 2px; }
 .freq-hud { position: absolute; z-index: 2; display: flex; gap: 6px; pointer-events: none; }
 .freq-hud > * { pointer-events: auto; }

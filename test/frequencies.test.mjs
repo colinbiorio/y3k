@@ -17,6 +17,8 @@ import * as S from '../src/frequencies/sand.mjs';
 import * as O from '../src/frequencies/orbit.mjs';
 import * as G from '../src/frequencies/giza.mjs';
 import * as SUN from '../src/frequencies/sun.mjs';
+import * as NIGHT from '../src/frequencies/night.mjs';
+import * as BSC from '../src/frequencies/bsc.js';
 import { hornSpec, WAVE_HZ, buildAt, courseHorns } from '../src/frequencies.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -492,8 +494,41 @@ ok('the sun over Giza: the seasons\' declinations, south at noon at 90° − lat
   for (let e = -12; e <= 70; e += 0.5) { const L = SUN.lightFor(e); assert.ok([...L.top, ...L.mid, ...L.low, ...L.warm, ...L.sun].every((v) => v >= 0 && v <= 255) && L.exposure > 0, 'a colour out of range at ' + e); }
   const room = read('src/frequencies.js'), stage = read('src/frequencies/stage.js'), pyr = read('src/frequencies/pyramid3d.js');
   assert.ok(room.includes('class="freq-sun"') && /class="freq-sun"[^>]*aria-label="[^"]+"/.test(room) && room.includes('pyr?.sky(sunHours);'), 'the sun has no control, or it moves nothing');
-  assert.ok(pyr.includes('const first = skyAt(hours);') && pyr.includes('sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); return k.at; },'), 'the pyramid\'s sun is not the sun\'s');
+  assert.ok(pyr.includes('const first = skyAt(hours);') && pyr.includes('sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); stars.at(h, k.at.elevation); return k.at; },'), 'the pyramid\'s sun is not the sun\'s');
   assert.ok(stage.includes('sunUp = L.sun[1] > 0;') && stage.includes('sun.castShadow = sunUp && step.shadow > 0;'), 'a sun under the horizon still casts shadows');
+});
+
+ok('the night of Khufu\'s reign: Meeus\' worked precession, Thuban the pole star about 2800 BCE, the Pleiades at the spring equinox; the stars where they stand at an hour', () => {
+  // Meeus, Astronomical Algorithms, example 21.b: theta Persei from J2000 to 2028 November 13.19, with its proper motion
+  const a0 = (2 + 44 / 60 + 11.986 / 3600) * 15, d0 = 49 + 13 / 60 + 42.48 / 3600, yrs = (2462088.69 - 2451545) / 365.25;
+  const [a1, d1] = NIGHT.precess(...NIGHT.moved(a0, d0, 0.03425 * 15 * 1000 * Math.cos((d0 * Math.PI) / 180), -89.5, yrs), yrs / 100);
+  near(a1, (2 + 46 / 60 + 11.331 / 3600) * 15, 0.0003, 'its right ascension'); near(d1, 49 + 20 / 60 + 54.54 / 3600, 0.0003, 'its declination');
+  const [ra0, de0] = NIGHT.precess(123.4, -56.7, 0); near(ra0, 123.4, 1e-9, 'no time, no precession'); near(de0, -56.7, 1e-9, 'no time, no precession');
+  const S = NIGHT.decodeStars(BSC.PACKED, BSC.MOVING, BSC.COUNT), star = (k) => { const i = BSC.NAMED[k]; return [S.ra[i], S.dec[i], S.pa[i], S.pd[i]]; };
+  assert.ok(BSC.COUNT > 4800 && BSC.COUNT < 5200, 'the catalogue to the sixth magnitude: ' + BSC.COUNT);
+  near(S.mag[BSC.NAMED.sirius], -1.46, 0.04, 'Sirius'); near(S.mag[BSC.NAMED.vega], 0.03, 0.04, 'Vega'); near(S.ra[BSC.NAMED.sirius], 101.287, 0.01, 'Sirius\' place'); near(S.dec[BSC.NAMED.polaris], 89.264, 0.01, 'Polaris\' place');
+  assert.ok([...S.mag].every((m, i) => m <= 6.0 + 1 / 60 && (!i || m >= S.mag[i - 1] - 1e-6)), 'brightest first, and none fainter than the sixth magnitude (packed to a thirtieth)');
+  const [pa, pd] = star('arcturus').slice(2);
+  near(Math.hypot(pa, pd) * 4559 / 3.6e6, 2.884, 0.01, 'Arcturus\' own motion over the 4,559 years: nearly three degrees');
+  let best = [1e9, 0];
+  for (let y = -3500; y <= -2000; y += 10) { const [, d] = NIGHT.atEpoch(...star('thuban'), y - 2000); if (90 - d < best[0]) best = [90 - d, y]; }
+  assert.ok(best[0] < 0.2 && best[1] > -2950 && best[1] < -2650, 'Thuban\'s nearest the pole: ' + best);
+  near(90 - NIGHT.atEpoch(...star('thuban'))[1], 1.3, 0.2, 'Thuban in 2560 BCE'); assert.ok(90 - NIGHT.atEpoch(...star('polaris'))[1] > 20, 'Polaris far from the pole then');
+  const pleiades = NIGHT.atEpoch(...star('alcyone'))[0]; assert.ok(Math.min(pleiades, 360 - pleiades) < 12, 'the Pleiades near the spring equinox: ' + pleiades);
+  near(NIGHT.obliquity(NIGHT.YEARS / 100), 23.98, 0.02, 'the obliquity then'); near(NIGHT.sunLongitude(NIGHT.NOVEMBER_17), 235.1, 0.3, 'the sun\'s longitude on 17 November');
+  const lat = SUN.GIZA.lat, zen = NIGHT.direction(77, lat, 77), pole = NIGHT.direction(0, 90, 123);
+  near(zen[1], 1, 1e-12, 'a star of the latitude\'s declination on the meridian is overhead');
+  near(pole[1], Math.sin((lat * Math.PI) / 180), 1e-12, 'the pole is as high as the latitude'); assert.ok(pole[2] < 0 && Math.abs(pole[0]) < 1e-12, 'and due north');
+  const rising = NIGHT.direction(0, 0, -90); assert.ok(Math.abs(rising[1]) < 1e-12 && rising[0] > 0.99, 'six hours before it crosses the meridian a star of the equator rises due east');
+  assert.ok(NIGHT.limit(5) < -1.5 && NIGHT.limit(-18) >= 5.99 && NIGHT.limit(-6) < NIGHT.limit(-10), 'none by day, the sixth magnitude in the dark');
+  assert.ok(NIGHT.seen(1, 45, -20) && !NIGHT.seen(5.5, 1, -20) && !NIGHT.seen(1, -2, -20) && !NIGHT.seen(0, 45, 10), 'the air near the horizon, the ground and the day hide them');
+  near(NIGHT.airmass(90), 1, 0.001, 'one air mass overhead'); within(NIGHT.airmass(0), 35, 45, 'about forty at the horizon');
+  assert.deepEqual(NIGHT.bvColour(-0.4), [155, 176, 255]); assert.deepEqual(NIGHT.bvColour(2.5), [255, 165, 90]);
+  const sf = read('src/frequencies/starfield.js'), stage = read('src/frequencies/stage.js'), pyr = read('src/frequencies/pyramid3d.js');
+  assert.ok(sf.includes('gl_Position = p.xyww;') && sf.includes('depthWrite: false'), 'the stars are not at the sky\'s distance, behind everything');
+  assert.ok(stage.includes('vec3 milky(vec3 d)') && stage.includes('air.uGalGlow.value = 0; s.onLight?.();'), 'the Milky Way is missing, or stays in the sandbox');
+  assert.ok(pyr.includes('stars.at(h, k.at.elevation)') && pyr.includes("hit({ ray: { origin: o, direction: d } }) !== null"), 'the night does not follow the hour, or names show through the pyramid');
+  assert.ok(!/export (const|function) then\b/.test(read('src/frequencies/night.mjs')), 'a module exporting `then` is taken for a promise by import()');
 });
 
 console.log(`\n${passed} checks passed.`);

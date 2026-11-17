@@ -56,8 +56,8 @@ async function loadPlaywright() {
   return { pw, exe: gpu ? build('chromium-', 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
     : build('chromium_headless_shell-', 'chrome-headless-shell-mac-arm64/chrome-headless-shell') };
 }
-// the mean colour of a PNG (as a page screenshot gives it: 8 bits, RGB or RGBA, not interlaced)
-function meanColour(png) {
+// a PNG's pixels (as a page screenshot gives it: 8 bits, RGB or RGBA, not interlaced)
+function pixelsOf(png) {
   let at = 8, w = 0, h = 0, type = 0;
   const idat = [];
   while (at < png.length) {
@@ -75,8 +75,19 @@ function meanColour(png) {
       px[o + i] = (src[i] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
     }
   }
+  return { w, h, bpp, px, sum };
+}
+// its mean colour, and its brightest pixel (the largest of the three channels)
+function meanColour(png) {
+  const { w, h, bpp, px, sum } = pixelsOf(png);
   for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) sum[k] += px[i * bpp + k];
   return sum.map((v) => Math.round(v / (w * h)));
+}
+function brightest(png) {
+  const { w, h, bpp, px } = pixelsOf(png);
+  let most = 0;
+  for (let i = 0; i < w * h; i++) most = Math.max(most, px[i * bpp], px[i * bpp + 1], px[i * bpp + 2]);
+  return most;
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
@@ -171,9 +182,20 @@ try {
     await sleep(700 * slow);
     const duskSky = await skyNow(), d = (await read()).sun, say = await page.locator('[data-read="sun"]').textContent();
     out.reads.sun = { morning: m, morningSky, dusk: d, duskSky, say };
-    check('the sun slider sets the hour: after sunset the sky darkens and the sun is under the horizon', m.elevation > 10 && d.elevation < 0 && duskSky.reduce((a, v) => a + v) < morningSky.reduce((a, v) => a + v) - 60 && /^17:36 · \d+° down$/.test(say), { m, d, morningSky, duskSky, say });
+    check('the sun slider sets the hour: after sunset the sky darkens and the sun is under the horizon', m.elevation > 10 && d.elevation < 0 && duskSky.reduce((a, v) => a + v) < morningSky.reduce((a, v) => a + v) - 60 && /^17:36 · \d+° down, twilight$/.test(say), { m, d, morningSky, duskSky, say });
     await shot('pyramid-dusk');
+    // the night: the stars as they stood in Khufu's reign, the Milky Way, and their names; looking up to the south-south-east
+    await page.locator('.freq-sun').evaluate((el) => { el.value = '21'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    const home = (await read()).stage;
+    await page.evaluate(() => window.Y3K.frequencies.aim({ target: [0, 160, 0], dist: 300, polar: 2.12, az: 3.6 }));
+    await sleep(900 * slow);
+    const n = (await read()).night, top = await page.screenshot({ clip: { x: box.x + 20, y: box.y + 110, width: box.width - 40, height: box.height * 0.45 } });
+    const names = await page.locator('.freq-label.star').evaluateAll((els) => els.filter((e) => e.style.display !== 'none').map((e) => e.textContent));
+    out.reads.night = { ...n, star: brightest(top), sky: meanColour(top), labelled: names };
+    check('at night the stars of Khufu\'s reign are out, with the Milky Way and their names', n.shown > 1000 && n.limit >= 5.9 && n.milkyWay === 1 && n.names.includes('thuban') && brightest(top) > 180 && meanColour(top).every((c) => c < 60) && names.some((t) => /Sirius|Orion/.test(t)), out.reads.night);
+    await shot('pyramid-night');
     await page.locator('.freq-sun').evaluate((el) => { el.value = '8.25'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.evaluate((v) => window.Y3K.frequencies.aim(v), { target: home.target, dist: home.dist, polar: home.polar, az: home.az });
     await sleep(400 * slow); }
   // seen whole on first sight: the stage's foot is inside the frame's window (not under its lower edge)
   if (!phone) {

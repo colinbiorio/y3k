@@ -261,6 +261,22 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning, last) — **The pyramid's night: the stars of Khufu's
+  reign** (`src/frequencies/night.mjs`, `bsc.js`, `starfield.js`;
+  `scripts/stars/bsc_build.py`; `stage.js`, `pyramid3d.js`, `sun.mjs`). The
+  sun's slider now runs through the whole day and night, and after dusk the
+  real sky comes out over Giza as it stood c. 2560 BCE: 5,023 stars of the
+  Yale Bright Star Catalogue (to the sixth magnitude, from NASA HEASARC),
+  carried back along their own motions and by the precession of the
+  equinoxes (IAU 1976, as Meeus gives it; his worked example reproduced to
+  the arcsecond). Thuban is the pole star, the Pleiades sit at the spring
+  equinox, Orion and Sirius rise where they then rose, and the Milky Way
+  arches over the pyramid. A few stars carry names, never through the
+  pyramid. What is placed and what is drawn: FREQUENCIES.md §9. Suite 38
+  (1 new); desk 39/39 and phone 32/32 on the GPU, 60 frames a second; the
+  smoke goes to 21:00, looks up, and finds the stars, the Milky Way and
+  their names.
+
 - **2026-11-17** (morning, later) — **The pyramid's sun moves through the day**
   (`src/frequencies/sun.mjs`, `stage.js`, `pyramid3d.js`, `frequencies.js`).
   A new slider, "the sun", sets the hour by the sun at Giza on 17 November,
