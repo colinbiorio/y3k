@@ -261,6 +261,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning, later) — **The pyramid stands in its land**
+  (`src/frequencies/giza.mjs`, `land.js`, `air.js`; `stage.js`, `kit.js`,
+  `pyramid3d.js`). The flat brown plane is gone: the Great Pyramid now stands
+  at the north-east corner of the Giza plateau with the valley 42 m below,
+  its fields and palms, a branch of the Nile at the plateau's foot (Sheisha
+  et al. 2022) and the river beyond, the Muqattam hills across, and on the
+  southern horizon the pyramids already standing then (Djoser's at Saqqara,
+  14 km; Sneferu's Red and Bent at Dahshur, 20 and 22 km), named where they
+  are. Under it all, one air: a morning sky warmer under the sun and a haze
+  and valley mist that fade far land into that sky exactly; the Earth's curve;
+  close up, grit and wind ripples in the sand. What is placed from a source
+  and what is drawn: FREQUENCIES.md §9. The land's shape is pure and tested
+  (3 new checks, 33); its edges ride on the mesh's points so the GPU work
+  stays light: the desk smoke holds 60 frames a second through the build
+  (p95 16.7 ms, as before) and now checks the land by its colours: 33/33 on
+  the GPU, the phone 26/26.
+
 - **2026-11-17** (morning) — **The frequencies stage is seen whole on first
   sight** (`styles.css`). At 1280 × 800 its foot (the scale, the hints, the
   level at your ear) sat under the frame's lower edge. It is now as tall as

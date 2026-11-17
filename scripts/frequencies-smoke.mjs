@@ -24,6 +24,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
+import { inflateSync } from 'node:zlib';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -54,6 +55,28 @@ async function loadPlaywright() {
   };
   return { pw, exe: gpu ? build('chromium-', 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
     : build('chromium_headless_shell-', 'chrome-headless-shell-mac-arm64/chrome-headless-shell') };
+}
+// the mean colour of a PNG (as a page screenshot gives it: 8 bits, RGB or RGBA, not interlaced)
+function meanColour(png) {
+  let at = 8, w = 0, h = 0, type = 0;
+  const idat = [];
+  while (at < png.length) {
+    const len = png.readUInt32BE(at), kind = png.toString('ascii', at + 4, at + 8), body = png.subarray(at + 8, at + 8 + len);
+    if (kind === 'IHDR') { w = body.readUInt32BE(0); h = body.readUInt32BE(4); type = body[9]; }
+    else if (kind === 'IDAT') idat.push(body);
+    at += 12 + len;
+  }
+  const bpp = type === 6 ? 4 : 3, raw = inflateSync(Buffer.concat(idat)), row = w * bpp, px = Buffer.alloc(row * h), sum = [0, 0, 0];
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (row + 1)], src = raw.subarray(y * (row + 1) + 1, (y + 1) * (row + 1)), o = y * row;
+    for (let i = 0; i < row; i++) {
+      const a = i >= bpp ? px[o + i - bpp] : 0, b = y ? px[o - row + i] : 0, c = i >= bpp && y ? px[o - row + i - bpp] : 0;
+      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+      px[o + i] = (src[i] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
+    }
+  }
+  for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) sum[k] += px[i * bpp + k];
+  return sum.map((v) => Math.round(v / (w * h)));
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
@@ -102,7 +125,8 @@ try {
   const read = () => page.evaluate(() => window.Y3K?.frequencies?.read?.() || null);
   const until = async (fn, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const r = await read(); if (r && fn(r)) return r; await sleep(80); } out.notes.push('timed out waiting: ' + fn); return read(); };
   // the stage alone (it may be scrolled half out of the page by then), and the page once
-  const shot = async (name) => { await sleep(500 * slow); await page.locator('.freq-stage').screenshot({ path: join(SHOTS, scene + '-' + name + '.png') }); out.reads[name] = await read(); };
+  // the stage alone, brought to the middle of the window first (so nothing of the site's frame lies over it)
+  const shot = async (name) => { await inView(); await sleep(500 * slow); await page.locator('.freq-stage').screenshot({ path: join(SHOTS, scene + '-' + name + '.png') }); out.reads[name] = await read(); };
   const pageShot = async (name) => { await page.evaluate(() => window.scrollTo(0, 0)); await sleep(400); await page.screenshot({ path: join(SHOTS, scene + '-page-' + name + '.png') }); };
   const inView = async () => { await page.locator('.freq-stage').evaluate((el) => el.scrollIntoView({ block: 'center' })); await sleep(300); };
   const press = (sel) => page.locator(sel).first().click({ timeout: 8000 });
@@ -122,6 +146,23 @@ try {
   const s = r.stage, want = Math.min(dpr, 3, Math.sqrt(8.3e6 / (s.css[0] * s.css[1])));
   check('drawn at the screen\'s own pixels', Math.abs(s.px[0] - Math.round(s.css[0] * want)) <= 1 && Math.abs(s.px[1] - Math.round(s.css[1] * want)) <= 1, s);
   await shot('pyramid-start');
+  // the land round it: the valley below the plateau green, and the sky above the horizon blue
+  { const box = await stageBox(), colour = async (p) => {
+      const at = await where(p);
+      if (!at || at[2] >= 1 || at[0] < 6 || at[1] < 6 || at[0] > box.width - 6 || at[1] > box.height - 6) return null;     // on the stage, in front
+      // nothing of the room's own (a name, a button) may lie over the place looked at
+      if (await page.evaluate(([x, y]) => document.elementsFromPoint(x, y).some((e) => e.closest?.('.freq-label, .freq-hud')), [box.x + at[0], box.y + at[1]])) return null;
+      return page.screenshot({ clip: { x: box.x + at[0] - 4, y: box.y + at[1] - 4, width: 8, height: 8 } }).then(meanColour);
+    };
+    // the first bare sand in sight: beside the pyramid on a wide stage, or between it and the eye on a tall one
+    const st = (await read()).stage, e = st.eye, t = st.target, h = Math.hypot(t[0] - e[0], t[2] - e[2]);
+    let sand = null;
+    for (const p of [[450, 0, 0], [300, 0, 160], ...[150, 190, 230].map((d) => [e[0] + ((t[0] - e[0]) / h) * d, 0, e[2] + ((t[2] - e[2]) / h) * d])]) if ((sand = await colour(p))) break;
+    const valley = await colour([900, -42, -1300]);
+    const sky = await page.screenshot({ clip: { x: box.x + box.width / 2 - 4, y: box.y + 30, width: 8, height: 8 } }).then(meanColour);
+    out.reads.land = { valley, sand, sky };
+    const green = (c) => c[1] - (c[0] + c[2]) / 2;
+    check('the land is drawn: the valley greener than the sand, the sky blue', valley && sand && green(valley) > green(sand) + 10 && sky[2] > sky[0] + 20, { valley, sand, sky }); }
   await pageShot('pyramid');
   // seen whole on first sight: the stage's foot is inside the frame's window (not under its lower edge)
   if (!phone) {
@@ -213,7 +254,7 @@ try {
   out.frames.sandbox = await frames();
   await shot('sandbox-block');
   await press('[data-horn="3"]');
-  r = await until((r) => r.solo === 3);
+  r = await until((r) => r.solo === 3 && r.bright === 1);           // its light follows on the next frame drawn
   check('a horn heard alone, and alone alight', r.solo === 3 && r.heardDb > 40 && r.bright === 1, { solo: r.solo, heardDb: r.heardDb, bright: r.bright });
   await shot('sandbox-alone');
   await press('[data-act="all"]');

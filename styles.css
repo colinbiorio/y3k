@@ -2762,6 +2762,14 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .freq-label.tag { font-variant-numeric: tabular-nums; font-weight: 500; }
 .freq-label.tag.on { color: #101216; background: rgba(214, 219, 228, 0.92); border-color: transparent; }
 .freq-label.tip { font-size: 12px; padding: 4px 10px; border-radius: 9px; color: #fff; background: rgba(8, 10, 16, 0.78); font-variant-numeric: tabular-nums; }
+/* a far thing's name, standing over it on a thin stem */
+.freq-label.far {
+  margin-top: -17px; padding: 0 2px; font-size: 10.5px; color: rgba(255, 252, 244, 0.92); background: none; border: 0;
+  -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: 0 1px 2px rgba(24, 16, 8, 0.8), 0 0 8px rgba(24, 16, 8, 0.35);
+}
+.freq-label.far::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 9px; background: rgba(255, 252, 244, 0.65); box-shadow: 0 0 2px rgba(24, 16, 8, 0.5); }
+.freq-label.far.east { --ax: -3px; } .freq-label.far.east::after { left: 2px; }
+.freq-label.far.west { --ax: calc(-100% + 3px); } .freq-label.far.west::after { left: auto; right: 2px; }
 .freq-hud { position: absolute; z-index: 2; display: flex; gap: 6px; pointer-events: none; }
 .freq-hud > * { pointer-events: auto; }
 .freq-tl { top: 14px; left: 16px; flex-direction: column; gap: 3px; max-width: 62%; }

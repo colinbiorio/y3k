@@ -163,7 +163,7 @@ export function createFrequencies({ toast } = {}) {
     root.addEventListener('click', onClick);
     root.addEventListener('input', onInput);
     root.addEventListener('change', onChange);
-    if (typeof window !== 'undefined' && window.Y3K) window.Y3K.frequencies = { read, screenOf: (p) => stage?.screenOf(p) || null };
+    if (typeof window !== 'undefined' && window.Y3K) window.Y3K.frequencies = { read, screenOf: (p) => stage?.screenOf(p) || null, aim };
     load();
     render();
   }
@@ -546,6 +546,16 @@ export function createFrequencies({ toast } = {}) {
     if (tool === 'look' || !on) sand.cursor(null);
     else sand.cursor(hit.x, hit.y, tool === 'horn' ? spec.mouthDiameter / 2 : RADIUS[tool]);
     stage.mark();
+  }
+
+  // the eye put somewhere at once (target, dist, polar, az: any of them), for a look from outside
+  function aim(v) {
+    const o = (tab === 'pyramid' ? pyr : sand)?.orbit;
+    if (!o || !stage) return false;
+    tour = follow = false;
+    go(o, v); o.now = { target: [...o.target], dist: o.dist, polar: o.polar, az: o.az }; o.rate = 0;
+    stage.mark();
+    return true;
   }
 
   // ---------------------------------------------------------------- the pyramid's places to go
