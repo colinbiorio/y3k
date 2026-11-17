@@ -15,6 +15,7 @@ import * as A from '../src/frequencies/acoustics.mjs';
 import * as P from '../src/frequencies/pyramid.mjs';
 import * as S from '../src/frequencies/sand.mjs';
 import * as O from '../src/frequencies/orbit.mjs';
+import * as G from '../src/frequencies/giza.mjs';
 import { hornSpec, WAVE_HZ, buildAt, courseHorns } from '../src/frequencies.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -290,7 +291,7 @@ ok('where the sound comes from: each horn\'s own share at the listener is what i
   near(A.hear(hs, 135, ear).p, all.p, 1e-12, 'the sum unchanged by the shares');
   const room = read('src/frequencies.js'), kit = read('src/frequencies/kit.js');
   assert.ok(kit.includes("fragment: 'totalEmissiveRadiance += uGlow * vGlow;'") && room.includes('scene.glow(glowW);'), 'the share is not shown as light');
-  for (const f of ['src/frequencies/sandbox3d.js', 'src/frequencies/pyramid3d.js']) assert.ok(read(f).includes('glowing(bronze())') && read(f).includes('withGlow(hornGeometry('), f + ' horns cannot glow');
+  for (const f of ['src/frequencies/sandbox3d.js', 'src/frequencies/pyramid3d.js']) assert.ok(/glowing\(bronze\((\), air)?\)/.test(read(f)) && read(f).includes('withGlow(hornGeometry('), f + ' horns cannot glow');
 });
 
 ok('how loud the room plays: full at the air\'s 170 dB limit, every 20 dB of field is 10 dB at the speakers, never past full', () => {
@@ -388,9 +389,44 @@ ok('the room in the round is wired: three.js stays out of the first load; the to
   const stage = read('src/frequencies/stage.js'), kit = read('src/frequencies/kit.js');
   const sky = stage.slice(stage.indexOf('const sky = new THREE.Mesh'), stage.indexOf('sky.renderOrder'));
   assert.ok(sky.includes('#include <colorspace_fragment>') && !sky.includes('tonemapping_fragment'), 'the sky is tone-mapped: it would not meet the fog');
-  assert.ok(kit.includes("material.customProgramCacheKey = () => 'freq-' + name;"), 'two patched materials could share one program');
+  assert.ok(kit.includes("material.customProgramCacheKey = () => 'freq-' + name + (air ? '-air' : '');"), 'two patched materials could share one program');
   for (const f of ['src/frequencies/sandbox3d.js', 'src/frequencies/pyramid3d.js']) assert.ok(!read(f).includes("from './stage.js'"), f + ' imports the stage');
   assert.ok(read('styles.css').includes('.freq-stage:fullscreen') && read('styles.css').includes('touch-action: none'), 'the stage cannot fill the screen or be held');
+});
+
+ok('the land: the pyramid on level ground at the plateau\'s north-east corner, the valley 42 m below, the river, the hills across, the Earth\'s curve', () => {
+  for (let a = 0; a < 6.3; a += 0.3) for (const r of [0, 60, 120, 170]) near(G.groundAt(r * Math.cos(a), r * Math.sin(a)), 0, 0.01, 'the base is level');
+  near(G.groundAt(3000, -3000), -G.DROP, 1.2, 'the valley floor');
+  assert.equal(G.valleyAt(0, 300), 0); assert.equal(G.valleyAt(-200, -200), 0);
+  assert.ok(G.valleyAt(0, -700) > 0.99 && G.valleyAt(1100, 0) > 0.99, 'the valley north and east, within a kilometre');
+  for (let x = -60; x <= 260; x += 20) { const a = G.valleyAt(G.lineX(G.DESERT_EDGE, 0) + x - 10, 0), b = G.valleyAt(G.lineX(G.DESERT_EDGE, 0) + x + 10, 0); assert.ok(b >= a, 'the scarp only falls, going east'); }
+  assert.ok(G.waterAt(5800 + 210 * Math.sin(1.1), 0) && G.waterAt(G.BASIN.x, G.BASIN.z), 'the river and the basin are water');
+  for (const [x, z] of [[0, 0], [500, 0], [-3000, 2000], [G.ELDERS[0].x, G.ELDERS[0].z]]) assert.ok(!G.waterAt(x, z), 'no water on the desert');
+  assert.ok(G.groundAt(15000, 0) > 100, 'the hills stand above the plateau across the valley');
+  near(G.groundAt(20000, 5000) - G.heightAt(20000, 5000), (20000 ** 2 + 5000 ** 2) / (2 * G.EARTH_R), 1e-6, 'the curve');
+  const r = G.rings();
+  assert.ok(r[0] === 0 && r.at(-1) >= G.REACH && r.every((v, i) => !i || (v > r[i - 1] && v <= r[i - 1] * 1.046 + 41)), 'the rings');
+});
+
+ok('the elder pyramids stand where the sites are: Djoser\'s 14.4 km away at 146°, Sneferu\'s Red 20.2 km at 160° and Bent 22.2 km at 161°', () => {
+  const at = (lat, lon) => [(lon - 31.13417) * 96487, -(lat - 29.97917) * 110852];       // metres east and south of the Great Pyramid
+  const sites = { djoser: at(29.87127, 31.21639), red: at(29.80833, 31.20583), bent: at(29.79032, 31.20938) };
+  for (const e of G.ELDERS) { near(e.x, sites[e.key][0], 2, e.key + ' east'); near(e.z, sites[e.key][1], 2, e.key + ' south'); }
+  const bearing = (e) => (Math.atan2(e.x, -e.z) * 180) / Math.PI, km = (e) => Math.hypot(e.x, e.z) / 1000, [dj, red, bent] = G.ELDERS;
+  near(km(dj), 14.35, 0.05, 'Djoser'); near(bearing(dj), 146.4, 0.3, 'Djoser');
+  near(km(red), 20.16, 0.05, 'Red'); near(bearing(red), 159.9, 0.3, 'Red');
+  near(km(bent), 22.16, 0.05, 'Bent'); near(bearing(bent), 160.9, 0.3, 'Bent');
+  assert.ok(G.ELDERS.every((e) => G.valleyAt(e.x, e.z) === 0), 'all three on the desert');
+  near(red.height, 105, 1, 'the Red'); near(bent.height, 104.7, 0.5, 'the Bent'); near(dj.height, 62.5, 0.5, 'Djoser');
+});
+
+ok('the land and the air are wired: the pyramid stands on its land under its haze; the sky and the haze share one colour of the air', () => {
+  const pyr = read('src/frequencies/pyramid3d.js'), stage = read('src/frequencies/stage.js'), land = read('src/frequencies/land.js'), air = read('src/frequencies/air.js');
+  assert.ok(pyr.includes('const land = createLand(air);') && /land: true/.test(pyr) && /haze: \[/.test(pyr), 'the pyramid has no land or no haze');
+  assert.ok(stage.includes('scene.fog = s.haze ? null : fog;') && stage.includes('ground.visible = !s.land;'), 'the stage does not give way to a scene\'s own land and air');
+  assert.ok(stage.includes('${SKY_HEAD}') && air.includes('vec3 skyAt(vec3 d)') && air.includes('linearToOutputTexel(vec4(hzC, 1.0))'), 'the haze is not the sky\'s colour');
+  assert.ok(land.includes("import * as G from './giza.mjs';") && land.includes('G.heightAt(x, z)'), 'the land is not giza.mjs\'s');
+  for (const m of ["'stone', {\n    air,", "'working', {\n    air,", 'glowing(bronze(), air)', "'post', air", "'outline', air", "'person', air"]) assert.ok(pyr.includes(m), 'not hazed: ' + m);
 });
 
 console.log(`\n${passed} checks passed.`);

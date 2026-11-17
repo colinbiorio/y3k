@@ -5,7 +5,8 @@
 // slab that rises as its aggregate arrives, darker while damp and paler as it
 // sets; the plan's horns shoulder to shoulder around it, each at its true size
 // on a post from the ledge below, riding half a metre above the surface; the
-// finished outline; and a person, 1.75 m, at a corner of the base. A low sun.
+// finished outline; and a person, 1.75 m, at a corner of the base. A low
+// morning sun, and the land round it all (land.js) under the morning's haze.
 //
 // While the sound is on, the fronts leave each line of horns a wavelength
 // apart on the slowed clock and die out where the tone shocks; on the course,
@@ -17,7 +18,9 @@ import * as THREE from 'three';
 import { createOrbit } from './orbit.mjs';
 import { wavelength } from './acoustics.mjs';
 import { BASE_M, HEIGHT_M, STONE, LATTICE_HZ } from './pyramid.mjs';
-import { rgb, lin, patch, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
+import { rgb, lin, patch, hazed, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
+import { createLand } from './land.js';
+import { ELDERS, RIVER, heightAt } from './giza.mjs';
 
 const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ);
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
@@ -25,7 +28,7 @@ const SIDES = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const sideAt = (y) => BASE_M * (1 - y / HEIGHT_M);
 
 export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
-  const group = new THREE.Group(), labels = [];
+  const group = new THREE.Group(), labels = [], air = stage.air;
 
   // ---------------------------------------------------------------- the courses built
   const box = new THREE.BoxGeometry(1, 1, 1);
@@ -37,7 +40,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   box.setAttribute('aRow', new THREE.InstancedBufferAttribute(rowOf, 1));
   box.setAttribute('aInfo', new THREE.InstancedBufferAttribute(info, 3));
   const stone = patch(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: 0.3 }), 'stone', {
-    uniforms: { uPitch: { value: STONE.blockPlanM } },
+    air, uniforms: { uPitch: { value: STONE.blockPlanM } },
     vertexHead: 'attribute float aRow;\nattribute vec3 aInfo;\nvarying float vRow;\nvarying vec3 vInfo;\n', vertex: 'vRow = aRow; vInfo = aInfo;\n',
     fragmentHead: 'uniform float uPitch;\nvarying float vRow;\nvarying vec3 vInfo;\nfloat blockTone(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n',
     // the joints between blocks: a square grid on a course's top, upright joints on its face,
@@ -68,7 +71,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   const wave = { uTau: { value: 0 }, uOn: { value: 0 }, uPitch: { value: STONE.blockPlanM }, uHalf: { value: 1 }, uReach: { value: reach },
     uSet: { value: 0 }, uDry: { value: rgb(214, 198, 162) } };
   const slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), patch(new THREE.MeshStandardMaterial({ color: rgb(170, 140, 96), roughness: 0.97, metalness: 0, envMapIntensity: 0.25 }), 'working', {
-    uniforms: wave,
+    air, uniforms: wave,
     fragmentHead: 'uniform float uTau;\nuniform float uOn;\nuniform float uPitch;\nuniform float uHalf;\nuniform float uReach;\nuniform float uSet;\nuniform vec3 uDry;\n',
     fragment: `
       diffuseColor.rgb = mix(diffuseColor.rgb, uDry, uSet);
@@ -86,10 +89,10 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
 
   // ---------------------------------------------------------------- its horns, each on a post from the ledge below
   const mt = spec.mouthDiameter / 2, th = Math.min(spec.throatDiameter / 2, mt * 0.98), waist = th * Math.exp(Math.log(mt / th) * 0.45);
-  const metal = glowing(bronze()); metal.roughness = 0.42;   // a thousand horns: a little less mirror, so their facets do not glitter
+  const metal = glowing(bronze(), air); metal.roughness = 0.42;   // a thousand horns: a little less mirror, so their facets do not glitter
   const horns = new THREE.InstancedMesh(withGlow(hornGeometry(spec, 'mid'), HORNS), metal, HORNS);
   const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 6).translate(0, 0.5, 0),
-    new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 }), HORNS);
+    hazed(new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 }), 'post', air), HORNS);
   for (const m of [horns, posts]) { m.count = 0; m.frustumCulled = false; m.castShadow = true; group.add(m); }
 
   // ---------------------------------------------------------------- the fronts leaving each line of horns: flat lines on the course,
@@ -130,23 +133,22 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     for (let i = 0; i < 4; i++) p.push(...corners[i], ...corners[(i + 1) % 4], ...corners[i], 0, HEIGHT_M, 0);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(p), 3));
-    group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: rgb(236, 226, 206), transparent: true, opacity: 0.35, depthWrite: false }))); }
-  const person = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.31, 4, 12), new THREE.MeshStandardMaterial({ color: rgb(236, 238, 246), roughness: 0.6, emissive: rgb(90, 100, 130) }));
+    group.add(new THREE.LineSegments(g, hazed(new THREE.LineBasicMaterial({ color: rgb(236, 226, 206), transparent: true, opacity: 0.35, depthWrite: false }), 'outline', air))); }
+  const person = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.31, 4, 12), hazed(new THREE.MeshStandardMaterial({ color: rgb(236, 238, 246), roughness: 0.6, emissive: rgb(90, 100, 130) }), 'person', air));
   person.position.set(BASE_M / 2 + 4, 0.875, BASE_M / 2 + 4); person.castShadow = true;
   group.add(person);
 
-  // the far side of the desert: a low ring of dunes rising beyond three kilometres, so the horizon is
-  // land and not only haze (the picture's, not the survey's)
-  { const n = 360, pos = [], idx = [];
-    for (let i = 0; i <= n; i++) {
-      const a = (i / n) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
-      const h = 18 + 30 * (0.5 + 0.5 * Math.sin(a * 3 + 1.3)) * (0.55 + 0.45 * Math.sin(a * 11 + 0.4)) + 9 * Math.sin(a * 29 + 2.1) + 4 * Math.sin(a * 71);
-      pos.push(c * 2900, -0.5, s * 2900, c * 3700, h, s * 3700, c * 4600, h * 0.55, s * 4600);
-    }
-    for (let i = 0; i < n; i++) { const a = i * 3, b = a + 3; idx.push(a, a + 1, b, a + 1, b + 1, b, a + 1, a + 2, b + 1, a + 2, b + 2, b + 1); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
-    group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: rgb(156, 128, 98), roughness: 1, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.2 }))); }
+  // the land, the valley, the river and the elder pyramids on the southern horizon (land.js), with their names
+  const land = createLand(air);
+  group.add(land.group);
+  const far = (say, x, y, z) => { const L = stage.label(labels, 'far').say(say); L.pos.set(x, y, z); L.on = true; return L; };
+  // (the two at Dahshur stand nearly in a line from here: one name for both)
+  const km = (e) => Math.round(Math.hypot(e.x, e.z) / 1000), [dj, red, bent] = ELDERS;
+  // (Djoser's is always the eastern, left of them looking south: its name stands to the left of its stem)
+  far(`${dj.name} · ${km(dj)} km`, dj.x, heightAt(dj.x, dj.z) + dj.height, dj.z).el.classList.add('west');
+  far(`Sneferu’s Red and Bent, at Dahshur · ${km(red)}, ${km(bent)} km`, red.x, heightAt(red.x, red.z) + red.height, red.z).el.classList.add('east');
+  { const z = -2600, x = RIVER[2][0] + ((RIVER[3][0] - RIVER[2][0]) * (z - RIVER[2][1])) / (RIVER[3][1] - RIVER[2][1]) + 210 * Math.sin(z / 2300 + 1.1) + 80 * Math.sin(z / 870);
+    far('the Nile', x, heightAt(x, z) + 30, z); }
 
   const lBase = stage.label(labels).say(`${BASE_M.toFixed(2)} m`), lTop = stage.label(labels).say(`${HEIGHT_M.toFixed(2)} m`), lCourse = stage.label(labels, 'tag on'), lPerson = stage.label(labels).say('a person, 1.75 m');
   lBase.pos.set(0, 0, BASE_M / 2 + 9); lBase.on = true;
@@ -224,16 +226,18 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     return { on: 'pyramid', point: [o.x + d.x * best, o.y + d.y * best, o.z + d.z * best] };
   }
 
-  const sunDir = [Math.sin(0.7) * Math.cos(0.28), Math.sin(0.28), Math.cos(0.7) * Math.cos(0.28)];     // 16° up, from the south-east of the view
+  const sunDir = [Math.sin(0.7) * Math.cos(0.28), Math.sin(0.28), Math.cos(0.7) * Math.cos(0.28)];     // 16° up in the south-east (X is east, Z south): a winter morning's
   return {
     name: 'pyr', group, labels,
     say: 'the Great Pyramid in three dimensions, at its true size, as far as the sound has built it',
     orbit: createOrbit({ target: [0, 52, 0], dist: 430, polar: 1.36, az: -0.62, fov: 40, minDist: 3, maxDist: 1600, minPolar: 0.02, maxPolar: 1.95, floor: 1.2,
       box: [[-450, 0, -450], [450, 160, 450]] }),
-    fog: [900, 5200], far: 12000, cell: 10,
+    fog: [900, 5200], far: 60000, cell: 10, land: true,
+    // the morning's air: an even haze, a tenth of the light lost every kilometre or so, and a mist on the valley floor
+    haze: [1 / 16000, 1 / 4200, 30, -42],
     sun: { center: [0, 40, 0], radius: 300, dir: sunDir, follow: true, least: 14, reach: 700, beyond: 900 },
-    look: { top: rgb(20, 26, 58), mid: rgb(92, 84, 120), low: rgb(198, 158, 124), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
-      sun: [rgb(255, 214, 172), 3.4], hemi: [rgb(120, 140, 200), rgb(118, 96, 72), 0.62], exposure: 1.0, glow: 1, grid: 0.4, dunes: 1 },
+    look: { top: rgb(46, 86, 160), mid: rgb(122, 154, 200), low: rgb(204, 202, 202), warm: rgb(246, 222, 186), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
+      sun: [rgb(255, 222, 186), 3.5], hemi: [rgb(150, 176, 222), rgb(150, 122, 90), 0.72], exposure: 1.0, glow: 1, grid: 0, dunes: 0 },
     hit, set, glow,
   };
 }

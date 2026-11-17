@@ -4,26 +4,33 @@
 // the linear light three.js works in.
 // ============================================================================
 import * as THREE from 'three';
+import { SKY_HEAD, HAZE } from './air.js';
 
 const LIN = new Float32Array(256).map((_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
 export const lin = (byte) => LIN[byte < 0 ? 0 : byte > 255 ? 255 : byte | 0];
 export const rgb = (r, g, b) => new THREE.Color(lin(r), lin(g), lin(b));
 
 // A standard material with a few lines of its own: every fragment knows where in the world it
-// is (vWp), and `fragment` may then change diffuseColor. Each patch is its own program (`name`).
-export function patch(material, name, { uniforms = {}, vertexHead = '', vertex = '', fragmentHead = '', fragment = '' }) {
+// is (vWp), and `fragment` may then change diffuseColor. Given the room's air (air.js), it is
+// hazed as the sky is, in place of three.js's fog; `post` runs on the screen's colour just
+// before; `normal` may bend the shading normal (view space). Each patch is its own program (`name`).
+export function patch(material, name, { uniforms = {}, vertexHead = '', vertex = '', fragmentHead = '', fragment = '', normal = '', air = null, post = '' }) {
   material.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, uniforms);
+    Object.assign(sh.uniforms, uniforms, air || {});
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWp;\n' + vertexHead)
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWp = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif\n' + vertex);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWp;\n' + fragmentHead)
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWp;\n' + (air ? SKY_HEAD : '') + fragmentHead)
       .replace('#include <color_fragment>', '#include <color_fragment>\n' + fragment);
+    if (normal) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + normal);
+    if (air || post) sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>', post + (air ? HAZE : '#include <fog_fragment>'));
   };
-  material.customProgramCacheKey = () => 'freq-' + name;
+  material.customProgramCacheKey = () => 'freq-' + name + (air ? '-air' : '');
   return material;
 }
+// any material, hazed by the room's air
+export const hazed = (material, name, air) => patch(material, name, { air });
 
 // several indexed geometries (position and normal) as one
 export function merge(list) {
@@ -78,8 +85,9 @@ export function aimMatrix(m, h, x, y, z, s = 1) {
 
 // A horn that glows as much of what you hear is its: an instanced attribute aGlow (0..1) adds warm
 // light, strongest at the mouth and gone by the throat (aAlong: 0 at the driver's back, 1 at the mouth).
-export function glowing(material) {
+export function glowing(material, air = null) {
   return patch(material, 'hornglow', {
+    air,
     uniforms: { uGlow: { value: rgb(255, 146, 52).multiplyScalar(1.25) } },
     vertexHead: 'attribute float aGlow;\nattribute float aAlong;\nvarying float vGlow;\n', vertex: 'vGlow = aGlow * aAlong * aAlong * aAlong;\n',
     fragmentHead: 'uniform vec3 uGlow;\nvarying float vGlow;\n',

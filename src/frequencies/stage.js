@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { clamp, pose, right as rightOf, turn, pan, zoom, focus, reset, above, settle, key as orbitKey, pixelRatio } from './orbit.mjs';
 import { patch, rgb } from './kit.js';
+import { createAir, SKY_HEAD } from './air.js';
 
 export { createSandScene } from './sandbox3d.js';
 export { createPyramidScene } from './pyramid3d.js';
@@ -26,7 +27,7 @@ export { createPyramidScene } from './pyramid3d.js';
 const KEYS = '. Drag to turn, shift and drag to slide, scroll to zoom; from the keys: arrows turn, shift and arrows slide, plus and minus zoom, zero returns, f fills the screen.';
 const r3 = (x) => Math.round(x * 1000) / 1000;
 // the stage as the sandbox shows it: the site's own dark, a cool key light, no sun in the sky;
-// a scene may bring its own (s.look: any of these)
+// a scene may bring its own (s.look: any of these; warm, the horizon under the sun, else low)
 const STUDIO = { top: rgb(5, 3, 10), mid: rgb(12, 12, 22), low: rgb(24, 27, 40), ground: rgb(21, 22, 30), line: rgb(126, 134, 158),
   sun: [new THREE.Color(0xfff1dc), 3.1], hemi: [new THREE.Color(0xc4d2ff), new THREE.Color(0x30281e), 0.85], exposure: 1.0, glow: 0, grid: 1, dunes: 0 };
 
@@ -47,27 +48,25 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(STUDIO.low.clone(), 40, 260);
+  const fog = new THREE.Fog(STUDIO.low.clone(), 40, 260);   // a scene that brings its own air (s.haze) hazes itself instead
+  scene.fog = fog;
   const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 1000);
   { const pm = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment(renderer); scene.environment = pm.fromScene(room, 0.04).texture; room.dispose?.(); pm.dispose(); }
 
-  // the sky: three bands (the horizon, where the ground's fog meets it; the middle; the top) and,
-  // in a scene with a sun, its glow and its disc. Three.js lays fog on after tone mapping, in the
-  // screen's own colour space; so the sky is not tone-mapped either, and the two meet exactly.
-  const skyU = { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, low: { value: new THREE.Color() },
-    sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, glow: { value: 0 } };
+  // the sky (air.js): three bands (the horizon, where the ground's fog or the scene's haze meets it,
+  // warmer under the sun; the middle; the top) and, in a scene with a sun, its glow and its disc.
+  // Three.js lays fog on after tone mapping, in the screen's own colour space; so the sky is not
+  // tone-mapped either, and the two meet exactly.
+  const air = createAir();
   const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, uniforms: skyU,
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, uniforms: air,
     vertexShader: `varying vec3 vD;
       void main() { vD = position; vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position, 1.0); gl_Position = p.xyww; }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glow; varying vec3 vD;
+    fragmentShader: `${SKY_HEAD} varying vec3 vD;
       void main() {
         vec3 d = normalize(vD);
-        vec3 c = mix(low, mid, smoothstep(0.0, 0.07, d.y));
-        c = mix(c, top, smoothstep(0.05, 0.5, d.y));
-        float s = max(dot(d, sunDir), 0.0);
-        c += sunCol * glow * (0.22 * pow(s, 5.0) + 0.7 * pow(s, 80.0) + 6.0 * smoothstep(0.99955, 0.99975, s)) * smoothstep(-0.02, 0.01, d.y);
-        gl_FragColor = vec4(c, 1.0);
+        float s = max(dot(d, uSunDir), 0.0);
+        gl_FragColor = vec4(skyAt(d) + uSunCol * uSunGlow * 6.0 * smoothstep(0.99955, 0.99975, s) * smoothstep(-0.02, 0.01, d.y), 1.0);
         #include <colorspace_fragment>
       }`,
   }));
@@ -123,16 +122,19 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     cur = s;
     if (!s.group.parent) scene.add(s.group);
     s.group.visible = true;
-    scene.fog.near = s.fog[0]; scene.fog.far = s.fog[1];
+    scene.fog = s.haze ? null : fog;
+    fog.near = s.fog[0]; fog.far = s.fog[1];
+    air.uHaze.value.set(...(s.haze || [0, 0, 30, 0]));
+    ground.visible = !s.land;                               // a scene with land of its own stands on that
     cell.value = s.cell;
     const L = { ...STUDIO, ...(s.look || {}) };
-    skyU.top.value.copy(L.top); skyU.mid.value.copy(L.mid); skyU.low.value.copy(L.low); scene.fog.color.copy(L.low);
-    skyU.glow.value = L.glow; skyU.sunCol.value.copy(L.sun[0]);
+    air.uTop.value.copy(L.top); air.uMid.value.copy(L.mid); air.uCool.value.copy(L.low); air.uWarm.value.copy(L.warm || L.low); fog.color.copy(L.low);
+    air.uSunGlow.value = L.glow; air.uSunCol.value.copy(L.sun[0]);
     groundMat.color.copy(L.ground); line.value.copy(L.line); gridK.value = L.grid; dunes.value = L.dunes;
     sun.color.copy(L.sun[0]); sun.intensity = L.sun[1];
     hemi.color.copy(L.hemi[0]); hemi.groundColor.copy(L.hemi[1]); hemi.intensity = L.hemi[2];
     renderer.toneMappingExposure = L.exposure;
-    sunDir.set(...s.sun.dir).normalize(); skyU.sunDir.value.copy(sunDir);
+    sunDir.set(...s.sun.dir).normalize(); air.uSunDir.value.copy(sunDir);
     if (!s.seen) {                                          // the first time a scene is shown, the eye comes in to it from afar
       s.seen = true;
       if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
@@ -159,7 +161,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
       let seen = L.on;
       if (seen) { v.copy(L.pos).project(camera); seen = v.z > -1 && v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05; }
       L.el.style.display = seen ? '' : 'none';
-      if (seen) L.el.style.transform = `translate(-50%, -50%) translate(${((v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px)`;
+      if (seen) L.el.style.transform = `translate(var(--ax, -50%), -50%) translate(${((v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px)`;
     }
   }
 
@@ -308,5 +310,5 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   const screenOf = (p) => { v.set(p[0], p[1], p[2]).project(camera); return [(v.x * 0.5 + 0.5) * host.clientWidth, (-v.y * 0.5 + 0.5) * host.clientHeight, v.z]; };
   // metres per CSS pixel at the point looked at
   const scale = () => (cur ? (2 * cur.orbit.now.dist * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, host.clientHeight) : 0);
-  return { canvas, use, label, mark, view, ear, pix, read, screenOf, scale, dispose, get ratio() { return ratio; } };
+  return { canvas, air, use, label, mark, view, ear, pix, read, screenOf, scale, dispose, get ratio() { return ratio; } };
 }
