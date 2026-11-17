@@ -21,6 +21,7 @@ import { BASE_M, HEIGHT_M, STONE, LATTICE_HZ } from './pyramid.mjs';
 import { rgb, lin, patch, hazed, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
 import { createLand } from './land.js';
 import { ELDERS, RIVER, heightAt } from './giza.mjs';
+import { DRY_SLOPE } from './sand.mjs';
 
 const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ);
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
@@ -68,21 +69,81 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   group.add(courses);
 
   // ---------------------------------------------------------------- the course being made
+  // While its aggregate arrives (part 0..1) the sand is dry, and the sound heaps it where the air is
+  // still, a block apart: ridges that rise first and that the cells then fill toward (as far in
+  // from the horns as their sound reaches: the plan's, §5). The low sun shades each ridge's lee.
+  // Where the air moves, between the ridges, grains hop and catch the light while the tone sounds.
+  // Then the binder: the cells go dark and wet and mirror the sky, and dry in patches to stone,
+  // the ridges left as the joints between the blocks.
   const wave = { uTau: { value: 0 }, uOn: { value: 0 }, uPitch: { value: STONE.blockPlanM }, uHalf: { value: 1 }, uReach: { value: reach },
-    uSet: { value: 0 }, uDry: { value: rgb(214, 198, 162) } };
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), patch(new THREE.MeshStandardMaterial({ color: rgb(170, 140, 96), roughness: 0.97, metalness: 0, envMapIntensity: 0.25 }), 'working', {
+    uPart: { value: 0 }, uWet: { value: 0 }, uSet: { value: 0 }, uTime: { value: 0 },
+    uSand: { value: rgb(206, 188, 152) }, uPaste: { value: rgb(134, 118, 96) }, uDry: { value: rgb(214, 198, 162) } };
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), patch(new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0, envMapIntensity: 0.25 }), 'working', {
     air, uniforms: wave,
-    fragmentHead: 'uniform float uTau;\nuniform float uOn;\nuniform float uPitch;\nuniform float uHalf;\nuniform float uReach;\nuniform float uSet;\nuniform vec3 uDry;\n',
+    fragmentHead: `uniform float uTau; uniform float uOn; uniform float uPitch; uniform float uHalf; uniform float uReach;
+      uniform float uPart; uniform float uWet; uniform float uSet; uniform float uTime; uniform vec3 uSand; uniform vec3 uPaste; uniform vec3 uDry;
+      float wh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+      float wn(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(wh(i), wh(i + vec2(1.0, 0.0)), u.x), mix(wh(i + vec2(0.0, 1.0)), wh(i + vec2(1.0, 1.0)), u.x), u.y); }\n`,
     fragment: `
-      diffuseColor.rgb = mix(diffuseColor.rgb, uDry, uSet);
       vec3 sN = normalize(cross(dFdx(vWp), dFdy(vWp)));
+      float onTop = step(0.5, abs(sN.y));
       vec2 lq = vWp.xz / uPitch, lw = fwidth(lq);
-      float lattice = 0.5 * (cos(3.14159265 * lq.x) + cos(3.14159265 * lq.y));
+      float lwm = max(lw.x, lw.y), px = lwm * uPitch, close = 1.0 - smoothstep(0.1, 0.45, lwm);
       float reached = exp(-max(uHalf - max(abs(vWp.x), abs(vWp.z)), 0.0) / uReach);
-      float seen = uOn * step(0.5, abs(sN.y)) * reached * (1.0 - smoothstep(0.12, 0.55, max(lw.x, lw.y)));
-      vec2 rq = abs(fract(lq + 0.5) - 0.5) / max(lw * 1.5, vec2(0.07));          // the ridges, where the air is still, a block apart
-      float ridge = 1.0 - min(min(rq.x, rq.y), 1.0);
-      diffuseColor.rgb *= (1.0 + seen * 0.34 * lattice * cos(6.2831853 * uTau)) * (1.0 + seen * 0.22 * ridge);`,
+      // how far, and to which side, the nearest still line lies across x and across z (the lines at whole
+      // blocks): a still line is not ruled, so it wanders a few centimetres
+      vec2 off = fract(lq + 0.5 + 0.025 * vec2(sin(vWp.z * 2.3 + 1.7 * wn(vWp.zx / 1.9)), sin(vWp.x * 2.1 + 1.7 * wn(vWp.xz / 2.1)))) - 0.5, cd = abs(off) * uPitch;
+      // the binder, once the sand is in: wet, then drying to stone from the course's edges inward, in ragged fronts
+      float inward = clamp(max(uHalf - max(abs(vWp.x), abs(vWp.z)), 0.0) / max(uHalf, 1.0), 0.0, 1.0);
+      float dryAt = 0.1 + 0.5 * inward + 0.3 * wn(vWp.xz / 8.0 + 3.7), dry = smoothstep(dryAt - 0.05, dryAt + 0.05, uSet);
+      float stone = uWet * dry;
+      // the ridges: heaps at dry sand's angle of repose (34°, sand.mjs), so half again as wide as they are tall; up first,
+      // then the cells fill toward their tops; level once stone. Seen only while a ridge is a few pixels wide.
+      float A = 0.12 * smoothstep(0.0, 0.3, uPart) * (1.0 - 0.7 * smoothstep(0.5, 1.0, uPart)) * reached * onTop * (1.0 - stone)
+              * (0.75 + 0.5 * wn(vWp.xz / 0.8 + 11.0));
+      float wb = max(A / ${DRY_SLOPE.toFixed(4)}, 1e-4), seenR = smoothstep(1.0, 3.0, wb / px);
+      float rx = max(0.0, 1.0 - cd.x / wb), rz = max(0.0, 1.0 - cd.y / wb), hr = max(rx, rz), hp = A * hr;
+      // the low sun's shade on a ridge's lee and beyond it, across x and across z
+      vec3 sd = normalize(uSunDir);
+      vec2 up = vec2(sd.x > 0.0 ? 1.0 - fract(lq.x) : fract(lq.x), sd.z > 0.0 ? 1.0 - fract(lq.y) : fract(lq.y)) * uPitch;
+      vec2 rise = up * sd.y / max(abs(sd.xz), vec2(1e-3));
+      float shade = max(clamp((A - hp - rise.x) / 0.012, 0.0, 1.0), clamp((A - hp - rise.y) / 0.012, 0.0, 1.0)) * seenR;
+      float wet = uWet * (1.0 - dry) * (1.0 - 0.55 * hr * seenR);
+      float grain = px < 0.02 ? (1.0 - smoothstep(0.006, 0.02, px)) * (wh(floor(vWp.xz / 0.012)) - 0.5) : 0.0;
+      vec3 c = uSand * (0.94 + 0.08 * wn(vWp.xz / 3.1) + 0.06 * hr * seenR + 0.1 * grain);
+      c = mix(c, uPaste * (0.9 + 0.15 * wn(vWp.xz / 1.7)), wet);
+      c = mix(c, uDry * (0.95 + 0.07 * wn(vWp.xz / 2.3)), stone);
+      // the joints where the ridges were, once it is stone (a pixel wide at most, as on the courses built)
+      vec2 jl = 1.0 - min(cd / uPitch / max(lw * 1.2, vec2(1e-5)), vec2(1.0));
+      c *= 1.0 - 0.45 * max(jl.x, jl.y) * close * stone * onTop;
+      // the sound on the course: the plan's lattice breathing on the slowed clock, where it reaches
+      c *= 1.0 + uOn * onTop * reached * close * 0.16 * 0.5 * (cos(3.14159265 * lq.x) + cos(3.14159265 * lq.y)) * cos(6.2831853 * uTau);
+      c *= (1.0 - 0.5 * shade) * (1.0 - 0.18 * (A / 0.12) * (1.0 - seenR));
+      diffuseColor.rgb = c;`,
+    normal: `
+      {
+        // a ridge's two faces, at the angle of repose
+        vec2 g = rx >= rz ? vec2(rx > 0.0 ? -${DRY_SLOPE.toFixed(4)} * sign(off.x) * tanh(cd.x / (0.22 * wb)) : 0.0, 0.0)
+                          : vec2(0.0, rz > 0.0 ? -${DRY_SLOPE.toFixed(4)} * sign(off.y) * tanh(cd.y / (0.22 * wb)) : 0.0);
+        g *= seenR * step(1e-4, A);
+        normal = normalize(normal + mat3(viewMatrix) * vec3(-g.x, 0.0, -g.y));
+        roughnessFactor = mix(roughnessFactor, 0.3, wet);
+        // grains hopping where the air moves, catching the sun and losing it, close by, while the tone sounds
+        float mob = uOn * reached * onTop * (1.0 - uWet) * smoothstep(0.08, 0.3, min(cd.x, cd.y)) * (1.0 - smoothstep(0.012, 0.03, px));
+        if (mob > 0.0) {
+          vec2 gq = vWp.xz / 0.03, gc = floor(gq);
+          float glint = step(0.84, wh(gc + 3.3)) * smoothstep(0.32, 0.08, length(fract(gq) - 0.5))
+                      * pow(max(0.0, sin(uTime * (5.0 + 9.0 * wh(gc + 7.1)) + 6.2831853 * wh(gc))), 24.0);
+          totalEmissiveRadiance += uSunCol * glint * mob * 1.4;
+        }
+      }`,
+    post: `
+      if (wet * onTop > 0.0) {
+        vec3 wv = normalize(vWp - cameraPosition);
+        float fres = 0.02 + 0.98 * pow(1.0 - clamp(-wv.y, 0.0, 1.0), 5.0);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(skyAt(reflect(wv, vec3(0.0, 1.0, 0.0))), 1.0)).rgb, wet * onTop * fres * 0.5);
+      }`,
   }));
   slab.visible = false; slab.castShadow = true; slab.receiveShadow = true;
   group.add(slab);
@@ -100,7 +161,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   const quad = new THREE.BufferGeometry();
   quad.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5]), 3));
   quad.setIndex([0, 2, 1, 0, 3, 2]);
-  const frontU = { uColor: { value: rgb(176, 214, 255) }, uWidth: { value: 0.32 }, uPix: { value: 0.001 } };
+  const frontU = { uColor: { value: rgb(176, 214, 255) }, uWidth: { value: 0.24 }, uPix: { value: 0.001 } };
   const fronts = new THREE.InstancedMesh(quad, new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false, uniforms: frontU,
     vertexShader: `uniform float uWidth; uniform float uPix; varying float vB; varying float vA;
@@ -190,13 +251,14 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
           if (d > far) break;
           const fade = (1 - d / far) ** 2 * Math.min(1, d / (0.2 * LAMBDA));
           M.makeRotationY(ax ? -Math.PI / 2 : 0).scale(S.set(current.side, 1, 1)).setPosition(ax ? ax * (edge - d) : 0, top + 0.04, ay ? ay * (edge - d) : 0);
-          fronts.setMatrixAt(nf, M); fronts.setColorAt(nf, C.setRGB(fade * 0.6, 0, 0)); nf++;
+          fronts.setMatrixAt(nf, M); fronts.setColorAt(nf, C.setRGB(fade * 0.45, 0, 0)); nf++;
         }
       }
     } else { top = built ? rows[built - 1].top : 0; horns.count = posts.count = 0; shownCourse = -1; }
     fronts.count = nf;
     if (nf) { fronts.instanceMatrix.needsUpdate = true; fronts.instanceColor.needsUpdate = true; frontU.uPix.value = stage.pix() * 3.2; }
-    wave.uTau.value = tau; wave.uOn.value = sound && current ? 1 : 0; wave.uHalf.value = current ? current.side / 2 : 1; wave.uSet.value = setPart;
+    wave.uTau.value = tau; wave.uOn.value = sound && current ? 1 : 0; wave.uHalf.value = current ? current.side / 2 : 1;
+    wave.uPart.value = current ? part : 0; wave.uWet.value = current && setPart > 0 ? 1 : 0; wave.uSet.value = setPart; wave.uTime.value = (performance.now() / 1000) % 600;
   }
 
   // each horn's share of what is heard where the camera stands, 0..1 (null: none)
