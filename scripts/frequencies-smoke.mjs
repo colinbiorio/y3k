@@ -164,6 +164,17 @@ try {
     const green = (c) => c[1] - (c[0] + c[2]) / 2;
     check('the land is drawn: the valley greener than the sand, the sky blue', valley && sand && green(valley) > green(sand) + 10 && sky[2] > sky[0] + 20, { valley, sand, sky }); }
   await pageShot('pyramid');
+  // the sun: from the morning's to after sunset, and back; the sky at the top of the stage darkens, and the read says so
+  { const box = await stageBox(), skyNow = () => page.screenshot({ clip: { x: box.x + box.width / 2 - 4, y: box.y + 30, width: 8, height: 8 } }).then(meanColour);
+    const morningSky = await skyNow(), m = (await read()).sun;
+    await page.locator('.freq-sun').evaluate((el) => { el.value = '17.6'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await sleep(700 * slow);
+    const duskSky = await skyNow(), d = (await read()).sun, say = await page.locator('[data-read="sun"]').textContent();
+    out.reads.sun = { morning: m, morningSky, dusk: d, duskSky, say };
+    check('the sun slider sets the hour: after sunset the sky darkens and the sun is under the horizon', m.elevation > 10 && d.elevation < 0 && duskSky.reduce((a, v) => a + v) < morningSky.reduce((a, v) => a + v) - 60 && /^17:36 · \d+° down$/.test(say), { m, d, morningSky, duskSky, say });
+    await shot('pyramid-dusk');
+    await page.locator('.freq-sun').evaluate((el) => { el.value = '8.25'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await sleep(400 * slow); }
   // seen whole on first sight: the stage's foot is inside the frame's window (not under its lower edge)
   if (!phone) {
     const fit = await page.evaluate(() => { const r = document.querySelector('.freq-stage').getBoundingClientRect(), hb = parseFloat(getComputedStyle(document.body).getPropertyValue('--hole-b')) || 0; return { bottom: Math.round(r.bottom), limit: Math.round(innerHeight - hb), h: Math.round(r.height) }; });

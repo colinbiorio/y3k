@@ -29,6 +29,7 @@ import { PETRIE, BASE_M, HEIGHT_M, courseTable, totals, recipeFor, RECIPE, BINDE
   LATTICE_HZ, STONE, TOP_MEAN_M, INCH } from './frequencies/pyramid.mjs';
 import { go, turn } from './frequencies/orbit.mjs';
 import { createSound } from './frequencies/sound.js';
+import { daylight, sunAt, clock } from './frequencies/sun.mjs';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (Number.isFinite(x) ? Number(x).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 }) : '—');
@@ -118,6 +119,9 @@ export function createFrequencies({ toast } = {}) {
   let fieldDirty = true, hornsDirty = true, reliefDirty = true, paintDirty = true, soloDirty = true;
   // the pyramid
   let years = 2.2, pyrPlaying = false, pyrSound = false, rowShown = null, rowHorns = [], follow = false, tip = null;     // it opens with the method at work: about a third of the way up
+  let sunHours = 8.25;               // …on a November morning, a quarter past eight by the sun (sun.mjs)
+  const [sunrise, sunset] = daylight();
+  const SUN_FROM = Math.floor((sunrise - 0.75) * 4) / 4, SUN_TO = Math.ceil((sunset + 0.75) * 4) / 4;     // from before first light to after dusk, on whole quarters
   // both
   let tau = 0, volume = 0.4, heardDb = null, lastTiles = 0, forceTiles = true, stage = null, sand = null, pyr = null, failed = '', sound = null;
   let tour = false, lit = false, litN = 0, each = new Float32Array(1280), glowW = new Float32Array(1280), gainsNow = [0, 0, 0, 0];
@@ -176,7 +180,7 @@ export function createFrequencies({ toast } = {}) {
       try {
         stage = m.createStage(host, { frame, hand });
         sand = m.createSandScene(stage, bed);
-        pyr = m.createPyramidScene(stage, { rows: sched.rows, spec: hornSpec(LATTICE_HZ, plan.acoustic), reach: shockDistance(plan.surfaceDb, LATTICE_HZ) });
+        pyr = m.createPyramidScene(stage, { rows: sched.rows, spec: hornSpec(LATTICE_HZ, plan.acoustic), reach: shockDistance(plan.surfaceDb, LATTICE_HZ), hours: sunHours });
       } catch (e) { try { stage?.dispose(); } catch { /* half made */ } stage = sand = pyr = null; throw e; }
       stage.use(tab === 'pyramid' ? pyr : sand);
       refs.wait.hidden = true;
@@ -251,6 +255,11 @@ export function createFrequencies({ toast } = {}) {
             <span class="freq-cap">the build</span>
             <button type="button" class="btn small freq-go" data-act="pyr-play">build</button>
             <input type="range" class="freq-years" min="0" max="${sched.years.toFixed(2)}" step="0.01" value="${years}" aria-label="years into the build" />
+          </div>
+          <div class="freq-group" role="group" aria-label="the sun">
+            <span class="freq-cap">the sun</span>
+            <input type="range" class="freq-sun" min="${SUN_FROM}" max="${SUN_TO}" step="0.05" value="${sunHours}" aria-label="the hour of the day, by the sun" />
+            <span class="freq-sunsay" data-read="sun" title="the hour by the sun at Giza on 17 November, and how high the sun stands">${sunSay()}</span>
           </div>
           <div class="freq-group" role="group" aria-label="the sound">
             <span class="freq-cap">the sound</span>
@@ -434,6 +443,11 @@ export function createFrequencies({ toast } = {}) {
   function onInput(ev) {
     const t = ev.target;
     if (t.classList.contains('freq-years')) { years = clamp(Number(t.value) || 0, 0, sched.years); forceTiles = true; sync(); kick(); }
+    else if (t.classList.contains('freq-sun')) {
+      sunHours = clamp(Number(t.value) || sunHours, SUN_FROM, SUN_TO);
+      if (tab === 'pyramid') pyr?.sky(sunHours);
+      const say = body?.querySelector('[data-read="sun"]'); if (say) say.textContent = sunSay();
+    }
     else if (t.classList.contains('freq-vol')) { volume = clamp(Number(t.value), 0, 1); sound?.volume(volume); }
   }
   function onChange(ev) {
@@ -546,6 +560,12 @@ export function createFrequencies({ toast } = {}) {
     if (tool === 'look' || !on) sand.cursor(null);
     else sand.cursor(hit.x, hit.y, tool === 'horn' ? spec.mouthDiameter / 2 : RADIUS[tool]);
     stage.mark();
+  }
+
+  // the hour by the sun and how high the sun stands, or how far under the horizon
+  function sunSay() {
+    const e = sunAt(sunHours).elevation;
+    return `${clock(sunHours)} · ${e >= 0 ? `${fmt(e, 0)}° up` : `${fmt(-e, 0)}° down`}${sunHours < 12 && e > -1 && e < 3 ? ', sunrise' : sunHours > 12 && e > -1 && e < 3 ? ', sunset' : ''}`;
   }
 
   // the eye put somewhere at once (target, dist, polar, az: any of them), for a look from outside
@@ -770,7 +790,7 @@ export function createFrequencies({ toast } = {}) {
     return { open: !!(root && root.isConnected), tab, loaded: !!stage, failed, stage: stage ? stage.read() : null, sound: sound ? sound.read() : null,
       years: r3(years), built: b.built, course: b.current ? b.current.course : null, rowHorns: rowHorns.length, pyrPlaying, pyrSound,
       playing, hearing, tool, show, speed, f, powerW, horns: horns.length, solo, heardDb: heardDb == null ? null : Math.round(heardDb * 10) / 10, tau: r3(tau),
-      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4), cased: !!pyr?.cased, hornsNear: !!pyr?.hornsNear };
+      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4), cased: !!pyr?.cased, hornsNear: !!pyr?.hornsNear, sun: { hours: r3(sunHours), elevation: r3(sunAt(sunHours).elevation) } };
   }
 
   return { open, close, hornSpec };

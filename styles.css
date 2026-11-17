@@ -2823,6 +2823,8 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .freq-group .btn.small { padding: 6px 16px; font-size: 13px; border-radius: 999px; }
 .freq-years { width: min(340px, 46vw); accent-color: #b9a6ff; }
 .freq-vol { width: 110px; accent-color: #b9a6ff; }
+.freq-sun { width: 170px; accent-color: #f0b46c; }
+.freq-sunsay { min-width: 10.5em; color: #c9cfd8; font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .freq-ctl { display: inline-flex; align-items: center; gap: 6px; color: #b8bfc9; font-size: 0.82rem; }
 .freq-ctl input {
   width: 6.4em; padding: 6px 8px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(0, 0, 0, 0.28);
@@ -2857,6 +2859,7 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   .freq-stage { aspect-ratio: auto; height: 62vh; min-height: 300px; border-radius: 12px; }
   .freq-bar { gap: 12px 16px; }
   .freq-years { width: 100%; }
+  .freq-sun { width: min(200px, 52vw); }
   .freq-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .freq-stat { padding: 9px 10px; }
   .freq-panel { padding: 14px 12px 14px; }

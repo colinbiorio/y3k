@@ -24,13 +24,21 @@ import { rgb, lin, patch, hazed, hornGeometry, aimMatrix, bronze, glowing, withG
 import { createLand } from './land.js';
 import { ELDERS, RIVER, heightAt } from './giza.mjs';
 import { DRY_SLOPE } from './sand.mjs';
+import { sunAt, sunDirection, lightFor } from './sun.mjs';
 
 const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ), HORN_NEAR = 40;      // m: nearer than this, the horns in their finer facets
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
 const SIDES = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const sideAt = (y) => BASE_M * (1 - y / HEIGHT_M);
 
-export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
+// the light at an hour of the day, by the sun (sun.mjs): the stage's look, and the sun's direction
+export function skyAt(hours) {
+  const at = sunAt(hours), L = lightFor(at.elevation), c = (v) => rgb(...v.map((x) => Math.round(x)));
+  return { at, dir: sunDirection(at), look: { top: c(L.top), mid: c(L.mid), low: c(L.low), warm: c(L.warm), sun: [c(L.sun), L.power],
+    hemi: [c(L.hemi[0]), c(L.hemi[1]), L.hemi[2]], env: L.env, exposure: L.exposure, glow: L.glow } };
+}
+
+export function createPyramidScene(stage, { rows, spec, reach = 9, hours = 8.25 }) {
   const group = new THREE.Group(), labels = [], air = stage.air;
 
   // ---------------------------------------------------------------- the courses built
@@ -369,7 +377,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     return { on: 'pyramid', point: [o.x + d.x * best, o.y + d.y * best, o.z + d.z * best] };
   }
 
-  const sunDir = [Math.sin(0.7) * Math.cos(0.28), Math.sin(0.28), Math.cos(0.7) * Math.cos(0.28)];     // 16° up in the south-east (X is east, Z south): a winter morning's
+  const first = skyAt(hours);         // the sun where the room opens: a November morning's, a quarter past eight by the sun
   return {
     name: 'pyr', group, labels,
     say: 'the Great Pyramid in three dimensions, at its true size, as far as the sound has built it',
@@ -378,10 +386,11 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     fog: [900, 5200], far: 60000, cell: 10, land: true,
     // the morning's air: an even haze, a tenth of the light lost every kilometre or so, and a mist on the valley floor
     haze: [1 / 16000, 1 / 4200, 30, -42],
-    sun: { center: [0, 40, 0], radius: 300, dir: sunDir, follow: true, least: 14, reach: 700, beyond: 900 },
-    look: { top: rgb(46, 86, 160), mid: rgb(122, 154, 200), low: rgb(204, 202, 202), warm: rgb(246, 222, 186), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
-      sun: [rgb(255, 222, 186), 3.5], hemi: [rgb(150, 176, 222), rgb(150, 122, 90), 0.72], exposure: 1.0, glow: 1, grid: 0, dunes: 0 },
-    hit, set, glow, lite: (on) => land.lite(on), get cased() { return casing.visible && casingU.uFront.value <= 0; },
+    sun: { center: [0, 40, 0], radius: 300, dir: first.dir, follow: true, least: 14, reach: 700, beyond: 900 },
+    look: { ...first.look, ground: rgb(150, 125, 96), line: rgb(132, 110, 86), grid: 0, dunes: 0 },
+    hit, set, glow, lite: (on) => land.lite(on),
+    // the sun to an hour of the day (by the sun): the sky, the light and the shadows follow
+    sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); return k.at; }, get cased() { return casing.visible && casingU.uFront.value <= 0; },
     get hornsNear() { return horns.visible && horns.count > 0; },
   };
 }
