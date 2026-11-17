@@ -28,6 +28,7 @@ export const ACTIONS = [
   { id: 'fly', label: 'fly', note: 'creative only; a second jump in the air does it too' },
   { id: 'down', label: 'sink', note: 'flying; on the water it lands' },
   { id: 'mode', label: 'survival or creative' },
+  { id: 'build', label: 'build', note: 'a shelter, a few steps in front; near one, it takes it down' },
   { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },
   { id: 'zoomOut', label: 'further' },
   { id: 'menu', label: 'controls' },
@@ -46,10 +47,10 @@ export function defaults() {
     keys: {
       forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
       jump: ['Space', ''], dash: ['KeyQ', 'Mouse2'], sprint: ['ShiftLeft', 'ShiftRight'], walk: ['KeyV', ''],
-      fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
+      fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], build: ['KeyB', ''], zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
     },
     // the standard pad: 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT · 8 view · 9 menu · 10 L3 · 11 R3 · 12–15 the d-pad
-    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, zoomIn: 12, zoomOut: 13, menu: 9 },
+    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, zoomIn: 12, zoomOut: 13, menu: 9 },
     look: { mouse: 1, stick: 1, invertY: false },
   };
 }
@@ -185,7 +186,7 @@ export function createInput(bindings = defaults()) {
         move: [mx, mz], look: [dYaw, dPitch], zoom,
         jump: on('jump'), jumpPressed: pressed.has('jump'), dash: pressed.has('dash'), flyToggle: pressed.has('fly'),
         sprint: on('sprint') || sprintLatch, walk: on('walk'), up: on('jump'), down: on('down'),
-        modeToggle: pressed.has('mode'), menu: pressed.has('menu'), device,
+        modeToggle: pressed.has('mode'), build: pressed.has('build'), menu: pressed.has('menu'), device,
       };
       pressed.clear(); lookX = lookY = wheel = 0;
       return out;

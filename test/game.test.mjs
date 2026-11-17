@@ -31,6 +31,8 @@ import * as Kin from '../src/game/bodies/kin.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
+import * as SH from '../src/game/shelter.js';
+import { createWorld, BODY } from '../src/game/world.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -1610,6 +1612,124 @@ ok('GAME.md keeps the asks in his own words, and what has been done about each',
     'an endless void', '1 inch of still water', "don't spend real money", 'get a working product first', 'ancient/natural, current, and futuristic'])
     assert.ok(g.includes(words), 'GAME.md quotes: ' + words);
   assert.match(g, /## Where it stands/); assert.match(g, /## What is next/);
+});
+
+// a body walked with the keys held (move: [right, forward], the eye at `yaw`) for `seconds`, in the world's steps
+function walk(body, move, yaw, seconds, extra = {}) {
+  for (let t = 0; t < seconds; t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move, yaw, pitch: 0, ...extra }, B.STEP); }
+  return body;
+}
+
+ok('the shelter: four metres across, a dome of rammed earth on a dry-stone ring, a room inside it, a skylight and a doorway', () => {
+  const S = SH.SHELTER;
+  near(2 * S.out, 4, 1e-9, 'four metres across');
+  near(SH.outerR(0), S.out, 1e-9); near(SH.outerR(S.base), S.out, 1e-6, 'the dome meets the stone ring'); near(SH.innerR(S.base), S.in, 1e-6);
+  near(SH.outerH(0), S.top, 1e-9); near(SH.innerH(0), S.topIn, 1e-9);
+  for (let y = 0; y < S.topIn; y += 0.05) assert.ok(SH.innerR(y) < SH.outerR(y) - 0.15, 'the shell has thickness at ' + y);
+  for (let r = 0; r < S.in; r += 0.05) assert.ok(SH.innerH(r) < SH.outerH(r) - 0.15, 'the roof has thickness at ' + r);
+  assert.ok(SH.innerH(1.1) > BODY.tall + S.floor + 0.2, 'a body stands up in the middle of it');
+  assert.ok(S.door.high > BODY.tall + 0.1 && S.door.half * 2 > 2 * BODY.rad + 0.3, 'a body goes through its doorway');
+  const b = { x: 10, z: -4, yaw: 0.7 };
+  for (const [lx, lz] of [[0.3, -1.2], [-1.1, 0.4]]) { const [x, z] = SH.toWorld(b, lx, lz), [ax, az] = SH.toLocal(b, x, z); near(ax, lx, 1e-12); near(az, lz, 1e-12); }
+});
+
+ok('built where the body stands: in front of it, its door toward it; the key again near it takes it down, and it goes', () => {
+  const body = B.createBody({ yaw: 0.4 }), w = createWorld();
+  body.p = [3, 0, -2];
+  const { did, b } = w.toggle(body);
+  assert.equal(did, 'up');
+  const [dx, dz] = SH.doorWorld(b), toBody = Math.hypot(dx - body.p[0], dz - body.p[2]), toCentre = Math.hypot(b.x - body.p[0], b.z - body.p[2]);
+  near(toCentre, SH.SHELTER.out + 1.6, 1e-9, 'a few steps in front');
+  near(toBody, 1.6, 1e-9, 'the door faces the body');
+  assert.deepEqual(SH.phase(b), { stones: 0, walls: 0, rest: 0, gone: false });
+  w.update(SH.SHELTER.build.base); assert.equal(SH.phase(b).stones, 1); assert.equal(SH.phase(b).walls, 0);
+  w.update(SH.SHELTER.build.done); assert.deepEqual(SH.phase(b), { stones: 1, walls: 1, rest: 1, gone: false });
+  assert.equal(w.toggle(body).did, 'down');
+  w.update(SH.SHELTER.build.down + 0.01); assert.equal(w.buildings.length, 0, 'taken down, it is gone');
+  const far = B.createBody({ yaw: 0 }); w.toggle(far); far.p = [500, 0, 500]; w.toggle(far);
+  w.update(SH.SHELTER.build.down + 0.01); assert.equal(w.buildings.length, 1, 'one at a time: building the next takes the first down');
+});
+
+ok('a body walks into it through the doorway, is stopped by its walls, cannot leave but by the door, and keeps its head under the dome', () => {
+  const w = createWorld(), body = B.createBody({ yaw: 0 });
+  body.world = w;
+  w.toggle(body); w.update(10);
+  const b = w.buildings[0];
+  // the eye behind the body, looking the way it faces (+Z): yaw π looks along +Z
+  walk(body, [0, 1], Math.PI, 2.2);
+  assert.ok(w.inside(body.p), 'in through the doorway: ' + body.p.map((v) => v.toFixed(2)));
+  near(body.p[1], SH.SHELTER.floor, 1e-9, 'on the dry floor');
+  walk(body, [0, 1], Math.PI, 3);
+  const [lx, lz] = SH.toLocal(b, body.p[0], body.p[2]);
+  assert.ok(w.inside(body.p) && Math.hypot(lx, lz) < SH.SHELTER.in, 'the far wall (and the hearth) stop it: ' + [lx, lz].map((v) => v.toFixed(2)));
+  walk(body, [1, 0], Math.PI, 3); assert.ok(w.inside(body.p), 'nor does the side wall let it out');
+  walk(body, [0, 0], Math.PI, 0.3, { jumpPressed: true, jump: true });
+  let top = 0; for (let t = 0; t < 1.5; t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move: [0, 0], yaw: Math.PI, jump: true }, B.STEP); top = Math.max(top, body.p[1]); }
+  assert.ok(top + BODY.tall <= SH.innerH(Math.hypot(...SH.toLocal(b, body.p[0], body.p[2]))) + 1e-6 && top > 0.2, 'a jump inside rises but stops at the dome: ' + top.toFixed(2));
+  // out again, the way it came: turn round and walk to the doorway's line
+  const [cx, cz] = SH.toWorld(b, 0, -0.1); body.p = [cx, SH.SHELTER.floor, cz]; body.v = [0, 0, 0]; body.grounded = true;
+  walk(body, [0, -1], Math.PI, 3);
+  assert.ok(!w.inside(body.p) && Math.hypot(...SH.toLocal(b, body.p[0], body.p[2])) > SH.SHELTER.out, 'out through the doorway');
+  near(body.p[1], 0, 1e-9, 'down the threshold onto the water');
+});
+
+ok('from outside the walls are solid all round: a body walked at them slides along them, and gets in only by the doorway; one that comes down on the dome stands on it', () => {
+  const w = createWorld(), b = SH.placeShelter({ p: [0, 0, 0], yaw: 0 }); b.t = 10; w.buildings.push(b);
+  for (let a = 0.2; a < 2 * Math.PI - 0.1; a += 0.3) {
+    const [sx, sz] = SH.toWorld(b, Math.sin(a) * 4, Math.cos(a) * 4), body = B.createBody({ world: w });
+    body.p = [sx, 0, sz];
+    const inward = Math.atan2(b.x - sx, b.z - sz);       // the yaw the body walks along; the eye looks along −Z at yaw 0, so it faces the other way
+    for (let t = 0; t < 3; t += B.STEP) {
+      body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: inward + Math.PI, pitch: 0 }, B.STEP);
+      const [lx, lz] = SH.toLocal(b, body.p[0], body.p[2]), r = Math.hypot(lx, lz);
+      if (r < SH.SHELTER.out + BODY.rad - 1e-6 && r > SH.SHELTER.in - BODY.rad) assert.ok(lz > 0 && Math.abs(lx) <= SH.SHELTER.door.half, 'in the wall at bearing ' + a.toFixed(1) + ': ' + [lx, lz].map((v) => v.toFixed(2)));
+    }
+    const away = Math.min(a, 2 * Math.PI - a) > 1.4;
+    if (away) assert.ok(Math.hypot(...SH.toLocal(b, body.p[0], body.p[2])) >= SH.SHELTER.out + BODY.rad - 1e-6, 'far from the doorway it stays out, at bearing ' + a.toFixed(1));
+  }
+  const body = B.createBody({ world: w, grounded: false });
+  const [tx, tz] = SH.toWorld(b, 0.2, -0.3); body.p = [tx, 4, tz]; body.v = [0, 0, 0];
+  walk(body, [0, 0], 0, 2);
+  assert.ok(body.grounded && Math.abs(body.p[1] - SH.outerH(Math.hypot(...SH.toLocal(b, body.p[0], body.p[2])) - BODY.rad * 0.5)) < 1e-6 && body.p[1] > 2.5, 'standing on the dome: ' + body.p[1].toFixed(3));
+});
+
+ok('the eye stays out of the walls: a body inside keeps it in the room with it, short of the dome; a body outside keeps it out of the walls, and may look in through the doorway', () => {
+  const b = SH.placeShelter({ p: [0, 0, 0], yaw: 0 }); b.t = 10;
+  const [hx, hz] = SH.toWorld(b, 0, 0.4), head = [hx, 1.6, hz];
+  const [bx, bz] = SH.toWorld(b, 0, -4), behind = [bx, 2.6, bz];
+  const t = SH.eyeRoom(b, head, behind), at = head.map((v, i) => v + (behind[i] - v) * t);
+  assert.ok(t < 0.5 && !SH.solid(b, at, 0.1), 'kept inside, short of the back wall: ' + t.toFixed(3));
+  const [ox, oz] = SH.toWorld(b, 0, 6), out = [ox, 1.5, oz], [ix, iz] = SH.toWorld(b, 0, -0.3), inner = [ix, 1.2, iz];
+  const tDoor = SH.eyeRoom(b, inner, out); assert.ok(tDoor < 0.4, 'from inside, not out through the doorway: ' + tDoor.toFixed(3));
+  const [sx, sz] = SH.toWorld(b, 4.5, 0), side = [sx, 1.4, sz];
+  assert.ok(SH.eyeRoom(b, inner, side) < 0.6, 'nor through the wall');
+  const [dx, dz] = SH.toWorld(b, 0, 2.6), atDoor = [dx, 1.5, dz], [fx, fz] = SH.toWorld(b, 0, 8), farOut = [fx, 2.2, fz];
+  near(SH.eyeRoom(b, atDoor, farOut), 1, 1e-9, 'outside, nothing in the way');
+  const [wx, wz] = SH.toWorld(b, 3.2, 1.0), [ex, ez] = SH.toWorld(b, -3.5, -1.0);
+  assert.ok(SH.eyeRoom(b, [wx, 1.5, wz], [ex, 1.8, ez]) < 0.3, 'outside, not through the dome');
+});
+
+ok('the sun inside: through the skylight from overhead, through the doorway when it is low in front, and the dome shades the rest', () => {
+  const b = SH.placeShelter({ p: [0, 0, 0], yaw: 0 }), at = (lx, y, lz) => { const [x, z] = SH.toWorld(b, lx, lz); return [x, y, z]; };
+  const overhead = [0, 1, 0];
+  assert.equal(SH.sunIn(b, ...at(0, 0.03, 0), overhead), 1, 'under the skylight, noon');
+  assert.equal(SH.sunIn(b, ...at(0.9, 0.03, 0.2), overhead), 0, 'beside it, in the shade');
+  const low = (() => { const [x, z] = SH.toWorld(b, 0, 1), d = [x - b.x, 0.25, z - b.z], m = Math.hypot(...d); return d.map((v) => v / m); })();   // low, from the doorway's side
+  assert.equal(SH.sunIn(b, ...at(0, 0.03, 0.6), low), 1, 'through the open doorway');
+  assert.equal(SH.sunIn(b, ...at(0, 0.03, 0.6), low, 0), 0, 'not through a shut door');
+  assert.equal(SH.sunIn(b, ...at(0, 0.03, 0), [0, -1, 0]), 0, 'no sun below the horizon');
+  const w = createWorld(); w.buildings.push(b); b.t = 10;
+  assert.equal(w.sunAt([50, 0, 50], [0.3, 0.5, 0.8]), 1, 'in the open, the sun');
+  assert.equal(w.wet(...at(0, 0, 0).filter((_, i) => i !== 1)), false, 'no water on its floor'); assert.equal(w.wet(40, 40), true);
+});
+
+ok('the build key is an action like the others: two keys, a pad button, in the controls; the world is wired to the body, the eye, the light and the water', () => {
+  const b = I.defaults();
+  assert.deepEqual(b.keys.build, ['KeyB', '']); assert.equal(b.pad.build, 2);
+  assert.ok(I.ACTIONS.find((a) => a.id === 'build')?.note);
+  const view = read('src/game/view.js');
+  for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
 });
 
 console.log(`\n${passed} checks passed.`);

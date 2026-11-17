@@ -14,7 +14,10 @@
 //     down as well. For its quarter second the fall waits.
 //   · FLIGHT is creative's alone: its key, or a second jump in the air.
 //
-// The floor is y = 0, under one inch of still water (WATER). Everything moves
+// The floor is y = 0, under one inch of still water (WATER), unless the world
+// (world.js) has put something there: given s.world, a body is pushed out of
+// its walls, stands on its floors and keeps its head under its ceilings, every
+// step (s.world.solve answers the floor under it). Everything moves
 // in fixed steps of 1/120 s (advance), so the same hands give the same jump
 // at any frame rate, and a jump's arc is integrated exactly (p += v·dt −
 // ½g·dt²), not approximately.
@@ -32,6 +35,9 @@ export const FLY = 14, FLY_SPRINT = 48, FLY_ACCEL = 60;
 export const TURN = 14;                 // rad/s, the body coming round to its heading
 export const STEP = 1 / 120;
 const COYOTE = 0.1, JUMP_BUFFER = 0.12; // a jump pressed just after the edge, or just before the ground
+const STEP_UP = 0.35;                   // a step taken without a jump; a floor further down than this is fallen to
+// the world's say in this step: the body pushed out of what is solid, and the floor under it (0: the water's floor)
+const settle = (s) => (s.world ? s.world.solve(s) : 0);
 
 export function createBody(over = {}) {
   const s = {
@@ -94,14 +100,15 @@ export function stepBody(s, inp, dt = STEP) {
   if (s.dashT > 0) {
     const t = Math.min(dt, s.dashT), d = s.dashDir;
     s.p[0] += d[0] * DASH_SPEED * t; s.p[1] += d[1] * DASH_SPEED * t; s.p[2] += d[2] * DASH_SPEED * t;
-    if (s.p[1] < 0) s.p[1] = 0;
+    const f = settle(s);
+    if (s.p[1] < f) s.p[1] = f;
     s.dashT -= dt;
     if (d[0] || d[2]) s.yaw = Math.atan2(d[0], d[2]);
     if (s.dashT <= 0) {
       // it ends at a sprint, not at a stop, and the fall begins again from rest
       const keep = s.flying ? FLY_SPRINT * 0.5 : SPRINT;
       s.v[0] = d[0] * keep; s.v[1] = s.flying ? d[1] * keep : 0; s.v[2] = d[2] * keep;
-      if (s.p[1] <= 0 && !s.flying) { s.grounded = true; s.airDash = AIR_DASHES; }
+      if (s.p[1] <= f && !s.flying) { s.grounded = true; s.airDash = AIR_DASHES; }
     }
     return s;
   }
@@ -111,8 +118,9 @@ export function stepBody(s, inp, dt = STEP) {
     const top = inp.sprint ? FLY_SPRINT : FLY, a = FLY_ACCEL * dt;
     s.v[0] = toward(s.v[0], w[0] * top, a); s.v[1] = toward(s.v[1], w[1] * top, a); s.v[2] = toward(s.v[2], w[2] * top, a);
     s.p[0] += s.v[0] * dt; s.p[1] += s.v[1] * dt; s.p[2] += s.v[2] * dt;
-    if (s.p[1] <= 0) {
-      s.p[1] = 0; if (s.v[1] < 0) s.v[1] = 0;
+    const f = settle(s);
+    if (s.p[1] <= f) {
+      s.p[1] = f; if (s.v[1] < 0) s.v[1] = 0;
       if (inp.down) { s.flying = false; s.grounded = true; s.airDash = AIR_DASHES; ev.push({ type: 'land', speed: 0 }); }
     }
     if (Math.hypot(s.v[0], s.v[2]) > 0.5) s.yaw = turnToward(s.yaw, Math.atan2(s.v[0], s.v[2]), TURN * dt);
@@ -140,12 +148,17 @@ export function stepBody(s, inp, dt = STEP) {
     const g = G * (s.rising ? HOLD_GRAVITY : 1);
     s.p[1] += s.v[1] * dt - 0.5 * g * dt * dt;
     s.v[1] -= g * dt;
-    if (s.p[1] <= 0 && s.v[1] <= 0) {
-      ev.push({ type: 'land', speed: -s.v[1], at: [s.p[0], 0, s.p[2]] });
-      s.p[1] = 0; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES;
-    }
   }
   s.p[0] += s.v[0] * dt; s.p[2] += s.v[2] * dt;
+  const f = settle(s);
+  if (!s.grounded && s.p[1] <= f && s.v[1] <= 0) {
+    ev.push({ type: 'land', speed: -s.v[1], at: [s.p[0], f, s.p[2]] });
+    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES;
+  } else if (s.grounded) {
+    // walking: up a step or down one; further down than a step, it falls
+    if (s.p[1] - f <= STEP_UP) s.p[1] = f;
+    else { s.grounded = false; s.coyote = COYOTE; }
+  }
   if (Math.hypot(s.v[0], s.v[2]) > 0.3 && wm > 0.05) s.yaw = turnToward(s.yaw, Math.atan2(w[0], w[2]), TURN * dt);
   return s;
 }
@@ -181,6 +194,6 @@ export function shift(s, dx, dz) { s.p[0] -= dx; s.p[2] -= dz; s.was[0] -= dx; s
 // The mode's switch. Survival takes flight away where the body is: it falls.
 export function setMode(s, mode) {
   s.mode = mode === 'creative' ? 'creative' : 'survival';
-  if (s.mode !== 'creative' && s.flying) { s.flying = false; s.rising = false; s.grounded = s.p[1] <= 0; }
+  if (s.mode !== 'creative' && s.flying) { s.flying = false; s.rising = false; s.grounded = s.p[1] <= (s.world ? s.world.solve(s) : 0); }
   return s.mode;
 }

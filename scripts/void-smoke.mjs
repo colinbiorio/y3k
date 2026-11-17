@@ -16,6 +16,9 @@
 //   phone  a thumb on glass, 390 x 844 at two pixels a point, and frame times
 //   bodies the body sheet: the five kinds worn in turn, each of the 125 options put on once, the arrow keys,
 //          the sheet clear of the body, each kind walked; `small` does it at a phone's size, by touch
+//   build  the shelter (stage 3): built with the key in front of the body, walked into through its door,
+//          its walls holding the body in, the eye kept inside, the room dim but for what gets in, at night
+//          its hearth; walked out again, taken down
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -39,7 +42,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -220,6 +223,50 @@ try {
     check('leaving the tab puts the void down', !out.left.gameRoot && !out.left.inVoid, out.left);
     await page.locator('#nav-world').click(); await page.waitForSelector('.game-root canvas', { timeout: 20000 }); await sleep(600);
     const again = await read(); check('and it is where it was on return', again && Math.abs(again.p[2] - out.reads['15-back-in-the-void'].p[2]) < 0.5 && again.light === 'night', again);
+  }
+
+  if (scene === 'build') {
+    out.frames ||= {};
+    const W = (r) => r.world;
+    await key.press('KeyB'); await sleep(200);
+    let r = await read();
+    const b = W(r).buildings[0];
+    check('the build key puts a shelter up in front of the body, its door toward it', W(r).buildings.length === 1 && b.kind === 'shelter' && Math.hypot(b.x - r.p[0], b.z - r.p[2]) > 3 && Math.hypot(b.x - r.p[0], b.z - r.p[2]) < 4, { b, p: r.p });
+    out.sayBuilt = await hintText();
+    await sleep(1600 * slow); await shot('01-going-up');
+    r = await until((r) => r.world.buildings[0]?.built, 15000); await sleep(400);
+    check('it goes up in a few seconds', r.world.buildings[0]?.built === true, r.world.buildings[0]);
+    await shot('02-built');
+    out.frames.outside = await frames(2000);
+    await key.down('KeyW'); r = await until((r) => r.world.inside, 8000); await sleep(900 * slow);
+    check('walked in through its door', r.world.inside === true && Math.abs(r.p[1] - 0.03) < 0.005, { inside: r.world.inside, p: r.p });
+    await sleep(1800 * slow); r = await read(); await key.up('KeyW');
+    check('its far wall holds the body in', r.world.inside === true, r.p);
+    await until((r) => speed(r) < 0.1); await sleep(600 * slow); r = await read();
+    check('inside, the body is seen by what gets in', r.world.indoor < 0.8, r.world);
+    check('inside, the eye has come into the room', r.world.eyeD < 2.5, r.world);
+    await shot('03-inside');
+    out.frames.inside = await frames(2000);
+    await drag(-700, 0); await sleep(600 * slow); await shot('04-inside-turned');
+    await drag(-500, 60); await sleep(600 * slow); await shot('05-inside-turned-again');
+    // the night: the hearth's light
+    await page.locator('#game-controls').click(); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
+    await page.locator('#game-menu [data-light="night"]').click(); await sleep(300); await page.locator('#game-menu-close').click(); await sleep(700 * slow);
+    await shot('06-inside-night');
+    // the hearth, close: turned toward it (the far side of the room)
+    await drag(500, -60); await sleep(600 * slow); r = await read();
+    check('inside, the eye stays in the room and clear of the body', r.world.inside && r.world.eyeD >= 0.9, r.world);
+    await shot('06b-inside-night-hearth');
+    // out again: the eye turned back the way it came in, and the body walked backward
+    await drag(700, 0); await sleep(400 * slow);
+    await key.down('KeyS'); r = await until((r) => !r.world.inside && Math.hypot(r.p[0] - r.world.buildings[0].x, r.p[2] - r.world.buildings[0].z) > 2.4, 8000); await key.up('KeyS');
+    out.outAgain = { p: r.p, inside: r.world.inside };
+    check('and out again through the doorway', !r.world.inside && Math.abs(r.p[1]) < 0.001, out.outAgain);
+    await until((r) => speed(r) < 0.1); await sleep(500 * slow); await shot('07-outside-night');
+    await key.press('KeyB'); r = await until((r) => r.world.buildings.length === 0, 6000);
+    check('the key again, near it, takes it down', r.world.buildings.length === 0, r.world);
+    await shot('08-taken-down');
+    check('no frame slower than the screen while it stands', out.frames.outside.median < 20 && out.frames.inside.median < 20, out.frames);
   }
 
   if (scene === 'pad') {
