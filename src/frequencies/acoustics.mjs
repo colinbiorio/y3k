@@ -173,17 +173,24 @@ export function pressureAt(horns, f, x, y, z = 0) {
 // horn and its image is placed by how far to the listener's right it lies, at constant
 // power, as a stereo recording places an instrument; no head is modelled. The horns keep
 // their true phases, so two that cancel at the listener cancel in the speakers too.
-// Returns { L: [re, im], R: [re, im], p: the rms pressure at the listener }.
-export function hear(horns, f, ear) {
+// Returns { L: [re, im], R: [re, im], p: the rms pressure at the listener }. Given `each` (an
+// array), it is also filled with each horn's own pressure there (the horn and its image): how
+// much of what is heard comes from it, so that the room can show the sound at its source.
+export function hear(horns, f, ear, each = null) {
   const k = waveNumber(f), alpha = absorptionDbPerM(f) / 8.686;
   let lr = 0, li = 0, rr = 0, ri = 0, pr = 0, pi = 0;
-  for (const h of horns) for (const side of [1, -1]) {
-    const hz = side * h.z;
-    const [amp, ph, d] = ray(h, k, alpha, ear.x, ear.y, ear.z, hz, side * (h.aimZ || 0));
-    const pan = d > 1e-6 ? ((h.x - ear.x) * ear.rx + (h.y - ear.y) * ear.ry + (hz - ear.z) * ear.rz) / d : 0;
-    const t = ((Math.max(-1, Math.min(1, pan)) + 1) * Math.PI) / 4, gl = Math.cos(t), gr = Math.sin(t);
-    const c = amp * Math.cos(ph), s = amp * Math.sin(ph);
-    lr += gl * c; li += gl * s; rr += gr * c; ri += gr * s; pr += c; pi += s;
+  for (let i = 0; i < horns.length; i++) {
+    const h = horns[i];
+    let hr = 0, hi = 0;
+    for (const side of [1, -1]) {
+      const hz = side * h.z;
+      const [amp, ph, d] = ray(h, k, alpha, ear.x, ear.y, ear.z, hz, side * (h.aimZ || 0));
+      const pan = d > 1e-6 ? ((h.x - ear.x) * ear.rx + (h.y - ear.y) * ear.ry + (hz - ear.z) * ear.rz) / d : 0;
+      const t = ((Math.max(-1, Math.min(1, pan)) + 1) * Math.PI) / 4, gl = Math.cos(t), gr = Math.sin(t);
+      const c = amp * Math.cos(ph), s = amp * Math.sin(ph);
+      lr += gl * c; li += gl * s; rr += gr * c; ri += gr * s; pr += c; pi += s; hr += c; hi += s;
+    }
+    if (each) each[i] = Math.hypot(hr, hi);
   }
   return { L: [lr, li], R: [rr, ri], p: Math.hypot(pr, pi) };
 }

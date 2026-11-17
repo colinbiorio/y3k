@@ -27,7 +27,7 @@ import { AIR, splToPa, paToSpl, particleVelocity, mouthDiameterFor, acousticPowe
 import { createBed, computeField, step, pour, addSand, takeSand, readings, presetPair, presetLattice, presetBlock, latticePitch } from './frequencies/sand.mjs';
 import { PETRIE, BASE_M, HEIGHT_M, courseTable, totals, recipeFor, RECIPE, BINDER_SOLIDS_FRACTION, SET, strengthAt, hornPlan, schedule,
   LATTICE_HZ, STONE, TOP_MEAN_M, INCH } from './frequencies/pyramid.mjs';
-import { go } from './frequencies/orbit.mjs';
+import { go, turn } from './frequencies/orbit.mjs';
 import { createSound } from './frequencies/sound.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -85,6 +85,7 @@ export function courseHorns(row, plan) {
 }
 
 const ICON = {
+  tour: '<ellipse cx="12" cy="13.5" rx="8.4" ry="3.6"/><path d="M16.4 9.6l3 .9-1.2 2.7"/><path d="M12 4.6v5.2"/><circle cx="12" cy="4.2" r="0.6"/>',
   reset: '<path d="M4.6 12a7.4 7.4 0 1 0 2.2-5.25M4.6 4.4v4.2h4.2"/>',
   above: '<path d="M12 3.4v6.2M9.3 7 12 9.7 14.7 7M4 15.3l8-3.7 8 3.7-8 3.7z"/>',
   out: '<path d="M6 12h12"/>',
@@ -92,7 +93,7 @@ const ICON = {
   full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
-const VIEWS = [['reset', 'back to the first view (0)'], ['above', 'look straight down'], ['out', 'farther (−)'], ['in', 'nearer (+)'], ['full', 'fill the screen (f)']];
+const VIEWS = [['tour', 'turn slowly around (a touch stops it)'], ['reset', 'back to the first view (0)'], ['above', 'look straight down'], ['out', 'farther (−)'], ['in', 'nearer (+)'], ['full', 'fill the screen (f)']];
 const PYR_GO = [['whole', 'the whole'], ['course', 'the working course'], ['horns', 'beside the horns'], ['foot', 'from the foot']];
 const TOOLS = [['look', 'the eye', 'drag to turn the view; tap a horn to hear it alone'], ['horn', 'place a horn', 'click the bed to place a horn; drag to aim it'],
   ['pour', 'pour binder', 'click the bed to pour a 1.27 m round of binder paste'], ['sand', 'tip sand', 'click or drag to tip sand'], ['erase', 'take away', 'click a horn to remove it, or the bed to dig']];
@@ -119,6 +120,7 @@ export function createFrequencies({ toast } = {}) {
   let years = 2.2, pyrPlaying = false, pyrSound = false, rowShown = null, rowHorns = [];     // it opens with the method at work: about a third of the way up
   // both
   let tau = 0, volume = 0.4, heardDb = null, lastTiles = 0, forceTiles = true, stage = null, sand = null, pyr = null, failed = '', sound = null;
+  let tour = false, lit = false, litN = 0, each = new Float32Array(1280), glowW = new Float32Array(1280), gainsNow = [0, 0, 0, 0];
   const plan = hornPlan({ mouthDb: 160 });
   const sched = schedule(plan);
   const rows = courseTable();
@@ -150,7 +152,7 @@ export function createFrequencies({ toast } = {}) {
           <div class="freq-line" data-hud="slow"></div>
           <div class="freq-help">drag to turn · shift- or right-drag to slide · click, then scroll, or pinch to zoom · double-click to centre</div>
         </div>
-        <div class="freq-hud freq-br"><div class="freq-ear"><span class="freq-k">at your ear</span><b data-hud="ear">sound off</b></div></div>
+        <div class="freq-hud freq-br"><div class="freq-ear"><canvas class="freq-scope" data-hud="scope" width="192" height="52" hidden title="left (blue) and right (amber), as played, slowed"></canvas><div class="freq-ear-say"><span class="freq-k">at your ear</span><b data-hud="ear">sound off</b></div></div></div>
         <div class="freq-wait" data-hud="wait"><span>drawing the room…</span></div>
       </div>
       <div class="freq-body"></div>`;
@@ -203,7 +205,8 @@ export function createFrequencies({ toast } = {}) {
 
   // everything that sounds or runs, stopped (a tab change, or leaving the room)
   function quiet() {
-    playing = pyrPlaying = pyrSound = false; drag = null; solo = -1;
+    playing = pyrPlaying = pyrSound = tour = false; drag = null; solo = -1;
+    shine(-1);
     sound?.stop();
     if (sand) { sand.plain = false; sand.cursor(null); }
   }
@@ -282,6 +285,7 @@ export function createFrequencies({ toast } = {}) {
           <li><b>What is drawn</b> is Petrie's pyramid at its true size: every course its own thickness and side, its blocks on the 1.27 m module, lit by a low sun; the faint outline is the finished pyramid, and the figure at its corner is 1.75 m tall.</li>
           <li><b>The horns</b> stand shoulder to shoulder around the course being made, each at its true size, half a metre above the surface as it rises. The fronts leaving each line of horns are drawn ${fmt(LATTICE_HZ / WAVE_HZ, 0)} times slowed and fade within about ${fmt(shockDistance(plan.surfaceDb, LATTICE_HZ), 0)} m, where the tone shocks; the pattern breathing on the course is the plan's lattice (two crossed standing waves, nodes a block apart), drawn where that sound reaches. It is the plan, not a field solved for a thousand horns.</li>
           <li><b>What you hear</b> with the sound on is the working course's horns where the camera stands, every one with its true phase, scaled as in the sandbox (every 20 dB of the field is 10 dB at your speakers). They are played throughout, also while a course sets, when in the plan they would rest, so a paused build is never mute. The pyramid's body does not shadow the sound, and below the working course the room mirrors your height above it.</li>
+          <li><b>Where the sound comes from:</b> while it sounds, each horn's mouth glows as much of what you hear is its own (its pressure at the camera over the loudest one's, to the power 1.5, so that the ones that carry the sound stand out). Stand behind a line of horns and its nearest are dim: they face away, and the line across the course, facing you, carries more. The scope beside the level draws the two channels as they are played, slowed.</li>
           <li><b>The build</b> plays the ${sig(sched.years, 3)} years of sound in ${BUILD_S} seconds; drag the years to go anywhere in it.</li>
         </ul>
       </section>`;
@@ -333,6 +337,7 @@ export function createFrequencies({ toast } = {}) {
           <li><b>Slowed.</b> The waves are drawn at half a cycle a second, ${fmt(f / WAVE_HZ, 0)} times slower than the tone, so the eye can follow them; the sand moves at the speed you choose.</li>
           <li><b>What you hear</b> is the tone where the camera stands: every horn and its echo in the ground, added with their true phases, so where they cancel it goes quiet and where they meet it swells. Turn, and the sound turns with you.</li>
           <li><b>Conventions, not physics:</b> where a horn sits between your speakers is placed as a stereo recording places an instrument (no head is modelled), and the level is scaled for speakers: every 20 dB of the field is 10 dB at them, and 170 dB, where air itself shocks, is full volume. Low tones play faintly on small speakers; headphones tell it best.</li>
+          <li><b>Where the sound comes from:</b> while it sounds, each horn's mouth glows as much of what you hear is its own (its pressure at the camera over the loudest one's, to the power 1.5, so that the ones that carry the sound stand out); a horn facing away is dim even near you. The scope beside the level draws the two channels as they are played, slowed.</li>
           <li><b>One horn alone.</b> With the eye chosen, tap a horn (or its number above) to hear only it and see only its waves; the sand still feels every horn.</li>
           <li><b>Drawn, not derived:</b> the driver behind each throat, the posts, and the glass tray (the sound takes no echo from it). Below about 110 Hz a mouth is wider than its half-metre mount and dips into the bed; the model treats each horn as a point at its mouth's centre.</li>
         </ul>
@@ -370,6 +375,8 @@ export function createFrequencies({ toast } = {}) {
       for (const b of body.querySelectorAll('[data-speed]')) press(b, Number(b.dataset.speed) === speed);
       for (const b of body.querySelectorAll('[data-horn]')) press(b, Number(b.dataset.horn) === solo);
     }
+    const tb = root.querySelector('[data-view="tour"]');
+    if (tb) { tb.classList.toggle('on', tour); tb.setAttribute('aria-pressed', String(tour)); }
     refs.solo.hidden = !(tab === 'sandbox' && solo >= 0);
     if (solo >= 0) refs['solo-say'].innerHTML = `horn <b>${solo + 1}</b> alone: its sound and its waves`;
     host.dataset.tool = tab === 'sandbox' ? tool : 'look';
@@ -388,6 +395,7 @@ export function createFrequencies({ toast } = {}) {
     if (!b || !root || !root.contains(b)) return;
     const d = b.dataset;
     if (d.tab) { if (d.tab !== tab) { quiet(); tab = d.tab; render(); } return; }
+    if (d.view === 'tour') { tour = !tour; sync(); kick(); return; }
     if (d.view) { stage?.view(d.view); return; }
     if (d.go) { goTo(d.go); return; }
     if (d.tool) { tool = d.tool; sand?.cursor(null); if (stage) stage.canvas.style.cursor = ''; sync(); kick(); return; }
@@ -488,6 +496,7 @@ export function createFrequencies({ toast } = {}) {
       kick();
     },
     tap(hit) { if (tab === 'sandbox' && tool === 'look' && hit?.on === 'horn') setSolo(solo === hit.horn ? -1 : hit.horn); },
+    touch() { if (tour) { tour = false; sync(); } },             // a hand on the stage ends the tour
     hover(hit) { cursorAt(hit); },
   };
   function newHorn(x, y) {
@@ -542,10 +551,11 @@ export function createFrequencies({ toast } = {}) {
   // ---------------------------------------------------------------- a frame (the stage calls it before it draws; true = keep drawing)
   function frame(now, dt) {
     if (!root) return false;
+    if (tour) { const o = (tab === 'pyramid' ? pyr : sand)?.orbit; if (o) { turn(o, dt * 0.07, 0); o.rate = 0; } }    // once round in ninety seconds
     const live = tab === 'pyramid' ? framePyr(dt) : frameSand(now, dt);
     if (forceTiles || now - lastTiles > 200) { tiles(now); lastTiles = now; forceTiles = false; }
-    earOut(); scaleBar();
-    return live;
+    earOut(); scaleBar(); scope();
+    return live || tour;
   }
   // a bar of a round length, as long on the screen as it is at the point looked at
   function scaleBar() {
@@ -579,7 +589,7 @@ export function createFrequencies({ toast } = {}) {
       }
       sand.fronts({ on: playing, lambda: wavelength(f), tau, solo });
     }
-    listen(solo >= 0 ? [horns[solo]] : horns, f, bed.depth0, playing && hearing);
+    listen(solo >= 0 ? [horns[solo]] : horns, f, bed.depth0, playing && hearing, solo);
     return playing || fieldDirty;
   }
 
@@ -609,12 +619,53 @@ export function createFrequencies({ toast } = {}) {
   }
 
   // ---------------------------------------------------------------- the tone at the camera
-  function listen(list, hz, zero, on) {
-    if (!on) { heardDb = null; return; }
-    if (!list.length) { heardDb = null; sound?.set([0, 0, 0, 0]); return; }
-    const heard = hear(list, hz, earNow(zero));
+  function listen(list, hz, zero, on, soloAt = -1) {
+    gainsNow = [0, 0, 0, 0];
+    if (!on || !list.length) { heardDb = null; if (on) sound?.set(gainsNow); shine(-1); return; }
+    if (each.length < list.length) each = new Float32Array(list.length * 2);
+    const heard = hear(list, hz, earNow(zero), each);
     heardDb = heard.p > 0 ? paToSpl(heard.p) : null;
-    sound?.set(stereo(heard));
+    gainsNow = stereo(heard);
+    sound?.set(gainsNow);
+    shine(list.length, soloAt);
+  }
+  // where the sound comes from, as light: each horn as bright as its own share of what is heard
+  // at the camera (its pressure there over the loudest one's, to the power 1.5, so that the ones
+  // that carry the sound stand out); n < 0 puts every horn out
+  function shine(n, soloAt = -1) {
+    const scene = tab === 'pyramid' ? pyr : sand;
+    if (!scene) return;
+    if (n < 0) { if (lit) { scene.glow(null); lit = false; litN = 0; } return; }
+    const need = Math.max(n, soloAt + 1);
+    if (glowW.length < need) glowW = new Float32Array(need * 2);
+    glowW.fill(0);
+    if (soloAt >= 0) glowW[soloAt] = 1;
+    else {
+      let top = 0;
+      for (let i = 0; i < n; i++) if (each[i] > top) top = each[i];
+      if (top > 0) for (let i = 0; i < n; i++) glowW[i] = Math.pow(each[i] / top, 1.5);
+    }
+    scene.glow(glowW); lit = true; litN = need;
+  }
+  // the two channels as they are played (left blue, right amber), on the slowed clock
+  function scope() {
+    const c = refs.scope;
+    if (!c) return;
+    const on = (tab === 'pyramid' ? pyrSound : playing && hearing) && heardDb != null;
+    if (c.hidden === on) c.hidden = !on;
+    if (!on) return;
+    const g = c.getContext('2d'), w = c.width, h = c.height, [a, b, d, e] = gainsNow;
+    const top = Math.max(Math.hypot(a, b), Math.hypot(d, e), 1e-9);
+    g.clearRect(0, 0, w, h);
+    g.lineWidth = 2.4; g.lineJoin = 'round';
+    for (const [cc, ss, col] of [[a, b, 'rgba(150, 196, 255, 0.95)'], [d, e, 'rgba(255, 196, 120, 0.95)']]) {
+      g.strokeStyle = col; g.beginPath();
+      for (let x = 0; x <= w; x += 3) {
+        const th = (x / w) * 4 * Math.PI - 2 * Math.PI * tau, y = h / 2 - ((cc * Math.cos(th) + ss * Math.sin(th)) / top) * (h / 2 - 3);
+        if (x) g.lineTo(x, y); else g.moveTo(x, y);
+      }
+      g.stroke();
+    }
   }
   // the listener: the camera's eye, its right hand along the ground, and its height above the
   // plane the sound meets (zero); below that plane the room mirrors it (a pyramid's flank)
@@ -642,7 +693,8 @@ export function createFrequencies({ toast } = {}) {
   function tiles(now) {
     if (!root) return;
     const px = stage ? stage.read().px : null, hz = tab === 'pyramid' ? LATTICE_HZ : f;
-    hud('slow', `waves drawn ${fmt(hz / WAVE_HZ, 0)}× slowed${px ? ` · ${px[0]} × ${px[1]} px` : ''}`);
+    const sounding = tab === 'pyramid' ? pyrSound : playing && hearing;
+    hud('slow', `waves drawn ${fmt(hz / WAVE_HZ, 0)}× slowed${sounding ? ' · the brighter a horn, the more of what you hear is its' : px ? ` · ${px[0]} × ${px[1]} px` : ''}`);
     if (tab === 'pyramid') {
       const b = buildAt(sched.rows, years), c = b.current, n = sched.rows.length;
       const phase = !c ? 'built' : b.setting ? `setting, ${fmt(b.setLeft, 0)} h to go` : `carrying in, ${fmt(b.part * 100, 0)} %`;
@@ -688,7 +740,8 @@ export function createFrequencies({ toast } = {}) {
     const b = buildAt(sched.rows, years), r3 = (x) => Math.round(x * 1000) / 1000;
     return { open: !!(root && root.isConnected), tab, loaded: !!stage, failed, stage: stage ? stage.read() : null, sound: sound ? sound.read() : null,
       years: r3(years), built: b.built, course: b.current ? b.current.course : null, rowHorns: rowHorns.length, pyrPlaying, pyrSound,
-      playing, hearing, tool, show, speed, f, powerW, horns: horns.length, solo, heardDb: heardDb == null ? null : Math.round(heardDb * 10) / 10, tau: r3(tau) };
+      playing, hearing, tool, show, speed, f, powerW, horns: horns.length, solo, heardDb: heardDb == null ? null : Math.round(heardDb * 10) / 10, tau: r3(tau),
+      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4) };
   }
 
   return { open, close, hornSpec };

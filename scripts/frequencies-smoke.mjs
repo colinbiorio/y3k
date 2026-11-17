@@ -108,6 +108,11 @@ try {
   const press = (sel) => page.locator(sel).first().click({ timeout: 8000 });
   const where = (p) => page.evaluate((p) => window.Y3K.frequencies.screenOf(p), p);
   const stageBox = async () => page.locator('.freq-stage').boundingBox();
+  // the gaps between drawn frames over a while: the middle one and the slow tail
+  const frames = (ms = 2500) => page.evaluate(async (ms) => { const d = []; let last = 0; const t0 = performance.now();
+    while (performance.now() - t0 < ms) { const n = await new Promise(requestAnimationFrame); if (last) d.push(n - last); last = n; }
+    d.sort((a, b) => a - b); const q = (p) => Math.round(d[Math.min(d.length - 1, Math.floor(p * d.length))] * 10) / 10; return { n: d.length, p50: q(0.5), p95: q(0.95) }; }, ms);
+  out.frames = {};
 
   // ---------------------------------------------------------------- the pyramid
   let r = await until((r) => r.loaded || r.failed, 60000);
@@ -124,12 +129,13 @@ try {
   await press('[data-act="pyr-sound"]');
   r = await until((r) => r.pyrSound && r.heardDb != null);
   check('sound on plays the working course at the ear', r.pyrSound && r.sound?.open && r.heardDb > 60 && r.heardDb < 200, { sound: r.sound, heardDb: r.heardDb });
-  const farDb = r.heardDb;
+  const farDb = r.heardDb, farBright = r.bright;
   await shot('pyramid-sounding');
   await press('[data-go="horns"]');
   await sleep(1800 * slow);
   r = await read();
   check('beside the horns is louder than the whole', r.heardDb > farDb + 6, { far: farDb, near: r.heardDb });
+  check('the horns glow by their share of what is heard: some, not all', r.lit > 100 && r.bright > 0 && r.bright < r.lit && farBright < r.lit, { near: r.bright, far: farBright, lit: r.lit });
   check('the stereo gains move with the ear', r.sound && r.sound.gains.some((g) => Math.abs(g) > 1e-3), r.sound);
   await shot('pyramid-horns');
   await press('[data-go="course"]'); await sleep(1500 * slow); await shot('pyramid-course');
@@ -139,7 +145,7 @@ try {
   await press('[data-go="whole"]'); await sleep(1500 * slow);
   const before = (await read()).years;
   await press('[data-act="pyr-play"]');
-  await sleep(2500);
+  out.frames.pyramid = await frames();
   r = await read();
   check('build runs the clock', r.pyrPlaying && r.years > before + 0.05, { before, after: r.years });
   check('the scale bar reads a round length', /^(\d+ (m|cm|km)|\d\.\d km)$/.test(await page.locator('[data-hud="scale-say"]').textContent()), await page.locator('[data-hud="scale-say"]').textContent());
@@ -148,6 +154,10 @@ try {
   r = await until((r) => r.built === 218 && r.rowHorns === 0);
   check('at the end every course is built and no horn sounds', r.built === 218 && r.rowHorns === 0 && r.heardDb == null, { built: r.built, rowHorns: r.rowHorns, heardDb: r.heardDb });
   await shot('pyramid-done');
+  await press('[data-view="tour"]');
+  const t0 = (await read()).stage.az; await sleep(1500);
+  r = await read();
+  check('the tour turns the eye by itself', r.tour && Math.abs(r.stage.az - t0) > 0.04, { tour: r.tour, az0: t0, az1: r.stage.az });
   if (!phone) {
     await inView();
     const b = await stageBox(), az0 = (await read()).stage.az;
@@ -156,6 +166,7 @@ try {
     await page.mouse.up(); await sleep(900 * slow);
     const az1 = (await read()).stage.az;
     check('a drag turns the eye', Math.abs(az1 - az0) > 0.3, { az0, az1 });
+    check('a hand on the stage ends the tour', !(await read()).tour, 'still touring');
     const d0 = (await read()).stage.dist;
     await page.mouse.wheel(0, -600); await sleep(900 * slow);
     const d1 = (await read()).stage.dist;
@@ -177,10 +188,12 @@ try {
   r = await read();
   check('sound on runs the bed and plays it', r.playing && r.sound?.open && r.heardDb > 60, { playing: r.playing, sound: r.sound, heardDb: r.heardDb });
   check('the waves run on the slowed clock', r.tau > 0.5, r.tau);
+  check('the scope draws the two channels', await page.locator('.freq-scope').isVisible() && r.gains.some((g) => Math.abs(g) > 1e-4), r.gains);
+  out.frames.sandbox = await frames();
   await shot('sandbox-block');
   await press('[data-horn="3"]');
   r = await until((r) => r.solo === 3);
-  check('a horn heard alone', r.solo === 3 && r.heardDb > 40, { solo: r.solo, heardDb: r.heardDb });
+  check('a horn heard alone, and alone alight', r.solo === 3 && r.heardDb > 40 && r.bright === 1, { solo: r.solo, heardDb: r.heardDb, bright: r.bright });
   await shot('sandbox-alone');
   await press('[data-act="all"]');
   r = await until((r) => r.solo === -1);

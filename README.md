@@ -261,6 +261,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (later) — **The frequencies room, round two: the horns light up
+  by how much of what you hear is theirs** (`acoustics.mjs` `hear(…, each)`,
+  `kit.js` `glowing`/`withGlow`, both scenes, `src/frequencies.js`). Colin's
+  "see where each sound is coming from", taken literally: while the tone
+  sounds, each horn's mouth glows by its own pressure at the camera over the
+  loudest one's (to the power 1.5), so walking the eye around shows which
+  horns you are hearing. It follows the physics: behind a line of horns the
+  nearest are dim (they face away) and the line across the course carries
+  more. A scope beside the level draws the two played channels; a tour button
+  turns the eye once round in ninety seconds until a hand touches the stage.
+  The smoke now measures frames: a steady 16.7 ms (60 a second) on the Mac's
+  GPU at 2×, building with the sound on and in the sandbox. 30 checks in
+  `test/frequencies.test.mjs` (one new: each horn's share is what it would be
+  heard alone).
+
 - **2026-11-17** — **The frequencies room in the round: the pyramid and the
   sandbox in 3D, the tone heard from where you stand** (`src/frequencies.js`,
   `src/frequencies/{stage,pyramid3d,sandbox3d,kit,orbit,sound}.js`,

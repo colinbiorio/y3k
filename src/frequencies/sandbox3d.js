@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { createOrbit } from './orbit.mjs';
 import { paToSpl } from './acoustics.mjs';
 import { SET, strengthAt } from './pyramid.mjs';
-import { lin, rgb, merge, hornGeometry, aimMatrix, bronze } from './kit.js';
+import { lin, rgb, merge, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
 
 const GLASS = 0.72;           // the top of the tray's glass, m above the floor
 const TUBE = 0.02;            // the arcs' tube as modelled; the shader redraws it at a width that reads
@@ -161,7 +161,7 @@ export function createSandScene(stage, bed0) {
     group.add(glass, rim); }
 
   // ---------------------------------------------------------------- the horns, each on its post
-  const brass = bronze(), steel = new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 });
+  const brass = glowing(bronze()), steel = new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 });
   const ONE = new THREE.Color(1, 1, 1), LIT = new THREE.Color(1.5, 1.42, 1.25), DIM = new THREE.Color(0.4, 0.4, 0.42);
   let hornMesh = null, postMesh = null, cap = 0, hornKey = '', spec = null;
   const tags = [];
@@ -171,7 +171,7 @@ export function createSandScene(stage, bed0) {
     if (key !== hornKey || list.length > cap) {
       for (const m of [hornMesh, postMesh]) if (m) { group.remove(m); m.geometry.dispose(); m.dispose(); }
       cap = Math.max(64, 2 ** Math.ceil(Math.log2(Math.max(1, list.length))));
-      hornMesh = new THREE.InstancedMesh(hornGeometry(sp, true), brass, cap);
+      hornMesh = new THREE.InstancedMesh(withGlow(hornGeometry(sp, true), cap), brass, cap);
       postMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 10).translate(0, 0.5, 0), steel, cap);
       for (const m of [hornMesh, postMesh]) { m.castShadow = true; m.frustumCulled = false; group.add(m); }
       hornKey = key;
@@ -234,6 +234,14 @@ export function createSandScene(stage, bed0) {
     for (const m of [into, shells]) { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; }
   }
 
+  // each horn's share of what is heard where the camera stands, 0..1 (null: none)
+  function glow(w) {
+    if (!hornMesh) return;
+    const a = hornMesh.geometry.attributes.aGlow;
+    for (let i = 0; i < a.count; i++) a.array[i] = w && i < list.length ? w[i] : 0;
+    a.needsUpdate = true;
+  }
+
   // ---------------------------------------------------------------- the tool's ring, and where a ray lands
   const mark = new THREE.Mesh(new THREE.RingGeometry(0.955, 1, 96).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: rgb(255, 226, 150), transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, fog: false }));
   mark.renderOrder = 5; mark.visible = false; group.add(mark);
@@ -271,7 +279,7 @@ export function createSandScene(stage, bed0) {
     orbit: createOrbit({ target: [width / 2, 0.3, depth / 2 + 0.2], dist: 15.5, polar: 0.98, az: -0.42, fov: 40, minDist: 0.6, maxDist: 80, minPolar: 0.02, maxPolar: 1.5, box: [[-10, 0, -10], [width + 10, 3, depth + 10]] }),
     fog: [34, 230], far: 800, cell: 1,
     sun: { center: [width / 2, 0, depth / 2], radius: 11, dir: [0.62, 0.5, -0.6] },
-    hit, horns, relief, paint, fronts, cursor,
+    hit, horns, relief, paint, fronts, cursor, glow,
     bed(b) { bed = b; },
   };
   relief(); paint();
