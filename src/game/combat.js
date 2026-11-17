@@ -211,6 +211,7 @@ export function stepCombat(c, dt, ctx) {
     if (hands.attackPressed && (R.mode === 'held')) {
       if (airborne) {
         R.mode = 'slam'; body.v[1] = Math.min(body.v[1], -RING.slam.fall); body.rising = false;
+        if (body.wallrun) { body.lastWall = body.wallrun.n; body.wallrun = null; }      // off the wall it was running along
         c.events.push({ type: 'dive', at: [...body.p] });
       } else { R.mode = 'charging'; R.held = 0; R.charge = 0; }
     }

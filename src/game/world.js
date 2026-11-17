@@ -18,7 +18,7 @@ export const REACH = 9;                               // m: within this of a bui
 // the kinds, each as its module answers: placing, solving, inside, the eye, the sun, how it goes up, where its door is
 export const KINDS = {
   shelter: { name: 'shelter', place: SH.placeShelter, solve: SH.solve, inside: SH.inside, eyeRoom: SH.eyeRoom, sunIn: SH.sunIn, phase: SH.phase, door: SH.doorWorld, dry: SH.dry, foot: SH.FOOT, solid: SH.solid },
-  house: { name: 'house', place: HO.placeHouse, solve: HO.solve, inside: HO.inside, eyeRoom: HO.eyeRoom, sunIn: HO.sunIn, phase: HO.phase, door: HO.doorWorld, dry: HO.dry, foot: HO.FOOT, solid: HO.solid },
+  house: { name: 'house', place: HO.placeHouse, solve: HO.solve, inside: HO.inside, eyeRoom: HO.eyeRoom, sunIn: HO.sunIn, phase: HO.phase, door: HO.doorWorld, dry: HO.dry, foot: HO.FOOT, solid: HO.solid, wall: HO.wall },
 };
 // the five, in the order they are offered; those not yet made say so
 export const BUILDINGS = [
@@ -83,6 +83,8 @@ export function createWorld() {
     eye(from, to) { let t = 1; for (const b of w.buildings) if (b.down < 0) t = Math.min(t, K(b).eyeRoom(b, from, to)); return t; },
     // whether the sun reaches a point (1) or the building it is in shades it (0); in the open, 1
     sunAt(p, sun, doorOpen = 1) { const b = w.inside(p); return b ? K(b).sunIn(b, p[0], p[1], p[2], sun, doorOpen) : 1; },
+    // the nearest wall a body at p could run along (body.js), of everything standing that has walls to run: { n, d } or null
+    wall(p) { let best = null; for (const b of w.buildings) { if (b.down >= 0 || !K(b).wall) continue; const r = K(b).wall(b, p); if (r && (!best || r.d < best.d)) best = r; } return best; },
     // whether a point is in something standing (a wall, a roof, a thing): what flies stops there (combat.js)
     solid(p) { for (const b of w.buildings) if (b.down < 0 && K(b).solid(b, p, 0.02)) return true; return false; },
     // the water a body treads on: none on a building's floor or its steps

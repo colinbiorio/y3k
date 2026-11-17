@@ -24,6 +24,8 @@
 //          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
 //          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
 //          aside, the whirl, a slam from a jump; seven bots up and the frames; the list clearing them
+//   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
+//          up, the body leaning into it) to its corner; run again and leapt off, out and up
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -47,7 +49,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -228,6 +230,48 @@ try {
     check('leaving the tab puts the void down', !out.left.gameRoot && !out.left.inVoid, out.left);
     await page.locator('#nav-world').click(); await page.waitForSelector('.game-root canvas', { timeout: 20000 }); await sleep(600);
     const again = await read(); check('and it is where it was on return', again && Math.abs(again.p[2] - out.reads['15-back-in-the-void'].p[2]) < 0.5 && again.light === 'night', again);
+  }
+
+  if (scene === 'wall') {
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const faceYaw = async (target) => { for (let i = 0; i < 5; i++) { const d = wrap(target - (await read()).yaw); if (Math.abs(d) < 0.03) break; await drag(Math.max(-900, Math.min(900, -d / 0.0024)), 0); await sleep(120); } };
+    const house = (r) => r.world.buildings.find((b) => b.kind === 'house');
+    const local = (r) => { const b = house(r), dx = r.p[0] - b.x, dz = r.p[2] - b.z, c = Math.cos(b.yaw), sn = Math.sin(b.yaw); return [c * dx - sn * dz, sn * dx + c * dz]; };
+    const world = (b, lx, lz) => [b.x + Math.cos(b.yaw) * lx + Math.sin(b.yaw) * lz, b.z - Math.sin(b.yaw) * lx + Math.cos(b.yaw) * lz];
+    const goto = async (lx, lz) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await read(), [tx, tz] = world(house(r), lx, lz), dx = tx - r.p[0], dz = tz - r.p[2], dist = Math.hypot(dx, dz);
+        if (dist < 0.3) break;
+        await faceYaw(Math.atan2(-dx, -dz));
+        await key.down('KeyW'); await sleep(Math.max(60, Math.min(700, (dist / 5.6) * 1000 * 0.8))); await key.up('KeyW'); await until((r) => speed(r) < 0.1, 3000);
+      }
+    };
+    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    let r = await until((r) => house(r)?.built, 15000);
+    check('a house to run along', !!house(r)?.built, r.world);
+    await goto(-5.2, 6.5); await goto(-5.2, -5.7); await goto(-2.7, -5.7);
+    const b = house(await read()), along = Math.atan2(-Math.cos(b.yaw), Math.sin(b.yaw));      // the eye looking along the back wall, toward its +x
+    await faceYaw(along); await key.down('KeyD'); await sleep(700); await key.up('KeyD'); await until((r) => speed(r) < 0.1, 3000);
+    r = await read(); out.start = { at: local(r) };
+    check('behind it, at its back wall', Math.abs(local(r)[1] + 4.8) < 0.05 && local(r)[0] < -1.8, out.start);
+    await key.down('KeyD'); await key.down('KeyW'); await sleep(200); await key.press('Space');
+    r = await until((r) => r.world.wallrun, 1500); const x0 = local(r)[0];
+    check('jumped at along it, the body runs along the wall', r.world.wallrun === true, { at: local(r), y: r.p[1] });
+    await sleep(90); r = await read(); await shot('01-wall-run');
+    out.wallEye = { eyeD: r.world.eyeD, eye: r.world.eye, p: r.p, pitch: r.pitch, yaw: r.yaw, zoom: r.zoom, at: local(r) };
+    check('faster than a run, held up', r.world.wallrun && Math.hypot(r.v[0], r.v[2]) > 7 && r.p[1] > 1, { v: r.v, y: r.p[1] });
+    r = await until((r) => !r.world.wallrun, 3000); const x1 = local(r)[0];
+    r = await until((r) => r.grounded, 3000); await key.up('KeyW'); await key.up('KeyD');
+    check('to its corner, and down', x1 > 2.4 && r.grounded, { from: x0, to: x1 });
+    // again, and leapt off
+    await goto(-2.7, -5.7); await faceYaw(along); await key.down('KeyD'); await sleep(700); await key.up('KeyD'); await until((r) => speed(r) < 0.1, 3000);
+    await key.down('KeyD'); await key.down('KeyW'); await sleep(200); await key.press('Space');
+    r = await until((r) => r.world.wallrun, 1500); await sleep(150);
+    await key.press('Space'); await sleep(60); r = await read(); await shot('02-leapt-off');
+    const lz = local(r)[1];
+    await sleep(250); const r2 = await read(); await key.up('KeyW'); await key.up('KeyD');
+    check('a jump leaps off it, out and up', !r.world.wallrun && local(r2)[1] < lz - 0.6 && r2.p[1] > 1.2, { z: [lz, local(r2)[1]], y: r2.p[1] });
+    await until((r) => r.grounded, 4000);
   }
 
   if (scene === 'fight') {

@@ -110,16 +110,40 @@ export function solve(b, p, was, rad = 0.3, tall = 1.7, stepUp = 0.35) {
       const head = Math.max(y, wy) + tall, lim = Math.min(IN, H.plate - Math.max(0, head - H.top) / TAN) - rad;
       if (lim > 0 && Math.abs(lx) > lim) { lx = Math.sign(lx) * lim; hit = true; }
       ceiling = Math.min(ceiling, roofIn(Math.min(IN, Math.abs(lx) + rad)));
-    } else if (y + tall > H.top - 0.3 && Math.abs(lx) < H.eave + rad && Math.abs(lz) < H.end + rad && y < roofOut(Math.max(0, Math.abs(lx) - rad))) {
-      // outside, at the roof's height (flying): out of the thatch the short way, across or along
-      const ax = Math.abs(lx), toSide = H.plate + (H.top + RISE - y) / TAN + rad - ax, toEnd = H.end + rad - Math.abs(lz);
-      if (toSide > 0 && toEnd > 0) { if (toSide < toEnd) lx = Math.sign(lx || 1) * (ax + toSide); else lz = Math.sign(lz || 1) * (H.end + rad); hit = true; }
+    } else if (Math.abs(lx) < H.eave + rad && Math.abs(lz) < H.end + rad && y < roofOut(Math.max(0, Math.abs(lx) - rad))) {
+      const under = (ax) => roofIn(Math.min(H.eave, ax + rad));        // the thatch's underside over the body's outer edge
+      if (wy + tall <= under(Math.abs(wx)) + 0.02) {
+        // outside, come up from below (a jump beside the walls): the thatch over it is a ceiling
+        ceiling = Math.min(ceiling, under(Math.abs(lx)));
+      } else if (y + tall > H.top - 0.3) {
+        // outside, at the roof's height (flying): out of the thatch the short way, across or along
+        const ax = Math.abs(lx), toSide = H.plate + (H.top + RISE - y) / TAN + rad - ax, toEnd = H.end + rad - Math.abs(lz);
+        if (toSide > 0 && toEnd > 0) { if (toSide < toEnd) lx = Math.sign(lx || 1) * (ax + toSide); else lz = Math.sign(lz || 1) * (H.end + rad); hit = true; }
+      }
     }
   }
   // the ladder: a body in front of it, inside the room, may climb it (body.js)
   const L = H.ladder, atLadder = roomBefore && Math.abs(lx - L.x) < L.half + 0.15 && lz > L.z - 0.05 && lz < L.z + rad + 0.25 && y < H.loft.top + 0.05;
   const [x, z] = toWorld(b, lx, lz);
   return { p: [x, y, z], floor, ceiling, hit, climb: atLadder ? { dir: [-Math.sin(b.yaw), -Math.cos(b.yaw)], top: H.loft.top, base: H.floor } : null };
+}
+
+// A wall a body could run along (body.js): the nearest of its walls whose face the body's middle is beside (from 0.5 m
+// over its feet to 1.2 m), within `reach` of its side. Answers the face's outward way in the world, and how near it is.
+export function wall(b, p, rad = 0.3, reach = 0.22) {
+  const [lx, lz] = toLocal(b, p[0], p[2]), lo = p[1] + 0.5, hi = p[1] + 1.2;
+  let best = null;
+  for (const s of SOLIDS) {
+    if (s.part !== 'wall' && s.part !== 'gable') continue;
+    const cx = Math.max(s.x0, Math.min(lx, s.x1)), cz = Math.max(s.z0, Math.min(lz, s.z1)), dx = lx - cx, dz = lz - cz, d = Math.hypot(dx, dz);
+    const top = s.part === 'gable' ? Math.min(s.y1, roofIn(Math.abs(cx)) + 0.15) : s.y1;      // a gable's top is the roof's line
+    if (s.y0 > lo || top < hi) continue;
+    if (d < 1e-6 || d > rad + reach) continue;
+    if (!best || d < best.d) best = { d, x: dx / d, z: dz / d };
+  }
+  if (!best) return null;
+  const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
+  return { d: best.d, n: [c * best.x + sn * best.z, -sn * best.x + c * best.z] };
 }
 
 // What of a point is solid to the eye: in a wall, the roof, the floor or a thing; not the room's air, the porch's or the doorway's.

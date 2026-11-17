@@ -2068,8 +2068,84 @@ ok('the fight\'s hands: cast, whirl, guard and a bot have keys and pad buttons; 
 
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {
   const view = read('src/game/view.js');
-  for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen, K.lean)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/fight.js').includes("from './combat.js'"), "the ring drawn is not the numbers' ring");
+});
+
+// ---- the wall run (body.js, house.js's wall). Colin, 17 Nov: "a third feature -- wall run".
+// A house at the origin, unturned (its own frame is the world's). Its back wall's outer face is at z = −4.5, from
+// x = −3 to 3, under the roof's end (which reaches 4.95): high enough over it to run along. A body behind it on the
+// water, the eye looking along +x (yaw −π/2): forward is +x, and the hands push a little toward the wall (+z).
+function wallYard() {
+  const w = createWorld(), b = { kind: 'house', x: 0, z: 0, yaw: 0, t: 10, down: -1 }; w.buildings.push(b);
+  const body = B.createBody({ yaw: Math.PI / 2, world: w }); body.p = [-2.8, 0, -4.8]; body.was = [...body.p];
+  return { w, b, body };
+}
+const ALONG = -Math.PI / 2;
+// the body stepped through a list of [seconds, input] with the world's walls; answers every event and the highest it went
+function drive(body, plan) {
+  const evs = []; let top = body.p[1];
+  for (const [secs, inp] of plan) for (let t = 0; t < secs - 1e-9; t += B.STEP) {
+    body.was = [...body.p];
+    B.stepBody(body, { yaw: ALONG, pitch: 0, move: [0, 0], ...inp, jumpPressed: t === 0 && !!inp.jumpPressed }, B.STEP);
+    evs.push(...body.events.splice(0)); top = Math.max(top, body.p[1]);
+  }
+  return { evs, top };
+}
+const runAlong = [[0.3, { move: [0.3, 1] }], [0.3, { move: [0.3, 1], jump: true, jumpPressed: true }]];
+
+ok('a wall run: jumped at along the house\'s back wall, the body takes to it and runs along it faster than it ran, held up, to its corner', () => {
+  const { w, body } = wallYard();
+  near(w.wall([-1, 1.0, -4.8])?.d ?? 9, 0.3, 1e-9, 'a wall 0.3 m off'); assert.deepEqual(w.wall([-1, 1.0, -4.8]).n, [0, -1], 'facing out, toward the body');
+  assert.equal(w.wall([4.5, 1.0, -4.8]), null, 'past its corner, none'); assert.equal(w.wall([-1, 1.0, -6]), null, 'too far off, none');
+  assert.equal(w.wall([-2.6, 3.5, -4.8]), null, 'over its top (the gable\'s slope), none'); assert.ok(w.wall([-1, 3.5, -4.8]), 'nearer the ridge it is higher');
+  const x0 = body.p[0];
+  const { evs } = drive(body, [...runAlong, [2, { move: [0.3, 1] }]]);
+  const on = evs.findIndex((e) => e.type === 'wallrun' && e.on), off = evs.findIndex((e, i) => i > on && e.type === 'wallrun' && !e.on);
+  assert.ok(on >= 0 && off > on, 'on the wall and off it: ' + evs.map((e) => e.type).join());
+  assert.deepEqual(evs[on].n, [0, -1]);
+  assert.ok(body.p[0] > 3, 'along it to the corner: ' + body.p[0].toFixed(2)); assert.ok(body.p[0] - x0 > 7, 'further than a run and a jump: ' + (body.p[0] - x0).toFixed(2));
+  assert.ok(body.grounded && body.p[1] === 0 && !body.wallrun, 'and down on the water again');
+  // on it: along at least WALL.along (more than a run), held to its face, a jump's rise not carried up it
+  const s2 = wallYard().body; drive(s2, [...runAlong, [0.15, { move: [0.3, 1] }]]);
+  assert.ok(s2.wallrun, 'still on it'); assert.ok(s2.v[0] >= B.WALL.along - 1e-9 && B.WALL.along > B.RUN, 'along it at ' + s2.v[0].toFixed(2));
+  assert.ok(s2.p[1] > 1 && s2.v[1] <= B.WALL.lift + 1e-9, 'held up, not flung up: ' + s2.p[1].toFixed(2) + ' at ' + s2.v[1].toFixed(2));
+  near(s2.p[2], -4.8, 1e-6, 'at the wall\'s face');
+});
+
+ok('a jump off the wall leaps out and up and gives the air\'s dash back; the same wall waits for the ground', () => {
+  const { body } = wallYard();
+  drive(body, [...runAlong, [0.15, { move: [0.3, 1] }]]);
+  assert.ok(body.wallrun); body.airDash = 0;
+  const { evs } = drive(body, [[B.STEP, { move: [0.3, 1], jump: true, jumpPressed: true }]]);
+  assert.ok(evs.some((e) => e.type === 'walljump'));
+  assert.ok(body.v[2] < -5 && body.v[1] > 5 && body.v[0] > 5 && !body.wallrun && body.airDash === B.AIR_DASHES, 'on, out, up, the dash back: ' + body.v.map((v) => v.toFixed(2)));
+  // pushing back at the same wall in the air: no second run until it has stood on something
+  const back = drive(body, [[0.6, { move: [1, 1] }]]);
+  assert.ok(!back.evs.some((e) => e.type === 'wallrun' && e.on), 'the same wall waits');
+  drive(body, [[2.5, {}]]); assert.ok(body.grounded && body.lastWall === null, 'the ground forgets it');
+});
+
+ok('no wall run when slow, low, going away from the wall, or with no wall there; a dash ends one', () => {
+  const walkOn = (inp) => { const { body } = wallYard(); return drive(body, [[0.3, inp], [0.6, { ...inp, jump: true, jumpPressed: true }]]).evs.some((e) => e.type === 'wallrun' && e.on); };
+  assert.equal(walkOn({ move: [0.3, 1], walk: true }), false, 'at a walk');
+  assert.equal(walkOn({ move: [-1, 0.3] }), false, 'going away from it');
+  assert.equal(walkOn({ move: [0.3, 1] }), true, 'running along it, it does');
+  { const { body } = wallYard(); assert.equal(drive(body, [[1, { move: [0.3, 1] }]]).evs.some((e) => e.type === 'wallrun'), false, 'on the water, not jumping'); }
+  { const body = B.createBody({ yaw: Math.PI, world: createWorld() }); assert.equal(drive(body, runAlong).evs.some((e) => e.type === 'wallrun'), false, 'nothing there'); }
+  { const { body } = wallYard(); drive(body, [...runAlong, [0.1, { move: [0.3, 1] }]]); assert.ok(body.wallrun);
+    const { evs } = drive(body, [[B.STEP, { move: [0.3, 1], dash: true }]]); assert.ok(!body.wallrun && evs.some((e) => e.type === 'dash'), 'a dash takes it off the wall'); }
+  // a turned house: the wall's face turned with it
+  const w2 = createWorld(); w2.buildings.push({ kind: 'house', x: 10, z: 0, yaw: Math.PI / 2, t: 10, down: -1 });
+  const [wx, wz] = HO.toWorld(w2.buildings[0], -1, -4.8), r = w2.wall([wx, 1, wz]);
+  near(r.n[0], -1, 1e-9); near(r.n[1], 0, 1e-9, 'its back wall faces −x when it is turned a quarter (its back, local −z, turned to −x)');
+});
+
+ok('beside the house\'s long side its eaves are a ceiling to a jump from the water: the head stops under the thatch, the body is not thrown aside', () => {
+  const { w } = wallYard(), body = B.createBody({ yaw: 0, world: w }); body.p = [-3.6, 0, 0]; body.was = [...body.p];
+  const { top } = drive(body, [[1.2, { jump: true, jumpPressed: true }]]);
+  near(top + B.createBody().p[1] + BODY.tall, HO.roofIn(HO.HOUSE.eave), 1e-6, 'the head under the eave\'s edge');
+  near(body.p[0], -3.6, 1e-9, 'where it jumped');
 });
 
 console.log(`\n${passed} checks passed.`);

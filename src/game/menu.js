@@ -17,7 +17,7 @@ import { LIGHT_NAMES } from './lights.js';
 import { MODES } from './state.js';
 
 export const MODE_LINES = {
-  survival: 'a tap jumps; held, the jump rises to twice the height, and the ground still takes you back. a dash goes any way you lean, once more in the air.',
+  survival: 'a tap jumps; held, the jump rises to twice the height, and the ground still takes you back. a dash goes any way you lean, once more in the air. jump at a wall along it and you run along the wall; jump again to leap off.',
   creative: 'all of survival, and flight: the fly key, or a second jump in the air. jump climbs, sink comes down; on the water, sink lands.',
 };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

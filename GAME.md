@@ -100,8 +100,8 @@ Said to Colin before starting, and standing until he says otherwise.
 | "make up 5 different plasma weapons" | **one of five** (17 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry). The thread, the bow, the bell and the torch to come. |
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
-| "wall run" (17 Nov) | next. |
-| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | after it: Lord Howe Island. |
+| "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
+| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | next: Lord Howe Island. |
 | "a mix between ancient/natural, current, and futuristic" | each of the five bodies wears all three (below). Every building and ship must. |
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
@@ -117,6 +117,34 @@ and choose who you are there. **Stage 3 is begun** (17 November): press
 **build** (or B) and a shelter goes up in front of you. **The first weapon and
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
+
+### The wall run (17 November 2026)
+
+Colin's third feature of the round, in `body.js` (the rule) and the
+buildings' own `wall` (where a wall is: so far the house's, its outer walls
+and gables and its room's walls inside).
+
+- **Taking to a wall**: in the air, going at least 3.4 m/s across the
+  ground, at least 0.55 m over what it stands on, along a wall or at it
+  slantwise (not square at it, not away from it), the hands still pushing,
+  with a wall within a hand's breadth of its side at the height of its middle.
+  A jump's rise is not carried up the wall.
+- **On it**: along it at 7.4 m/s or more (a run is 5.6), held to its face,
+  the pull a fifth of the whole, for a second and a half at most. The body
+  leans into the wall and its legs run; the eye goes to the shoulder away
+  from the wall and stands a metre out from it.
+- **Off it**: a jump leaps off (on along it, out from it at 6 m/s, up at 6.4,
+  the air's dash given back, held to rise further as any jump is); letting
+  go, the wall's end or corner, the time, the ground, the sink key or a dash
+  end it. The same wall again (one facing within 60 degrees) waits for the
+  ground; another can be run at once, so a body can go from wall to wall.
+- Found on the way: a jump beside the house's long sides was thrown 1.8 m
+  sideways by the thatch's rule for fliers. The eaves are now a ceiling to a
+  head coming up from below (the house's side walls are too low under their
+  eaves to run along from outside; its back and front walls and the room
+  inside can be).
+- Not yet: walls on the island (its cliffs and rocks, next); a wall climb; the
+  octopus and the light keep their air pose on a wall (the three on legs run).
 
 ### The fight: the ring and the bots (17 November 2026)
 
@@ -458,7 +486,7 @@ from the front, the three-quarter and the side.
 Each stage ends the way the first two did: playable, looked at in a browser,
 tested, shipped.
 
-This round (Colin, 17 November): **wall running**, then **the first map**,
+This round (Colin, 17 November): **wall running** (done), then **the first map**,
 Lord Howe Island (a crescent ten kilometres long off Australia: two sheer
 mountains, a coral lagoon, its woodhens, tropicbirds, terns and turtles),
 under a new **map** tab in the controls sheet. Then the buildings again.
