@@ -76,5 +76,24 @@ export function aimMatrix(m, h, x, y, z, s = 1) {
   return m.makeBasis(R, U, F).scale(S.set(s, s, s)).setPosition(x, y, z);
 }
 
+// A horn that glows as much of what you hear is its: an instanced attribute aGlow (0..1) adds warm
+// light, strongest at the mouth and gone by the throat (aAlong: 0 at the driver's back, 1 at the mouth).
+export function glowing(material) {
+  return patch(material, 'hornglow', {
+    uniforms: { uGlow: { value: rgb(255, 146, 52).multiplyScalar(1.25) } },
+    vertexHead: 'attribute float aGlow;\nattribute float aAlong;\nvarying float vGlow;\n', vertex: 'vGlow = aGlow * aAlong * aAlong * aAlong;\n',
+    fragmentHead: 'uniform vec3 uGlow;\nvarying float vGlow;\n',
+    fragment: 'totalEmissiveRadiance += uGlow * vGlow;',
+  });
+}
+export function withGlow(geometry, n) {
+  const p = geometry.attributes.position, along = new Float32Array(p.count);
+  let lo = 0;
+  for (let i = 0; i < p.count; i++) lo = Math.min(lo, p.getZ(i));
+  for (let i = 0; i < p.count; i++) along[i] = lo < 0 ? Math.max(0, Math.min(1, 1 - p.getZ(i) / lo)) : 1;
+  geometry.setAttribute('aAlong', new THREE.BufferAttribute(along, 1));
+  geometry.setAttribute('aGlow', new THREE.InstancedBufferAttribute(new Float32Array(n), 1));
+  return geometry;
+}
 // what the horns are made of
 export const bronze = () => new THREE.MeshStandardMaterial({ color: rgb(190, 150, 92), metalness: 0.9, roughness: 0.34, side: THREE.DoubleSide, envMapIntensity: 1.15 });

@@ -221,7 +221,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   }
   canvas.addEventListener('pointerdown', (ev) => {
     if (!cur) return;
-    byHand = true; canvas.focus({ preventScroll: true }); cur.orbit.rate = 0;
+    byHand = true; canvas.focus({ preventScroll: true }); cur.orbit.rate = 0; hand.touch?.();
     fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     try { canvas.setPointerCapture(ev.pointerId); } catch { /* a pointer that cannot be held */ }
     ev.preventDefault();
@@ -267,7 +267,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
   canvas.addEventListener('wheel', (ev) => {
     if (!cur || !(ev.ctrlKey || document.activeElement === canvas || isFull())) return;       // until the stage is taken up, the wheel scrolls the page
-    ev.preventDefault(); cur.orbit.rate = 0;
+    ev.preventDefault(); cur.orbit.rate = 0; hand.touch?.();
     zoom(cur.orbit, Math.exp(ev.deltaY * (ev.deltaMode === 1 ? 16 : 1) * (ev.ctrlKey ? 0.01 : 0.0016)), hitAt(ev)?.point || null);
     mark();
   }, { passive: false });
@@ -277,7 +277,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   canvas.addEventListener('dblclick', (ev) => { const h = hitAt(ev); if (h?.point) { focus(cur.orbit, h.point); zoom(cur.orbit, 0.7); mark(); } });
   canvas.addEventListener('keydown', (ev) => {
     if (!cur || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (orbitKey(cur.orbit, ev.key, ev.shiftKey, host.clientHeight)) { ev.preventDefault(); cur.orbit.rate = 0; mark(); }
+    if (orbitKey(cur.orbit, ev.key, ev.shiftKey, host.clientHeight)) { ev.preventDefault(); cur.orbit.rate = 0; hand.touch?.(); mark(); }
     else if (ev.key === 'f' || ev.key === 'F') { ev.preventDefault(); full(); }
   });
   for (const n of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(n, size);

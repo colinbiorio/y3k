@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { createOrbit } from './orbit.mjs';
 import { wavelength } from './acoustics.mjs';
 import { BASE_M, HEIGHT_M, STONE, LATTICE_HZ } from './pyramid.mjs';
-import { rgb, lin, patch, hornGeometry, aimMatrix, bronze } from './kit.js';
+import { rgb, lin, patch, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
 
 const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ);
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
@@ -86,8 +86,8 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
 
   // ---------------------------------------------------------------- its horns, each on a post from the ledge below
   const mt = spec.mouthDiameter / 2, th = Math.min(spec.throatDiameter / 2, mt * 0.98), waist = th * Math.exp(Math.log(mt / th) * 0.45);
-  const metal = bronze(); metal.roughness = 0.42;            // a thousand horns: a little less mirror, so their facets do not glitter
-  const horns = new THREE.InstancedMesh(hornGeometry(spec, 'mid'), metal, HORNS);
+  const metal = glowing(bronze()); metal.roughness = 0.42;   // a thousand horns: a little less mirror, so their facets do not glitter
+  const horns = new THREE.InstancedMesh(withGlow(hornGeometry(spec, 'mid'), HORNS), metal, HORNS);
   const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 6).translate(0, 0.5, 0),
     new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 }), HORNS);
   for (const m of [horns, posts]) { m.count = 0; m.frustumCulled = false; m.castShadow = true; group.add(m); }
@@ -184,6 +184,13 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     wave.uTau.value = tau; wave.uOn.value = sound && current ? 1 : 0; wave.uHalf.value = current ? current.side / 2 : 1; wave.uSet.value = setPart;
   }
 
+  // each horn's share of what is heard where the camera stands, 0..1 (null: none)
+  function glow(w) {
+    const a = horns.geometry.attributes.aGlow;
+    for (let i = 0; i < a.count; i++) a.array[i] = w && i < horns.count ? w[i] : 0;
+    a.needsUpdate = true;
+  }
+
   // where a ray lands: the pyramid as far as it is built (its ideal faces, and the working top), else the ground
   function hit(rc) {
     const o = rc.ray.origin, d = rc.ray.direction, b = BASE_M / 2, lean = BASE_M / (2 * HEIGHT_M);
@@ -214,6 +221,6 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     sun: { center: [0, 40, 0], radius: 300, dir: sunDir, follow: true, least: 14, reach: 700, beyond: 900 },
     look: { top: rgb(20, 26, 58), mid: rgb(92, 84, 120), low: rgb(198, 158, 124), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
       sun: [rgb(255, 214, 172), 3.4], hemi: [rgb(120, 140, 200), rgb(118, 96, 72), 0.62], exposure: 1.0, glow: 1, grid: 0.4, dunes: 1 },
-    hit, set,
+    hit, set, glow,
   };
 }

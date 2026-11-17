@@ -283,6 +283,16 @@ ok('the two speakers: a horn on the right is in the right one; the four gains ar
   assert.deepEqual(A.stereo({ L: [0, 0], R: [0, 0], p: 0 }), [0, 0, 0, 0]);
 });
 
+ok('where the sound comes from: each horn\'s own share at the listener is what it would be heard alone', () => {
+  const hs = [hornAt(0, 0, 1, 0), hornAt(6, 3, -1, 0.2), hornAt(2, -5, 0, 1, 156)], ear = { x: 3, y: 1, z: 1.4, rx: 0, ry: -1, rz: 0 };
+  const each = new Float32Array(3), all = A.hear(hs, 135, ear, each);
+  hs.forEach((h, i) => near(each[i], A.hear([h], 135, ear).p, A.hear([h], 135, ear).p * 1e-6, `horn ${i + 1}`));
+  near(A.hear(hs, 135, ear).p, all.p, 1e-12, 'the sum unchanged by the shares');
+  const room = read('src/frequencies.js'), kit = read('src/frequencies/kit.js');
+  assert.ok(kit.includes("fragment: 'totalEmissiveRadiance += uGlow * vGlow;'") && room.includes('scene.glow(glowW);'), 'the share is not shown as light');
+  for (const f of ['src/frequencies/sandbox3d.js', 'src/frequencies/pyramid3d.js']) assert.ok(read(f).includes('glowing(bronze())') && read(f).includes('withGlow(hornGeometry('), f + ' horns cannot glow');
+});
+
 ok('how loud the room plays: full at the air\'s 170 dB limit, every 20 dB of field is 10 dB at the speakers, never past full', () => {
   near(A.played(A.splToPa(170)), 1, 1e-12, '170 dB');
   assert.equal(A.played(A.splToPa(190)), 1);
@@ -368,7 +378,7 @@ ok('the room in the round is wired: three.js stays out of the first load; the to
   const room = read('src/frequencies.js');
   assert.ok(!/^import[^;]*from 'three/m.test(room), 'three is imported with the site');
   assert.ok(room.includes("import('./frequencies/stage.js')"), 'the stage is not loaded');
-  assert.ok(room.includes('const heard = hear(list, hz, earNow(zero));') && room.includes('sound?.set(stereo(heard));'), 'the tone is not the field at the camera');
+  assert.ok(room.includes('const heard = hear(list, hz, earNow(zero), each);') && room.includes('gainsNow = stereo(heard);') && room.includes('sound?.set(gainsNow);'), 'the tone is not the field at the camera');
   assert.equal((room.match(/sound\.start\(/g) || []).length, 1, 'sound may only begin in startSound, from a click');
   assert.ok(/function startSound[\s\S]{0,200}sound\.start\(hz\)/.test(room));
   for (const m of room.matchAll(/<input [^>]*>/g)) assert.match(m[0], /aria-label="[^"]+"/, 'an input without a name: ' + m[0].slice(0, 60));
