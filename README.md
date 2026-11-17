@@ -263,6 +263,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (late afternoon) — **The wall run** (`src/game/body.js`,
+  `house.js`, `world.js`; `view.js`, `bodies/biped.js`). Colin's third feature
+  of the round. Jump at a wall slantwise while running and the body takes to it:
+  along it at 7.4 m/s or more, the pull a fifth of the whole, for up to a
+  second and a half, leaning into it with its legs running, the eye off the far
+  shoulder. A jump leaps off (out, up, the air's dash given back); the same wall
+  waits for the ground, another can be run at once. Walls so far: the house's.
+  Also fixed: a jump beside the house's long sides was thrown 1.8 m sideways by
+  the thatch; the eaves are now a ceiling from below. Game suite 125 (4 new);
+  the void smoke's new `wall` scene 8/8; desk 16/16, phone 5/5, and build and
+  fight pass every check but their frame times. Those two ran at exactly 30
+  frames a second on a 16% battery (Chrome's battery saver), against 60 earlier
+  the same day.
+
 - **2026-11-17** (afternoon, later) — **The first plasma weapon, and bots to
   fight** (`src/game/combat.js`, `fight.js`; `view.js`, `input.js`, `body.js`,
   `world.js`, `state.js`). Colin's round: "a plasma weapon generated with

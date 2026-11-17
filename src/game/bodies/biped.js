@@ -37,7 +37,7 @@ export function createBiped({ build, scale = 1, waist = 0.07, shoulder = [0.186,
     // pose, with `falls`: where a foot came down this frame, in the world ([x, z]).
     step(body, dt, at) {
       told.v[0] = body.v[0] / s; told.v[1] = body.v[1] / s; told.v[2] = body.v[2] / s;
-      told.yaw = body.yaw; told.flying = body.flying; told.dashT = body.dashT; told.grounded = body.grounded;
+      told.yaw = body.yaw; told.flying = body.flying; told.dashT = body.dashT; told.grounded = body.grounded || !!body.wallrun;   // running along a wall, the legs run
       const p = stepGait(gait, told, dt);
       held.moved(at, dt);
       rig.position.set(at[0], at[1], at[2]); rig.rotation.y = body.yaw;

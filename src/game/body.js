@@ -20,7 +20,17 @@
 // step (s.world.solve answers the floor under it, and says when a ladder is
 // in front of the body: s.climb). On a ladder, pushed toward it, the body
 // climbs; pushed away, it climbs down; let alone, it hangs; a jump lets go;
-// at the top it steps off onto what the ladder leans on. Everything moves
+// at the top it steps off onto what the ladder leans on.
+//
+// A WALL RUN (Colin, 17 Nov: "a third feature -- wall run"): in the air, going
+// fast enough across the ground, high enough, along a wall rather than at it
+// or away, the hands still pushing, the body takes to the wall (s.world.wall
+// says where one is, and which way it faces) and runs along it at 7.4 m/s or
+// more, the pull on it a fifth of the whole, for a second and a half at most.
+// A jump leaps off it, out and up, the air's dash given back; letting go, the
+// wall's end, the time, the ground or the sink key end it and it falls. The
+// same wall again (one facing within 60 degrees of it) waits for the ground,
+// another may be run at once, so a body can go from wall to wall. Everything moves
 // in fixed steps of 1/120 s (advance), so the same hands give the same jump
 // at any frame rate, and a jump's arc is integrated exactly (p += v·dt −
 // ½g·dt²), not approximately.
@@ -38,6 +48,17 @@ export const FLY = 14, FLY_SPRINT = 48, FLY_ACCEL = 60;
 export const TURN = 14;                 // rad/s, the body coming round to its heading
 export const STEP = 1 / 120;
 export const CLIMB = 1.4;               // m/s up or down a ladder
+export const WALL = {
+  reach: 0.22,                          // m past the body's side: a wall this near may be run along
+  speed: 3.4, height: 0.55,             // to take to one: m/s across the ground, and m over what it stands on, at least
+  time: 1.5,                            // s on one wall, at most
+  gravity: 0.2,                         // the share of the pull on a body running along a wall
+  lift: 1.7,                            // m/s upward as it takes to the wall
+  along: 7.4,                           // m/s along it, at least
+  hold: 0.8,                            // m/s into it: it keeps to the wall's face
+  off: [6.0, 6.4],                      // a jump off: m/s out from the wall, and up
+  same: 0.5,                            // a wall facing within 60 degrees of the last one run is the same wall: the ground first
+};
 const COYOTE = 0.1, JUMP_BUFFER = 0.12; // a jump pressed just after the edge, or just before the ground
 const STEP_UP = 0.35;                   // a step taken without a jump; a floor further down than this is fallen to
 // the world's say in this step: the body pushed out of what is solid, and the floor under it (0: the water's floor)
@@ -49,7 +70,7 @@ export function createBody(over = {}) {
     mode: 'survival', grounded: true, flying: false, rising: false,
     dashT: 0, dashDir: [0, 0, 1], dashCool: 0, airDash: AIR_DASHES,
     coyote: COYOTE, buffer: 0, acc: 0, events: [],
-    pending: { jumpPressed: false, dash: false, flyToggle: false }, climb: null, climbing: false,
+    pending: { jumpPressed: false, dash: false, flyToggle: false }, climb: null, climbing: false, wallrun: null, lastWall: null,
     ...over,
   };
   if (!over.was) s.was = [s.p[0], s.p[1], s.p[2]];   // where it was a step ago (shown, below)
@@ -98,6 +119,7 @@ export function stepBody(s, inp, dt = STEP) {
   if (inp.dash && s.dashT <= 0 && s.dashCool <= 0 && (s.grounded || s.flying || s.airDash > 0)) {
     const d = wm > 0.2 ? [w[0] / wm, w[1] / wm, w[2] / wm] : [Math.sin(s.yaw), 0, Math.cos(s.yaw)];
     s.dashDir = d; s.dashT = DASH_TIME; s.dashCool = DASH_COOLDOWN; s.rising = false; s.climbing = false;
+    if (s.wallrun) { s.lastWall = s.wallrun.n; s.wallrun = null; ev.push({ type: 'wallrun', on: false }); }
     if (!s.grounded && !s.flying) s.airDash--;
     ev.push({ type: 'dash', from: [s.p[0], s.p[1], s.p[2]], dir: d, air: !s.grounded });
   }
@@ -157,6 +179,9 @@ export function stepBody(s, inp, dt = STEP) {
     }
   } else if (s.climbing) s.climbing = false;
 
+  // ---- a wall run
+  if ((s.wallrun || !s.grounded) && s.world?.wall && wallRun(s, inp, w, wm, dt, ev)) return s;
+
   // ---- on foot
   const top = inp.walk ? WALK : inp.sprint ? SPRINT : RUN, a = (s.grounded ? GROUND_ACCEL : AIR_ACCEL) * dt;
   s.v[0] = toward(s.v[0], w[0] * top, a); s.v[2] = toward(s.v[2], w[2] * top, a);
@@ -183,7 +208,7 @@ export function stepBody(s, inp, dt = STEP) {
   const f = settle(s);
   if (!s.grounded && s.p[1] <= f && s.v[1] <= 0) {
     ev.push({ type: 'land', speed: -s.v[1], at: [s.p[0], f, s.p[2]] });
-    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES;
+    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES; s.lastWall = null;
   } else if (s.grounded) {
     // walking: up a step or down one; further down than a step, it falls
     if (s.p[1] - f <= STEP_UP) s.p[1] = f;
@@ -191,6 +216,53 @@ export function stepBody(s, inp, dt = STEP) {
   }
   if (Math.hypot(s.v[0], s.v[2]) > 0.3 && wm > 0.05) s.yaw = turnToward(s.yaw, Math.atan2(w[0], w[2]), TURN * dt);
   return s;
+}
+
+// One step of a wall run, or of taking to a wall. Answers whether the step was the wall's (else the body goes on as
+// it was, in the air).
+function wallRun(s, inp, w, wm, dt, ev) {
+  const near = s.world.wall(s.p);                     // { n: [x, z] out of the wall toward the body, d } or null
+  if (!s.wallrun) {
+    if (!near || inp.down || s.climbing || wm < 0.3) return false;
+    const hv = Math.hypot(s.v[0], s.v[2]);
+    if (hv < WALL.speed || s.p[1] - (s.floorY ?? 0) < WALL.height) return false;
+    const into = (s.v[0] * near.n[0] + s.v[2] * near.n[1]) / hv;     // −1 straight at it, +1 straight away from it
+    if (into > 0.15 || into < -0.92) return false;
+    if (s.lastWall && s.lastWall[0] * near.n[0] + s.lastWall[1] * near.n[1] > WALL.same) return false;
+    const t = [-near.n[1], near.n[0]];
+    s.wallrun = { n: near.n, t: 0, dir: Math.sign(s.v[0] * t[0] + s.v[2] * t[1]) || 1 };
+    s.v[1] = Math.min(WALL.lift, Math.max(s.v[1], 0.6 * WALL.lift)); s.rising = false; s.airDash = AIR_DASHES;   // a jump's rise is not carried up the wall
+    ev.push({ type: 'wallrun', on: true, n: [...near.n], at: [s.p[0], s.p[1], s.p[2]] });
+  }
+  const W = s.wallrun, t = [-W.n[1] * W.dir, W.n[0] * W.dir];
+  if (inp.jumpPressed) {
+    // a leap off it: on along it, out from it and up (held, the jump rises further, as any jump does)
+    const keep = 0.85 * Math.max(WALL.along, s.v[0] * t[0] + s.v[2] * t[1]);
+    s.v[0] = t[0] * keep + W.n[0] * WALL.off[0]; s.v[2] = t[1] * keep + W.n[1] * WALL.off[0]; s.v[1] = WALL.off[1];
+    s.lastWall = W.n; s.wallrun = null; s.rising = true; s.buffer = 0; s.coyote = 0; s.airDash = AIR_DASHES;
+    s.yaw = Math.atan2(s.v[0], s.v[2]);
+    ev.push({ type: 'walljump', at: [s.p[0], s.p[1], s.p[2]] });
+    return false;
+  }
+  const holding = wm > 0.2 && w[0] * W.n[0] + w[2] * W.n[1] < 0.5;     // the hands not pulling away from it
+  if (!near || W.t >= WALL.time || inp.down || !holding || near.n[0] * W.n[0] + near.n[1] * W.n[1] < 0.7) {
+    s.lastWall = W.n; s.wallrun = null;
+    ev.push({ type: 'wallrun', on: false });
+    return false;
+  }
+  W.t += dt; W.n = near.n;
+  const sp = Math.max(WALL.along, s.v[0] * t[0] + s.v[2] * t[1]), g = G * WALL.gravity;
+  s.v[0] = t[0] * sp - W.n[0] * WALL.hold; s.v[2] = t[1] * sp - W.n[1] * WALL.hold;
+  s.p[1] += s.v[1] * dt - 0.5 * g * dt * dt; s.v[1] -= g * dt;
+  s.p[0] += s.v[0] * dt; s.p[2] += s.v[2] * dt;
+  const f = settle(s);
+  if (s.p[1] <= f && s.v[1] <= 0) {
+    ev.push({ type: 'land', speed: -s.v[1], at: [s.p[0], f, s.p[2]] });
+    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES; s.lastWall = null; s.wallrun = null;
+    ev.push({ type: 'wallrun', on: false });
+  }
+  s.yaw = turnToward(s.yaw, Math.atan2(t[0], t[1]), TURN * dt);
+  return true;
 }
 
 // A frame of any length, in fixed steps. What was pressed this frame (the
