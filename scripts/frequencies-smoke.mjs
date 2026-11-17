@@ -215,6 +215,8 @@ try {
   await page.locator('.freq-years').evaluate((el) => { el.value = el.max; el.dispatchEvent(new Event('input', { bubbles: true })); });
   r = await until((r) => r.built === 218 && r.rowHorns === 0);
   check('at the end every course is built and no horn sounds', r.built === 218 && r.rowHorns === 0 && r.heardDb == null, { built: r.built, rowHorns: r.rowHorns, heardDb: r.heardDb });
+  r = await until((r) => r.cased, 12000);
+  check('then the casing is dressed, from the top down, to the foot', r.cased === true, { cased: r.cased });
   await shot('pyramid-done');
   await press('[data-view="tour"]');
   const t0 = (await read()).stage.az; await sleep(1500);

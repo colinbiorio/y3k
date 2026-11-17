@@ -631,9 +631,9 @@ export function createFrequencies({ toast } = {}) {
     // following, the point looked at rises with the working surface (where the eye looks across, it stays)
     if (follow && pyr) { const o = pyr.orbit, want = b.top + 1.5; if (Math.abs(o.target[1] - want) > 0.01) { go(o, { target: [o.target[0], o.target[1] + (want - o.target[1]) * Math.min(1, dt * 2.5), o.target[2]] }); o.rate = 0; } }
     if (pyrSound) tau += dt * WAVE_HZ;
-    pyr?.set({ built: b.built, current: b.current, part: b.part, setPart: b.setting ? 1 - b.setLeft / b.current.setHours : 0, list: rowHorns, tau, sound: pyrSound });
+    const dressing = pyr?.set({ built: b.built, current: b.current, part: b.part, setPart: b.setting ? 1 - b.setLeft / b.current.setHours : 0, list: rowHorns, tau, sound: pyrSound });
     listen(rowHorns, LATTICE_HZ, b.top, pyrSound);
-    return pyrPlaying || pyrSound || (follow && pyr && Math.abs(pyr.orbit.target[1] - b.top - 1.5) > 0.05);
+    return pyrPlaying || pyrSound || !!dressing || (follow && pyr && Math.abs(pyr.orbit.target[1] - b.top - 1.5) > 0.05);
   }
 
   // the alone horn's own field on the bed, for its waves on the sand
@@ -770,7 +770,7 @@ export function createFrequencies({ toast } = {}) {
     return { open: !!(root && root.isConnected), tab, loaded: !!stage, failed, stage: stage ? stage.read() : null, sound: sound ? sound.read() : null,
       years: r3(years), built: b.built, course: b.current ? b.current.course : null, rowHorns: rowHorns.length, pyrPlaying, pyrSound,
       playing, hearing, tool, show, speed, f, powerW, horns: horns.length, solo, heardDb: heardDb == null ? null : Math.round(heardDb * 10) / 10, tau: r3(tau),
-      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4) };
+      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4), cased: !!pyr?.cased };
   }
 
   return { open, close, hornSpec };

@@ -438,4 +438,13 @@ ok('the course being made: ridges at dry sand\'s angle of repose where the sound
   assert.ok(/float mob = uOn \* reached \* onTop \* \(1\.0 - uWet\)/.test(pyr), 'grains hop when no tone sounds, or in wet paste');
 });
 
+ok('the casing: on the ideal faces in the courses\' bands, shown only once every course is in, dressed from the top down a course at a time (at once for a reader who asks for less motion)', () => {
+  const pyr = read('src/frequencies/pyramid3d.js'), room = read('src/frequencies.js');
+  assert.ok(pyr.includes('half = (y) => b2 * Math.max(0, 1 - y / HEIGHT_M)') && pyr.includes('for (let i = 0; i < rows.length; i++) {\n      const y0 = rows[i].bottom, y1 = Math.min(rows[i].top, HEIGHT_M)'), 'the casing is not on the ideal faces, course by course');
+  assert.ok(pyr.includes('const done = !current && built >= rows.length;') && pyr.includes('casing.visible = done; outline.visible = !done;'), 'the casing shows before the last course');
+  assert.ok(pyr.includes('while (k > 0 && rows[k - 1].top > yf + 1e-6) k--;') && pyr.includes('courses.count = k; casingU.uFront.value = k ? rows[k - 1].top : 0;'), 'the front does not step down a whole course at a time');
+  assert.ok(pyr.includes("matchMedia?.('(prefers-reduced-motion: reduce)')") && pyr.includes('const r = still ? 1 :'), 'the dressing ignores reduced motion');
+  assert.ok(room.includes('return pyrPlaying || pyrSound || !!dressing ||') && room.includes('cased: !!pyr?.cased'), 'the stage stops drawing mid-dressing, or the room cannot say it is cased');
+});
+
 console.log(`\n${passed} checks passed.`);
