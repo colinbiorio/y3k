@@ -2737,7 +2737,10 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .freq-root { display: flex; flex-direction: column; gap: 16px; }
 .freq-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 2px; }
 .freq-stage {
-  position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 78vh; min-height: 320px;
+  /* as tall as 16:9 allows, but never taller than what the frame's window leaves under the room's head
+     (the rails' insets, --hole-t and --hole-b, and the title and tabs above it): seen whole on first sight */
+  position: relative; width: 100%; aspect-ratio: 16 / 9; min-height: 320px;
+  max-height: min(78vh, calc(100vh - var(--hole-t, 92px) - var(--hole-b, 92px) - 145px));
   border-radius: 16px; overflow: hidden; isolation: isolate; container: freqstage / inline-size;
   background: radial-gradient(120% 90% at 50% 0%, #17141f 0%, #07060c 72%);
   border: 1px solid rgba(190, 198, 208, 0.16);

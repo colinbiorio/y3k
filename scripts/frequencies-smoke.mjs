@@ -123,6 +123,11 @@ try {
   check('drawn at the screen\'s own pixels', Math.abs(s.px[0] - Math.round(s.css[0] * want)) <= 1 && Math.abs(s.px[1] - Math.round(s.css[1] * want)) <= 1, s);
   await shot('pyramid-start');
   await pageShot('pyramid');
+  // seen whole on first sight: the stage's foot is inside the frame's window (not under its lower edge)
+  if (!phone) {
+    const fit = await page.evaluate(() => { const r = document.querySelector('.freq-stage').getBoundingClientRect(), hb = parseFloat(getComputedStyle(document.body).getPropertyValue('--hole-b')) || 0; return { bottom: Math.round(r.bottom), limit: Math.round(innerHeight - hb), h: Math.round(r.height) }; });
+    check('the stage is seen whole on first sight, inside the frame', fit.bottom <= fit.limit && fit.h >= 320, fit);
+  }
   await page.locator('.freq-years').evaluate((el) => { el.value = '1.6'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   r = await until((r) => r.built > 0 && r.course > 1);
   check('the years slider builds courses', r.built > 10 && r.rowHorns > 100, { built: r.built, course: r.course, rowHorns: r.rowHorns });

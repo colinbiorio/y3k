@@ -261,6 +261,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **The frequencies stage is seen whole on first
+  sight** (`styles.css`). At 1280 × 800 its foot (the scale, the hints, the
+  level at your ear) sat under the frame's lower edge. It is now as tall as
+  16:9 allows but never taller than what the frame's window leaves under the
+  room's head (`--hole-t`, `--hole-b`, the title and tabs), so it fits any
+  laptop and grows when the rails are folded away. The smoke checks it: 32/32.
+
 - **2026-11-17** (morning) — **kode's other two smokes run again**
   (`scripts/code-pane-smoke.mjs`, `scripts/history-smoke.mjs`). Both can now
   find Playwright the way the others do (`PW_CORE`, the cached Chromium); the
