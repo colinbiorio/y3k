@@ -23,7 +23,7 @@ import { patch, rgb } from './kit.js';
 import { createAir, SKY_HEAD } from './air.js';
 
 export { createSandScene } from './sandbox3d.js';
-export { createPyramidScene } from './pyramid3d.js';
+export { createPyramidScene, skyAt } from './pyramid3d.js';
 
 const KEYS = '. Drag to turn, shift and drag to slide, scroll to zoom; from the keys: arrows turn, shift and arrows slide, plus and minus zoom, zero returns, f fills the screen.';
 const r3 = (x) => Math.round(x * 1000) / 1000;
@@ -128,6 +128,21 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     air.uHaze.value.set(...(s.haze || [0, 0, 30, 0]));
     ground.visible = !s.land;                               // a scene with land of its own stands on that
     cell.value = s.cell;
+    light(s);
+    if (!s.seen) {                                          // the first time a scene is shown, the eye comes in to it from afar
+      s.seen = true;
+      if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        const n = s.orbit.now; n.dist = Math.min(n.dist * 2.2, s.orbit.maxDist); n.az -= 0.8; n.polar = Math.max(s.orbit.minPolar, n.polar - 0.22); s.orbit.rate = 2.2;
+      }
+    }
+    canvas.setAttribute('aria-label', s.say + KEYS);
+    size();
+  }
+  // a scene's light: its look (the sky, the sun's colour and strength, the sky's own light, how much of the room's
+  // reflections its things take, the exposure) and where its sun is. A sun below the horizon lights nothing and
+  // casts no shadow.
+  let sunUp = true;
+  function light(s) {
     const L = { ...STUDIO, ...(s.look || {}) };
     air.uTop.value.copy(L.top); air.uMid.value.copy(L.mid); air.uCool.value.copy(L.low); air.uWarm.value.copy(L.warm || L.low); fog.color.copy(L.low);
     air.uSunGlow.value = L.glow; air.uSunCol.value.copy(L.sun[0]);
@@ -136,15 +151,17 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     hemi.color.copy(L.hemi[0]); hemi.groundColor.copy(L.hemi[1]); hemi.intensity = L.hemi[2];
     renderer.toneMappingExposure = L.exposure;
     sunDir.set(...s.sun.dir).normalize(); air.uSunDir.value.copy(sunDir);
-    if (!s.seen) {                                          // the first time a scene is shown, the eye comes in to it from afar
-      s.seen = true;
-      if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-        const n = s.orbit.now; n.dist = Math.min(n.dist * 2.2, s.orbit.maxDist); n.az -= 0.8; n.polar = Math.max(s.orbit.minPolar, n.polar - 0.22); s.orbit.rate = 2.2;
-      }
-    }
+    sunUp = L.sun[1] > 0;
+    if (step) sun.castShadow = sunUp && step.shadow > 0;
+    const k = L.env ?? 1;
+    s.group.traverse((o) => { for (const m of [].concat(o.material || [])) if (m && 'envMapIntensity' in m) { m.userData.env0 ??= m.envMapIntensity; m.envMapIntensity = m.userData.env0 * k; } });
     aimSun();
-    canvas.setAttribute('aria-label', s.say + KEYS);
-    size();
+  }
+  // the scene's sky changed (its sun moved): its look and its sun's direction, at once
+  function relight(look, dir) {
+    if (!cur) return;
+    cur.look = { ...cur.look, ...look }; cur.sun.dir = dir;
+    light(cur); mark();
   }
   function label(owner, cls = '') {
     const el = document.createElement('span');
@@ -175,7 +192,7 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     steps = ladder(window.devicePixelRatio, w, h);
     step = steps[Math.min(fine.level, steps.length - 1)];
     ratio = step.ratio;
-    sun.castShadow = step.shadow > 0;
+    sun.castShadow = sunUp && step.shadow > 0;
     if (step.shadow && sun.shadow.mapSize.x !== step.shadow) { sun.shadow.mapSize.set(step.shadow, step.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; if (cur) aimSun(); }
     cur?.lite?.(step.lite);
     renderer.setPixelRatio(ratio);
@@ -323,5 +340,5 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
   const screenOf = (p) => { v.set(p[0], p[1], p[2]).project(camera); return [(v.x * 0.5 + 0.5) * host.clientWidth, (-v.y * 0.5 + 0.5) * host.clientHeight, v.z]; };
   // metres per CSS pixel at the point looked at
   const scale = () => (cur ? (2 * cur.orbit.now.dist * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, host.clientHeight) : 0);
-  return { canvas, air, use, label, mark, view, ear, pix, read, screenOf, scale, dispose, get ratio() { return ratio; } };
+  return { canvas, air, use, sky: relight, label, mark, view, ear, pix, read, screenOf, scale, dispose, get ratio() { return ratio; } };
 }

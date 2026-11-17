@@ -16,6 +16,7 @@ import * as P from '../src/frequencies/pyramid.mjs';
 import * as S from '../src/frequencies/sand.mjs';
 import * as O from '../src/frequencies/orbit.mjs';
 import * as G from '../src/frequencies/giza.mjs';
+import * as SUN from '../src/frequencies/sun.mjs';
 import { hornSpec, WAVE_HZ, buildAt, courseHorns } from '../src/frequencies.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -462,8 +463,37 @@ ok('when its frames are long the stage steps down (fewer pixels, then a coarser 
   near(O.ringDistance([0, 80, 100], 40, 50), Math.hypot(60, 30), 1e-12, 'outside a side, and above');
   const stage = read('src/frequencies/stage.js'), pyr = read('src/frequencies/pyramid3d.js');
   assert.ok(stage.includes("import { createWatch, watch, rest } from '../game/fine.js';") && stage.includes("else if (steps && watch(fine, since, steps) === 'ratio') size();") && stage.includes("if (!since) { if (rest(fine) === 'ratio') size(); }"), 'the stage does not watch its frames');
-  assert.ok(stage.includes('sun.castShadow = step.shadow > 0;') && stage.includes('cur?.lite?.(step.lite);'), 'a step down changes only the pixels');
+  assert.ok(stage.includes('sun.castShadow = sunUp && step.shadow > 0;') && stage.includes('cur?.lite?.(step.lite);'), 'a step down changes only the pixels');
   assert.ok(pyr.includes("farGeo.setAttribute('aGlow', horns.geometry.getAttribute('aGlow'));") && pyr.includes('hornsFar.instanceMatrix = horns.instanceMatrix;') && pyr.includes('< HORN_NEAR;'), 'the far horns are not the same horns');
+});
+
+ok('the sun over Giza: the seasons\' declinations, south at noon at 90° − latitude + declination, from the east in the morning; 17 November\'s day; the light by the sun\'s height', () => {
+  near(SUN.declination(172), 23.44, 0.15, 'the June solstice'); near(SUN.declination(355), -23.44, 0.15, 'the December solstice');
+  near(SUN.declination(80), 0, 0.5, 'the March equinox'); near(SUN.declination(266), 0, 0.5, 'the September equinox');
+  near(SUN.declination(321), -18.8, 0.4, '17 November');
+  for (const day of [1, 100, 200, 321]) {
+    const noon = SUN.sunAt(12, day);
+    near(noon.elevation, 90 - SUN.GIZA.lat + SUN.declination(day, 12), 1e-9, 'noon height'); near(noon.azimuth, 180, 1e-9, 'due south at noon');
+    const [rise, set] = SUN.daylight(day);
+    near(rise + set, 24, 1e-9, 'the day is even about noon');
+    near(SUN.sunAt(rise, day).elevation, -0.833, 0.05, 'at sunrise the sun\'s upper edge is on the horizon');
+  }
+  const morning = SUN.sunAt(8.25), dir = SUN.sunDirection(morning);
+  near(Math.hypot(...dir), 1, 1e-12, 'a unit vector');
+  assert.ok(dir[0] > 0 && dir[2] > 0 && dir[1] > 0, 'a November morning\'s sun is in the south-east, and up: ' + dir);
+  within(morning.elevation, 15, 19, 'a quarter past eight'); within(morning.azimuth, 120, 130, 'its bearing');
+  const len = (day) => { const [a, b] = SUN.daylight(day, 30); return (b - a) * 60; };
+  near(len(172), 14 * 60 + 5, 3, 'June at 30° N: 14 h 05'); near(len(355), 10 * 60 + 13, 3, 'December at 30° N: 10 h 13');
+  assert.equal(SUN.clock(8.25), '8:15'); assert.equal(SUN.clock(17.0), '17:00');
+  const day = SUN.lightFor(30), dusk = SUN.lightFor(-4), night = SUN.lightFor(-12);
+  assert.ok(day.power > 3 && dusk.power === 0 && night.power === 0, 'no sunlight once the sun is down');
+  assert.ok(dusk.top.reduce((a, v) => a + v) < day.top.reduce((a, v) => a + v) && night.top.reduce((a, v) => a + v) <= dusk.top.reduce((a, v) => a + v), 'the sky darkens as the sun goes down');
+  assert.ok(SUN.lightFor(1).warm[0] > SUN.lightFor(1).warm[2] + 100, 'the horizon under a low sun is warm');
+  for (let e = -12; e <= 70; e += 0.5) { const L = SUN.lightFor(e); assert.ok([...L.top, ...L.mid, ...L.low, ...L.warm, ...L.sun].every((v) => v >= 0 && v <= 255) && L.exposure > 0, 'a colour out of range at ' + e); }
+  const room = read('src/frequencies.js'), stage = read('src/frequencies/stage.js'), pyr = read('src/frequencies/pyramid3d.js');
+  assert.ok(room.includes('class="freq-sun"') && /class="freq-sun"[^>]*aria-label="[^"]+"/.test(room) && room.includes('pyr?.sky(sunHours);'), 'the sun has no control, or it moves nothing');
+  assert.ok(pyr.includes('const first = skyAt(hours);') && pyr.includes('sky(h) { const k = skyAt(h); stage.sky(k.look, k.dir); return k.at; },'), 'the pyramid\'s sun is not the sun\'s');
+  assert.ok(stage.includes('sunUp = L.sun[1] > 0;') && stage.includes('sun.castShadow = sunUp && step.shadow > 0;'), 'a sun under the horizon still casts shadows');
 });
 
 console.log(`\n${passed} checks passed.`);

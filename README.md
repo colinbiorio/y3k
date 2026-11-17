@@ -261,6 +261,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning, later) — **The pyramid's sun moves through the day**
+  (`src/frequencies/sun.mjs`, `stage.js`, `pyramid3d.js`, `frequencies.js`).
+  A new slider, "the sun", sets the hour by the sun at Giza on 17 November,
+  from before first light to after dusk: the sun stands where it really
+  does (Spencer's declination, the hour angle, refraction at the horizon;
+  rising 6:41 and setting 17:19 by the sun, 41° up at noon), the shadows
+  follow it, and the sky, the light and the haze go from morning blue
+  through a long golden afternoon to a pink sunset and violet dusk, after
+  which the sun lights nothing. The colours are the picture's, keyed to the
+  sun's height (FREQUENCIES.md §9). The room still opens at 8:15, as before.
+  Suite 37 (1 new); desk 38/38 and phone 31/31 on the GPU, 60 frames a
+  second; the smoke reads the sky's colour at morning and after sunset.
+
 - **2026-11-17** (morning) — **The frequencies stage keeps up on slow machines**
   (`src/frequencies/stage.js`, `orbit.mjs`, `pyramid3d.js`, `land.js`). The
   stage now watches its own frames with the world's frame watch
