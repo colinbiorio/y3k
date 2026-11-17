@@ -19,8 +19,9 @@
 // pixels, edges smoothed, turned down only when its own drawing is what makes
 // the frames long. The page's guess at a tier (../gfx.js) is not read.
 //
-// What stands in the void (world.js) is built with the build key: the shelter,
-// first of the five buildings, a few steps in front, its door toward the body.
+// What stands in the void (world.js) is built from the bar's build list (the
+// shelter and the house, of the five) or with the build key (the kind last
+// chosen), a few steps in front, its door toward the body.
 // The body is pushed out of its walls and stands on its floor (body.js); the
 // eye comes in rather than go through them; inside, the body is seen by the
 // light that gets in (the hearth, the skylight, the doorway), and its steps
@@ -43,9 +44,9 @@ import { cleanKind, cleanLook } from './kinds.js';
 import { createMenu } from './menu.js';
 import { createChooser, standIn } from './chooser.js';
 import { ratios, createWatch, watch, rest, chosen } from './fine.js';
-import { createWorld, BODY } from './world.js';
-import { SHELTER, phase, doorWorld } from './shelter.js';
+import { createWorld, BODY, KINDS, BUILDINGS } from './world.js';
 import { createShelterArt } from './buildings/shelter.js';
+import { createHouseArt } from './buildings/house.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
@@ -176,12 +177,29 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     size();
   }
 
-  // the build key: a shelter in front of the body, or the one it is near taken down
-  function buildHere() {
-    if (K.body.flying || !K.body.grounded) { say('stand on the water to build'); return; }
-    const r = K.world.toggle(K.body);
-    if (r.did === 'up') say(touch ? 'a shelter goes up · walk in through its door · build again near it takes it down' : `a shelter goes up · walk in through its door · ${keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build'} again near it takes it down`, 6);
-    else say('the shelter comes down', 3);
+  // the build key: near a building's door it is taken down; else the kind last chosen goes up in front of the body
+  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft' };
+  function said(r) {
+    const key = keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build';
+    if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
+    else if (r.did === 'down') say(`the ${r.b.kind} comes down`, 3);
+    else if (r.did === 'blocked') say(`too near the ${r.b.kind}: step away from it and build`, 4);
+  }
+  function buildHere(kind = null) {
+    if (K.body.flying || !K.body.grounded || K.body.climbing) { say('stand on the ground to build'); return; }
+    if (kind) { st.building = kind; save(); said(K.world.build(K.body, kind)); }
+    else said(K.world.toggle(K.body, st.building));
+  }
+  // the bar's build list: the five, those not made yet greyed; near a building, the first line takes it down
+  function listBuilds(show) {
+    const el = $('#game-build-list'), btn = $('#game-build'); if (!el || !btn) return;
+    const open = show ?? el.hidden;
+    if (open) {
+      const near = K.world.near(K.body.p);
+      el.innerHTML = (near ? `<button type="button" class="login-alt game-build-down" data-build="down">take down the ${near.kind}</button>` : '')
+        + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? '' : '<small>to come</small>'}</button>`).join('');
+    }
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
   // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
@@ -190,19 +208,22 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     SUN.copy(V.key.position).sub(V.key.target.position).normalize();
     sunCol.set(L.key).multiplyScalar(L.keyAmt);
     skyCol.set(L.horizon).lerp(new THREE.Color(L.zenith), 0.5).multiplyScalar(0.55 * L.env);
-    let flame = 0, flameAt = null;
+    let flame = 0, flameAt = null, fireCol = hearthCol, best = Infinity;
     for (const b of K.world.buildings) {
       let art = K.arts.get(b);
-      if (!art) { art = createShelterArt({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
+      if (!art) { art = (b.kind === 'house' ? createHouseArt : createShelterArt)({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
       seen.add(b);
-      const [dx, dz] = doorWorld(b), near = Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || !!K.world.inside(K.body.p);
-      const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol });
-      if (r.flame > flame) { flame = r.flame; flameAt = art.flameAt.clone().applyMatrix4(art.group.matrixWorld); }
+      const [dx, dz] = KINDS[b.kind].door(b), inIt = KINDS[b.kind].inside(b, K.body.p[0], K.body.p[2], K.body.p[1]);
+      const near = Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || inIt;
+      const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol, night: L.stars });
+      // the light of the fire nearest the body (one light for all of them: a light that came and went would make every material again)
+      const at = art.flameAt.clone().applyMatrix4(art.group.matrixWorld), d = at.distanceTo(new THREE.Vector3(K.body.p[0], K.body.p[1], K.body.p[2])) - (inIt ? 100 : 0);
+      if (r.flame > 0 && d < best) { best = d; flame = r.flame; flameAt = at; fireCol = art.fireCol || hearthCol; }
     }
     for (const [b, art] of K.arts) if (!seen.has(b)) { V.scene.remove(art.group); art.dispose(); K.arts.delete(b); }
-    // the hearth's light; and inside, the body seen by what gets in (the sun's own patch, or the shade)
+    // the fire's light; and inside, the body seen by what gets in (the sun's own patch, or the shade)
     K.hearth.intensity = 2.2 * flame;
-    if (flameAt) K.hearth.position.copy(flameAt);
+    if (flameAt) { K.hearth.position.copy(flameAt); K.hearth.color.copy(fireCol); }
     const inside = K.world.inside(K.body.p), head = [K.body.p[0], K.body.p[1] + BODY.tall * 0.8, K.body.p[2]];
     const want = inside ? 0.12 + 0.88 * K.world.sunAt(head, [SUN.x, SUN.y, SUN.z]) : 1;
     K.indoor += (want - K.indoor) * ease(5, dt);
@@ -300,6 +321,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (walls) {
       let best = room(pitch0, d);
       for (const l of [0.35, 0.7, 1.0]) { if (best >= Math.min(d, 1.3)) break; const dd = room(clamp(pitch0 - l, PITCH[0], PITCH[1]), d); if (dd > best + 0.05) { best = dd; lift = l; } }
+      if (best < 0.6) lift = 0;               // nowhere gives it room: it stays just behind the head, looking where it was looking
     }
     eye.lift = (eye.lift || 0) + (lift - (eye.lift || 0)) * ease(6, dt);
     const pitch = clamp(pitch0 - eye.lift, PITCH[0], PITCH[1]), [fx, fy, fz] = along(pitch);
@@ -351,9 +373,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="world-bar game-bar">
         <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
-        <button type="button" id="game-build" class="login-alt" title="a shelter, a few steps in front of you; near one, it is taken down">build</button>
+        <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
         ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
+        <div class="game-build" id="game-build-list" role="group" aria-label="what to build" hidden></div>
       </div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
@@ -382,7 +405,16 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     press('#game-mode', () => modeTo(K.body.mode === 'survival' ? 'creative' : 'survival'));
     press('#game-controls', openMenu);
     press('#game-body-open', openBody);
-    press('#game-build', () => { if (!menu.isOpen() && !chooser.isOpen()) buildHere(); });
+    press('#game-build', () => { if (!menu.isOpen() && !chooser.isOpen()) listBuilds(); });
+    { const el = $('#game-build-list');
+      on(el, 'click', (e) => {
+        const btn = e.target.closest?.('[data-build]'); if (!btn || btn.disabled) return;
+        if (e.detail > 0) focusCanvas();
+        const k = btn.dataset.build; listBuilds(false);
+        if (k === 'down') said(K.world.toggle(K.body, st.building)); else buildHere(k);
+      });
+      on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBuilds(false); $('#game-build')?.focus(); } });
+      on(holder, 'pointerdown', () => listBuilds(false)); }
     press('#game-societies', () => toSocieties?.());
     for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down']]) {
       const el = $(sel); if (!el) continue;
@@ -398,7 +430,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
-      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(phase(b).rest >= 1) })), inside: !!K.world.inside(K.body.p), indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100 } } : null) };
+      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
+        climbing: !!K.body.climbing, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     focusCanvas();

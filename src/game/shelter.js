@@ -157,3 +157,6 @@ export function phase(b) {
   if (b.down >= 0) { const u = 1 - Math.min(1, b.down / B.down); return { stones: u, walls: u, rest: u, gone: b.down >= B.down }; }
   return { stones: k(0, B.base, b.t), walls: k(B.base, B.walls, b.t), rest: k(B.walls, B.done, b.t), gone: false };
 }
+// what it stands on is dry: inside its outer wall
+export const dry = (b, x, z) => Math.hypot(...toLocal(b, x, z)) < SHELTER.out;
+export const FOOT = SHELTER.out + 0.9;      // m: a circle round its middle that holds all of it (its awning, the shade at its foot)

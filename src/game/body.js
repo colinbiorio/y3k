@@ -17,7 +17,10 @@
 // The floor is y = 0, under one inch of still water (WATER), unless the world
 // (world.js) has put something there: given s.world, a body is pushed out of
 // its walls, stands on its floors and keeps its head under its ceilings, every
-// step (s.world.solve answers the floor under it). Everything moves
+// step (s.world.solve answers the floor under it, and says when a ladder is
+// in front of the body: s.climb). On a ladder, pushed toward it, the body
+// climbs; pushed away, it climbs down; let alone, it hangs; a jump lets go;
+// at the top it steps off onto what the ladder leans on. Everything moves
 // in fixed steps of 1/120 s (advance), so the same hands give the same jump
 // at any frame rate, and a jump's arc is integrated exactly (p += v·dt −
 // ½g·dt²), not approximately.
@@ -34,6 +37,7 @@ export const AIR_DASHES = 1;            // one in the air, given back on landing
 export const FLY = 14, FLY_SPRINT = 48, FLY_ACCEL = 60;
 export const TURN = 14;                 // rad/s, the body coming round to its heading
 export const STEP = 1 / 120;
+export const CLIMB = 1.4;               // m/s up or down a ladder
 const COYOTE = 0.1, JUMP_BUFFER = 0.12; // a jump pressed just after the edge, or just before the ground
 const STEP_UP = 0.35;                   // a step taken without a jump; a floor further down than this is fallen to
 // the world's say in this step: the body pushed out of what is solid, and the floor under it (0: the water's floor)
@@ -45,7 +49,7 @@ export function createBody(over = {}) {
     mode: 'survival', grounded: true, flying: false, rising: false,
     dashT: 0, dashDir: [0, 0, 1], dashCool: 0, airDash: AIR_DASHES,
     coyote: COYOTE, buffer: 0, acc: 0, events: [],
-    pending: { jumpPressed: false, dash: false, flyToggle: false },
+    pending: { jumpPressed: false, dash: false, flyToggle: false }, climb: null, climbing: false,
     ...over,
   };
   if (!over.was) s.was = [s.p[0], s.p[1], s.p[2]];   // where it was a step ago (shown, below)
@@ -93,7 +97,7 @@ export function stepBody(s, inp, dt = STEP) {
   if (s.dashCool > 0) s.dashCool -= dt;
   if (inp.dash && s.dashT <= 0 && s.dashCool <= 0 && (s.grounded || s.flying || s.airDash > 0)) {
     const d = wm > 0.2 ? [w[0] / wm, w[1] / wm, w[2] / wm] : [Math.sin(s.yaw), 0, Math.cos(s.yaw)];
-    s.dashDir = d; s.dashT = DASH_TIME; s.dashCool = DASH_COOLDOWN; s.rising = false;
+    s.dashDir = d; s.dashT = DASH_TIME; s.dashCool = DASH_COOLDOWN; s.rising = false; s.climbing = false;
     if (!s.grounded && !s.flying) s.airDash--;
     ev.push({ type: 'dash', from: [s.p[0], s.p[1], s.p[2]], dir: d, air: !s.grounded });
   }
@@ -126,6 +130,32 @@ export function stepBody(s, inp, dt = STEP) {
     if (Math.hypot(s.v[0], s.v[2]) > 0.5) s.yaw = turnToward(s.yaw, Math.atan2(s.v[0], s.v[2]), TURN * dt);
     return s;
   }
+
+  // ---- a ladder
+  const L = s.climb;
+  if (L) {
+    const into = w[0] * L.dir[0] + w[2] * L.dir[1], atTop = s.p[1] >= L.top - 0.05;
+    if (!s.climbing && ((into > 0.35 && !atTop) || (into < -0.35 && atTop && s.grounded))) { s.climbing = true; ev.push({ type: 'climb', on: true }); }
+    if (s.climbing && inp.jumpPressed) {
+      // let go: a little hop back from it
+      s.climbing = false; s.grounded = false; s.rising = false; s.buffer = 0;
+      s.v[0] = -L.dir[0] * 2.2; s.v[2] = -L.dir[1] * 2.2; s.v[1] = 2.0;
+      ev.push({ type: 'climb', on: false });
+    } else if (s.climbing) {
+      const up = into > 0.35 ? 1 : into < -0.35 ? -1 : 0;
+      // near the top the body goes over the ladder's head as it climbs (and back over its face coming down from there)
+      const near = Math.max(0, Math.min(1, (s.p[1] - (L.top - 0.4)) / 0.4)), over = up * CLIMB * near;
+      s.v[0] = L.dir[0] * (over + 0.4); s.v[2] = L.dir[1] * (over + 0.4); s.v[1] = up * CLIMB;     // the 0.4: held to it
+      s.p[0] += s.v[0] * dt; s.p[2] += s.v[2] * dt; s.p[1] += s.v[1] * dt;
+      s.grounded = false; s.rising = false; s.airDash = AIR_DASHES; s.buffer = 0; s.coyote = 0;
+      s.yaw = turnToward(s.yaw, Math.atan2(L.dir[0], L.dir[1]), TURN * dt);
+      const f = settle(s);
+      if (s.p[1] >= L.top) { s.p[1] = L.top; s.climbing = false; s.grounded = true; s.v[1] = 0; ev.push({ type: 'climb', on: false }); }
+      else if (up < 0 && s.p[1] <= f) { s.p[1] = f; s.climbing = false; s.grounded = true; s.v[1] = 0; ev.push({ type: 'climb', on: false }); }
+      else if (!s.climb) { s.climbing = false; ev.push({ type: 'climb', on: false }); }                  // off its side: it falls
+      return s;
+    }
+  } else if (s.climbing) s.climbing = false;
 
   // ---- on foot
   const top = inp.walk ? WALK : inp.sprint ? SPRINT : RUN, a = (s.grounded ? GROUND_ACCEL : AIR_ACCEL) * dt;

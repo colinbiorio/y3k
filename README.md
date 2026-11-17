@@ -261,6 +261,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (afternoon) — **The world's second building: the house**
+  (`src/game/house.js`, `solids.js`, `buildings/house.js`; `world.js`,
+  `body.js`, `view.js`, `state.js`). The bar's **build** button opens a list of
+  the five (shelter and house made, three greyed); B builds the last chosen.
+  The house: six by nine metres on stone piers, steps to a covered porch,
+  timber frame, reed-and-lime walls, a steep thatched roof with a ridge of dark
+  solar glass, a round window; inside a room open to the roof, a table and two
+  stools, a ceramic stove with a ring of light, and a ladder to a loft with a
+  bed. The body climbs ladders now. Lit by what gets in, warm by the stove at
+  night. Game suite 109; void smoke `build` 20/20 (the house climbed to the loft
+  and back), desk 16/16, phone 5/5, 60 frames a second.
+
 - **2026-11-17** (morning) — **The world's first building: the shelter**
   (`src/game/shelter.js`, `world.js`, `buildings/shelter.js`; `body.js`,
   `view.js`, `input.js`, `void.js`). Stage 3 of the open world begins. Press

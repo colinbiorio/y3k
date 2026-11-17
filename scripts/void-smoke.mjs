@@ -18,7 +18,8 @@
 //          the sheet clear of the body, each kind walked; `small` does it at a phone's size, by touch
 //   build  the shelter (stage 3): built with the key in front of the body, walked into through its door,
 //          its walls holding the body in, the eye kept inside, the room dim but for what gets in, at night
-//          its hearth; walked out again, taken down
+//          its hearth; walked out again, taken down. Then the house, chosen from the bar's build list: up
+//          its steps and in, its ladder climbed to the loft and back down, taken down
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -239,9 +240,9 @@ try {
     await shot('02-built');
     out.frames.outside = await frames(2000);
     await key.down('KeyW'); r = await until((r) => r.world.inside, 8000); await sleep(900 * slow);
-    check('walked in through its door', r.world.inside === true && Math.abs(r.p[1] - 0.03) < 0.005, { inside: r.world.inside, p: r.p });
+    check('walked in through its door', r.world.inside === 'shelter' && Math.abs(r.p[1] - 0.03) < 0.005, { inside: r.world.inside, p: r.p });
     await sleep(1800 * slow); r = await read(); await key.up('KeyW');
-    check('its far wall holds the body in', r.world.inside === true, r.p);
+    check('its far wall holds the body in', r.world.inside === 'shelter', r.p);
     await until((r) => speed(r) < 0.1); await sleep(600 * slow); r = await read();
     check('inside, the body is seen by what gets in', r.world.indoor < 0.8, r.world);
     check('inside, the eye has come into the room', r.world.eyeD < 2.5, r.world);
@@ -267,6 +268,41 @@ try {
     check('the key again, near it, takes it down', r.world.buildings.length === 0, r.world);
     await shot('08-taken-down');
     check('no frame slower than the screen while it stands', out.frames.outside.median < 20 && out.frames.inside.median < 20, out.frames);
+
+    // ---- the house, from the build list
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const faceYaw = async (target) => { for (let i = 0; i < 4; i++) { const d = wrap(target - (await read()).yaw); if (Math.abs(d) < 0.03) break; await drag(Math.max(-900, Math.min(900, -d / 0.0024)), 0); await sleep(120); } };
+    const house = (r) => r.world.buildings.find((b) => b.kind === 'house');
+    const local = (r) => { const b = house(r), dx = r.p[0] - b.x, dz = r.p[2] - b.z, c = Math.cos(b.yaw), sn = Math.sin(b.yaw); return [c * dx - sn * dz, sn * dx + c * dz]; };
+    await page.locator('#game-build').click(); await sleep(250);
+    const listed = await page.locator('#game-build-list button').evaluateAll((els) => els.map((e) => [e.dataset.build, e.disabled]));
+    out.listed = listed;
+    check('the build list offers the five, the three not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house', listed);
+    await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    r = await until((r) => house(r)?.built, 15000);
+    check('the house goes up', !!house(r)?.built && r.world.choice === 'house', r.world);
+    await faceYaw(Math.atan2(-(house(r).x - r.p[0]), -(house(r).z - r.p[2]))); await sleep(400 * slow);
+    await shot('09-house');
+    await key.down('KeyW'); r = await until((r) => r.world.inside === 'house' && local(r)[1] < 1.4, 10000); await key.up('KeyW');
+    check('up its steps, across the porch and in at the door', r.world.inside === 'house' && Math.abs(r.p[1] - 0.5) < 0.001, { inside: r.world.inside, p: r.p, at: local(r) });
+    await until((r) => speed(r) < 0.1); await faceYaw(house(r).yaw); await sleep(300);
+    // to the ladder at a walk (V), so the hands stop where they mean to
+    await key.down('KeyV'); await key.down('KeyA'); r = await until((r) => local(r)[0] < -0.95, 6000); await key.up('KeyA');
+    await until((r) => speed(r) < 0.1); await sleep(200);
+    await shot('10-house-room');
+    out.frames.house = await frames(2000);
+    await key.down('KeyW'); r = await until((r) => r.world.climbing, 6000); await key.up('KeyV');
+    check('at the ladder, pushed toward it, the body climbs', r.world.climbing === true, { at: local(r), y: r.p[1] });
+    r = await until((r) => !r.world.climbing && r.grounded && r.p[1] > 3.1, 8000); await sleep(300); await key.up('KeyW');
+    r = await read();
+    check('and steps off onto the loft', Math.abs(r.p[1] - 3.12) < 0.001 && local(r)[1] < -1.6, { y: r.p[1], at: local(r) });
+    await until((r) => speed(r) < 0.1); await sleep(500 * slow);
+    await shot('11-house-loft');
+    await key.down('KeyS'); r = await until((r) => r.grounded && !r.world.climbing && r.p[1] < 0.51, 9000); await key.up('KeyS');
+    check('pushed away from it at the top, it climbs back down', Math.abs(r.p[1] - 0.5) < 0.001, { y: r.p[1], at: local(r) });
+    await key.press('KeyB'); r = await until((r) => !house(r), 6000);
+    check('and the key near it takes the house down', !house(r), r.world);
+    check('the house\'s frames keep up', out.frames.house.median < 20, out.frames.house);
   }
 
   if (scene === 'pad') {

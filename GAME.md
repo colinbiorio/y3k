@@ -78,7 +78,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "traverse the entire planet of Earth" | stage 7. The heights and the colours are fetched and packed (below). |
 | "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
-| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **begun**: the first of the five, the shelter, is built with a key, entered through its door and explored; its room is furnished. The house, the workshop, the tower and the hall are next. |
+| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **two of five**: the shelter and the house, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder. The workshop, the tower and the hall are next. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
 | "some type of 'force'" | stage 5: the binding. |
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
@@ -138,9 +138,43 @@ the ground, because the void has no ground to sink it in.
   are arithmetic in the shader, like everything else in the void; the flame is
   a card turned to the eye with a white core, a blue-violet sheath and slow
   rising tongues; the mat is woven by its shader, over and under.
-- Not yet: the other four buildings; a building kept between visits (stage 6
-  keeps things); the shelter's shadow on the water (the void casts no shadows);
-  sitting on the mat or lying down.
+- Not yet: the workshop, the tower and the hall; a building kept between visits
+  (stage 6 keeps things); a building's shadow on the water (the void casts no
+  shadows); sitting on the mat or lying down.
+
+**The house** (17 November), from its brief: "about six by nine metres on low
+stone piers: a timber frame, walls of woven reed and lime plaster, a steep
+thatched roof whose ridge is a line of dark glass solar tiles, a covered porch,
+one round window. Inside: a main room and a loft, a wooden table and two
+stools, a bed with a woven blanket, a ladder, a small ceramic stove with a ring
+of light."
+
+- **Built from the bar's list.** The **build** button opens a row of the five
+  (the three not yet made greyed, and near a building a line that takes it
+  down); the key builds whichever was chosen last. One of each kind stands, and
+  one is never put up over another.
+- **Walked.** Two stone steps up to the porch (a step each, no jump); the
+  platform's sides are too high to step onto. The room is open to the roof but
+  for the loft over its back. The walls, the table, the stools, the stove and
+  the open door are in the way; under the loft a jump meets its floor; in the
+  loft the thatch keeps a head under it, and a rail keeps a body off its edge.
+  A body's steps are against boxes (`solids.js`) in the house's own frame.
+- **The ladder.** Pushed toward it the body climbs; pushed away it climbs down;
+  let alone it hangs; a jump lets go; at the top it steps over onto the loft,
+  and from the loft's edge, pushed away, it starts back down (`body.js`, from
+  `s.climb`, which the house sets in front of its ladder).
+- **The light inside**, as the shelter's: the sun only where its ray leaves by
+  the round window, or by the doorway and out under the porch's ceiling
+  (`sunLocal`, the same in the numbers and in the shader); the loft shades what
+  is under it; the sky by how near a surface is to the door and the window; at
+  night the stove's ring, warm, and the round window glowing from outside.
+- **Drawn** (`buildings/house.js`): one mesh whose parts say what they are made
+  of (plaster over a reed weave, timber, thatch in stems greying toward the
+  eaves, stone, glass tiles, planks, glazed ceramic, linen, a striped blanket)
+  and when they go up: the piers, the frame, the walls, the thatch from the
+  eaves up, then the things one after another.
+- Rough edges: climbing, the body holds its jump's pose; in the loft's low
+  corners the eye is close and the body is then not drawn.
 
 ### Stage 1: the void
 
@@ -388,7 +422,9 @@ suite runs them; those that draw are read as text and looked at.
 | `lights.js` | pale, dusk, night |
 | `shelter.js` | the shelter as numbers: its shell, what of it is solid, where a body may go and stand, where the eye may stand, where the sun gets in, how it goes up |
 | `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
-| `buildings/` | `shelter.js`: the shelter drawn (draws) |
+| `house.js` | the house as numbers: its solids, the room's and the porch's air, the ladder, the eye, the sun through its window and door, how it goes up |
+| `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
+| `buildings/` | `shelter.js`, `house.js`: the two drawn (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |
@@ -415,7 +451,7 @@ Fixed in the code, so nobody has to find them again:
 
 ## How it is looked at
 
-- `node test/game.test.mjs` (in `npm test`), 102 checks (the shelter's seven
+- `node test/game.test.mjs` (in `npm test`), 109 checks (the house's seven since 17 Nov afternoon too) (the shelter's seven
   since 17 Nov: its shape, where it is built and taken down, walked into and
   out of, its walls from outside, the eye, the sun inside, the build key): the jump's two
   heights, the dash in eight directions, flight's rules, the bindings, the
