@@ -113,9 +113,10 @@ export function createLife(scene, { lite = false, ground, shape }) {
     'float ph = instanceMatrix[3].x * 0.31 + instanceMatrix[3].z * 0.17; float sway = aX * aX; transformed.x += sway * 0.22 * sin(uTime * 1.3 + ph); transformed.z += sway * 0.16 * sin(uTime * 1.1 + ph * 1.7); transformed.y -= sway * 0.07 * (1.0 + sin(uTime * 2.1 + ph));');
   const crowns = add(crownGeo(lite), crownMat, MAXP);
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3(), S = new THREE.Vector3(), UP = new THREE.Vector3();
-  let palmAt = null;
-  function plant(cx, cz) {
-    const list = palmsNear(ground, cx, cz, NEAR);
+  let palmAt = null, sites = '';
+  // the palms round (cx, cz), but none where a building stands (skip(x, z))
+  function plant(cx, cz, skip = null) {
+    const list = palmsNear(ground, cx, cz, NEAR).filter((p) => !skip || !skip(p.x, p.z));
     let n = 0;
     for (const p of list) {
       if (n >= MAXP) break;
@@ -160,9 +161,11 @@ export function createLife(scene, { lite = false, ground, shape }) {
     group, plant,
     // one frame: the palms round the body (planted again as it goes), the birds where they are at t, the hens and
     // turtles a step on; a turtle breaking the surface rings the water
-    live(dt, t, body, drop) {
+    live(dt, t, body, drop, world = null) {
       time.value = t; clock += dt;
-      if (!palmAt || Math.hypot(body.p[0] - palmAt[0], body.p[2] - palmAt[1]) > 22) plant(body.p[0], body.p[2]);
+      // planted again as the body goes, and when a building goes up or comes down (no palm grows in a building)
+      const now = world ? world.buildings.filter((b) => b.down < 0).map((b) => `${b.kind}${Math.round(b.x)},${Math.round(b.z)}`).join(';') : '';
+      if (!palmAt || now !== sites || Math.hypot(body.p[0] - palmAt[0], body.p[2] - palmAt[1]) > 22) { sites = now; plant(body.p[0], body.p[2], world ? world.built : null); }
       let n = 0;
       for (const f of flocks) for (let k = 0; k < f.n; k++) {
         const b = ternAt(f, k, t);

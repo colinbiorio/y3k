@@ -77,7 +77,8 @@ function quadG(a, b, c, d, uvs = [[0, 0], [1, 0], [1, 1], [0, 1]]) {
 // GLSL: the house's frame, noise, what each part looks like
 const COMMON = `
   uniform vec2 uCentre; uniform float uYaw; uniform float uBuild;
-  vec3 toLocal(vec3 w) { vec2 d = w.xz - uCentre; float c = cos(uYaw), s = sin(uYaw); return vec3(c * d.x - s * d.y, w.y, s * d.x + c * d.y); }
+  uniform float uBase;
+  vec3 toLocal(vec3 w) { vec2 d = w.xz - uCentre; float c = cos(uYaw), s = sin(uYaw); return vec3(c * d.x - s * d.y, w.y - uBase, s * d.x + c * d.y); }
   vec3 dirLocal(vec3 v) { float c = cos(uYaw), s = sin(uYaw); return vec3(c * v.x - s * v.z, v.y, s * v.x + c * v.z); }
   float h1(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   float n2(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
@@ -171,7 +172,7 @@ export function createHouseArt({ lite = false } = {}) {
   const group = new THREE.Group(), G = gatherer(), put = G.put, mats = [], geos = [];
   const keep = (m) => { mats.push(m); return m; };
   const U = {
-    uCentre: { value: new THREE.Vector2() }, uYaw: { value: 0 }, uBuild: { value: 0 }, uTime: { value: 0 },
+    uCentre: { value: new THREE.Vector2() }, uYaw: { value: 0 }, uBuild: { value: 0 }, uTime: { value: 0 }, uBase: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uSky: { value: new THREE.Color() },
     uFire: { value: new THREE.Vector3() }, uFireCol: { value: new THREE.Color() }, uDoor: { value: 0.4 }, uOpen: { value: 1 },
   };
@@ -325,13 +326,24 @@ export function createHouseArt({ lite = false } = {}) {
   const fireAt = new THREE.Vector3(H.stove.x, H.stove.ring, H.stove.z);
   const fireCol = new THREE.Color(1.0, 0.78, 0.5);
 
+  // ---- its foundations, where it stands raised on uneven ground (the island): the piers and the steps carried down 1.6 m
+  const foundG = (() => { const parts = [];
+    for (const x of [-2.7, -0.9, 0.9, 2.7]) for (const z of [-4.2, -2.1, 0, 2.1, 4.2]) parts.push(boxG(x - 0.21, x + 0.21, -1.6, 0, z - 0.21, z + 0.21));
+    parts.push(boxG(-H.half, H.half, -1.6, 0, H.front, 5.1));
+    const g = new THREE.BufferGeometry(), P = [], N = [];
+    for (const q of parts) { const n = q.toNonIndexed(); n.computeVertexNormals(); P.push(...n.attributes.position.array); N.push(...n.attributes.normal.array); n.dispose(); q.dispose(); }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); return g; })();
+  geos.push(foundG);
+  const found = new THREE.Mesh(foundG, keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.4, 0.38, 0.34), roughness: 0.95 })));
+  found.visible = false; group.add(found);
+
   let doorOpen = 0;
   return {
     group, flameAt: fireAt, fireCol,
     update(b, { t = 0, dt = 0, sun = [0, 1, 0], sunCol = new THREE.Color(1, 1, 1), sky = new THREE.Color(0.2, 0.2, 0.25), near = false, night = 0 } = {}) {
-      group.position.set(b.x, 0, b.z); group.rotation.y = b.yaw;
+      group.position.set(b.x, b.y || 0, b.z); group.rotation.y = b.yaw;
       const ph = phase(b);
-      U.uCentre.value.set(b.x, b.z); U.uYaw.value = b.yaw; U.uTime.value = t;
+      U.uCentre.value.set(b.x, b.z); U.uYaw.value = b.yaw; U.uTime.value = t; U.uBase.value = b.y || 0;
       U.uBuild.value = ph.rest > 0 ? 4 + ph.rest : ph.roof > 0 ? 3 + ph.roof : ph.walls > 0 ? 2 + ph.walls : ph.frame > 0 ? 1 + ph.frame : ph.piers;
       U.uOpen.value = 1 - ph.roof;
       U.uSunDir.value.set(sun[0], sun[1], sun[2]); U.uSunCol.value.copy(sunCol); U.uSky.value.copy(sky);
@@ -342,6 +354,7 @@ export function createHouseArt({ lite = false } = {}) {
       U.uDoor.value = 0.25 + 0.75 * doorOpen;
       const shown = (at) => U.uBuild.value >= at;
       hinge.visible = shown(4.05); winRing.visible = glass.visible = shown(4.15); ringLight.visible = shown(4.7);
+      found.visible = (b.y || 0) > 0.01 && ph.piers > 0.2;
       lightMat.color.setRGB(1.0, 0.82, 0.55).multiplyScalar(0.6 + 0.4 * ph.rest);
       // after dark the round window shows the stove's light from outside
       glass.material.emissive.setRGB(1.0, 0.7, 0.4).multiplyScalar(0.55 * night * ph.rest); glass.material.opacity = 0.16 + 0.5 * night;

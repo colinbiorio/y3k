@@ -264,7 +264,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
     },
     // the island's life, a frame on: the palms round the body, the birds, the woodhens, the turtles
-    live(dt, t, body) { life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a)); },
+    live(dt, t, body, world) { life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
     renderMirror() {},
     setScale() {},
     dispose() { life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },

@@ -263,6 +263,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (evening, last) — **Building and fighting on the island**
+  (`src/game/world.js`, `buildings/*.js`, `combat.js`, `island/creatures.js`).
+  The buildings and the bots had assumed the void's flat water at height 0,
+  so on Lord Howe a house would have sunk into a hill and a bot hovered inside
+  one. Now a building stands with its way in at the ground's height, on stone
+  foundations where the ground falls away. Where the ground rises behind it or
+  falls too far, it is refused and the game says which. No palm grows inside
+  it, and bots rise from the ground and hover over it. Game suite 135 (2 new);
+  the `island` smoke 15/15 (a house built and walked into there, a bot over
+  its land); every other smoke green.
+
 - **2026-11-17** (evening, later) — **Lord Howe's life: its palms and its
   animals** (`src/game/island/life.js`, `creatures.js`; `island.js`, `world.js`,
   `view.js`, `menu.js`). The island's expected fauna, as Colin asked: kentia

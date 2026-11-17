@@ -32,6 +32,10 @@
 // how well they shoot (bursts, leading a moving body), whether they slip a
 // cast. Never a presence's people: things.
 //
+// On the island the bots rise out of the ground (or the sea) where they are
+// called and hover over whatever is under them (world.ground), not over a
+// sea level that may be deep inside a hill.
+//
 // The body is hurt only in survival; at nothing it is down for a moment, then
 // stands again where it fell, whole. Everything moves in steps of at most
 // 1/60 s, and what flies is tested along the whole of each step (a swept test),
@@ -241,6 +245,9 @@ export function stepCombat(c, dt, ctx) {
   return c;
 }
 
+// what a bot hovers over: the island's ground (or the sea's level over water), else the void's water
+const floorUnder = (world, x, z) => (world?.ground ? Math.max(0, world.ground.height(x, z)) : 0);
+
 function step(c, h, body, aim, aimYaw, world, creative) {
   const R = c.ring, P = c.player, hand = handOf(body);
   R.spin += h * (R.mode === 'held' ? 5 : R.mode === 'charging' ? 6 + 34 * R.charge : 30);
@@ -301,7 +308,8 @@ function step(c, h, body, aim, aimYaw, world, creative) {
     b.t += h; b.hitT = Math.max(0, b.hitT - h);
     if (b.mode === 'rise') {
       const u = Math.min(1, b.t / RISE);
-      b.p[1] = -0.8 + (b.alt + 0.8) * (1 - (1 - u) * (1 - u));
+      const g0 = floorUnder(world, b.p[0], b.p[2]);
+      b.p[1] = g0 - 0.8 + (b.alt + 0.8) * (1 - (1 - u) * (1 - u));
       if (u >= 1) b.mode = 'fight';
       continue;
     }
@@ -318,7 +326,8 @@ function step(c, h, body, aim, aimYaw, world, creative) {
       const dx = b.p[0] - o.p[0], dz = b.p[2] - o.p[2], dd = Math.hypot(dx, dz);
       if (dd < 2.6 && dd > 1e-6) { want[0] += (dx / dd) * 3 * (2.6 - dd); want[2] += (dz / dd) * 3 * (2.6 - dd); }
     }
-    want[1] = (b.alt + 0.25 * Math.sin(1.3 * b.t + b.phase) - b.p[1]) * 3;
+    const gy = floorUnder(world, b.p[0], b.p[2]);
+    want[1] = (gy + b.alt + 0.25 * Math.sin(1.3 * b.t + b.phase) - b.p[1]) * 3;
     // a cast coming at it: one that was going to slip it does, sideways
     if (b.armed && R.mode === 'out' && b.dodgeT <= 0) {
       const rel = sub(b.p, R.p), ahead = dot(rel, R.dir), off = segPoint(R.p, [R.p[0] + R.dir[0] * 8, R.p[1] + R.dir[1] * 8, R.p[2] + R.dir[2] * 8], b.p);
@@ -332,7 +341,7 @@ function step(c, h, body, aim, aimYaw, world, creative) {
     if (b.dodgeT > 0) { b.dodgeT -= h; want = [b.dodgeDir[0] * 13, want[1], b.dodgeDir[2] * 13]; }
     const ease = 1 - Math.exp(-(b.dodgeT > 0 ? 18 : 4) * h);
     for (let j = 0; j < 3; j++) b.v[j] += (want[j] - b.v[j]) * ease;
-    const next = [b.p[0] + b.v[0] * h, Math.max(0.6, b.p[1] + b.v[1] * h), b.p[2] + b.v[2] * h];
+    const next = [b.p[0] + b.v[0] * h, Math.max(floorUnder(world, b.p[0] + b.v[0] * h, b.p[2] + b.v[2] * h) + 0.6, b.p[1] + b.v[1] * h), b.p[2] + b.v[2] * h];
     if (world?.solid?.(next)) { b.v[0] *= -0.3; b.v[2] *= -0.3; } else b.p = next;
     // shooting: a burst every so often, each bolt at where the body will be when it gets there (as well as this level can)
     if (P.down > 0 || dist > L.range[1] + 10) continue;
