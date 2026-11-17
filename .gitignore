@@ -78,3 +78,5 @@ airden_*.json
 # (The already-committed copy stays in history; untracking stops the next write.)
 .library.json
 .library.json.tmp
+__pycache__/
+*.pyc
