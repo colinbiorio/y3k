@@ -117,7 +117,7 @@ export function createFrequencies({ toast } = {}) {
   let spec = hornSpec(f, powerW), solo = -1, soloP = null, hearing = true, drag = null, lat = null, lastLat = 0, lastField = 0;
   let fieldDirty = true, hornsDirty = true, reliefDirty = true, paintDirty = true, soloDirty = true;
   // the pyramid
-  let years = 2.2, pyrPlaying = false, pyrSound = false, rowShown = null, rowHorns = [];     // it opens with the method at work: about a third of the way up
+  let years = 2.2, pyrPlaying = false, pyrSound = false, rowShown = null, rowHorns = [], follow = false, tip = null;     // it opens with the method at work: about a third of the way up
   // both
   let tau = 0, volume = 0.4, heardDb = null, lastTiles = 0, forceTiles = true, stage = null, sand = null, pyr = null, failed = '', sound = null;
   let tour = false, lit = false, litN = 0, each = new Float32Array(1280), glowW = new Float32Array(1280), gainsNow = [0, 0, 0, 0];
@@ -205,7 +205,8 @@ export function createFrequencies({ toast } = {}) {
 
   // everything that sounds or runs, stopped (a tab change, or leaving the room)
   function quiet() {
-    playing = pyrPlaying = pyrSound = tour = false; drag = null; solo = -1;
+    playing = pyrPlaying = pyrSound = tour = follow = false; drag = null; solo = -1;
+    if (tip) tip.on = false;
     shine(-1);
     sound?.stop();
     if (sand) { sand.plain = false; sand.cursor(null); }
@@ -259,6 +260,7 @@ export function createFrequencies({ toast } = {}) {
           <div class="freq-group" role="group" aria-label="go to">
             <span class="freq-cap">go to</span>
             ${PYR_GO.map(([k, say]) => `<button type="button" class="disc-chip" data-go="${k}">${say}</button>`).join('')}
+            <button type="button" class="disc-chip" data-act="follow" aria-pressed="false" title="the eye rises with the course being made">follow the course</button>
           </div>
         </div>
         <div class="freq-stats">${tilesHtml(PYR_TILES)}</div>
@@ -286,6 +288,7 @@ export function createFrequencies({ toast } = {}) {
           <li><b>The horns</b> stand shoulder to shoulder around the course being made, each at its true size, half a metre above the surface as it rises. The fronts leaving each line of horns are drawn ${fmt(LATTICE_HZ / WAVE_HZ, 0)} times slowed and fade within about ${fmt(shockDistance(plan.surfaceDb, LATTICE_HZ), 0)} m, where the tone shocks; the pattern breathing on the course is the plan's lattice (two crossed standing waves, nodes a block apart), drawn where that sound reaches. It is the plan, not a field solved for a thousand horns.</li>
           <li><b>What you hear</b> with the sound on is the working course's horns where the camera stands, every one with its true phase, scaled as in the sandbox (every 20 dB of the field is 10 dB at your speakers). They are played throughout, also while a course sets, when in the plan they would rest, so a paused build is never mute. The pyramid's body does not shadow the sound, and below the working course the room mirrors your height above it.</li>
           <li><b>Where the sound comes from:</b> while it sounds, each horn's mouth glows as much of what you hear is its own (its pressure at the camera over the loudest one's, to the power 1.5, so that the ones that carry the sound stand out). Stand behind a line of horns and its nearest are dim: they face away, and the line across the course, facing you, carries more. The scope beside the level draws the two channels as they are played, slowed.</li>
+          <li><b>Follow the course</b> lifts the point you look at with the working surface as it rises; point at any course to read its number, its size and the year it was done.</li>
           <li><b>The build</b> plays the ${sig(sched.years, 3)} years of sound in ${BUILD_S} seconds; drag the years to go anywhere in it.</li>
         </ul>
       </section>`;
@@ -366,6 +369,7 @@ export function createFrequencies({ toast } = {}) {
       if (p) p.textContent = pyrPlaying ? 'pause' : years >= sched.years - 1e-6 ? 'build again' : years > 0 ? 'go on' : 'build';
       const s = q('[data-act="pyr-sound"]');
       if (s) { s.textContent = pyrSound ? 'sound off' : 'sound on'; s.classList.toggle('on', pyrSound); }
+      press(q('[data-act="follow"]'), follow);
     } else {
       const p = q('[data-act="play"]');
       if (p) p.textContent = playing ? 'pause' : 'sound on';
@@ -418,7 +422,8 @@ export function createFrequencies({ toast } = {}) {
       pyrSound = !pyrSound;
       if (pyrSound) startSound(LATTICE_HZ); else sound?.stop();
       sync(); kick();
-    } else if (d.act === 'all') setSolo(-1);
+    } else if (d.act === 'follow') { follow = !follow; sync(); kick(); }
+    else if (d.act === 'all') setSolo(-1);
   }
   // only from inside a click: browsers let sound begin then and not before
   function startSound(hz) {
@@ -495,10 +500,22 @@ export function createFrequencies({ toast } = {}) {
       if (was === 'horn') { fieldDirty = true; renderHorns(); sync(); }
       kick();
     },
-    tap(hit) { if (tab === 'sandbox' && tool === 'look' && hit?.on === 'horn') setSolo(solo === hit.horn ? -1 : hit.horn); },
+    tap(hit) { if (tab === 'sandbox' && tool === 'look' && hit?.on === 'horn') setSolo(solo === hit.horn ? -1 : hit.horn); else if (tab === 'pyramid') courseAt(hit); },
     touch() { if (tour) { tour = false; sync(); } },             // a hand on the stage ends the tour
-    hover(hit) { cursorAt(hit); },
+    hover(hit) { cursorAt(hit); courseAt(hit); },
   };
+  // the course under the pointer, on the pyramid: its number, its size, and when it was done
+  function courseAt(hit) {
+    if (!pyr || !stage) return;
+    if (!tip) tip = stage.label(pyr.labels, 'tip');
+    const p = tab === 'pyramid' && hit?.point, b = p ? buildAt(sched.rows, years) : null;
+    const row = p && p[1] > 0.01 && p[1] <= b.top + 0.01 ? sched.rows.find((r) => r.bottom <= p[1] && p[1] < r.bottom + r.thickness + 1e-6) : null;
+    if (!row || (row.cumulativeHours > years * 8766 && row !== b.current)) { if (tip.on) { tip.on = false; stage.mark(); } return; }
+    const done = row.cumulativeHours <= years * 8766;
+    tip.say(`course ${row.course}: ${fmt(row.thickness, 2)} m thick, ${fmt(row.side, 1)} m a side, ${fmt(row.blocks, 0)} blocks · ${done ? `done in year ${fmt(row.cumulativeHours / 8766, 2)}` : 'being made'}`);
+    tip.pos.set(p[0], p[1] + 1.2, p[2]); tip.on = true;
+    stage.mark();
+  }
   function newHorn(x, y) {
     const dx = bed.width / 2 - x, dy = bed.depth / 2 - y, L = Math.hypot(dx, dy);
     return { x, y, z: 0.5, aimX: L > 0.15 ? dx / L : 1, aimY: L > 0.15 ? dy / L : 0, aimZ: -0.25, mouthDb: spec.mouthDb, mouthDiameter: spec.mouthDiameter, phase: 0 };
@@ -601,10 +618,12 @@ export function createFrequencies({ toast } = {}) {
     }
     const b = buildAt(sched.rows, years);
     if (b.current !== rowShown) { rowShown = b.current; rowHorns = b.current ? courseHorns(b.current, plan) : []; }
+    // following, the point looked at rises with the working surface (where the eye looks across, it stays)
+    if (follow && pyr) { const o = pyr.orbit, want = b.top + 1.5; if (Math.abs(o.target[1] - want) > 0.01) { go(o, { target: [o.target[0], o.target[1] + (want - o.target[1]) * Math.min(1, dt * 2.5), o.target[2]] }); o.rate = 0; } }
     if (pyrSound) tau += dt * WAVE_HZ;
     pyr?.set({ built: b.built, current: b.current, part: b.part, setPart: b.setting ? 1 - b.setLeft / b.current.setHours : 0, list: rowHorns, tau, sound: pyrSound });
     listen(rowHorns, LATTICE_HZ, b.top, pyrSound);
-    return pyrPlaying || pyrSound;
+    return pyrPlaying || pyrSound || (follow && pyr && Math.abs(pyr.orbit.target[1] - b.top - 1.5) > 0.05);
   }
 
   // the alone horn's own field on the bed, for its waves on the sand

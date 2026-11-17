@@ -2758,6 +2758,7 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 }
 .freq-label.tag { font-variant-numeric: tabular-nums; font-weight: 500; }
 .freq-label.tag.on { color: #101216; background: rgba(214, 219, 228, 0.92); border-color: transparent; }
+.freq-label.tip { font-size: 12px; padding: 4px 10px; border-radius: 9px; color: #fff; background: rgba(8, 10, 16, 0.78); font-variant-numeric: tabular-nums; }
 .freq-hud { position: absolute; z-index: 2; display: flex; gap: 6px; pointer-events: none; }
 .freq-hud > * { pointer-events: auto; }
 .freq-tl { top: 14px; left: 16px; flex-direction: column; gap: 3px; max-width: 62%; }
