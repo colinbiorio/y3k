@@ -261,6 +261,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (later still) — **The pyramid's desert has a far side**
+  (`pyramid3d.js`, `stage.js`): a low ring of dunes rising beyond three
+  kilometres, so the horizon is land and not only haze, and a sky that
+  deepens from the warm horizon toward violet within the view. The picture's,
+  not the survey's (FREQUENCIES.md §9 already says the sun, the sky and the
+  drifts are). The desk smoke passes on the GPU at 2×.
+
 - **2026-11-17** (later) — **The frequencies room, round two: the horns light up
   by how much of what you hear is theirs** (`acoustics.mjs` `hear(…, each)`,
   `kit.js` `glowing`/`withGlow`, both scenes, `src/frequencies.js`). Colin's

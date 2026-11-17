@@ -63,8 +63,8 @@ export function createStage(host, { frame = null, hand = {} } = {}) {
     fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glow; varying vec3 vD;
       void main() {
         vec3 d = normalize(vD);
-        vec3 c = mix(low, mid, smoothstep(0.0, 0.12, d.y));
-        c = mix(c, top, smoothstep(0.12, 0.7, d.y));
+        vec3 c = mix(low, mid, smoothstep(0.0, 0.07, d.y));
+        c = mix(c, top, smoothstep(0.05, 0.5, d.y));
         float s = max(dot(d, sunDir), 0.0);
         c += sunCol * glow * (0.22 * pow(s, 5.0) + 0.7 * pow(s, 80.0) + 6.0 * smoothstep(0.99955, 0.99975, s)) * smoothstep(-0.02, 0.01, d.y);
         gl_FragColor = vec4(c, 1.0);
