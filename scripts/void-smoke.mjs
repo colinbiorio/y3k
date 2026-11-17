@@ -26,6 +26,11 @@
 //          aside, the whirl, a slam from a jump; seven bots up and the frames; the list clearing them
 //   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
 //          up, the body leaning into it) to its corner; run again and leapt off, out and up
+//   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
+//          Howe Island, the island chosen and come to (its ground fetched and inflated), the body on its beach facing
+//          Mount Gower, walked inland and up, into the lagoon's shallows (rings on the water), flown out over the
+//          deep sea and let down into it to swim with its head out; the map with where the body is; the frames;
+//          and back to the void
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -49,7 +54,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -230,6 +235,49 @@ try {
     check('leaving the tab puts the void down', !out.left.gameRoot && !out.left.inVoid, out.left);
     await page.locator('#nav-world').click(); await page.waitForSelector('.game-root canvas', { timeout: 20000 }); await sleep(600);
     const again = await read(); check('and it is where it was on return', again && Math.abs(again.p[2] - out.reads['15-back-in-the-void'].p[2]) < 0.5 && again.light === 'night', again);
+  }
+
+  if (scene === 'island') {
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const faceYaw = async (target) => { for (let i = 0; i < 5; i++) { const d = wrap(target - (await read()).yaw); if (Math.abs(d) < 0.03) break; await drag(Math.max(-900, Math.min(900, -d / 0.0024)), 0); await sleep(120); } };
+    const sheet = async () => { await page.locator('#game-controls').click(); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 }); await page.locator('#game-menu [data-tab="map"]').click(); await sleep(300); };
+    await sheet();
+    out.places = await page.locator('#game-menu [data-place]').evaluateAll((els) => els.map((e) => [e.dataset.place, e.getAttribute('aria-pressed')]));
+    check('the map tab offers the void (here now) and Lord Howe Island', JSON.stringify(out.places) === JSON.stringify([['void', 'true'], ['island', 'false']]), out.places);
+    out.mapDrawn = await page.evaluate(() => { const svg = document.querySelector('#game-menu .game-map-svg'); return svg ? { paths: svg.querySelectorAll('path').length, peaks: [...svg.querySelectorAll('.peak text')].map((t) => t.textContent) } : null; });
+    check('and draws the island, its peaks named', out.mapDrawn && out.mapDrawn.paths > 4 && out.mapDrawn.peaks.some((t) => /Mount Gower/.test(t)), out.mapDrawn);
+    await shot('01-map');
+    await page.locator('#game-menu [data-place="island"]').click();
+    let r = await until((r) => r.world.place === 'island', 30000); await sleep(1500 * slow);
+    check('the island chosen, the body is there, on its beach', r.world.place === 'island' && r.world.ground > 1 && r.world.ground < 8 && Math.abs(r.p[1] - r.world.ground) < 0.01, { place: r.world.place, p: r.p, ground: r.world.ground });
+    await shot('02-arrived');
+    // inland (east) and up
+    await faceYaw(-Math.PI / 2); const g0 = (await read()).world.ground;
+    await key.down('KeyW'); await sleep(2600); await key.up('KeyW'); r = await until((r) => speed(r) < 0.1, 3000);
+    check('walked inland, the ground rises under it', r.world.ground > g0 + 1 && Math.abs(r.p[1] - r.world.ground) < 0.05, { from: g0, to: r.world.ground });
+    out.frames = { island: await frames(2500) };
+    await shot('03-inland');
+    // back west into the lagoon's shallows
+    await faceYaw(Math.PI / 2); await key.down('KeyW'); r = await until((r) => r.world.depth > 0.12, 9000); await sleep(300); await key.up('KeyW');
+    r = await read();
+    check('into the lagoon: it wades in shallow water', r.world.depth > 0.1 && r.world.depth < 4 && !r.world.swim && r.p[1] < 0, { depth: r.world.depth, swim: r.world.swim, y: r.p[1] });
+    await shot('04-wading');
+    // up and out over the deep sea, east of the island, and let down into it
+    await key.press('KeyG'); await sleep(150); await key.press('KeyF'); await sleep(200);
+    await page.evaluate(() => { const g = window.Y3K.game; return g && g.read(); });
+    await key.down('Space'); await sleep(1800); await key.up('Space');
+    // east: the island is narrow here and the sea off its east side is deep close in
+    await faceYaw(-Math.PI / 2); await key.down('ShiftLeft'); await key.down('KeyW'); r = await until((r) => r.world.ground < -14, 40000); await key.up('KeyW'); await key.up('ShiftLeft');
+    await key.down('KeyC'); r = await until((r) => !r.flying, 15000); await key.up('KeyC'); await sleep(700);
+    r = await read();
+    check('let down into the deep sea, it swims with its head out', r.world.swim && Math.abs(r.p[1] + 1.35) < 0.02 && r.world.depth > 10, { p: r.p, depth: r.world.depth, swim: r.world.swim, flying: r.flying });
+    await shot('05-swimming');
+    await sheet(); out.you = await page.evaluate(() => !!document.querySelector('#game-menu .game-map-svg .you'));
+    check('the map marks where the body is', out.you, out.you);
+    await page.locator('#game-menu [data-place="void"]').click();
+    r = await until((r) => r.world.place === 'void', 10000); await sleep(600);
+    check('and back to the void', r.world.place === 'void' && Math.abs(r.p[1]) < 0.01 && r.world.ground === 0, { place: r.world.place, p: r.p });
+    check('the island\'s frames keep up', out.frames.island.median < 20, out.frames.island);
   }
 
   if (scene === 'wall') {

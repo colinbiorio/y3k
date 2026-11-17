@@ -115,26 +115,52 @@ const hts = sample(GRID), L = landOf(GRID, hts), dLand = distance(GRID, L.land),
 const southPeaks = (() => { const order = []; for (let k = 0; k < hts.length; k++) if (L.land[k] && hts[k] > 300) order.push(k); order.sort((p, q) => hts[q] - hts[p]); const got = [];
   for (const k of order) { const x = GRID.x0 + (k % GRID.w) * S, z = GRID.z0 + Math.floor(k / GRID.w) * S; if (got.every((p) => Math.hypot(p.x - x, p.z - z) > 700)) got.push({ x, z }); if (got.length >= 2) break; } return got; })();
 const LAGOON_SOUTH = Math.min(...southPeaks.map((p) => p.z)) - 700;
-const out = new Float32Array(GRID.w * GRID.h);
+const out = new Float32Array(GRID.w * GRID.h), lagoon = new Uint8Array(GRID.w * GRID.h), edgeOf = new Float32Array(GRID.w * GRID.h);
 let lagoonCells = 0;
+// the lagoon: the sea in the hull, north of its south end, within its reach of the shore; how far inside its edge each cell is
+for (let j = 0; j < GRID.h; j++) for (let i = 0; i < GRID.w; i++) {
+  const k = j * GRID.w + i, x = GRID.x0 + i * S, z = GRID.z0 + j * S;
+  if (L.land[k] || !inside(hull, x, z)) continue;
+  const e = Math.min(toPoly(hull, x, z), LAGOON.shore - dLand[k], LAGOON_SOUTH - z);
+  if (e > 0) { lagoon[k] = 1; edgeOf[k] = e; lagoonCells++; }
+}
+// the rest of the sea falls away from the land and the lagoon (its reef), not from where the lagoon's rule stops
+const reach = new Uint8Array(GRID.w * GRID.h); for (let k = 0; k < reach.length; k++) reach[k] = L.land[k] || lagoon[k] ? 1 : 0;
+const dReef = distance(GRID, reach);
 for (let j = 0; j < GRID.h; j++) for (let i = 0; i < GRID.w; i++) {
   const k = j * GRID.w + i, x = GRID.x0 + i * S, z = GRID.z0 + j * S;
   if (L.land[k]) { out[k] = hts[k]; continue; }
-  const dl = dLand[k], de = toPoly(hull, x, z), sand = noise(x / 90, z / 90) - 0.5, heads = Math.max(0, noise(x / 23 + 50, z / 23) - 0.62);
-  // how far inside the lagoon's edge: the hull's, the reach from the shore, its south end (negative: outside it)
-  const edge = inside(hull, x, z) ? Math.min(de, LAGOON.shore - dl, LAGOON_SOUTH - z) : -de;
+  const dl = dLand[k], sand = noise(x / 90, z / 90) - 0.5, heads = Math.max(0, noise(x / 23 + 50, z / 23) - 0.62);
   let depth;
-  if (edge > 0) {
+  if (lagoon[k]) {
     // the lagoon: shallow sand deepening a little away from the beach, rippled; the reef crest along its edge, coral heads near it
-    lagoonCells++;
-    const floor = 0.5 + 2.4 * smooth(0, 380, dl) + 0.7 * sand;
+    const floor = 0.5 + 2.4 * smooth(0, 380, dl) + 0.7 * sand, edge = edgeOf[k];
     depth = floor + (0.35 - floor) * smooth(170, 25, edge) - 2.2 * heads * smooth(420, 60, edge);
   } else {
     // outside: falling away from the land and the reef to the shelf
-    const d = Math.min(dl, -edge);
+    const d = dReef[k];
     depth = 0.4 + 31 * (1 - Math.exp(-d / 300)) + 12 * smooth(1200, 4200, d) + 1.5 * sand;
   }
   out[k] = -Math.min(48, Math.max(0.25, depth));
+}
+// a low shore drawn smooth: the land's mask blurred, and near its half-way line the ground set by how far in or out
+// it is (beaches rise gently from the water; the sea is shallow at them). Cliffs, where the land by the sea is high,
+// keep their sheer drop.
+{
+  // a Gaussian two cells wide (32 m), in two passes
+  const R = 4, kern = []; for (let t = -R; t <= R; t++) kern.push(Math.exp(-(t * t) / 8)); const ks = kern.reduce((a, b) => a + b, 0); for (let t = 0; t < kern.length; t++) kern[t] /= ks;
+  const W = GRID.w, Hh = GRID.h, m = new Float32Array(W * Hh), tmp = new Float32Array(W * Hh);
+  for (let k = 0; k < m.length; k++) m[k] = L.land[k];
+  for (let j = 0; j < Hh; j++) for (let i = 0; i < W; i++) { let v = 0; for (let t = -R; t <= R; t++) v += kern[t + R] * m[j * W + Math.max(0, Math.min(W - 1, i + t))]; tmp[j * W + i] = v; }
+  for (let j = 0; j < Hh; j++) for (let i = 0; i < W; i++) { let v = 0; for (let t = -R; t <= R; t++) v += kern[t + R] * tmp[Math.max(0, Math.min(Hh - 1, j + t)) * W + i]; m[j * W + i] = v; }
+  const high = new Float32Array(W * Hh);
+  for (let j = 0; j < Hh; j++) for (let i = 0; i < W; i++) { let v = -99; for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++) { const q = Math.max(0, Math.min(Hh - 1, j + b)) * W + Math.max(0, Math.min(W - 1, i + a)); if (L.land[q]) v = Math.max(v, hts[q]); } high[j * W + i] = v; }
+  for (let k = 0; k < m.length; k++) {
+    const sgn = m[k] - 0.5, w = smooth(0.49, 0.2, Math.abs(sgn)) * smooth(14, 7, high[k]);
+    if (w <= 0) continue;
+    const shore = sgn > 0 ? sgn * 10 : sgn * 2.6;
+    out[k] = out[k] + (shore - out[k]) * w;
+  }
 }
 
 // ---- Ball's Pyramid, modelled on a grid of its own: a blade of rock, its summit a little north of its middle and a
@@ -216,11 +242,16 @@ const named = [
 ].filter(Boolean);
 
 // ---- the place to arrive: the lagoon's beach in the island's middle, looking south over the lagoon to the mountains
+// (on the heights as drawn: the westmost dry ground of a row with the lagoon's water west of it, then inland to dry sand)
 let arrive = null;
 for (let j = Math.round((-1300 - GRID.z0) / S); j <= Math.round((-300 - GRID.z0) / S) && !arrive; j++) {
-  for (let i = 0; i < GRID.w - 1; i++) {
+  for (let i = 3; i < GRID.w - 8; i++) {
     const k = j * GRID.w + i;
-    if (L.land[k] && L.comp[k] === L.main && out[k] > 2 && out[k] < 6 && !L.land[k - 1] && inside(hull, GRID.x0 + (i - 2) * S, GRID.z0 + j * S)) { arrive = { x: GRID.x0 + (i + 1) * S, z: GRID.z0 + j * S }; break; }
+    if (!(out[k] > 0 && out[k - 1] <= 0 && out[k - 2] < 0 && lagoon[k - 3])) continue;
+    let ii = i; while (ii < i + 8 && out[j * GRID.w + ii] < 2) ii++;
+    const kk = j * GRID.w + ii;
+    if (out[kk] >= 2 && out[kk] < 7 && (L.land[kk] ? L.comp[kk] === L.main : true)) arrive = { x: GRID.x0 + ii * S, z: GRID.z0 + j * S };
+    break;
   }
 }
 if (!arrive) throw new Error('no beach on the lagoon found to arrive at');
@@ -242,7 +273,7 @@ mkdirSync(OUT, { recursive: true });
 writeFileSync(join(OUT, 'lordhowe.bin'), Buffer.concat([head, body]));
 
 const landCells = L.land.reduce((s, v) => s + v, 0), mainCells = L.sizes[L.main];
-const lines = coast(GRID, out), plines = coast(PG, pout);
+const lines = coast(GRID, out), plines = coast(PG, pout), shallows = coast(GRID, out, -4).filter((l) => l.length > 8);
 const ext = (pred) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let k = 0; k < out.length; k++) if (pred(k)) { const x = GRID.x0 + (k % GRID.w) * S, z = GRID.z0 + Math.floor(k / GRID.w) * S; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { x0, x1, z0, z1 }; };
 const mainExt = ext((k) => L.land[k] && L.comp[k] === L.main);
 const shape = {
@@ -252,7 +283,7 @@ const shape = {
   length: Math.round(Math.hypot(mainExt.x1 - mainExt.x0, mainExt.z1 - mainExt.z0)), extent: mainExt,
   lagoonKm2: Math.round((lagoonCells * S * S) / 1e4) / 100,
   peaks: named, arrive: { x: arrive.x, z: arrive.z, facing: Math.round(arrive.facing * 1000) / 1000 },
-  reef: hull.map(([x, z]) => [x, z]),
+  reef: hull.map(([x, z]) => [x, z]), shallows,
   coast: lines, pyramid: { name: "Ball's Pyramid", x: Math.round(pyrCentre[0]), z: Math.round(pyrCentre[1]), h: Math.round(Math.max(...pout)), real: 551, modelled: true, coast: plines },
 };
 const js = `// lordhowe-shape.js — MADE BY scripts/island/lordhowe-build.mjs from the AWS Terrain Tiles (zoom 13); not edited by hand.

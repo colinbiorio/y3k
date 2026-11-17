@@ -48,6 +48,7 @@ export const FLY = 14, FLY_SPRINT = 48, FLY_ACCEL = 60;
 export const TURN = 14;                 // rad/s, the body coming round to its heading
 export const STEP = 1 / 120;
 export const CLIMB = 1.4;               // m/s up or down a ladder
+export const SWIM = { speed: 2.2, sprint: 3.4, jump: 0.55 };   // in deep water (the island's sea): m/s, and a jump's share of a jump
 export const WALL = {
   reach: 0.22,                          // m past the body's side: a wall this near may be run along
   speed: 3.4, height: 0.55,             // to take to one: m/s across the ground, and m over what it stands on, at least
@@ -182,14 +183,14 @@ export function stepBody(s, inp, dt = STEP) {
   // ---- a wall run
   if ((s.wallrun || !s.grounded) && s.world?.wall && wallRun(s, inp, w, wm, dt, ev)) return s;
 
-  // ---- on foot
-  const top = inp.walk ? WALK : inp.sprint ? SPRINT : RUN, a = (s.grounded ? GROUND_ACCEL : AIR_ACCEL) * dt;
+  // ---- on foot (or swimming: slower, and a jump is a kick up out of the water)
+  const top = s.swim ? (inp.sprint ? SWIM.sprint : SWIM.speed) : inp.walk ? WALK : inp.sprint ? SPRINT : RUN, a = (s.grounded ? GROUND_ACCEL : AIR_ACCEL) * dt;
   s.v[0] = toward(s.v[0], w[0] * top, a); s.v[2] = toward(s.v[2], w[2] * top, a);
   if (s.grounded) s.coyote = COYOTE; else if (s.coyote > 0) s.coyote -= dt;
   if (s.buffer > 0) {
     s.buffer -= dt;
     if (s.coyote > 0) {
-      s.v[1] = JUMP_V0; s.grounded = false; s.rising = true; s.coyote = 0; s.buffer = 0;
+      s.v[1] = JUMP_V0 * (s.swim ? SWIM.jump : 1); s.grounded = false; s.rising = !s.swim; s.coyote = 0; s.buffer = 0;
       ev.push({ type: 'jump', at: [s.p[0], s.p[1], s.p[2]] });
     } else if (creative && inp.jumpPressed) {
       // a second jump in the air: creative takes off

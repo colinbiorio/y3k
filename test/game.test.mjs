@@ -36,6 +36,9 @@ import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
+import * as GR from '../src/game/island/ground.js';
+import { SHAPE } from '../src/game/island/lordhowe-shape.js';
+import { inflateSync } from 'node:zlib';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -1218,10 +1221,11 @@ console.log('the void: what is kept, and the door');
 
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1 });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1, place: 'void' });
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
-  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3 });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3 });
+  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3, place: 'island' });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island' });
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"place":"mars"}' })).place, 'void', 'a place not on the map is the void');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"building":"castle"}' })).building, 'shelter', 'a building that is not made is the shelter');
   const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
   assert.equal(odd.kind, 'human', 'a kind that is not one of the five is the first');
@@ -2146,6 +2150,85 @@ ok('beside the house\'s long side its eaves are a ceiling to a jump from the wat
   const { top } = drive(body, [[1.2, { jump: true, jumpPressed: true }]]);
   near(top + B.createBody().p[1] + BODY.tall, HO.roofIn(HO.HOUSE.eave), 1e-6, 'the head under the eave\'s edge');
   near(body.p[0], -3.6, 1e-9, 'where it jumped');
+});
+
+// ---- the island (island/ground.js, lordhowe.bin, lordhowe-shape.js). Colin, 17 Nov: "let's pick a random small island on
+// earth ... just the general shape and size and expected fauna of a small island of your choice". Lord Howe Island.
+const islandBytes = readFileSync(join(ROOT, 'src/game/island/lordhowe.bin'));
+const islandHead = GR.parseHead(new Uint8Array(islandBytes));
+const islandGround = GR.createGround(islandHead, GR.heightsOf(islandHead, new Uint8Array(inflateSync(islandBytes.subarray(GR.HEAD)))));
+// a little made-up ground: flat sand at 1 m, a cliff rising 20 m at x = 40, deep sea west of x = −40
+function madeGround() {
+  const w = 12, h = 6, S = 16, x0 = -88, z0 = -40, main = new Float32Array(w * h);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const x = x0 + i * S; main[j * w + i] = x >= 40 ? 21 : x <= -40 ? -10 : 1; }
+  return GR.createGround({ w, h, spacing: S, x0, z0, pw: 1, ph: 1, px0: 1e6, pz0: 1e6 }, { main, pyramid: new Float32Array(1) });
+}
+
+ok('Lord Howe Island from the tiles: a crescent 11.7 km long, its two mountains in the south and two hills in the north, a little more land than it has (the data blurs its shore)', () => {
+  assert.equal(SHAPE.name, 'Lord Howe Island');
+  within(SHAPE.length, 10500, 12500, 'its length');
+  within(SHAPE.mainKm2, 13, 20, 'its main island\'s land (its own figure: 14.55 km²)');
+  const named = Object.fromEntries(SHAPE.peaks.map((p) => [p.name, p]));
+  within(named['Mount Gower'].h, 800, 900, 'Mount Gower (875 m)'); within(named['Mount Lidgbird'].h, 640, 800, 'Mount Lidgbird (777 m)');
+  assert.ok(named['Mount Lidgbird'].z < named['Mount Gower'].z && named['Mount Gower'].z > 2000, 'Gower south of Lidgbird, both in the south');
+  assert.ok(named['Mount Eliza'] && named['Malabar Hill'] && named['Mount Eliza'].x < named['Malabar Hill'].x && named['Malabar Hill'].z < -2000, 'the two hills of the north, Eliza to the west');
+  near(islandGround.height(named['Mount Gower'].x, named['Mount Gower'].z), named['Mount Gower'].h, 0.6, 'the ground at its summit is its summit');
+  assert.ok(islandBytes.length < 400000, 'the heights travel in under 400 KB: ' + islandBytes.length);
+  near(SHAPE.pyramid.h, 551, 1, 'Ball\'s Pyramid, as high as it is (modelled: the tiles miss it)'); assert.equal(SHAPE.pyramid.modelled, true);
+  within(Math.hypot(SHAPE.pyramid.x, SHAPE.pyramid.z), 26000, 30000, 'and as far off');
+  near(islandGround.height(SHAPE.pyramid.x + 30, SHAPE.pyramid.z), islandGround.height(SHAPE.pyramid.x + 30, SHAPE.pyramid.z), 0);
+  assert.ok(Math.max(...[0, 60, -60].map((d) => islandGround.height(SHAPE.pyramid.x + d, SHAPE.pyramid.z - 90))) > 400, 'it stands up out of the sea where it is');
+});
+
+ok('the lagoon lies in the hollow on the west, shallow, closed by a reef crest; the sea is deep off the east cliffs and off Mount Gower\'s west; the arrival is on its beach facing Gower', () => {
+  const a = SHAPE.arrive;
+  within(islandGround.height(a.x, a.z), 0.5, 7, 'the beach');
+  const lagoon = [150, 400, 700].map((d) => islandGround.depth(a.x - d, a.z));
+  assert.ok(lagoon.every((d) => d > 0.2 && d < 4.5), 'shallow water west of the beach: ' + lagoon.map((d) => d.toFixed(2)));
+  // across the lagoon to the west: shallow, then the crest, then deep
+  let crest = null, deep = null;
+  for (let x = a.x - 100; x > a.x - 3500; x -= 16) { const d = islandGround.depth(x, a.z); if (crest === null && d < 0.7 && x < a.x - 400) crest = x; if (crest !== null && d > 8) { deep = x; break; } }
+  assert.ok(crest !== null && deep !== null && crest - deep < 700, 'a reef crest, and deep water beyond it within 700 m: ' + [crest, deep]);
+  const g = SHAPE.peaks.find((p) => p.name === 'Mount Gower');
+  let east = g.x; while (islandGround.height(east, g.z) > 0) east += 16;
+  assert.ok(islandGround.depth(east + 600, g.z) > 6, 'deep water off Gower\'s east cliffs (past the rocks at their foot): ' + islandGround.depth(east + 600, g.z).toFixed(1));
+  let west = g.x; while (islandGround.height(west, g.z) > 0) west -= 16;
+  assert.ok(islandGround.depth(west - 250, g.z) > 6, 'and off its west, beyond the lagoon\'s end');
+  near(Math.atan2(g.x - a.x, g.z - a.z), a.facing, 1e-3, 'facing Mount Gower');
+  assert.ok(SHAPE.lagoonKm2 > 4 && SHAPE.lagoonKm2 < 13, 'the lagoon\'s size: ' + SHAPE.lagoonKm2);
+});
+
+ok('the ground a body stands on is the drawn triangles: exact at the samples, on the two triangles between them; off both grids, the shelf', () => {
+  const H = islandHead, S = H.spacing, m = islandGround.hts.main, i = 300, j = 400, x = H.x0 + i * S, z = H.z0 + j * S;
+  near(islandGround.height(x, z), m[j * H.w + i], 1e-4, 'at a sample');
+  const h00 = m[j * H.w + i], h10 = m[j * H.w + i + 1], h01 = m[(j + 1) * H.w + i], h11 = m[(j + 1) * H.w + i + 1];
+  near(islandGround.height(x + 0.25 * S, z + 0.25 * S), h00 + (h10 - h00) * 0.25 + (h01 - h00) * 0.25, 1e-4, 'on the first triangle');
+  near(islandGround.height(x + 0.75 * S, z + 0.75 * S), h11 + (h01 - h11) * 0.25 + (h10 - h11) * 0.25, 1e-4, 'on the second');
+  assert.equal(islandGround.height(60000, 60000), GR.SEA_FLOOR, 'the shelf beyond');
+  let steep = 0; for (let k = 0; k < 4000; k++) { const px = H.x0 + 2000 + (k % 80) * 70, pz = H.z0 + 3000 + Math.floor(k / 80) * 160; const [sx, sz] = islandGround.slope(px, pz); if (Math.hypot(sx, sz) > GR.STEEP) steep++; }
+  assert.ok(steep > 40, 'the island has cliffs too steep to walk up: ' + steep + ' of 4000 places');
+});
+
+ok('a body on the ground: it stands on the land, walks along it, is held at the foot of a cliff, swims in deep water with its head out (slower, a small kick for a jump), runs along a cliff', () => {
+  const w = createWorld(); w.ground = madeGround();
+  const body = B.createBody({ yaw: Math.PI / 2, world: w }); body.p = [0, 1, 0]; body.was = [...body.p];
+  walk(body, [0, 0], 0, 0.2); near(body.p[1], 1, 1e-9, 'on the sand');
+  // east, at the cliff (the eye looking along +x: yaw −π/2, forward +x)
+  walk(body, [0, 1], -Math.PI / 2, 4);
+  assert.ok(body.p[0] < 40 && body.p[0] > 20 && body.p[1] < 10, 'held below the cliff: ' + body.p.map((v) => v.toFixed(2)));
+  // the cliff to run along: beside it, at its foot
+  near(w.wall([39.5 - 16 + 16, 1.4, 0]) ? 1 : 0, 1, 0, 'a cliff is a wall beside it');
+  // west, into the deep: it swims
+  const s2 = B.createBody({ yaw: -Math.PI / 2, world: w }); s2.p = [-30, 1, 0]; s2.was = [...s2.p];
+  walk(s2, [0, 1], Math.PI / 2, 12);
+  assert.ok(s2.p[0] < -50 && s2.swim, 'out into the deep (at a swimmer\'s pace): ' + s2.p[0].toFixed(1));
+  near(s2.p[1], -GR.SWIM, 1e-6, 'its feet SWIM down, its head out');
+  near(Math.hypot(s2.v[0], s2.v[2]), B.SWIM.speed, 1e-6, 'at a swimmer\'s pace');
+  let top = s2.p[1]; walk(s2, [0, 0], 0, 0.02, { jump: true, jumpPressed: true }); for (let t = 0; t < 1; t += B.STEP) { B.stepBody(s2, { move: [0, 0], yaw: 0, jump: true }, B.STEP); top = Math.max(top, s2.p[1]); }
+  assert.ok(top - -GR.SWIM < 0.6 && top - -GR.SWIM > 0.2, 'a kick up out of the water: ' + (top + GR.SWIM).toFixed(2));
+  assert.equal(w.wet(-60, 0), true); assert.equal(w.wet(0, 0), false, 'the land is dry');
+  assert.ok(w.solid([60, 5, 0]) && !w.solid([60, 25, 0]), 'what flies stops in the ground');
+  assert.ok(w.eye([0, 2, 0], [80, 2, 0]) < 0.6, 'the eye stays out of the hill');
 });
 
 console.log(`\n${passed} checks passed.`);
