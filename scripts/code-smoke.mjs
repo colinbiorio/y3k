@@ -7,8 +7,9 @@
 //   the diff on the permission card BEFORE its buttons, the file untouched
 //   until allowed, the amber dot on the laptop while it waits, green/red rows,
 //   the context ring, the 5-hour and weekly bars, the cost, todos, a subagent
-//   with its own tool nested inside, Esc stopping a turn, the orb still on
-//   screen in its column, six glyphs on each rail, and no page errors.
+//   with its own tool nested inside, Esc stopping a turn, the orb keeping the
+//   whole window behind the glass pane, the rails' glyphs, /new starting afresh
+//   from the folders (one conversation: no tabs), and no page errors.
 //
 //   node scripts/code-smoke.mjs [--shots <dir>] [--size 1440x900]
 //   (PORT=<n> serves the site on that port, and SMOKE_SLOW=<n> makes every
@@ -187,7 +188,8 @@ try {
   await page.waitForSelector('#nav-code:not([hidden])', { timeout: 15000 });
   check('the laptop shows for the founder', true);
   const rails = await page.evaluate(() => ['home-nav', 'home-nav-right'].map((id) => [...document.querySelectorAll(`#${id} .nav-btn`)].filter((b) => getComputedStyle(b).display !== 'none').map((b) => b.id)));
-  check('six glyphs on each rail', rails[0].length === 6 && rails[1].length === 6, JSON.stringify(rails));
+  check('the rails: six glyphs on the left, seven on the right (frequencies, 9 Nov)', JSON.stringify(rails) === JSON.stringify([['nav-profile', 'nav-feed', 'nav-post', 'nav-live', 'broadcast', 'nav-search'],
+    ['nav-settings', 'nav-code', 'nav-world', 'nav-games', 'nav-mine', 'nav-frequencies', 'nav-orb']]), JSON.stringify(rails));
   check('go live is on the left rail', rails[0].includes('broadcast') && !rails[1].includes('broadcast'));
 
   // the engine's link carried us straight into Code, which paired
@@ -203,20 +205,19 @@ try {
   await page.waitForSelector('.cv-input', { timeout: 8000 });
   check('the mode is remembered for the folder', store.folders()[repo]?.mode === 'ask');
 
-  // the orb keeps its column. The stage and its canvas keep the whole window
-  // (the room runs behind the pane); the body is framed in #orb-frame, the
-  // column body.js measures (THE FRAME), so the column is that element.
+  // the orb keeps the whole window (styles.css, "WIDE: NO FRAME", 29 Oct): the
+  // pane floats over it as glass, and #orb-frame is laid out only on a narrow
+  // screen, where the orb becomes a band across the top.
   const geo = await page.evaluate(() => {
     const st = document.getElementById('orb-frame').getBoundingClientRect();
     const pane = document.querySelector('.cv-pane').getBoundingClientRect();
     const cv = document.querySelector('#stage canvas')?.getBoundingClientRect();
     return { st: [st.left, st.width, st.height], pane: [pane.left, pane.right], cv: cv ? [cv.left, cv.width] : null, vw: innerWidth };
   });
-  check('the orb has its own column to the right of the pane', geo.st[1] >= 230 && geo.st[1] <= 410 && geo.pane[1] <= geo.st[0] + 1, JSON.stringify(geo));
-  // and the body is DRAWN in it: the running camera puts the glass's centre
-  // in the column (the canvas itself spans the window, by design)
+  check('wide, no frame is laid out: the canvas spans the window and the pane floats over it between the rails', geo.st[1] === 0 && geo.cv && geo.cv[1] === geo.vw && geo.pane[0] >= 80 && geo.pane[1] <= geo.vw - 80, JSON.stringify(geo));
+  // and the body is DRAWN at the window's middle, behind the glass
   const drawnX = await page.evaluate(() => { const e = window.Y3K.body.eye().proj; return ((1 - e[8]) / 2) * innerWidth; });
-  check('the orb is drawn centred in that column', Math.abs(drawnX - (geo.st[0] + geo.st[1] / 2)) < 6, JSON.stringify({ drawnX, col: geo.st }));
+  check('the orb is drawn at the middle of the window', Math.abs(drawnX - geo.vw / 2) < 6, JSON.stringify({ drawnX, vw: geo.vw }));
 
   // orion writes the coder a note; it waits, editable, for the first message
   await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 10000 });
@@ -273,7 +274,7 @@ try {
   // the turn's summary, under its reply (2026-10-08)
   await page.waitForSelector('.cv-list .it.cv-turnsum', { timeout: 10000 });
   const sum = await page.textContent('.cv-list .it.cv-turnsum');
-  check('the turn landed with its summary: how long, its file, its tokens, its cost, who pays', /^Worked \S+ · 1 file \+1 −1 · \d+ tokens · \$\d+\.\d\d covered$/.test(sum || ''), sum);
+  check('the turn landed with its summary: how long, its file, its tokens, its cost, who pays', /^Worked \S+ · 1 file \+1 −1 · \d+ tokens( · \d+ tok\/s)? · \$\d+\.\d\d covered$/.test(sum || ''), sum);
   await shot('4-allowed');
 
   // THE CONTEXT PANEL: the ring opens it; the breakdown opens in it; Escape closes it
@@ -337,8 +338,9 @@ try {
   const rich = await page.evaluate(() => ({
     todos: document.querySelector('.cv-todos summary')?.textContent,
     nested: document.querySelectorAll('.it.tl.tk-task .tl-children .it').length,
-    code: document.querySelector('.cv-list .it.as:last-child .md-code')?.textContent,
-    bullets: document.querySelectorAll('.cv-list .it.as:last-child li').length,
+    // the last reply (its turn's summary now comes after it)
+    code: [...document.querySelectorAll('.cv-list .it.as')].at(-1)?.querySelector('.md-code')?.textContent,
+    bullets: [...document.querySelectorAll('.cv-list .it.as')].at(-1)?.querySelectorAll('li').length,
   }));
   check('todos: 1 of 3 done', /1 of 3 done/.test(rich.todos || ''), rich.todos);
   check('the subagent\'s tool and words are nested inside its card', rich.nested >= 2, String(rich.nested));
@@ -401,32 +403,15 @@ try {
   const work0 = await page.textContent('.cv-working');
   await page.waitForFunction((was) => document.querySelector('.cv-working')?.textContent !== was, work0, { timeout: 10000 }).catch(() => {});
   const work1 = await page.textContent('.cv-working');
-  check('while it works, the strip says for how long and at what', /^Working 0:\d\d · Writing$/.test(work0 || '') && /^Working 0:\d\d · Writing$/.test(work1 || '') && work1 !== work0, `${work0} → ${work1}`);
+  check('while it works, the strip says for how long and at what', /^Working 0:\d\d · Writing( · ~\d+ tok\/s)?$/.test(work0 || '') && /^Working 0:\d\d · Writing( · ~\d+ tok\/s)?$/.test(work1 || '') && work1 !== work0, `${work0} → ${work1}`);
   await shot('5c-working');
   await page.keyboard.press('Escape');
   await page.waitForSelector('.it.sys.st-stopped', { timeout: 8000 });
   check('Esc stops a running turn', true);
   check('the turn\'s line goes with the turn', !(await page.$('.cv-working')));
 
-  // CLOSING A SESSION FROM ITS TAB (2026-10-08): a second session, then its ×
-  await page.click('.cv-tab.cv-new');
-  await page.waitForSelector('.cv-folderrow', { timeout: 10000 });
-  await page.click('.cv-folderrow');
-  await page.waitForFunction(() => document.querySelectorAll('.cv-tabwrap').length === 2, null, { timeout: 15000 });
-  check('a second session, in a tab of its own', engine.sessionCount === 2, String(engine.sessionCount));
-  await page.hover('.cv-tabwrap:not(.on) .cv-tab');
-  await page.waitForTimeout(300);
-  const xs = await page.evaluate(() => [...document.querySelectorAll('.cv-tabx')].map((x) => [getComputedStyle(x).opacity, x.closest('.cv-tab') ? 'inside' : 'beside', x.getAttribute('aria-label')]));
-  check('each tab has its × beside it, shown on the one on screen and the one under the pointer', xs.length === 2 && xs.every(([o, where]) => o === '1' && where === 'beside'), JSON.stringify(xs));
-  await shot('5d-two-tabs');
-  await page.click('.cv-tabwrap.on .cv-tabx');
-  await page.waitForFunction(() => document.querySelectorAll('.cv-tabwrap').length === 1, null, { timeout: 10000 });
-  for (let k = 0; k < 100 && engine.sessionCount !== 1; k++) await new Promise((r) => setTimeout(r, 100));
-  check('its × stops it: the tab is gone, and the engine runs one session', engine.sessionCount === 1, String(engine.sessionCount));
-  await page.waitForSelector('.cv-tabwrap.on .cv-tab', { timeout: 10000 });
-  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 10000 });
-  check('the session left takes the screen', true);
-  await shot('5e-closed');
+  // ONE CONVERSATION (no tabs since 9 Nov): a second session is a second opinion's, reached from its column; a fresh
+  // start is /new, at the front door below
 
   const md = await page.evaluate(async () => {
     const { markdown } = await import('/src/code/render/markdown.js');
@@ -497,7 +482,7 @@ try {
     }
     out.composer = { same: document.querySelector('.cv-input') === ta, focused: document.activeElement === ta, caret: ta.selectionStart, value: ta.value,
       selectKept: document.querySelector('.cv-controls select') === sel,
-      bgTab: !![...document.querySelectorAll('.cv-tab.unread')].find((t) => t.title.includes('/tmp/smoke-bg')) };
+      bgQuiet: !/elsewhere/.test(document.querySelector('.cv-list')?.textContent || '') };
     ta.value = '';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     // 3. a long session opens in slices: a few items at once, the rest after
@@ -509,8 +494,7 @@ try {
       cv._feed({ sid: long, type: 'message.end', id: 'l' + i });
     }
     await frame();
-    const tab = [...document.querySelectorAll('.cv-tab')].find((t) => t.title.includes('/tmp/smoke-long'));
-    tab.click();
+    cv._show(long);                                        // one conversation: no tab to press; the view's own way to put a session on screen
     const atOnce = document.querySelectorAll('.cv-list > .it').length;
     for (let k = 0; k < 200 && document.querySelectorAll('.cv-list > .it').length < 400; k++) await new Promise((r) => setTimeout(r, 50));
     const all = document.querySelectorAll('.cv-list > .it').length;
@@ -519,7 +503,7 @@ try {
     for (let k = 0; k < 200 && document.querySelectorAll('.cv-list > .it').length < 500; k++) await new Promise((r) => setTimeout(r, 50));
     out.long = { atOnce, all, older, paged: document.querySelectorAll('.cv-list > .it').length, first: document.querySelector('.cv-list > .it .us-text')?.textContent };
     // back to the real session; the made-up ones end
-    [...document.querySelectorAll('.cv-tab')].find((t) => !/smoke-(long|bg)/.test(t.title) && !t.classList.contains('cv-new'))?.click();
+    cv._show(sid);
     cv._feed({ sid: long, type: 'session.ended', reason: 'stopped' });
     cv._feed({ sid: other, type: 'session.ended', reason: 'stopped' });
     await frame();
@@ -530,7 +514,7 @@ try {
   check('rendering: it ends fully opaque, drawn as the whole text would be, its code coloured', drawn.stream.opacity === '1' && drawn.stream.same && drawn.stream.code >= 2, JSON.stringify(drawn.stream));
   check('rendering: typing survives meta events — same textarea, focus, caret, words', drawn.composer.same && drawn.composer.focused && drawn.composer.caret === 4 && drawn.composer.value === 'half a thought', JSON.stringify(drawn.composer));
   check('rendering: the toolbar is patched, not rebuilt (the model select is the same element)', drawn.composer.selectKept, JSON.stringify(drawn.composer));
-  check('rendering: a session in another tab only lights its tab', drawn.composer.bgTab, JSON.stringify(drawn.composer));
+  check('rendering: a session not on screen draws nothing on it', drawn.composer.bgQuiet, JSON.stringify(drawn.composer));
   check('rendering: a long session opens with a few items at once, the rest in slices', drawn.long.atOnce <= 40 && drawn.long.all === 400, JSON.stringify(drawn.long));
   check('rendering: "show earlier" adds a page above, not everything', drawn.long.older === 'show 1200 earlier' && drawn.long.paged === 500 && drawn.long.first === 'question 550', JSON.stringify(drawn.long));
   await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
@@ -579,7 +563,8 @@ try {
   });
   await page.click('.cv-iconbtn[title="Coding tools and keys"]');
   await page.click('.cv-drawer > .cv-acts .btn');
-  await page.waitForSelector('.cv-drawer .ob-signin', { timeout: 8000 });
+  // other tools' rows show a sign-in line of their own: wait for Claude Code's
+  await page.waitForFunction(() => [...document.querySelectorAll('.cv-drawer .cv-prov')].some((r) => r.querySelector('.cv-provhead b')?.textContent === 'Claude Code' && r.querySelector('.ob-signin')), null, { timeout: 8000 });
   const claudeRow = await page.evaluate(() => {
     const row = [...document.querySelectorAll('.cv-drawer .cv-prov')].find((r) => r.querySelector('.cv-provhead b')?.textContent === 'Claude Code');
     return row && { text: row.textContent, cmd: row.querySelector('.ob-signin code')?.textContent, inputs: row.querySelectorAll('input').length, useKey: !!row.querySelector('.ob-usekey') };
@@ -590,23 +575,27 @@ try {
   check('the open models reached through OpenCode still ask for their key', viaKeys === 8, String(viaKeys));
   await shot('7-signin');
   await page.click('.cv-drawerhead .cv-iconbtn');
-  await page.click('.cv-tab.cv-new');
+  // a fresh start: /new stops the conversation left and goes back to the folders, as Claude Code's /clear does
+  await page.fill('.cv-input', '/new');
+  await page.keyboard.press('Enter');
   await page.waitForSelector('.ob-gate', { timeout: 8000 });
+  for (let k = 0; k < 100 && engine.sessionCount !== 0; k++) await new Promise((r) => setTimeout(r, 100));
+  check('/new stops the conversation left and starts afresh from the folders', engine.sessionCount === 0, String(engine.sessionCount));
   const gate = await page.evaluate(() => ({ text: document.querySelector('.ob-gate')?.textContent, cont: !!document.querySelector('.ob-continue') }));
   check('the folder screen asks for the sign-in before a folder and a mode', /Sign in to Claude Code first/.test(gate.text || '') && !gate.cont, JSON.stringify(gate));
   await page.unroute(cmdUrl);
   await page.click('.ob-gate .ob-refresh');
   await page.waitForSelector('.ob-continue', { timeout: 8000 });
   const cont = await page.evaluate(() => ({ text: document.querySelector('.ob-continue')?.textContent, focused: document.activeElement?.classList.contains('ob-continue'), gate: !!document.querySelector('.ob-gate') }));
-  check('signed in: one Continue, focused for Enter', /^Continue in y3k-smoke-repo-\w+ · Claude · ask/.test(cont.text || '') && cont.focused && !cont.gate, JSON.stringify(cont));
+  check('signed in: one button to start afresh (after /new), focused for Enter', /^Start in y3k-smoke-repo-\w+ · Claude · ask/.test(cont.text || '') && cont.focused && !cont.gate, JSON.stringify(cont));
   await shot('8-continue');
 
+  const BUILDS = [['mac', 'arm64', 'Mac · Apple silicon'], ['mac', 'x64', 'Mac · Intel'], ['win', 'x64', 'Windows'], ['win', 'arm64', 'Windows on Arm'], ['linux', 'x64', 'Linux'], ['linux', 'arm64', 'Linux on Arm']];
   // first run: this browser disconnected
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: SITE });
   await page.route(`${SITE}/api/code/setup`, (route) => route.fulfill({ status: 200, contentType: 'application/json',
     body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6',
-      builds: [['mac', 'arm64', 'Mac · Apple silicon'], ['mac', 'x64', 'Mac · Intel'], ['win', 'x64', 'Windows'], ['win', 'arm64', 'Windows on Arm'], ['linux', 'x64', 'Linux'], ['linux', 'arm64', 'Linux on Arm']]
-        .map(([os, arch, label]) => ({ os, arch, label, url: `https://dl.test/y3k-${os}-${arch}.bin` })) }) }));
+      builds: BUILDS.map(([os, arch, label]) => ({ os, arch, label, url: `https://dl.test/y3k-${os}-${arch}.bin` })) }) }));
   await page.click('.cv-iconbtn[title="Coding tools and keys"]');
   await page.click('.cv-drawer >> text=Disconnect this browser');
   await page.waitForSelector('.ob-first .ob-copystart', { timeout: 8000 });
@@ -617,8 +606,10 @@ try {
     dl: document.querySelector('.ob-apppath a.ob-dl')?.getAttribute('href'),
     here: document.querySelector('.ob-build[aria-pressed="true"]')?.textContent,
   }));
+  // the build this browser says it is on (headless Chromium says what its machine is): the one chosen, offered, and linked
+  const here = BUILDS.find(([, , label]) => first.here === label + 'this computer');
   check('first run: y3kode is better on desktop (this computer\'s build chosen), or one line for Terminal', /y3kode is better on desktop/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
-    && first.buttons.includes('Download for Linux') && first.dl === 'https://dl.test/y3k-linux-x64.bin' && first.here === 'Linuxthis computer'
+    && !!here && first.buttons.includes('Download for ' + here[2]) && first.dl === `https://dl.test/y3k-${here[0]}-${here[1]}.bin`
     && first.open && first.buttons.includes('Copy the start command'), JSON.stringify(first));
   await shot('9-first-run');
   await page.click('.ob-copystart');

@@ -643,6 +643,20 @@ await ok('the meters move in place, so their sweep and width transitions run', (
   assert.equal(cost.textContent, '$1.25');
 });
 
+await ok('the plan\'s windows: a whole answer replaces them; a turn\'s rate-limit event updates its two and keeps a model\'s own', () => {
+  const feed = (T, sid, list) => { for (const e of list) apply(T, { sid, ...e }); return T.sessions.get(sid); };
+  const T = createState(), w = (kind, utilization, label) => ({ kind, utilization, resetsAt: 1, ...(label ? { label } : {}) });
+  const x = feed(T, 'u1', [
+    { type: 'session.started', provider: 'claude', cwd: '/w', mode: 'ask' },
+    { type: 'usage.limits', provider: 'claude', status: null, windows: [w('five_hour', 0.13), w('seven_day', 0.93), w('seven_day_model', 1, 'Fable')] },
+    { type: 'usage.limits', provider: 'claude', status: 'allowed', windows: [w('five_hour', 0.18), w('seven_day', 0.11)] },
+  ]);
+  assert.deepEqual(x.usage.limits.windows.map((v) => [v.kind, v.label || '', v.utilization]), [['five_hour', '', 0.18], ['seven_day', '', 0.11], ['seven_day_model', 'Fable', 1]]);
+  assert.equal(x.usage.limits.status, 'allowed');
+  apply(T, { type: 'usage.limits', sid: 'u1', provider: 'claude', status: null, windows: [w('five_hour', 0.2), w('seven_day', 0.3)] });
+  assert.deepEqual(x.usage.limits.windows.map((v) => v.kind), ['five_hour', 'seven_day'], 'a whole answer without it: the model\'s window is gone');
+});
+
 await ok('the context panel: Claude\'s popover in y3k glass — the window by part, until auto-compact, the plan, the breakdown', async () => {
   const cp = await import('../src/code/render/context-panel.js');
   const byText = (el, tag, text) => [...el.querySelectorAll(tag.toLowerCase())].filter((e) => e.textContent.includes(text));
@@ -651,6 +665,7 @@ await ok('the context panel: Claude\'s popover in y3k glass — the window by pa
   assert.equal(cp.resetsIn(now + (2 * 60 + 19) * 60000, now), 'Resets in 2 hr 19 min');
   assert.equal(cp.resetsIn(now + 25 * 60000, now), 'Resets in 25 min');
   assert.equal(cp.resetsIn(now + 3 * 86400000, now), 'Resets in 3 days');
+  assert.equal(cp.resetsIn(now - 60000, now), 'Has reset', 'a reading older than its window does not say it resets in a minute');
   assert.deepEqual([['five_hour'], ['seven_day'], ['seven_day_model', 'Fable'], ['seven_day_opus']].map(([k, l]) => cp.windowLabel(k, l)), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable', 'Weekly · Opus']);
   const ctx = { used: 676500, limit: 1e6, percent: 68, breakdown: [
     { name: 'Messages', tokens: 619100, kind: 'used' }, { name: 'System tools', tokens: 24300, kind: 'used' },

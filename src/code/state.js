@@ -586,7 +586,16 @@ export function apply(S, e, { replay = false } = {}) {
       s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null };
       out.meta = true;
       break;
-    case 'usage.limits': s.usage.limits = { status: e.status, windows: e.windows || [] }; out.meta = true; break;
+    case 'usage.limits': {
+      // A whole answer (Claude Code asked for its windows, status null) replaces them. A turn's own rate_limit_event
+      // names only the 5-hour and weekly windows: it updates those and keeps the rest, or a model's own weekly window
+      // (get_usage's) went from the panel at every turn (found by scripts/code-smoke.mjs, 17 Nov 2026).
+      const next = Array.isArray(e.windows) ? e.windows : [], was = s.usage.limits?.windows || [];
+      const same = (a, b) => a.kind === b.kind && (a.label || '') === (b.label || '');
+      const windows = e.status == null ? next.slice() : [...was.map((w) => next.find((n) => same(n, w)) || w), ...next.filter((n) => !was.some((w) => same(n, w)))];
+      s.usage.limits = { status: e.status, windows };
+      out.meta = true; break;
+    }
     case 'usage.cost':
       s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent };
       if (s.turn && typeof e.totalUsd === 'number' && Number.isFinite(e.totalUsd)) s.turn.costTo = e.totalUsd;
