@@ -261,6 +261,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **kode's plan panel keeps a model's own weekly
+  window, and kode's browser smoke runs again** (`src/code/state.js`,
+  `render/context-panel.js`; `scripts/code-smoke.mjs`). Found by bringing the
+  smoke up to the one conversation: Claude Code's per-turn `rate_limit_event`
+  names only the 5-hour and weekly windows, and it replaced the whole list, so
+  the model's own weekly window (from `get_usage`, "Weekly · Fable") went from
+  the panel at every turn. Now a whole answer (`get_usage`) replaces the
+  windows and a turn's event updates the two it names and keeps the rest; a
+  reading older than its window says "Has reset", not "Resets in 1 min". The
+  smoke's stale expectations follow the product: seven glyphs on the right
+  rail, the orb keeping the whole window behind the glass pane (no column since
+  29 Oct), tokens a second in the summaries, `/new` for a fresh start (no tabs),
+  the build this browser says it is on. `node scripts/code-smoke.mjs` (with
+  `PW_CORE` where Playwright is not installed): 80 checks, all pass;
+  `test/code-client.test.mjs` 137 (two new, each broken once). Still owed:
+  `code-pane-smoke.mjs` and `history-smoke.mjs`, written for tabs.
+
 - **2026-11-17** (morning) — **The human has a real face, real hands and hair
   that fits** (`src/game/bodies/kin.js`, `human.js`; `scripts/kin/`; GAME.md).
   Colin, 15 Nov: "the human isn't realistic whatsoever". The face, the hands

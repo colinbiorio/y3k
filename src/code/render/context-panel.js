@@ -53,6 +53,7 @@ const pct = (n, of) => (of ? `${(100 * n / of).toFixed(1)}%` : '—');
 // "Resets in 2 hr 19 min" — the way Claude's own panel says it
 export function resetsIn(at, now = Date.now()) {
   if (!at) return '';
+  if (at <= now) return 'Has reset';                      // a reading older than its window ("Resets in 1 min" it was not)
   const m = Math.max(1, Math.round((at - now) / 60000));
   if (m < 60) return `Resets in ${m} min`;
   const hrs = Math.floor(m / 60);
