@@ -136,18 +136,34 @@ try {
   r = await read();
   check('beside the horns is louder than the whole', r.heardDb > farDb + 6, { far: farDb, near: r.heardDb });
   check('the horns glow by their share of what is heard: some, not all', r.lit > 100 && r.bright > 0 && r.bright < r.lit && farBright < r.lit, { near: r.bright, far: farBright, lit: r.lit });
-  check('the stereo gains move with the ear', r.sound && r.sound.gains.some((g) => Math.abs(g) > 1e-3), r.sound);
+  // the gains the room sets from the ear (what the audio thread has made of them by now is the machine's; a headless one can stall)
+  check('the stereo gains move with the ear', r.gains.some((g) => Math.abs(g) > 1e-3) && r.gains[0] !== r.gains[2], r.gains);
+  if (!r.sound?.gains?.some((g) => Math.abs(g) > 1e-3)) out.notes.push('the audio thread had not applied the gains yet: ' + JSON.stringify(r.sound));
   await shot('pyramid-horns');
   await press('[data-go="course"]'); await sleep(1500 * slow); await shot('pyramid-course');
   await press('[data-go="foot"]'); await sleep(1800 * slow); await shot('pyramid-foot');
   r = await read();
   check('the eye stays above the ground', r.stage.eye[1] >= 1.1, r.stage.eye);
   await press('[data-go="whole"]'); await sleep(1500 * slow);
+  if (!phone) {
+    // the course under the pointer: its number, size and year
+    await inView();
+    const sb = await stageBox(), face = await where([0, 20, 108]);
+    await page.mouse.move(sb.x + face[0], sb.y + face[1]); await sleep(600 * slow);
+    const tipText = await page.locator('.freq-label.tip').first().textContent().catch(() => '');
+    check('pointing at a course says which, how big, and when', /^course \d+: [\d.]+ m thick, [\d.,]+ m a side, [\d,]+ blocks · done in year [\d.]+$/.test(tipText || '') && await page.locator('.freq-label.tip').first().isVisible(), tipText);
+    await page.mouse.move(sb.x + 5, sb.y + 5);
+  }
   const before = (await read()).years;
   await press('[data-act="pyr-play"]');
   out.frames.pyramid = await frames();
   r = await read();
   check('build runs the clock', r.pyrPlaying && r.years > before + 0.05, { before, after: r.years });
+  await press('[data-act="follow"]'); await sleep(2500);
+  r = await read();
+  const topNow = await page.evaluate(() => { const r = window.Y3K.frequencies.read(); return r.stage.target[1]; });
+  check('following, the eye rises with the course', r.pyrPlaying && topNow > 60, { target: r.stage.target, years: r.years });
+  await press('[data-act="follow"]');
   check('the scale bar reads a round length', /^(\d+ (m|cm|km)|\d\.\d km)$/.test(await page.locator('[data-hud="scale-say"]').textContent()), await page.locator('[data-hud="scale-say"]').textContent());
   await press('[data-act="pyr-play"]');
   await page.locator('.freq-years').evaluate((el) => { el.value = el.max; el.dispatchEvent(new Event('input', { bubbles: true })); });

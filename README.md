@@ -261,6 +261,14 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (dawn) — **The pyramid: follow the course, and read any
+  course by pointing at it** (`src/frequencies.js`). "Follow the course" lifts
+  the point the eye looks at with the working surface as the build plays, so
+  the eye rises with the pyramid; pointing at a course (or tapping it) says its
+  number, thickness, side, blocks and the year it was done. The smoke checks
+  both, and now judges the stereo by the gains the room sets (a headless
+  browser's audio thread can stall). 31 checks on the GPU at 2×.
+
 - **2026-11-17** — **The world is drawn at the screen's own pixels, and the
   octopus's arms end in points** (`src/game/fine.js`, `view.js`,
   `bodies/octopus.js`, `art/v2/`; `scripts/void-smoke.mjs fine`; GAME.md).
