@@ -35,6 +35,7 @@ import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
+import * as CB from '../src/game/combat.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -308,7 +309,7 @@ ok('every action has two keys\' places and a controller\'s, and no key or button
 ok('one key does one thing: giving it to an action takes it from the one that had it', () => {
   const b = I.defaults();
   I.bindKey(b, 'jump', 1, 'KeyQ');
-  assert.deepEqual(b.keys.jump, ['Space', 'KeyQ']); assert.deepEqual(b.keys.dash, ['', 'Mouse2']);
+  assert.deepEqual(b.keys.jump, ['Space', 'KeyQ']); assert.deepEqual(b.keys.dash, ['', ''], 'Q was the dash\'s (its second key went to the guard, 17 Nov)');
   I.bindKey(b, 'jump', 1, '');
   assert.deepEqual(b.keys.jump, ['Space', '']);
   I.bindPad(b, 'dash', 0);
@@ -501,7 +502,7 @@ ok('the page\'s keys: the game hears them, except while typing, on a focused but
   assert.ok([...win.h.values(), ...doc.h.values(), ...el.h.values()].every((s) => s.size === 0), 'and leaves no listener behind');
 });
 
-ok('a press on the canvas gives it the keys and holds the pointer; the right button dashes; a held pointer looks', () => {
+ok('a press on the canvas gives it the keys and holds the pointer; then the left button casts the ring and the right one guards; a held pointer looks', () => {
   const { win, doc, el, canvas } = fakePage(), inp = I.createInput();
   const locks = [];
   let paused = false;
@@ -518,8 +519,10 @@ ok('a press on the canvas gives it the keys and holds the pointer; the right but
   el.fire('wheel', { deltaY: 100 }); assert.equal(Math.abs(inp.frame().zoom), 0, 'and the wheel is the sheet\'s');
   paused = false;
   const e = el.fire('mousedown', { button: 2 });
-  assert.equal(e.defaultPrevented, true); assert.equal(inp.frame().dash, true);
+  assert.equal(e.defaultPrevented, true); const g = inp.frame(); assert.ok(g.guard && g.guardPressed);
   win.fire('mouseup', { button: 2 });
+  el.fire('mousedown', { button: 0 }); const a = inp.frame(); assert.ok(a.attack && a.attackPressed, 'with the pointer held, the left button casts');
+  win.fire('mouseup', { button: 0 });
   assert.equal(el.fire('contextmenu').defaultPrevented, true, 'no menu over the game');
   el.fire('wheel', { deltaY: 100 }); assert.ok(inp.frame().zoom > 0, 'the wheel pulled back draws the eye back');
   el.fire('wheel', { deltaY: 48 }); const px = inp.frame().zoom;
@@ -950,7 +953,7 @@ ok('what every body shares: its limbs as cloth feels them, what goes with it whe
   assert.ok(common.includes('c.cloth.step(dt, c.free ? [] : shapes, floor, c.stiff)'), 'a cloth is pushed out of the body, unless it is free of it');
   assert.ok(common.includes('shade: rig.shade ?? 1,'));
   assert.match(read('src/game/bodies/light.js'), /\bshade: 0\.3,/, 'the light goes through a body of light');
-  assert.ok(read('src/game/view.js').includes('V.update(K.clock, camera, [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }]);'));
+  assert.ok(read('src/game/view.js').includes('const shades = [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }];'), 'the body\'s shade first (the nearest bots\' after it)');
 });
 
 console.log('the void: a cloth and the limb under it');
@@ -1215,10 +1218,10 @@ console.log('the void: what is kept, and the door');
 
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter' });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1 });
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
-  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house' });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house' });
+  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3 });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3 });
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"building":"castle"}' })).building, 'shelter', 'a building that is not made is the shelter');
   const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
   assert.equal(odd.kind, 'human', 'a kind that is not one of the five is the first');
@@ -1850,6 +1853,223 @@ ok('the build key is an action like the others: two keys, a pad button, in the c
   for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', "(b.kind === 'house' ? createHouseArt : createShelterArt)"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/buildings/house.js').includes("from '../house.js'"), 'the house drawn is not the numbers\' house');
   assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
+});
+
+// ---- the fight (combat.js): the ring and the bots
+// Colin, 17 Nov 2026: "a plasma weapon generated with several ways to attack with it, getting a bot enemy that we can
+// spawn in at varying difficulty". A body at the origin facing −z; the eye behind it looking along −z.
+const FRAME = 1 / 60;
+function arena(seed = 3) {
+  const c = CB.createCombat({ seed }), body = B.createBody({ yaw: Math.PI });
+  const aim = { from: [0.3, 1.9, 5.5], dir: [0, 0, -1] };
+  return { c, body, aim };
+}
+// a bot of a level standing (hovering) where it is put, not yet shooting
+function standBot(c, body, at, level = 1) {
+  const b = CB.spawnBot(c, body, 0, level); b.p = [...at]; b.alt = at[1]; b.mode = 'fight'; b.fire = 99; b.strafeT = 99; b.v = [0, 0, 0];
+  c.events.length = 0;
+  return b;
+}
+function fightFor(c, body, aim, seconds, hands = {}, extra = {}) {
+  const evs = [];
+  for (let t = 0; t < seconds - 1e-9; t += FRAME) { CB.stepCombat(c, FRAME, { body, aim, hands: typeof hands === 'function' ? hands(t) : hands, ...extra }); evs.push(...c.events.splice(0)); }
+  return evs;
+}
+const kinds = (evs, type) => evs.filter((e) => e.type === type);
+
+ok('the ring: a tap casts it along the eye\'s line at the bot nearest it; it goes out, strikes the bot once, and comes back to the hand', () => {
+  const { c, body, aim } = arena(), b = standBot(c, body, [0.6, 1.3, -10]);
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  evs = evs.concat(fightFor(c, body, aim, FRAME, { attack: false }));
+  assert.equal(kinds(evs, 'cast').length, 1, 'cast'); assert.equal(c.ring.mode, 'out');
+  assert.equal(kinds(evs, 'cast')[0].power, 0, 'a tap is a plain cast');
+  evs = evs.concat(fightFor(c, body, aim, 2.5));
+  const hits = kinds(evs, 'hit');
+  assert.equal(hits.length, 1, 'struck once, out and back: ' + JSON.stringify(hits));
+  assert.equal(hits[0].damage, CB.RING.cast.damage); assert.equal(b.hp, b.max - CB.RING.cast.damage);
+  assert.equal(kinds(evs, 'catch').length, 1, 'caught again'); assert.equal(c.ring.mode, 'held');
+});
+
+ok('an attack pressed while the ring is away calls it home and waits for it: a tap casts again as it comes, a hold spins it up', () => {
+  const { c, body, aim } = arena();
+  fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, 0.3, {});
+  assert.equal(c.ring.mode, 'out');
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }).concat(fightFor(c, body, aim, FRAME, {}));
+  assert.equal(kinds(evs, 'recall').length, 1, 'called home'); assert.equal(c.ring.mode, 'back');
+  evs = evs.concat(fightFor(c, body, aim, 0.6, {}));
+  assert.equal(kinds(evs, 'cast').length, 1, 'cast again as soon as it was in hand');
+  fightFor(c, body, aim, 2.5, {});
+  assert.equal(c.ring.mode, 'held');
+  fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, FRAME, {}); fightFor(c, body, aim, 0.3, {});
+  fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, 2.5, { attack: true });
+  assert.equal(c.ring.mode, 'charging', 'held while it came home: it spins up');
+});
+
+ok('held, the ring spins up (and the body walks); let go, it flies faster and further and strikes two and a half times as hard: a drifter breaks', () => {
+  const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.3, -16]);
+  let evs = fightFor(c, body, aim, 1.2, (t) => ({ attack: true, attackPressed: t === 0 }));
+  assert.equal(c.ring.mode, 'charging'); near(c.ring.charge, 1, 1e-9, 'spun up all the way'); assert.ok(c.slow, 'spinning it up, the body walks');
+  evs = evs.concat(fightFor(c, body, aim, 1.5, { attack: false }));
+  const cast = kinds(evs, 'cast')[0];
+  near(cast.power, 1, 1e-9);
+  const hit = kinds(evs, 'hit')[0];
+  assert.equal(hit.damage, CB.RING.charged.damage); assert.ok(CB.RING.charged.damage >= 2.5 * CB.RING.cast.damage);
+  assert.equal(kinds(evs, 'broken').length, 1, 'broken'); assert.equal(c.broken, 1); assert.equal(c.bots.length, 0, 'gone from the fight');
+  assert.ok(CB.RING.charged.reach > CB.RING.cast.reach && CB.RING.charged.speed > CB.RING.cast.speed);
+});
+
+ok('the whirl: everything within reach is struck once and thrown back; what is further is not', () => {
+  const { c, body, aim } = arena(), near1 = standBot(c, body, [0, 1.2, -2]), near2 = standBot(c, body, [1.6, 1.0, 1.4]), far = standBot(c, body, [0, 1.2, -6]);
+  const evs = fightFor(c, body, aim, 0.6, (t) => ({ sweep: t === 0 }));
+  assert.equal(kinds(evs, 'whirl').length, 1);
+  const struck = kinds(evs, 'hit').map((e) => e.id).sort();
+  assert.deepEqual(struck, [near1.id, near2.id].sort(), 'the two within reach, once each');
+  assert.equal(far.hp, far.max, 'the far one untouched');
+  assert.ok(near1.p[2] < -2 && Math.hypot(near2.p[0], near2.p[2]) > Math.hypot(1.6, 1.4), 'thrown back');
+  assert.equal(c.ring.mode, 'held', 'back in hand');
+});
+
+ok('in the air the attack is a slam: the body is driven down; where it lands a wave strikes, hardest nearest, nothing past its reach', () => {
+  const { c, body, aim } = arena();
+  body.p = [0, 3.2, 0]; body.grounded = false; body.v = [0, 0, 0];
+  const a = standBot(c, body, [1, 1.0, 0]), b = standBot(c, body, [0, 1.0, -5]), x = standBot(c, body, [0, 1.0, -9]);
+  CB.stepCombat(c, FRAME, { body, aim, hands: { attack: true, attackPressed: true } });
+  assert.equal(c.ring.mode, 'slam'); assert.ok(body.v[1] <= -CB.RING.slam.fall, 'driven down');
+  const evs = [];
+  for (let t = 0; t < 1 && c.ring.mode === 'slam'; t += FRAME) { B.advance(body, { move: [0, 0], yaw: 0 }, FRAME); CB.stepCombat(c, FRAME, { body, aim, hands: {} }); evs.push(...c.events.splice(0)); }
+  assert.equal(kinds(evs, 'slam').length, 1, 'a wave');
+  const dmg = Object.fromEntries(kinds(evs, 'hit').map((e) => [e.id, e.damage]));
+  assert.ok(dmg[a.id] > dmg[b.id] && dmg[b.id] > 0, 'hardest nearest: ' + JSON.stringify(dmg));
+  assert.equal(dmg[x.id], undefined, 'past its reach');
+  assert.ok(!(c.ring.mode === 'slam'));
+  // on the ground the same press is a cast, not a slam
+  const g = arena(); CB.stepCombat(g.c, FRAME, { body: g.body, aim: g.aim, hands: { attack: true, attackPressed: true } }); assert.equal(g.c.ring.mode, 'charging');
+});
+
+ok('the guard: a bolt from the front is turned aside; raised just as one comes, it goes back at its sender three times as hard; from behind, it strikes', () => {
+  const bolt = (c, b, from, v) => c.bolts.push({ p: from, v, owner: 'bot', from: b.id, level: 1, damage: 6, life: 3 });
+  // a parry
+  { const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.1, -8]);
+    bolt(c, b, [0, 1.1, -3], [0, 0, 16]);
+    const evs = fightFor(c, body, aim, 1.5, (t) => ({ guard: true, guardPressed: t === 0 }));
+    assert.equal(kinds(evs, 'parry').length, 1, 'a parry'); assert.equal(c.player.hp, CB.PLAYER.hp, 'unhurt');
+    assert.equal(b.hp, b.max - 18, 'its own bolt, three times as hard'); }
+  // a guard held already
+  { const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.1, -8]);
+    fightFor(c, body, aim, 0.5, (t) => ({ guard: true, guardPressed: t === 0 }));
+    bolt(c, b, [0, 1.1, -3], [0, 0, 16]);
+    const evs = fightFor(c, body, aim, 1, { guard: true });
+    assert.equal(kinds(evs, 'deflect').length, 1, 'turned aside'); assert.equal(kinds(evs, 'parry').length, 0);
+    assert.equal(c.player.hp, CB.PLAYER.hp); assert.equal(b.hp, b.max, 'its sender untouched'); }
+  // from behind
+  { const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.1, 8]);
+    bolt(c, b, [0, 1.1, 3], [0, 0, -16]);
+    const evs = fightFor(c, body, aim, 1, (t) => ({ guard: true, guardPressed: t === 0 }));
+    assert.equal(kinds(evs, 'hurt').length, 1); assert.equal(c.player.hp, CB.PLAYER.hp - 6); }
+  // the guard pressed while the ring is out calls it home
+  { const { c, body, aim } = arena();
+    fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, 0.2, {});
+    assert.equal(c.ring.mode, 'out');
+    const evs = fightFor(c, body, aim, FRAME, { guardPressed: true, guard: true });
+    assert.equal(kinds(evs, 'recall').length, 1); assert.equal(c.ring.mode, 'back'); }
+});
+
+ok('five levels of bot, each tougher, quicker and surer than the last; one comes up out of the water, keeps its distance, circles and shoots', () => {
+  const L = CB.LEVELS;
+  assert.equal(L.length, 5);
+  for (let i = 1; i < 5; i++) {
+    assert.ok(L[i].hp > L[i - 1].hp && L[i].speed > L[i - 1].speed && L[i].every < L[i - 1].every && L[i].spread < L[i - 1].spread, 'level ' + (i + 1));
+    assert.ok(L[i].dodge >= L[i - 1].dodge && L[i].lead >= L[i - 1].lead && L[i].bolt.damage > L[i - 1].bolt.damage && L[i].burst >= L[i - 1].burst);
+  }
+  assert.equal(L[0].dodge, 0); assert.equal(L[0].lead, 0);
+  const { c, body, aim } = arena(5), b = CB.spawnBot(c, body, 0, 3);
+  assert.equal(b.mode, 'rise'); assert.ok(b.p[1] < 0, 'under the water');
+  assert.equal(kinds(c.events, 'spawn').length, 1);
+  const evs = fightFor(c, body, aim, 8, {}, { creative: true });
+  assert.equal(b.mode, 'fight'); assert.ok(b.p[1] > 1, 'hovering');
+  const d = Math.hypot(b.p[0], b.p[2]);
+  assert.ok(d > L[2].range[0] - 1.5 && d < L[2].range[1] + 1.5, 'at its distance: ' + d.toFixed(2));
+  assert.ok(kinds(evs, 'bolt').length >= 4, 'it shoots: ' + kinds(evs, 'bolt').length);
+  assert.equal(c.player.hp, CB.PLAYER.hp, 'in creative nothing hurts the body');
+});
+
+ok('the best bots lead a moving body; a drifter shoots where it is; a bot that may slip a cast does', () => {
+  const lead = (level) => {
+    const { c, body, aim } = arena(9), b = standBot(c, body, [0, 1.2, -9], level);
+    b.L = { ...b.L, spread: 0 }; b.fire = 0; body.v = [6, 0, 0];
+    CB.stepCombat(c, FRAME, { body, aim, hands: {}, creative: true });
+    const x = c.bolts[0], to = [body.p[0] - x.p[0], body.p[1] + 1.1 - x.p[1], body.p[2] - x.p[2]];
+    return Math.atan2(x.v[0], -x.v[2]) - Math.atan2(to[0], -to[2]);
+  };
+  near(lead(1), 0, 0.03, 'a drifter at where the body is');
+  assert.ok(lead(5) > 0.12, 'a warden ahead of it: ' + lead(5).toFixed(3));
+  // slipping a cast: a warden that will, a drifter that never does
+  for (const [level, slips] of [[5, true], [1, false]]) {
+    const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.3, -11], level);
+    c.rand = () => 0;
+    const evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }).concat(fightFor(c, body, aim, 0.6, {}));
+    assert.equal(kinds(evs, 'dodge').length > 0, slips, 'level ' + level);
+  }
+});
+
+ok('struck down at nothing, the body stands again whole after a moment, spared a while; unhurt for a while it mends', () => {
+  const { c, body, aim } = arena(), b = standBot(c, body, [0, 1.1, -8]);
+  c.player.hp = 5; c.player.hurt = 0;            // just hurt: not mending yet
+  c.bolts.push({ p: [0, 1.1, -2], v: [0, 0, 16], owner: 'bot', from: b.id, level: 1, damage: 6, life: 3 });
+  let evs = fightFor(c, body, aim, 0.5, {});
+  assert.equal(kinds(evs, 'down').length, 1); assert.ok(c.player.down > 0); assert.equal(c.player.hp, 0);
+  // down, the hands do nothing
+  evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); assert.equal(c.ring.mode, 'held');
+  evs = fightFor(c, body, aim, CB.PLAYER.down + 0.1, {});
+  assert.equal(kinds(evs, 'rise').length, 1); assert.equal(c.player.hp, CB.PLAYER.hp); assert.ok(c.player.mercy > 0, 'spared a moment');
+  c.player.hp = 50; c.player.hurt = 0; c.player.mercy = 0;
+  fightFor(c, body, aim, CB.PLAYER.regenAfter + 1, {});
+  assert.ok(c.player.hp > 50 && c.player.hp <= CB.PLAYER.hp, 'mended: ' + c.player.hp);
+});
+
+ok('twelve bots at once at most; cleared, they sink; the origin moved, the fight moves with it; the ring stops at a wall and a bolt is spent there', () => {
+  const { c, body, aim } = arena();
+  for (let i = 0; i < 13; i++) CB.spawnBot(c, body, 0, 1 + (i % 5));
+  assert.equal(c.bots.length, CB.MAX_BOTS);
+  assert.equal(CB.spawnBot(c, body, 0, 1), null);
+  c.events.length = 0; CB.clearBots(c);
+  assert.equal(c.bots.length, 0); assert.equal(kinds(c.events, 'gone').length, CB.MAX_BOTS);
+  const b = standBot(c, body, [5, 1, 5]); CB.shiftCombat(c, 2, 3); assert.deepEqual(b.p, [3, 1, 2]);
+  // a house between the body and where it casts
+  const w = createWorld(), walker = B.createBody({ yaw: 0 }); walker.world = w;
+  w.build(walker, 'house'); w.update(10);
+  const h = w.buildings[0], [cx, cz] = HO.toWorld(h, 0, 0);
+  // cast from nine metres off its side, at its middle: the side wall (local x = 3) is six metres off
+  const [sx, sz] = HO.toWorld(h, 9, 0), c2 = CB.createCombat(), body2 = B.createBody({ yaw: Math.atan2(cx - sx, cz - sz) }); body2.p = [sx, 0, sz];
+  const from = [sx, 1.6, sz], dir = (() => { const d = [cx - sx, 0, cz - sz], m = Math.hypot(...d); return d.map((v) => v / m); })();
+  const evs = fightFor(c2, body2, { from, dir }, FRAME, { attack: true, attackPressed: true }, { world: w }).concat(fightFor(c2, body2, { from, dir }, 0.5, {}, { world: w }));
+  assert.ok(kinds(evs, 'spark').length >= 1, 'it met the wall'); assert.ok(c2.ring.went < 6.5 && c2.ring.went > 5, 'and turned back there: ' + c2.ring.went.toFixed(2));
+  // and a bolt into the wall is spent
+  c2.bolts.push({ p: [...from], v: dir.map((v) => v * 20), owner: 'bot', from: 0, level: 1, damage: 6, life: 3 });
+  fightFor(c2, B.createBody({ yaw: 0 }), { from, dir }, 0.6, {}, { world: w, creative: true }); assert.equal(c2.bolts.length, 0);
+});
+
+ok('the fight\'s hands: cast, whirl, guard and a bot have keys and pad buttons; an older keeping that gave the right mouse to the dash keeps it there', () => {
+  const d = I.defaults();
+  assert.deepEqual(d.keys.attack, ['Mouse0', 'KeyJ']); assert.deepEqual(d.keys.guard, ['Mouse2', 'KeyL']); assert.deepEqual(d.keys.whirl, ['KeyE', 'KeyK']); assert.deepEqual(d.keys.spawn, ['KeyN', '']);
+  assert.equal(d.pad.attack, 7); assert.equal(d.pad.guard, 6); assert.equal(d.pad.whirl, 5); assert.equal(d.pad.spawn, 15);
+  const all = Object.values(d.keys).flat().filter(Boolean); assert.equal(new Set(all).size, all.length, 'one key, one thing');
+  const pads = Object.values(d.pad).filter((n) => n >= 0); assert.equal(new Set(pads).size, pads.length, 'one button, one thing');
+  const old = store({ [I.STORE_KEY]: JSON.stringify({ v: 1, keys: { dash: ['KeyQ', 'Mouse2'] }, pad: { dash: 1 } }) });
+  const b = I.loadBindings(old);
+  assert.deepEqual(b.keys.dash, ['KeyQ', 'Mouse2'], 'kept'); assert.deepEqual(b.keys.guard, ['', 'KeyL'], 'the guard does without the right mouse');
+  const inp = I.createInput(I.defaults());
+  inp.down('KeyJ'); let f = inp.frame(); assert.ok(f.attack && f.attackPressed);
+  f = inp.frame(); assert.ok(f.attack && !f.attackPressed, 'held, pressed once'); inp.up('KeyJ');
+  inp.down('KeyE'); inp.down('KeyL'); inp.down('KeyN'); f = inp.frame(); assert.ok(f.whirl && f.guard && f.guardPressed && f.spawn);
+  const st = store(); S.saveState(st, { ...S.freshState(), level: 4 }); assert.equal(S.loadState(st).level, 4);
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: JSON.stringify({ level: 9 }) })).level, 1, 'not believed');
+});
+
+ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {
+  const view = read('src/game/view.js');
+  for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/fight.js').includes("from './combat.js'"), "the ring drawn is not the numbers' ring");
 });
 
 console.log(`\n${passed} checks passed.`);

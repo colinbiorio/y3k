@@ -32,6 +32,19 @@ Four things were asked of him before anything was built. His answers:
 
 > one update to make the current goal a bit lighter -- instead of generating a whole solar system, let's just start with an endless void -- think assassin's creed, but with 1 inch of still water -- we'll save the traversable physical universe for later, as that's a larger task
 
+### The round of 17 November
+
+He came back to the brief above ("the world is looking really cool so far! can
+we work on the next parts of the prompt?") and set this round's order:
+
+> for this round, let's prioritize getting a plasma weapon generated with several ways to attack with it, getting a bot enemy that we can spawn in at varying difficulty, and a third feature -- wall run, as well as generating just a small environment, the first of our map -- let's pick a random small island on earth, generate the entire environment for it, and then we'll expand from there later (because eventually we are planning to have an entire solar system lol) -- but yeah, for now, just the general shape and size and expected fauna of a small island of your choice -- then add this island under the world settings as a new tap called 'map
+
+> ignore anything about higgsfield, unless you want to use the 10 credits left on my free plan, but don't charge my card anything
+
+So the buildings wait (the workshop is designed, not built) while the round
+goes: the first weapon and the bots (done, below), wall running, then the
+island, Lord Howe Island, under a **map** tab.
+
 So the first working product is the void: an endless still water to stand in,
 and a body that moves the way he asked. Everything else arrives in it, one
 stage at a time, each stage playable when it lands. The planet and the solar
@@ -80,11 +93,15 @@ Said to Colin before starting, and standing until he says otherwise.
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **two of five**: the shelter and the house, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder. The workshop, the tower and the hall are next. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
-| "some type of 'force'" | stage 5: the binding. |
+| "some type of 'force'" | stage 5: the binding. The ring is already held by it rather than by a hand. |
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
 | "Optimize for web, but also offer a download option" | the web: so far, yes (measured below). A download: stage 6; the desktop window in `desktop/` already exists. |
 | "run this smoothly on my mac" | **measured** on an M2 MacBook Air: 16.7 ms a frame. |
-| "make up 5 different plasma weapons" | stage 5. |
+| "make up 5 different plasma weapons" | **one of five** (17 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry). The thread, the bow, the bell and the torch to come. |
+| "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
+| "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
+| "wall run" (17 Nov) | next. |
+| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | after it: Lord Howe Island. |
 | "a mix between ancient/natural, current, and futuristic" | each of the five bodies wears all three (below). Every building and ship must. |
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
@@ -97,7 +114,68 @@ Said to Colin before starting, and standing until he says otherwise.
 **Stages 1 and 2 are built**: the void (13 November 2026) and the five bodies
 (14 November). Open the world tab and you are standing in it. Press **body**
 and choose who you are there. **Stage 3 is begun** (17 November): press
-**build** (or B) and a shelter goes up in front of you.
+**build** (or B) and a shelter goes up in front of you. **The first weapon and
+something to fight** came forward at Colin's word the same day: press **bots**,
+call one up, and throw the ring at it.
+
+### The fight: the ring and the bots (17 November 2026)
+
+The first of the five plasma weapons and the first enemy (`combat.js`, the
+numbers; `fight.js`, the drawing). None of it is a blade, and what it fights
+are machines, never a presence's people.
+
+- **The ring**: a bronze ring a forearm across, wound with a filament of
+  contained plasma, held by the binding rather than by a hand (so every one of
+  the five kinds of body wields it). It floats beside the right shoulder.
+  Five ways to use it:
+  - **cast** (the left mouse button with the pointer held, J, or the pad's RT):
+    a tap throws it along the eye's line, or at the bot nearest that line
+    (within 17 degrees), bending after it; it passes through what it meets
+    and comes back. Pressed again while it is out, it is called home and
+    thrown again from the hand.
+  - **charged cast**: held, it spins up for up to 0.8 s (the mark at the
+    middle of the picture swells and brightens; the body walks); let go, it
+    flies at 46 m/s instead of 30, 34 m instead of 22, and strikes for 85
+    instead of 34.
+  - **whirl** (E, K, or RB): twice round the body at arm's length in 0.42 s;
+    everything within 2.9 m is struck once and thrown back.
+  - **slam** (the attack in the air, more than 1.1 m up): the body is driven
+    down at 22 m/s and a wave of plasma runs out over the water from where it
+    lands, 55 at its middle and less toward its edge 6.5 m out.
+  - **guard** (the right mouse button, L, or LT, held): the ring grows to a
+    shield in front of the body with a membrane of plasma across it. A bolt
+    from the front is turned aside; one met within a quarter second of
+    raising it (a parry) goes back at whoever sent it, three times as hard.
+    With the ring out, the guard calls it home.
+- **The bots**: dark glazed spheres in a bronze ring, one eye bulging from the
+  front in their level's colour, seams of that colour, as many lights on the
+  ring's crown as their level, three bronze fins behind. They come up out of
+  the water ahead (twelve at most), keep their distance, circle, keep apart
+  from each other, and shoot bolts of plasma, a burst at a time. Five levels,
+  each tougher, quicker and surer than the last:
+
+  | level | name | takes | speed | bursts | leads a moving body | slips a cast |
+  |---|---|---|---|---|---|---|
+  | 1 | drifter | 40 | 2.8 m/s | 1 every 2.8 s | no | never |
+  | 2 | scout | 70 | 4.0 | 1 every 2.5 s | a little | 15% |
+  | 3 | sentinel | 100 | 5.4 | 2 every 2.3 s | more | 30% |
+  | 4 | hunter | 140 | 6.8 | 2 every 1.75 s | nearly | 45% |
+  | 5 | warden | 200 | 8.2 | 3 every 1.5 s | fully | 60% |
+
+  Struck, a bot flashes and shows how much it has left; broken, it falls
+  apart into the water. A low hover stirs the water under it.
+- **Being hurt**: in survival a bolt takes from the body's hundred (the bar at
+  the foot of the picture; the edges flush when hit). At nothing the body goes
+  over backward and stands again whole after 2.6 s, spared for a moment;
+  unhurt for four seconds it mends. In creative nothing hurts it.
+- **Called up** from the bar's **bots** list (the five levels; the one chosen
+  is kept, and N, or the pad's d-pad right, calls another of it), and cleared
+  from the same list. Bolts and the ring stop at walls; the bots stay out of
+  them.
+- Not yet: sounds; the other four weapons; the binding as a power of its own;
+  bots that walk or fly differently from these; a bot that knows the
+  buildings are there (they go round nothing yet); the bar wraps onto two
+  lines on a phone.
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -380,6 +458,11 @@ from the front, the three-quarter and the side.
 Each stage ends the way the first two did: playable, looked at in a browser,
 tested, shipped.
 
+This round (Colin, 17 November): **wall running**, then **the first map**,
+Lord Howe Island (a crescent ten kilometres long off Australia: two sheer
+mountains, a coral lagoon, its woodhens, tropicbirds, terns and turtles),
+under a new **map** tab in the controls sheet. Then the buildings again.
+
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
    through, furnished a little. Ancient, present and to come in each. **The
@@ -411,7 +494,7 @@ suite runs them; those that draw are read as text and looked at.
 | file | what it is |
 |---|---|
 | `body.js` | how a body moves: the jump, the dash, flight, the fixed step |
-| `input.js` | the hands: keys, mouse, controller, touch, as fourteen actions; the bindings and their keeping |
+| `input.js` | the hands: keys, mouse, controller, touch, as nineteen actions; the bindings and their keeping (an action added later gives way to a key already kept for another) |
 | `rings.js` | a ring on the water as a function; the pool of drops; the floor's lattice and the rebase |
 | `gait.js` | how a body on two legs carries itself: the stride with its feet planted, the two-bone leg, landings; told a build (the mantis's long legs, the robot's stiffness) |
 | `crawl.js` | how a body on many arms carries itself: six tips, three always on the floor |
@@ -424,6 +507,8 @@ suite runs them; those that draw are read as text and looked at.
 | `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
 | `house.js` | the house as numbers: its solids, the room's and the porch's air, the ladder, the eye, the sun through its window and door, how it goes up |
 | `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
+| `combat.js` | the fight as numbers: the ring's five ways, the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
+| `fight.js` | the ring, its trail and shield, the bots, bolts, sparks, debris and the slam's wave (draws) |
 | `buildings/` | `shelter.js`, `house.js`: the two drawn (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |

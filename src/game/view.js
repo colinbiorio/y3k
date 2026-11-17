@@ -47,6 +47,8 @@ import { ratios, createWatch, watch, rest, chosen } from './fine.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from './world.js';
 import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
+import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
+import { createFightArt } from './fight.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
@@ -57,7 +59,9 @@ const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const worn = (st) => st.kind + ' ' + JSON.stringify(st.looks[st.kind]);
 const LEARNED = 14;        // seconds of moving after which the standing hint is put away
-const IDLE = { move: [0, 0], look: [0, 0], zoom: 0, jump: false, jumpPressed: false, dash: false, flyToggle: false, sprint: false, walk: false, up: false, down: false, modeToggle: false, menu: false, device: 'keys' };
+const IDLE = { move: [0, 0], look: [0, 0], zoom: 0, jump: false, jumpPressed: false, dash: false, flyToggle: false, sprint: false, walk: false, up: false, down: false, modeToggle: false, menu: false, device: 'keys',
+  attack: false, attackPressed: false, whirl: false, guard: false, guardPressed: false, spawn: false };
+const turnTo = (a, b, max) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI; return Math.abs(d) <= max ? b : a + Math.sign(d) * max; };
 
 // how tall and how wide a body is as it stands at `at` (the body sheet fits the eye to it): the reach of what it
 // is made of, measured when it is first looked at. Its lights in the air (points, sprites) are not counted.
@@ -72,12 +76,24 @@ function sized(figure, at) {
   return { tall: ok(tall, 0.8, 3.4, figure.look + 0.35), wide: ok(2 * far, 0.6, 3.4, 1.5) };
 }
 
+// the eye's line (the fight aims along it), and the fall's turn about the feet
+const AIM = new THREE.Vector3(), TIP = new THREE.Quaternion(), TIPV = new THREE.Vector3(), TIPA = new THREE.Vector3();
+// a body struck down goes over backward about its feet (k: 0 standing, 1 lying): its whole group turned about where it stands
+function tip(figure, at, yaw, k) {
+  const g = figure.group;
+  if (k < 1e-3) { if (g.position.lengthSq() > 0 || g.quaternion.w < 1) { g.position.set(0, 0, 0); g.quaternion.identity(); } return; }
+  TIPA.set(-Math.cos(yaw), 0, Math.sin(yaw));
+  TIP.setFromAxisAngle(TIPA, 1.38 * k);
+  TIPV.set(at[0], at[1], at[2]).applyQuaternion(TIP);
+  g.quaternion.copy(TIP); g.position.set(at[0] - TIPV.x, at[1] - TIPV.y, at[2] - TIPV.z);
+}
+
 // what stays for the next visit: the canvas and its programs, the void, the figure, the body where it stood
 let kept = null;
 function stage(lite, st) {
   if (kept && (kept.renderer.getContext().isContextLost() || kept.lite !== lite)) {
-    kept.figure.dispose(); kept.void.dispose(); kept.renderer.dispose(); kept.renderer.domElement.remove();
-    kept = { body: kept.body, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
+    kept.figure.dispose(); kept.fight?.dispose(); kept.void.dispose(); kept.renderer.dispose(); kept.renderer.domElement.remove();
+    kept = { body: kept.body, world: kept.world, combat: kept.combat, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
   }
   if (!kept?.renderer) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });       // edges smoothed, whatever else is plain
@@ -92,7 +108,9 @@ function stage(lite, st) {
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
     camera.layers.enable(1);            // the sky's dome is on layer 1: this eye sees it, the mirror's does not
     // the body begins with its back to the eye, looking where the eye looks
-    kept = { body: createBody({ yaw: Math.PI }), world: createWorld(), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1 };
+    kept = { body: createBody({ yaw: Math.PI }), world: createWorld(), combat: createCombat({ seed: (Math.random() * 1e9) | 0 }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1, fallen: 0 };
+    // the ring and the bots, drawn in the void's scene (combat.js's numbers are kept in kept.combat)
+    kept.fight = createFightArt(v.scene, { lite }); kept.fight.setDrop((x, z, a) => kept.void.drop(x, z, a));
     // the hearths' light: always in the scene (a light that came and went would make every material be compiled again)
     kept.hearth = new THREE.PointLight(0x8fb4ff, 0, 7, 2);
     v.scene.add(kept.hearth);
@@ -168,11 +186,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function plain() {
     let v = null, made = null;
     try { v = createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
-    K.figure.dispose(); K.void.dispose();
+    K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
     K.arts.clear();
     v.scene.add(made.group, K.hearth); made.setEnv(LIGHTS[v.light].env);
     K.void = v; K.figure = made; K.lite = true; K.worn = worn(st); K.size = null; standT = 0;
+    K.fight = createFightArt(v.scene, { lite: true }); K.fight.setDrop((x, z, a) => K.void.drop(x, z, a));
     shown(K.body, pos); made.update(K.body, 0, pos);
     size();
   }
@@ -195,12 +214,55 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const el = $('#game-build-list'), btn = $('#game-build'); if (!el || !btn) return;
     const open = show ?? el.hidden;
     if (open) {
+      listBots(false);
       const near = K.world.near(K.body.p);
       el.innerHTML = (near ? `<button type="button" class="login-alt game-build-down" data-build="down">take down the ${near.kind}</button>` : '')
         + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? '' : '<small>to come</small>'}</button>`).join('');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
+  // ---- the fight. The bar's bots list: the five levels (the one last chosen marked), and a line to clear them
+  function listBots(show) {
+    const el = $('#game-bot-list'), btn = $('#game-bots'); if (!el || !btn) return;
+    const open = show ?? el.hidden;
+    if (open) {
+      listBuilds(false);
+      const n = K.combat.bots.length;
+      el.innerHTML = LEVELS.map((L, i) => `<button type="button" class="login-alt${i + 1 === st.level ? ' on' : ''}" data-bot="${i + 1}">${i + 1} · ${L.name}<small>${['easy', 'steady', 'quick', 'hard', 'fierce'][i]}</small></button>`).join('')
+        + (n ? `<button type="button" class="login-alt game-build-down" data-bot="clear">clear them (${n})</button>` : '');
+    }
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  }
+  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', spawn: 'bots' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
+  // a bot of a level comes up out of the water ahead, where the eye looks
+  function callBot(level = st.level) {
+    const b = spawnBot(K.combat, K.body, K.eye.yaw, level);
+    if (!b) { say('twelve is as many as the void holds at once', 3); return; }
+    say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} casts the ring, held it spins up · ${actKey('whirl')} whirls · ${actKey('guard')} guards`, 6);
+  }
+  let hurtT = 0, foes = '', hpShown = -1;
+  function fought(e) {
+    if (e.type === 'hurt') hurtT = Math.min(1, hurtT + 0.35 + e.damage / 30);
+    else if (e.type === 'down') say('struck down · you stand again in a moment', PLAYER.down);
+    else if (e.type === 'rise') say('standing again', 2);
+  }
+  // what the fight shows over the picture: the mark the ring goes for, how much the body has left, a flush when it is hit
+  function hud(dt) {
+    const C = K.combat, live = C.bots.length, hudEl = $('.game-hud'); if (!hudEl) return;
+    const engaged = live > 0 || C.ring.mode !== 'held' || C.guard.up;
+    hudEl.classList.toggle('on', !stand && (locked || engaged));
+    hudEl.style.setProperty('--charge', C.ring.mode === 'charging' ? C.ring.charge.toFixed(2) : '0');
+    hudEl.classList.toggle('guard', C.guard.up);
+    const hp = Math.round(C.player.hp), showHp = K.body.mode === 'survival' && (live > 0 || hp < PLAYER.hp);
+    if (hp !== hpShown) { hpShown = hp; hudEl.style.setProperty('--hp', (hp / PLAYER.hp).toFixed(3)); }
+    hudEl.classList.toggle('hp', showHp);
+    hurtT = Math.max(0, hurtT - dt * 1.6);
+    hudEl.style.setProperty('--hurt', hurtT.toFixed(3));
+    hudEl.classList.toggle('down', C.player.down > 0);
+    const line = live || C.broken ? `${live ? `${live} bot${live > 1 ? 's' : ''}` : 'no bots'} · ${C.broken} broken` : '';
+    if (line !== foes) { foes = line; const el = $('.game-foes'); if (el) { el.textContent = line; el.hidden = !line; } }
+  }
+
   // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
   function builds(dt) {
@@ -269,9 +331,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.zoom) { st.zoom = clamp(st.zoom * Math.exp(inp.zoom), ZOOM.min, ZOOM.max); saveT = now + 600; }
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
       if (inp.build) buildHere();
+      if (inp.spawn) callBot();
       if (inp.menu) openMenu();
       K.world.update(dt);
-      advance(body, { ...inp, yaw: eye.yaw, pitch: eye.pitch }, dt);
+      // struck down, the body does nothing; spinning the ring up or guarding, it walks
+      const C = K.combat, down = C.player.down > 0;
+      advance(body, { ...(down ? IDLE : C.slow ? { ...inp, walk: true, sprint: false } : inp), yaw: eye.yaw, pitch: eye.pitch }, dt);
       // what the body did, on the water
       for (const e of body.events.splice(0)) {
         const at = e.at || body.p;
@@ -281,6 +346,15 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         else if (e.type === 'dash') wake = 0;
         else if (e.type === 'fly') showMode();
       }
+      // the fight: the ring and the bots, once the body has moved (aimed along the eye's line as it was drawn last)
+      camera.getWorldDirection(AIM);
+      stepCombat(C, dt, { body, aim: { from: [camera.position.x, camera.position.y, camera.position.z], dir: [AIM.x, AIM.y, AIM.z] },
+        hands: down ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl },
+        creative: body.mode === 'creative', world: K.world });
+      const evs = C.events.splice(0);
+      K.fight.events(evs);
+      for (const e of evs) fought(e);
+      if (C.face > 0 && !body.flying) body.yaw = turnTo(body.yaw, C.faceYaw, 16 * dt);
       // something fast and low drags a wake: a dash along the water, a flier skimming it
       const speed = Math.hypot(body.v[0], body.v[2]);
       const low = body.dashT > 0 ? body.p[1] < 0.6 : body.flying && body.p[1] < 1.6 && speed > 5;
@@ -292,9 +366,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (posing) { let by = eye.yaw + turned - body.yaw; by -= 2 * Math.PI * Math.round(by / (2 * Math.PI)); body.yaw += by * ease(6, dt); }
     shown(body, pos);
     for (const [x, z] of figure.update(body, paused ? 0 : dt, pos)) if (pos[1] < 0.05 && K.world.wet(x, z)) V.drop(x, z, 0.1 + 0.012 * Math.hypot(body.v[0], body.v[2]));
+    // struck down: the body goes over backward where it stood, and comes up again
+    K.fallen += ((K.combat.player.down > 0 ? 1 : 0) - K.fallen) * ease(K.combat.player.down > 0 ? 7 : 4, dt);
+    tip(figure, pos, body.yaw, K.fallen);
     // far from where the numbers began, they begin again under the body
     const far = rebase(body.p[0], body.p[2]);
-    if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); }
+    if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen); }
 
     // the eye. While the body sheet is open it stands back far enough for the whole body, level with its middle,
     // and the body is put in what the sheet leaves of the room
@@ -344,8 +421,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     camera.updateMatrixWorld();
 
     builds(dt);
+    K.fight.update(K.combat, paused ? 0 : dt, camera, body);
+    hud(dt);
     V.setScale(camera);
-    V.update(K.clock, camera, [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }]);
+    // the bodies' shades on the water: this one's, and the nearest bots' (four in all)
+    const shades = [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }];
+    for (const b of K.combat.bots) { if (shades.length >= 4) break; if (b.mode === 'fight') shades.push({ x: b.p[0], z: b.p[2], y: b.p[1], k: 0.55 }); }
+    V.update(K.clock, camera, shades);
     V.renderMirror(camera);
     K.renderer.render(V.scene, camera);
 
@@ -374,14 +456,19 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
         <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
+        <button type="button" id="game-bots" class="login-alt" aria-expanded="false" aria-controls="game-bot-list" title="call up a bot to fight, at one of five levels">bots</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
         ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
         <div class="game-build" id="game-build-list" role="group" aria-label="what to build" hidden></div>
+        <div class="game-build game-bots" id="game-bot-list" role="group" aria-label="a bot to fight, by level" hidden></div>
       </div>
+      <div class="game-hud" aria-hidden="true"><i class="game-reticle"></i><div class="game-hp"><i></i></div><i class="game-hurt"></i></div>
+      <div class="game-foes" role="status" hidden></div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
       <div class="game-touch"${touch ? '' : ' hidden'}>
         <button type="button" id="game-t-sink" class="game-tbtn" aria-label="Sink" hidden>sink</button>
+        <div class="game-tfight"><button type="button" id="game-t-guard" class="game-tbtn" aria-label="Guard">guard</button><button type="button" id="game-t-whirl" class="game-tbtn" aria-label="Whirl">whirl</button><button type="button" id="game-t-cast" class="game-tbtn" aria-label="Cast the ring">cast</button></div>
         <button type="button" id="game-t-dash" class="game-tbtn" aria-label="Dash">dash</button>
         <button type="button" id="game-t-jump" class="game-tbtn game-tbtn-main" aria-label="Jump">jump</button>
       </div>`;
@@ -414,9 +501,19 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         if (k === 'down') said(K.world.toggle(K.body, st.building)); else buildHere(k);
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBuilds(false); $('#game-build')?.focus(); } });
-      on(holder, 'pointerdown', () => listBuilds(false)); }
+      on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); }); }
+    press('#game-bots', () => { if (!menu.isOpen() && !chooser.isOpen()) listBots(); });
+    { const el = $('#game-bot-list');
+      on(el, 'click', (e) => {
+        const btn = e.target.closest?.('[data-bot]'); if (!btn) return;
+        if (e.detail > 0) focusCanvas();
+        const k = btn.dataset.bot; listBots(false);
+        if (k === 'clear') { const n = K.combat.bots.length; clearBots(K.combat); say(n ? `the ${n === 1 ? 'bot sinks' : `${n} bots sink`} back into the water` : 'no bots', 3); return; }
+        st.level = Math.max(1, Math.min(5, +k || 1)); save(); callBot(st.level);
+      });
+      on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBots(false); $('#game-bots')?.focus(); } }); }
     press('#game-societies', () => toSocieties?.());
-    for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down']]) {
+    for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down'], ['#game-t-cast', 'attack'], ['#game-t-whirl', 'whirl'], ['#game-t-guard', 'guard']]) {
       const el = $(sel); if (!el) continue;
       on(el, 'pointerdown', (e) => { e.preventDefault(); input.hold(action, true); try { el.setPointerCapture?.(e.pointerId); } catch { /* it still lifts */ } });
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) on(el, ev, () => input.hold(action, false));
@@ -431,7 +528,9 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
-        climbing: !!K.body.climbing, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) } } : null) };
+        climbing: !!K.body.climbing, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
+      fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
+        bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100) })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     focusCanvas();

@@ -29,6 +29,10 @@ export const ACTIONS = [
   { id: 'down', label: 'sink', note: 'flying; on the water it lands' },
   { id: 'mode', label: 'survival or creative' },
   { id: 'build', label: 'build', note: 'a shelter, a few steps in front; near one, it takes it down' },
+  { id: 'attack', label: 'cast the ring', note: 'a tap throws it; held, it spins up and flies harder; in the air, it drives you down' },
+  { id: 'whirl', label: 'whirl', note: 'the ring twice round you' },
+  { id: 'guard', label: 'guard', note: 'held: a shield; raised just as a bolt comes, it sends it back; with the ring out, it calls it home' },
+  { id: 'spawn', label: 'a bot', note: 'another, at the level last chosen under bots' },
   { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },
   { id: 'zoomOut', label: 'further' },
   { id: 'menu', label: 'controls' },
@@ -46,11 +50,13 @@ export function defaults() {
     v: 1,
     keys: {
       forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
-      jump: ['Space', ''], dash: ['KeyQ', 'Mouse2'], sprint: ['ShiftLeft', 'ShiftRight'], walk: ['KeyV', ''],
-      fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], build: ['KeyB', ''], zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
+      jump: ['Space', ''], dash: ['KeyQ', ''], sprint: ['ShiftLeft', 'ShiftRight'], walk: ['KeyV', ''],
+      fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], build: ['KeyB', ''],
+      attack: ['Mouse0', 'KeyJ'], whirl: ['KeyE', 'KeyK'], guard: ['Mouse2', 'KeyL'], spawn: ['KeyN', ''],
+      zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
     },
     // the standard pad: 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT · 8 view · 9 menu · 10 L3 · 11 R3 · 12–15 the d-pad
-    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, zoomIn: 12, zoomOut: 13, menu: 9 },
+    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, attack: 7, whirl: 5, guard: 6, spawn: 15, zoomIn: 12, zoomOut: 13, menu: 9 },
     look: { mouse: 1, stick: 1, invertY: false },
   };
 }
@@ -68,6 +74,13 @@ export function loadBindings(storage) {
     if (Array.isArray(k)) b.keys[id] = [0, 1].map((i) => (typeof k[i] === 'string' && k[i].length < 40 ? k[i] : ''));
     const p = kept.pad?.[id];
     if (Number.isInteger(p) && p >= -1 && p < 32 && !ACTIONS.find((a) => a.id === id).stick) b.pad[id] = p;
+  }
+  // an action added since keeps its default only where no kept action already holds that key or button
+  const taken = new Set(), held = new Set();
+  for (const id of IDS) { if (Array.isArray(kept.keys?.[id])) for (const c of b.keys[id]) if (c) taken.add(c); if (Number.isInteger(kept.pad?.[id]) && b.pad[id] >= 0) held.add(b.pad[id]); }
+  for (const id of IDS) {
+    if (!Array.isArray(kept.keys?.[id])) b.keys[id] = b.keys[id].map((c) => (taken.has(c) ? '' : c));
+    if (!Number.isInteger(kept.pad?.[id]) && held.has(b.pad[id])) b.pad[id] = -1;
   }
   const l = kept.look || {};
   if (l.mouse > 0 && l.mouse <= 4) b.look.mouse = +l.mouse;
@@ -187,6 +200,7 @@ export function createInput(bindings = defaults()) {
         jump: on('jump'), jumpPressed: pressed.has('jump'), dash: pressed.has('dash'), flyToggle: pressed.has('fly'),
         sprint: on('sprint') || sprintLatch, walk: on('walk'), up: on('jump'), down: on('down'),
         modeToggle: pressed.has('mode'), build: pressed.has('build'), menu: pressed.has('menu'), device,
+        attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), spawn: pressed.has('spawn'),
       };
       pressed.clear(); lookX = lookY = wheel = 0;
       return out;
