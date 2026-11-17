@@ -770,7 +770,7 @@ export function createFrequencies({ toast } = {}) {
     return { open: !!(root && root.isConnected), tab, loaded: !!stage, failed, stage: stage ? stage.read() : null, sound: sound ? sound.read() : null,
       years: r3(years), built: b.built, course: b.current ? b.current.course : null, rowHorns: rowHorns.length, pyrPlaying, pyrSound,
       playing, hearing, tool, show, speed, f, powerW, horns: horns.length, solo, heardDb: heardDb == null ? null : Math.round(heardDb * 10) / 10, tau: r3(tau),
-      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4), cased: !!pyr?.cased };
+      tour, lit: litN, bright: glowW.subarray(0, litN).filter((w) => w > 0.5).length, gains: gainsNow.map((g) => Math.round(g * 1e4) / 1e4), cased: !!pyr?.cased, hornsNear: !!pyr?.hornsNear };
   }
 
   return { open, close, hornSpec };

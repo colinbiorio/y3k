@@ -100,3 +100,23 @@ export function key(o, k, shift = false, viewH = 800) {
 // starts low and only steps down), up to MAX_RATIO device pixels a point and PIXELS a frame.
 export const PIXELS = 8.3e6, MAX_RATIO = 3;
 export const pixelRatio = (dpr, w, h, budget = PIXELS, most = MAX_RATIO) => Math.min(dpr > 0 ? dpr : 1, most, Math.sqrt(budget / Math.max(1, w * h)));
+
+// What the stage can be turned down to when its frames are long, finest first: fewer pixels, then a
+// coarser shadow, then no shadow and the land's fine detail left out. When to step is the frame watch's
+// to decide (src/game/fine.js, the world's own: it tries the last step, keeps it only if the frames are
+// clearly shorter there, and climbs back while they stay good). Never under half a pixel a point, nor above
+// the screen's own.
+export const LADDER = [{ share: 1, shadow: 2048, lite: false }, { share: 0.75, shadow: 2048, lite: false },
+  { share: 0.5, shadow: 1024, lite: false }, { share: 0.5, shadow: 0, lite: true }];
+export function ladder(dpr, w, h) {
+  const top = pixelRatio(dpr, w, h);
+  return LADDER.map((s) => ({ ratio: Math.min(top, Math.max(0.5, top * s.share)), shadow: s.shadow, lite: s.lite }));
+}
+
+// How far an eye is from the nearest horn of a ring of them: on the square of half-side `half` about the
+// upright axis, at height `y`.
+export function ringDistance(eye, half, y) {
+  const dx = Math.abs(eye[0]), dz = Math.abs(eye[2]);
+  const flat = dx < half && dz < half ? half - Math.max(dx, dz) : Math.hypot(Math.max(dx - half, 0), Math.max(dz - half, 0));
+  return Math.hypot(flat, eye[1] - y);
+}

@@ -261,6 +261,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **The frequencies stage keeps up on slow machines**
+  (`src/frequencies/stage.js`, `orbit.mjs`, `pyramid3d.js`, `land.js`). The
+  stage now watches its own frames with the world's frame watch
+  (`src/game/fine.js`) and, only when they are long, steps itself down a
+  ladder: fewer pixels, then a coarser shadow, then no shadow and a plainer
+  land; it climbs back while frames stay good, and on a machine that keeps up
+  it never steps. Horns more than 40 m from the eye are drawn in fewer facets.
+  Drawn in software a frame took about 0.9 s and the smoke died at its first
+  click; now it settles at its plainest in a few seconds, about a third of a
+  second a frame, and all 36 checks pass there. On the GPU: desk 37/37,
+  phone 30/30, 60 frames a second, never stepping. Suite 36 (1 new).
+
 - **2026-11-17** (morning, last) — **The finished pyramid is cased white,
   dressed from the top down** (`src/frequencies/pyramid3d.js`). When the
   last course goes in, the casing sweeps down the pyramid a course at a time

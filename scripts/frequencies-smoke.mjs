@@ -176,11 +176,13 @@ try {
   r = await until((r) => r.pyrSound && r.heardDb != null);
   check('sound on plays the working course at the ear', r.pyrSound && r.sound?.open && r.heardDb > 60 && r.heardDb < 200, { sound: r.sound, heardDb: r.heardDb });
   const farDb = r.heardDb, farBright = r.bright;
+  check('from afar the horns are drawn in their fewer facets', r.hornsNear === false && r.rowHorns > 100, { hornsNear: r.hornsNear });
   await shot('pyramid-sounding');
   await press('[data-go="horns"]');
   await sleep(1800 * slow);
   r = await read();
   check('beside the horns is louder than the whole', r.heardDb > farDb + 6, { far: farDb, near: r.heardDb });
+  check('beside them, in their finer ones', r.hornsNear === true, { hornsNear: r.hornsNear });
   check('the horns glow by their share of what is heard: some, not all', r.lit > 100 && r.bright > 0 && r.bright < r.lit && farBright < r.lit, { near: r.bright, far: farBright, lit: r.lit });
   // the gains the room sets from the ear (what the audio thread has made of them by now is the machine's; a headless one can stall)
   check('the stereo gains move with the ear', r.gains.some((g) => Math.abs(g) > 1e-3) && r.gains[0] !== r.gains[2], r.gains);
@@ -205,7 +207,7 @@ try {
   out.frames.pyramid = await frames();
   r = await read();
   check('build runs the clock', r.pyrPlaying && r.years > before + 0.05, { before, after: r.years });
-  await press('[data-act="follow"]'); await sleep(2500);
+  await press('[data-act="follow"]'); await sleep(2500 * slow);
   r = await read();
   const topNow = await page.evaluate(() => { const r = window.Y3K.frequencies.read(); return r.stage.target[1]; });
   check('following, the eye rises with the course', r.pyrPlaying && topNow > 60, { target: r.stage.target, years: r.years });
@@ -217,6 +219,9 @@ try {
   check('at the end every course is built and no horn sounds', r.built === 218 && r.rowHorns === 0 && r.heardDb == null, { built: r.built, rowHorns: r.rowHorns, heardDb: r.heardDb });
   r = await until((r) => r.cased, 12000);
   check('then the casing is dressed, from the top down, to the foot', r.cased === true, { cased: r.cased });
+  // the frame watch (fine.js): on a machine that keeps up, the stage stays at its finest; drawn in software, it steps down
+  if (gpu) check('keeping up, the stage stays at its finest', r.stage?.fine?.level === 0, r.stage?.fine);
+  else out.notes.push('drawn in software, the stage stood at ' + JSON.stringify(r.stage?.fine));
   await shot('pyramid-done');
   await press('[data-view="tour"]');
   const t0 = (await read()).stage.az; await sleep(1500);

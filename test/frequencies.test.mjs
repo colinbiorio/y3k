@@ -343,7 +343,7 @@ ok('drawn at the screen\'s own pixels: up to three a point and 8.3 million a fra
   assert.equal(O.pixelRatio(4, 100, 100), 3);
   assert.equal(O.pixelRatio(0, 100, 100), 1);
   near(O.pixelRatio(3, 2560, 1440), Math.sqrt(8.3e6 / (2560 * 1440)), 1e-12, 'a big screen');
-  assert.ok(read('src/frequencies/stage.js').includes('ratio = pixelRatio(window.devicePixelRatio, w, h);'), 'the stage takes another ratio');
+  assert.ok(read('src/frequencies/stage.js').includes('steps = ladder(window.devicePixelRatio, w, h);') && read('src/frequencies/stage.js').includes('ratio = step.ratio;'), 'the stage takes another ratio');
   assert.ok(!/gfx|profile\(\)/.test(read('src/frequencies/stage.js')), 'the stage reads the site\'s tier');
 });
 
@@ -445,6 +445,25 @@ ok('the casing: on the ideal faces in the courses\' bands, shown only once every
   assert.ok(pyr.includes('while (k > 0 && rows[k - 1].top > yf + 1e-6) k--;') && pyr.includes('courses.count = k; casingU.uFront.value = k ? rows[k - 1].top : 0;'), 'the front does not step down a whole course at a time');
   assert.ok(pyr.includes("matchMedia?.('(prefers-reduced-motion: reduce)')") && pyr.includes('const r = still ? 1 :'), 'the dressing ignores reduced motion');
   assert.ok(room.includes('return pyrPlaying || pyrSound || !!dressing ||') && room.includes('cased: !!pyr?.cased'), 'the stage stops drawing mid-dressing, or the room cannot say it is cased');
+});
+
+ok('when its frames are long the stage steps down (fewer pixels, then a coarser shadow, then none and a plainer land), never under half a pixel a point nor above the screen\'s own; far horns in fewer facets', () => {
+  for (const [dpr, w, h] of [[2, 938, 469], [3, 390, 844], [1, 938, 469], [1, 2560, 1440], [2, 3840, 2160]]) {
+    const L = O.ladder(dpr, w, h), top = O.pixelRatio(dpr, w, h);
+    assert.equal(L.length, O.LADDER.length);
+    near(L[0].ratio, top, 1e-12, 'it begins at the screen\'s own pixels');
+    assert.ok(L.every((s, i) => s.ratio <= top + 1e-12 && s.ratio >= Math.min(top, 0.5) - 1e-12 && (!i || s.ratio <= L[i - 1].ratio)), JSON.stringify(L));
+    assert.ok(L[0].shadow === 2048 && !L[0].lite && L.at(-1).shadow === 0 && L.at(-1).lite, 'the last step is the plainest');
+  }
+  near(O.ringDistance([0, 50, 0], 40, 50), 40, 1e-12, 'from the middle of the course: half its side');
+  near(O.ringDistance([30, 50, 0], 40, 50), 10, 1e-12, 'inside, from the nearer edge');
+  near(O.ringDistance([43, 50, 44], 40, 50), 5, 1e-12, 'outside a corner, level with the horns: 3 and 4 make 5');
+  near(O.ringDistance([43, 62, 44], 40, 50), 13, 1e-12, 'and 12 above them: 13');
+  near(O.ringDistance([0, 80, 100], 40, 50), Math.hypot(60, 30), 1e-12, 'outside a side, and above');
+  const stage = read('src/frequencies/stage.js'), pyr = read('src/frequencies/pyramid3d.js');
+  assert.ok(stage.includes("import { createWatch, watch, rest } from '../game/fine.js';") && stage.includes("else if (steps && watch(fine, since, steps) === 'ratio') size();") && stage.includes("if (!since) { if (rest(fine) === 'ratio') size(); }"), 'the stage does not watch its frames');
+  assert.ok(stage.includes('sun.castShadow = step.shadow > 0;') && stage.includes('cur?.lite?.(step.lite);'), 'a step down changes only the pixels');
+  assert.ok(pyr.includes("farGeo.setAttribute('aGlow', horns.geometry.getAttribute('aGlow'));") && pyr.includes('hornsFar.instanceMatrix = horns.instanceMatrix;') && pyr.includes('< HORN_NEAR;'), 'the far horns are not the same horns');
 });
 
 console.log(`\n${passed} checks passed.`);

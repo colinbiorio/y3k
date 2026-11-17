@@ -23,6 +23,7 @@ float x${name}(float z) {
 }`;
 
 const HEAD = `
+uniform float uLite;
 varying float vUp;
 varying vec3 vEdge;
 ${points('RV', G.RIVER)}
@@ -43,7 +44,8 @@ vec2 lgrad(vec2 p, float s) { float e = s * 0.05; return vec2(ln((p + vec2(e, 0.
 // where it can be seen.
 const COLOUR = `
   vec2 P = vWp.xz;
-  float rr = length(P), px = max(max(fwidth(P.x), fwidth(P.y)), 1e-3);       // metres a pixel spans here
+  // metres a pixel spans here (plain, when the stage is turned down: as if every pixel were far, so the fine detail is left out)
+  float rr = length(P), px = uLite > 0.5 ? 60.0 : max(max(fwidth(P.x), fwidth(P.y)), 1e-3);
   float vly = 0.55 * smoothstep(-15.0, 45.0, vEdge.x) + 0.45 * smoothstep(20.0, 220.0, vEdge.x);
   float hill = smoothstep(-300.0, 500.0, vEdge.y);
   float slope = 1.0 - clamp(vUp, 0.0, 1.0), n1 = ln(P / 820.0);
@@ -116,7 +118,7 @@ const WATER = `
   }`;
 
 export function createLand(air) {
-  const group = new THREE.Group();
+  const group = new THREE.Group(), uLite = { value: 0 };
   const radii = G.rings(), seg = 320, nr = radii.length, cols = seg + 1;
   const pos = new Float32Array(nr * cols * 3), edge = new Float32Array(nr * cols * 3), idx = [];
   for (let i = 0; i < nr; i++) for (let k = 0; k < cols; k++) {
@@ -134,7 +136,7 @@ export function createLand(air) {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   const mat = patch(new THREE.MeshStandardMaterial({ roughness: 0.96, metalness: 0, envMapIntensity: 0.12 }), 'land', {
-    air, vertexHead: 'attribute vec3 aEdge;\nvarying float vUp;\nvarying vec3 vEdge;\n', vertex: 'vUp = objectNormal.y; vEdge = aEdge;\n', fragmentHead: HEAD, fragment: COLOUR, normal: BUMPS, post: WATER,
+    air, uniforms: { uLite }, vertexHead: 'attribute vec3 aEdge;\nvarying float vUp;\nvarying vec3 vEdge;\n', vertex: 'vUp = objectNormal.y; vEdge = aEdge;\n', fragmentHead: HEAD, fragment: COLOUR, normal: BUMPS, post: WATER,
   });
   const ground = new THREE.Mesh(geo, mat);
   ground.receiveShadow = true; ground.frustumCulled = false;
@@ -162,5 +164,5 @@ export function createLand(air) {
       group.add(m);
     }
   }
-  return { group, material: mat };
+  return { group, material: mat, lite: (on) => { uLite.value = on ? 1 : 0; } };
 }

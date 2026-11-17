@@ -17,7 +17,7 @@
 // thousand horns.
 // ============================================================================
 import * as THREE from 'three';
-import { createOrbit } from './orbit.mjs';
+import { createOrbit, ringDistance } from './orbit.mjs';
 import { wavelength } from './acoustics.mjs';
 import { BASE_M, HEIGHT_M, STONE, LATTICE_HZ } from './pyramid.mjs';
 import { rgb, lin, patch, hazed, hornGeometry, aimMatrix, bronze, glowing, withGlow } from './kit.js';
@@ -25,7 +25,7 @@ import { createLand } from './land.js';
 import { ELDERS, RIVER, heightAt } from './giza.mjs';
 import { DRY_SLOPE } from './sand.mjs';
 
-const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ);
+const HORNS = 1280, FRONTS = 48, LAMBDA = wavelength(LATTICE_HZ), HORN_NEAR = 40;      // m: nearer than this, the horns in their finer facets
 const M = new THREE.Matrix4(), C = new THREE.Color(), V = new THREE.Vector3(), S = new THREE.Vector3();
 const SIDES = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const sideAt = (y) => BASE_M * (1 - y / HEIGHT_M);
@@ -211,9 +211,14 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   const mt = spec.mouthDiameter / 2, th = Math.min(spec.throatDiameter / 2, mt * 0.98), waist = th * Math.exp(Math.log(mt / th) * 0.45);
   const metal = glowing(bronze(), air); metal.roughness = 0.42;   // a thousand horns: a little less mirror, so their facets do not glitter
   const horns = new THREE.InstancedMesh(withGlow(hornGeometry(spec, 'mid'), HORNS), metal, HORNS);
+  // farther off, the same horns in fewer facets (a thousand of them are most of what is drawn): one set of places and one of light
+  const farGeo = withGlow(hornGeometry(spec, false), HORNS);
+  farGeo.setAttribute('aGlow', horns.geometry.getAttribute('aGlow'));
+  const hornsFar = new THREE.InstancedMesh(farGeo, metal, HORNS);
+  hornsFar.instanceMatrix = horns.instanceMatrix;
   const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 6).translate(0, 0.5, 0),
     hazed(new THREE.MeshStandardMaterial({ color: rgb(74, 78, 90), metalness: 0.7, roughness: 0.45, envMapIntensity: 0.8 }), 'post', air), HORNS);
-  for (const m of [horns, posts]) { m.count = 0; m.frustumCulled = false; m.castShadow = true; group.add(m); }
+  for (const m of [horns, hornsFar, posts]) { m.count = 0; m.frustumCulled = false; m.castShadow = true; group.add(m); }
 
   // ---------------------------------------------------------------- the fronts leaving each line of horns: flat lines on the course,
   // as wide as a pixel or two at any distance (the vertex shader widens them with their depth)
@@ -314,9 +319,11 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
           const up = y + V.y - waist - current.bottom;
           posts.setMatrixAt(i, up > 0.02 ? M.makeScale(1, up, 1).setPosition(h.x + V.x, current.bottom, h.y + V.z) : M.makeScale(0, 0, 0));
         }
-        horns.count = posts.count = k;
+        horns.count = hornsFar.count = posts.count = k;
         horns.instanceMatrix.needsUpdate = posts.instanceMatrix.needsUpdate = true;
       }
+      const near = ringDistance(stage.ear().eye, current.side / 2 + 0.1, top + 0.5) < HORN_NEAR;
+      horns.visible = near; hornsFar.visible = !near;
       if (sound) {
         const far = Math.min(reach * 1.6, current.side * 0.98), edge = current.side / 2 + 0.1, ph = tau - Math.floor(tau);
         for (const [ax, ay] of SIDES) for (let k = 0; nf < FRONTS; k++) {
@@ -327,7 +334,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
           fronts.setMatrixAt(nf, M); fronts.setColorAt(nf, C.setRGB(fade * 0.45, 0, 0)); nf++;
         }
       }
-    } else { top = built ? rows[built - 1].top : 0; horns.count = posts.count = 0; shownCourse = -1; }
+    } else { top = built ? rows[built - 1].top : 0; horns.count = hornsFar.count = posts.count = 0; shownCourse = -1; }
     fronts.count = nf;
     if (nf) { fronts.instanceMatrix.needsUpdate = true; fronts.instanceColor.needsUpdate = true; frontU.uPix.value = stage.pix() * 3.2; }
     wave.uTau.value = tau; wave.uOn.value = sound && current ? 1 : 0; wave.uHalf.value = current ? current.side / 2 : 1;
@@ -374,6 +381,7 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
     sun: { center: [0, 40, 0], radius: 300, dir: sunDir, follow: true, least: 14, reach: 700, beyond: 900 },
     look: { top: rgb(46, 86, 160), mid: rgb(122, 154, 200), low: rgb(204, 202, 202), warm: rgb(246, 222, 186), ground: rgb(150, 125, 96), line: rgb(132, 110, 86),
       sun: [rgb(255, 222, 186), 3.5], hemi: [rgb(150, 176, 222), rgb(150, 122, 90), 0.72], exposure: 1.0, glow: 1, grid: 0, dunes: 0 },
-    hit, set, glow, get cased() { return casing.visible && casingU.uFront.value <= 0; },
+    hit, set, glow, lite: (on) => land.lite(on), get cased() { return casing.visible && casingU.uFront.value <= 0; },
+    get hornsNear() { return horns.visible && horns.count > 0; },
   };
 }
