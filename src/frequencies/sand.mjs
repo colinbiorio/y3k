@@ -33,6 +33,8 @@ export function createBed({ width = 12, depth = 8, cell = 0.05, grain = 2.5e-4, 
     setH: new Float32Array(n),              // hours since the pour, where wet
     phi: new Float32Array(n).fill(PACKING.loose),
     p: new Float32Array(n), u: new Float32Array(n), ux: new Float32Array(n), uy: new Float32Array(n),
+    pr: new Float32Array(n), pi: new Float32Array(n),   // the pressure as a phasor, for the waves the room draws
+    depth0: sand,                           // the level the bed was laid at: the plane the sound meets
     moved: 0,                               // kg hopped cell to cell so far (every hop counts; not a throughput)
     h0: null,                               // the bed as it was laid, for what the sound has displaced
     uT: thresholdVelocity(grain, rhoS),     // the dry threshold, m/s (surface, rms)
@@ -48,9 +50,9 @@ export function computeField(bed, horns, f) {
   const { nx, ny, cell } = bed;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const k = j * nx + i;
-    if (!horns.length) { bed.p[k] = bed.u[k] = bed.ux[k] = bed.uy[k] = 0; continue; }
+    if (!horns.length) { bed.p[k] = bed.u[k] = bed.ux[k] = bed.uy[k] = bed.pr[k] = bed.pi[k] = 0; continue; }
     const r = fieldAt(horns, f, (i + 0.5) * cell, (j + 0.5) * cell);
-    bed.p[k] = r.p; bed.u[k] = r.u; bed.ux[k] = r.ux; bed.uy[k] = r.uy;
+    bed.p[k] = r.p; bed.u[k] = r.u; bed.ux[k] = r.ux; bed.uy[k] = r.uy; bed.pr[k] = r.re; bed.pi[k] = r.im;
   }
 }
 
@@ -144,6 +146,17 @@ export function addSand(bed, cx, cy, radius, height) {
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const x = (i + 0.5) * cell - cx, y = (j + 0.5) * cell - cy;
     if (x * x + y * y <= radius * radius) { bed.h[j * nx + i] += height; if (bed.h0) bed.h0[j * nx + i] += height; }   // tipped sand is part of the bed as laid
+  }
+}
+// Sand taken away: a disc lowered by up to this much, never under the floor. What is taken
+// is gone from the bed as laid too: it was carried off, not moved by the sound.
+export function takeSand(bed, cx, cy, radius, depth) {
+  const { nx, ny, cell } = bed;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = (i + 0.5) * cell - cx, y = (j + 0.5) * cell - cy;
+    if (x * x + y * y > radius * radius) continue;
+    const k = j * nx + i, d = Math.min(depth, bed.h[k]);
+    bed.h[k] -= d; if (bed.h0) bed.h0[k] = Math.max(0, bed.h0[k] - d);
   }
 }
 

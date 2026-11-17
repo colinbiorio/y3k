@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import * as A from '../src/frequencies/acoustics.mjs';
 import * as P from '../src/frequencies/pyramid.mjs';
 import * as S from '../src/frequencies/sand.mjs';
-import { hornSpec } from '../src/frequencies.js';
+import * as O from '../src/frequencies/orbit.mjs';
+import { hornSpec, WAVE_HZ, buildAt, courseHorns } from '../src/frequencies.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -246,6 +247,140 @@ ok("the glyph is on the right rail after the mine, called frequencies; the view 
   assert.ok(read('src/mercury-mount.js').includes("['nav-frequencies', (el) => ({ svgEl: svgOf(el), size: S(70) })]"), 'not poured in metal');
   assert.ok(read('styles.css').includes('.home-grid.mode-frequencies {'), 'no room width');
   assert.ok(read('package.json').includes('node test/frequencies.test.mjs'), 'not in the chain');
+});
+
+console.log('\nfrequencies, in the round (17 Nov 2026):');
+
+const hornAt = (x, y, aimX, aimY, mouthDb = 150, f = 135) => ({ x, y, z: 0.5, aimX, aimY, aimZ: -0.25, mouthDb, mouthDiameter: A.mouthDiameterFor(f), phase: 0 });
+
+ok('the pressure anywhere: on the ground it is the field the sand feels; its phasor is its size; horns add as phasors', () => {
+  const hs = [hornAt(0, 0, 1, 0), hornAt(6, 3, -1, 0.2)];
+  for (const [x, y] of [[3, 0.5], [5, 2], [1, -4]]) {
+    const q = A.pressureAt(hs, 135, x, y, 0), fa = A.fieldAt(hs, 135, x, y);
+    near(q.p, fa.p, fa.p * 1e-9, 'pressureAt on the ground against fieldAt');
+    near(Math.hypot(q.re, q.im), q.p, q.p * 1e-12, 'the phasor\'s size');
+    const a = A.pressureAt([hs[0]], 135, x, y, 1.6), b = A.pressureAt([hs[1]], 135, x, y, 1.6), ab = A.pressureAt(hs, 135, x, y, 1.6);
+    near(ab.re, a.re + b.re, Math.abs(ab.p) * 1e-12 + 1e-9, 'superposition (re)');
+    near(ab.im, a.im + b.im, Math.abs(ab.p) * 1e-12 + 1e-9, 'superposition (im)');
+  }
+});
+
+ok('a standing wave heard: between opposed horns the ear finds a node a quarter wavelength from the middle', () => {
+  const lam = A.wavelength(135), L = 10, hs = [hornAt(0, 0, 1, 0), hornAt(L, 0, -1, 0)];
+  const ear = (x) => ({ x, y: 0, z: 0.5, rx: 0, ry: -1, rz: 0 });
+  const mid = A.hear(hs, 135, ear(L / 2)).p, node = A.hear(hs, 135, ear(L / 2 + lam / 4)).p;
+  assert.ok(node < mid / 4, `node ${node} against the middle ${mid}`);
+});
+
+ok('the two speakers: a horn on the right is in the right one; the four gains are as loud as played() says; turning round swaps them', () => {
+  const one = [hornAt(4, 0, -1, 0)];
+  const facing = A.hear(one, 135, { x: 0, y: 0, z: 0.5, rx: 1, ry: 0, rz: 0 }), g = A.stereo(facing);
+  const left = Math.hypot(g[0], g[1]), right = Math.hypot(g[2], g[3]);
+  assert.ok(right > 5 * left, `right ${right} against left ${left}`);
+  near(Math.hypot(...g), A.played(Math.hypot(...facing.L, ...facing.R)), 1e-12, 'the loudness');
+  const back = A.stereo(A.hear(one, 135, { x: 0, y: 0, z: 0.5, rx: -1, ry: 0, rz: 0 }));
+  assert.ok(Math.hypot(back[0], back[1]) > 5 * Math.hypot(back[2], back[3]), 'turned round, it is not on the left');
+  assert.deepEqual(A.stereo({ L: [0, 0], R: [0, 0], p: 0 }), [0, 0, 0, 0]);
+});
+
+ok('how loud the room plays: full at the air\'s 170 dB limit, every 20 dB of field is 10 dB at the speakers, never past full', () => {
+  near(A.played(A.splToPa(170)), 1, 1e-12, '170 dB');
+  assert.equal(A.played(A.splToPa(190)), 1);
+  near(20 * Math.log10(A.played(A.splToPa(150)) / A.played(A.splToPa(170))), -10, 1e-9, '150 dB');
+  near(20 * Math.log10(A.played(A.splToPa(110)) / A.played(A.splToPa(130))), -10, 1e-9, '110 dB');
+  assert.ok(A.played(A.splToPa(120)) < A.played(A.splToPa(121)) && A.played(0) === 0);
+});
+
+ok('take away: sand dug from a round goes, to the floor at most, and nowhere else changes', () => {
+  const bed = S.createBed({ width: 2, depth: 2, cell: 0.05 }), before = Float32Array.from(bed.h);
+  S.takeSand(bed, 1, 1, 0.3, 0.1);
+  let inside = 0, outside = 0;
+  for (let j = 0; j < bed.ny; j++) for (let i = 0; i < bed.nx; i++) {
+    const k = j * bed.nx + i, x = (i + 0.5) * bed.cell - 1, y = (j + 0.5) * bed.cell - 1;
+    if (x * x + y * y <= 0.09) { near(before[k] - bed.h[k], 0.1, 1e-6, 'dug'); inside++; } else { assert.equal(bed.h[k], before[k]); outside++; }
+  }
+  assert.ok(inside > 100 && outside > 1000);
+  S.takeSand(bed, 1, 1, 0.3, 5);
+  assert.ok(Math.min(...bed.h) >= 0, 'dug below the floor');
+});
+
+ok('the eye: where it stands; a slide goes with the hand; nearer toward a point keeps that point; it settles; the keys; the floor', () => {
+  const o = O.createOrbit({ target: [1, 2, 3], dist: 10, polar: Math.PI / 2, az: 0, maxPolar: 1.6 });
+  O.pose(o).forEach((v, i) => near(v, [1, 2, 13][i], 1e-9, 'pose'));
+  O.pose({ target: [0, 0, 0], dist: 5, polar: 0.02, az: 1 }).forEach((v, i) => near(v, [0, 5, 0][i], 0.11, 'from above'));
+  const t0 = [...o.target];
+  O.pan(o, 100, 0, 800);
+  assert.ok(o.target[0] < t0[0], 'a drag to the right moves the ground right, so the point looked at goes left');
+  const p = [3, 0, -2], eye0 = O.pose(o), dir0 = p.map((v, i) => v - eye0[i]), n0 = Math.hypot(...dir0);
+  O.zoom(o, 0.5, p);
+  const eye1 = O.pose(o), dir1 = p.map((v, i) => v - eye1[i]), n1 = Math.hypot(...dir1);
+  dir0.forEach((v, i) => near(dir1[i] / n1, v / n0, 1e-9, 'the point stays where it is on the screen'));
+  near(n1, n0 * 0.5, 1e-9, 'and comes half as far');
+  for (let i = 0; i < 400 && O.settle(o, 1 / 60); i++);
+  assert.ok(!O.settle(o, 1 / 60), 'never settles');
+  O.pose(o.now).forEach((v, i) => near(v, O.pose(o)[i], 1e-6, 'settled where asked'));
+  assert.ok(O.key(o, '+') && o.dist < 5 && O.key(o, '0') && o.dist === 10 && !O.key(o, 'q'));
+  const low = O.createOrbit({ target: [0, 20, 0], dist: 40, polar: 1, maxPolar: 2.5, floor: 1.2 });
+  O.turn(low, 0, 3);
+  assert.ok(O.pose(low)[1] >= 1.2 - 1e-9 && low.polar > Math.PI / 2, 'looking up, the eye stays above the floor');
+  const boxed = O.go(O.createOrbit({ box: [[-1, 0, -1], [1, 1, 1]] }), { target: [5, 5, 5], dist: 3 });
+  assert.deepEqual(boxed.target, [1, 1, 1]);
+});
+
+ok('drawn at the screen\'s own pixels: up to three a point and 8.3 million a frame, whatever the site\'s graphics tier', () => {
+  assert.equal(O.pixelRatio(2, 1280, 720), 2);
+  assert.equal(O.pixelRatio(4, 100, 100), 3);
+  assert.equal(O.pixelRatio(0, 100, 100), 1);
+  near(O.pixelRatio(3, 2560, 1440), Math.sqrt(8.3e6 / (2560 * 1440)), 1e-12, 'a big screen');
+  assert.ok(read('src/frequencies/stage.js').includes('ratio = pixelRatio(window.devicePixelRatio, w, h);'), 'the stage takes another ratio');
+  assert.ok(!/gfx|profile\(\)/.test(read('src/frequencies/stage.js')), 'the stage reads the site\'s tier');
+});
+
+ok('the build at any time: the courses done, the one being made, its surface; then all of them, and no horns', () => {
+  const plan = P.hornPlan({ mouthDb: 160 }), sched = P.schedule(plan), r0 = sched.rows[0];
+  let b = buildAt(sched.rows, 0);
+  assert.ok(b.built === 0 && b.current.course === 1 && b.part === 0 && b.top === 0 && !b.setting);
+  b = buildAt(sched.rows, r0.moveHours / 2 / 8766);
+  near(b.part, 0.5, 1e-9, 'half carried in'); near(b.top, r0.thickness / 2, 1e-9, 'half its thickness');
+  b = buildAt(sched.rows, (r0.moveHours + 10) / 8766);
+  assert.ok(b.setting && b.part === 1); near(b.setLeft, r0.setHours - 10, 1e-6, 'setting');
+  b = buildAt(sched.rows, sched.years + 1e-9);
+  assert.ok(b.built === 218 && b.current === null); near(b.top, P.HEIGHT_M, 0.01, 'the top');
+  let last = -1;
+  for (let y = 0; y <= sched.years; y += sched.years / 997) { const t = buildAt(sched.rows, y).top; assert.ok(t >= last - 1e-9, `the surface fell at ${y} y`); last = t; }
+  assert.equal(WAVE_HZ, 0.5);
+});
+
+ok('the working course\'s horns: the plan\'s count, shoulder to shoulder on its four edges, aimed across it, half a metre up', () => {
+  const plan = P.hornPlan({ mouthDb: 160 }), sched = P.schedule(plan);
+  for (const row of [sched.rows[0], sched.rows[100], sched.rows[200]]) {
+    const hs = courseHorns(row, plan), edge = row.side / 2 + 0.1;
+    within(hs.length, row.horns - 4, row.horns + 4, `course ${row.course}`);
+    within(row.side / (hs.length / 4), plan.spacing, plan.spacing * 1.02, 'shoulder to shoulder, mouths never overlapping');
+    for (const h of hs) {
+      near(Math.max(Math.abs(h.x), Math.abs(h.y)), edge, 1e-9, 'on an edge');
+      assert.ok(h.x * h.aimX + h.y * h.aimY < 0 && h.z === 0.5 && h.aimZ === -0.3 && h.mouthDb === plan.mouthDb && h.mouthDiameter === plan.mouthDiameter);
+    }
+  }
+});
+
+ok('the room in the round is wired: three.js stays out of the first load; the tone is the field at the camera; every control has a name', () => {
+  const room = read('src/frequencies.js');
+  assert.ok(!/^import[^;]*from 'three/m.test(room), 'three is imported with the site');
+  assert.ok(room.includes("import('./frequencies/stage.js')"), 'the stage is not loaded');
+  assert.ok(room.includes('const heard = hear(list, hz, earNow(zero));') && room.includes('sound?.set(stereo(heard));'), 'the tone is not the field at the camera');
+  assert.equal((room.match(/sound\.start\(/g) || []).length, 1, 'sound may only begin in startSound, from a click');
+  assert.ok(/function startSound[\s\S]{0,200}sound\.start\(hz\)/.test(room));
+  for (const m of room.matchAll(/<input [^>]*>/g)) assert.match(m[0], /aria-label="[^"]+"/, 'an input without a name: ' + m[0].slice(0, 60));
+  assert.ok(room.includes('data-view="${k}" aria-label="${say}"'), 'the view buttons are nameless');
+  for (const id of ['The tone.', 'The horns.', 'The rate.', 'The stone.', 'The set.', 'What sound does not do here.']) assert.ok(room.includes(`<li><b>${id}</b>`), 'the method lost: ' + id);
+  assert.ok(room.includes("<p class=\"muted\">Petrie's survey is the pyramid:"), 'the survey line lost');
+  const stage = read('src/frequencies/stage.js'), kit = read('src/frequencies/kit.js');
+  const sky = stage.slice(stage.indexOf('const sky = new THREE.Mesh'), stage.indexOf('sky.renderOrder'));
+  assert.ok(sky.includes('#include <colorspace_fragment>') && !sky.includes('tonemapping_fragment'), 'the sky is tone-mapped: it would not meet the fog');
+  assert.ok(kit.includes("material.customProgramCacheKey = () => 'freq-' + name;"), 'two patched materials could share one program');
+  for (const f of ['src/frequencies/sandbox3d.js', 'src/frequencies/pyramid3d.js']) assert.ok(!read(f).includes("from './stage.js'"), f + ' imports the stage');
+  assert.ok(read('styles.css').includes('.freq-stage:fullscreen') && read('styles.css').includes('touch-action: none'), 'the stage cannot fill the screen or be held');
 });
 
 console.log(`\n${passed} checks passed.`);

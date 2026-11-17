@@ -109,7 +109,9 @@ export const shockDistance = (dB, f) => (AIR.rho * AIR.c ** 3) / (AIR.beta * 2 *
 // shaped by the piston directivity about its aim, and thinned by absorption.
 //
 // horn: { x, y, z, aimX, aimY, aimZ, mouthDb, mouthDiameter, phase }  (metres, dB, rad)
-// Returns, at ground point (x, y): { p: rms pressure, ux, uy: rms tangential velocity components, u: |u| rms }.
+// Returns, at ground point (x, y): { p: rms pressure, ux, uy: rms tangential velocity components, u: |u| rms,
+// re, im: the pressure itself as a phasor }: at any moment the pressure there is √2 (re cos ωt − im sin ωt),
+// which is what the room draws on the sand, slowed, as the waves crossing it.
 export function fieldAt(horns, f, x, y) {
   const k = waveNumber(f);
   const alpha = absorptionDbPerM(f) / 8.686;   // nepers per metre
@@ -136,7 +138,70 @@ export function fieldAt(horns, f, x, y) {
     uxr += v * ex * c; uxi += v * ex * s; uyr += v * ey * c; uyi += v * ey * s;
   }
   const p = Math.hypot(pr, pi), ux = Math.hypot(uxr, uxi), uy = Math.hypot(uyr, uyi);
-  return { p, ux, uy, u: Math.hypot(ux, uy) };
+  return { p, ux, uy, u: Math.hypot(ux, uy), re: pr, im: pi };
+}
+
+// --- the field in the air, and what a listener hears -----------------------------
+// One horn's pressure at a point: the same spreading, directivity and absorption as on
+// the ground. `hz` and `aimZ` are passed apart so that the horn's image in the ground
+// (itself, mirrored) can be asked for as well. Returns [amplitude (rms), phase, distance].
+function ray(h, k, alpha, x, y, z, hz, aimZ) {
+  const a = h.mouthDiameter / 2;
+  const dx = x - h.x, dy = y - h.y, dz = z - hz;
+  const d = Math.hypot(dx, dy, dz), r = Math.max(d, a);
+  const al = Math.hypot(h.aimX, h.aimY, aimZ) || 1;
+  const theta = Math.acos(Math.max(-1, Math.min(1, (dx * h.aimX + dy * h.aimY + dz * aimZ) / (r * al))));
+  const dir = theta > Math.PI / 2 ? 0.1 * pistonDirectivity(k * a, Math.PI / 2) : pistonDirectivity(k * a, theta);
+  return [splToPa(h.mouthDb) * (a / r) * dir * Math.exp(-alpha * Math.max(r - a, 0)), -k * r + (h.phase || 0), d];
+}
+// The pressure anywhere over the bed, z metres above it: every horn and its image in the
+// rigid ground, added as phasors (T-I: the image method). On the ground the two paths are
+// one length and it is fieldAt's doubled pressure; higher up they part, and the level
+// rises and falls with height.
+export function pressureAt(horns, f, x, y, z = 0) {
+  const k = waveNumber(f), alpha = absorptionDbPerM(f) / 8.686;
+  let re = 0, im = 0;
+  for (const h of horns) for (const side of [1, -1]) {
+    const [amp, ph] = ray(h, k, alpha, x, y, z, side * h.z, side * (h.aimZ || 0));
+    re += amp * Math.cos(ph); im += amp * Math.sin(ph);
+  }
+  return { re, im, p: Math.hypot(re, im) };
+}
+// What a listener standing there hears. ear: { x, y, z } where they are (z above the bed)
+// and { rx, ry, rz }, the unit vector toward their right. The pressure is the physics above.
+// WHERE each horn sits between the two speakers is a convention, not physics (T-II): each
+// horn and its image is placed by how far to the listener's right it lies, at constant
+// power, as a stereo recording places an instrument; no head is modelled. The horns keep
+// their true phases, so two that cancel at the listener cancel in the speakers too.
+// Returns { L: [re, im], R: [re, im], p: the rms pressure at the listener }.
+export function hear(horns, f, ear) {
+  const k = waveNumber(f), alpha = absorptionDbPerM(f) / 8.686;
+  let lr = 0, li = 0, rr = 0, ri = 0, pr = 0, pi = 0;
+  for (const h of horns) for (const side of [1, -1]) {
+    const hz = side * h.z;
+    const [amp, ph, d] = ray(h, k, alpha, ear.x, ear.y, ear.z, hz, side * (h.aimZ || 0));
+    const pan = d > 1e-6 ? ((h.x - ear.x) * ear.rx + (h.y - ear.y) * ear.ry + (hz - ear.z) * ear.rz) / d : 0;
+    const t = ((Math.max(-1, Math.min(1, pan)) + 1) * Math.PI) / 4, gl = Math.cos(t), gr = Math.sin(t);
+    const c = amp * Math.cos(ph), s = amp * Math.sin(ph);
+    lr += gl * c; li += gl * s; rr += gr * c; ri += gr * s; pr += c; pi += s;
+  }
+  return { L: [lr, li], R: [rr, ri], p: Math.hypot(pr, pi) };
+}
+// How loud the room plays a pressure. Not at its level: 160 dB is past the threshold of
+// pain, and no speaker makes it. The air's own limit (170 dB, the throat) is full volume,
+// and every 20 dB of the field under it is 10 dB at the speakers (T-II: a choice, so that
+// a quiet place is still heard and a loud one is still safe). 0..1.
+export const PLAYED_DB_PER_DB = 0.5;
+export const played = (pRms) => Math.min(1, Math.pow(Math.max(pRms, 0) / splToPa(THROAT_MAX_DB), PLAYED_DB_PER_DB));
+// The four gains of the room's two oscillators (a cosine and a sine at the tone) for the
+// left and the right speaker: [left cos, left sin, right cos, right sin]. The two ears keep
+// their ratio and their phases; together they are as loud as played() says.
+export function stereo(heard) {
+  const [lr, li] = heard.L, [rr, ri] = heard.R;
+  const total = Math.hypot(lr, li, rr, ri);
+  if (!(total > 0)) return [0, 0, 0, 0];
+  const s = played(total) / total;
+  return [lr * s, -li * s, rr * s, -ri * s];
 }
 
 // --- grains -------------------------------------------------------------------
