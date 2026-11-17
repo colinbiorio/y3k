@@ -9,8 +9,10 @@ export const WHICH_KEY = 'y3k.world.which';
 export const MODES = ['survival', 'creative'];
 export const ZOOM = { min: 2, max: 12, start: 5.5 };
 
-// mode, light and zoom; which of the five kinds of body the person is, and how each kind was last made to look
-export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter' });
+// mode, light and zoom; which of the five kinds of body the person is, and how each kind was last made to look;
+// the building last chosen; the level of bot last called (1..5)
+export const cleanLevel = (n) => (Number.isInteger(n) && n >= 1 && n <= 5 ? n : 1);
+export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter', level: 1 });
 
 export function loadState(storage) {
   const s = freshState();
@@ -23,10 +25,11 @@ export function loadState(storage) {
   s.kind = cleanKind(kept.kind);
   s.looks = cleanLooks(kept.looks);
   s.building = cleanBuilding(kept.building);
+  s.level = cleanLevel(kept.level);
   return s;
 }
 export function saveState(storage, s) {
-  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building) })); return true; } catch { return false; }
+  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building), level: cleanLevel(s.level) })); return true; } catch { return false; }
 }
 
 // The world tab holds two worlds for now: the void (the game, new) and the

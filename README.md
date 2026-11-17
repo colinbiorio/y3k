@@ -88,7 +88,9 @@ of its own, hosted by their account. The rails around the room are its places.
   any way and, in creative, flies. Keys and mouse, a controller or a thumb,
   and a controls sheet to change them. The body is one of five kinds (human,
   robot, mantis, octopus, light), each with five choices of five options,
-  chosen in the body sheet. The planet above is one button away.
+  chosen in the body sheet. It builds (a shelter, a house) and fights: the
+  ring, a plasma weapon with five ways to use it, against bots at five
+  levels. The planet above is one button away.
 - **The mine** (`src/mine.js`, `phraszle.mjs`) — Phraszle: proof-of-work with a
   closed book of 340 words. You cannot guess the phrase; you coach a rented
   mind and make it commit. A ladder, and the seed of an in-world currency.
@@ -260,6 +262,24 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-11-17** (afternoon, later) — **The first plasma weapon, and bots to
+  fight** (`src/game/combat.js`, `fight.js`; `view.js`, `input.js`, `body.js`,
+  `world.js`, `state.js`). Colin's round: "a plasma weapon generated with
+  several ways to attack with it, getting a bot enemy that we can spawn in at
+  varying difficulty". **The ring**: bronze wound with contained plasma, held
+  by the binding beside the shoulder. A tap casts it (left mouse with the
+  pointer held, J, RT) at the bot nearest the eye's line and calls it back;
+  held, it spins up and flies harder and further; E whirls it twice round the
+  body; in the air the attack is a slam with a wave over the water; the right
+  mouse (L, LT) holds it up as a shield that turns bolts aside, and a parry
+  sends them back. **The bots**: five levels (drifter to warden) from the bar's
+  **bots** list or N, coming up out of the water, circling, shooting bursts,
+  the better ones leading a moving body and slipping casts; broken, they fall
+  apart into the water. Survival hurts the body (a bar, a flush, struck down
+  and up again); creative does not. Game suite 121 (12 new); the void smoke's
+  new `fight` scene 15/15 with seven bots at 60 frames a second; desk 16/16,
+  phone 5/5, build 20/20.
 
 - **2026-11-17** (afternoon) — **The world's second building: the house**
   (`src/game/house.js`, `solids.js`, `buildings/house.js`; `world.js`,

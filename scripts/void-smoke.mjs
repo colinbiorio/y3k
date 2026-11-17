@@ -20,6 +20,10 @@
 //          its walls holding the body in, the eye kept inside, the room dim but for what gets in, at night
 //          its hearth; walked out again, taken down. Then the house, chosen from the bar's build list: up
 //          its steps and in, its ladder climbed to the loft and back down, taken down
+//   fight  the ring and the bots (combat.js, fight.js): the bar's list of five levels, a drifter come up out of
+//          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
+//          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
+//          aside, the whirl, a slam from a jump; seven bots up and the frames; the list clearing them
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -43,7 +47,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -224,6 +228,60 @@ try {
     check('leaving the tab puts the void down', !out.left.gameRoot && !out.left.inVoid, out.left);
     await page.locator('#nav-world').click(); await page.waitForSelector('.game-root canvas', { timeout: 20000 }); await sleep(600);
     const again = await read(); check('and it is where it was on return', again && Math.abs(again.p[2] - out.reads['15-back-in-the-void'].p[2]) < 0.5 && again.light === 'night', again);
+  }
+
+  if (scene === 'fight') {
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const faceYaw = async (target) => { for (let i = 0; i < 5; i++) { const d = wrap(target - (await read()).yaw); if (Math.abs(d) < 0.03) break; await drag(Math.max(-900, Math.min(900, -d / 0.0024)), 0); await sleep(120); } };
+    const aimAt = async () => { const r = await read(), b = r.fight.bots[0]; if (b) await faceYaw(Math.atan2(-(b.p[0] - r.p[0]), -(b.p[2] - r.p[2]))); };
+    const pick = async (level) => { await page.locator('#game-bots').click(); await sleep(250); await page.locator(`#game-bot-list [data-bot="${level}"]`).click(); await sleep(200); };
+    await page.locator('#game-bots').click(); await sleep(250);
+    const listed = await page.locator('#game-bot-list button').evaluateAll((els) => els.map((e) => e.dataset.bot));
+    check('the bots list offers the five levels', listed.join() === '1,2,3,4,5', listed);
+    await page.locator('#game-bot-list [data-bot="1"]').click(); await sleep(200);
+    let r = await until((r) => r.fight.bots[0]?.mode === 'fight', 6000);
+    const b0 = r.fight.bots[0], far = Math.hypot(b0.p[0] - r.p[0], b0.p[2] - r.p[2]);
+    check('a drifter comes up out of the water ahead and hovers', b0.level === 1 && b0.p[1] > 1 && far > 6 && far < 17, { b0, far });
+    out.hud = await page.evaluate(() => ({ on: document.querySelector('.game-hud').classList.contains('on'), hp: document.querySelector('.game-hud').classList.contains('hp'), foes: document.querySelector('.game-foes').textContent }));
+    check('the mark, the body\'s health and the count are shown', out.hud.on && out.hud.hp && /1 bot/.test(out.hud.foes), out.hud);
+    await aimAt(); await sleep(150 * slow); await shot('01-drifter');
+    const hp0 = (await read()).fight.bots[0].hp;
+    await key.down('KeyJ'); await sleep(40); await key.up('KeyJ');
+    r = await until((r) => (r.fight.bots[0]?.hp ?? 0) < hp0, 3000);
+    check('a cast strikes it', (r.fight.bots[0]?.hp ?? 0) === hp0 - 34, r.fight.bots[0]);
+    await until((r) => r.fight.ring === 'held', 4000);
+    // in creative from here: what follows is about the ring, and nothing should be struck down in the middle of it
+    await key.press('KeyG'); await sleep(200);
+    await aimAt(); await key.down('KeyJ'); await sleep(1000); r = await read();
+    check('held, the ring spins up', r.fight.ring === 'charging' && r.fight.charge > 0.8, r.fight);
+    await shot('02-spun-up'); await key.up('KeyJ');
+    r = await until((r) => r.fight.broken >= 1, 4000); await sleep(250);
+    check('let go, it breaks the drifter', r.fight.broken === 1 && r.fight.bots.length === 0, r.fight);
+    await shot('03-broken');
+    await pick(3); r = await until((r) => r.fight.bots[0]?.mode === 'fight', 6000);
+    await key.press('KeyN'); r = await until((r) => r.fight.bots.length === 2, 3000);
+    check('a sentinel from the list, and the key calls another at the level chosen', r.fight.level === 3 && r.fight.bots.every((b) => b.level === 3), r.fight.bots);
+    await until((r) => r.fight.bots.every((b) => b.mode === 'fight'), 4000);
+    await aimAt(); await key.down('KeyL'); await sleep(250); r = await read(); check('the guard comes up', r.fight.guard === true, r.fight);
+    await shot('04-guard');
+    r = await until((r) => r.fight.turned >= 1, 9000); await key.up('KeyL');
+    check('the guard turns their bolts aside', r.fight.turned >= 1, r.fight);
+    await key.press('KeyE'); r = await until((r) => r.fight.ring === 'whirl', 1500); await sleep(120); await shot('05-whirl');
+    check('the whirl goes round', r.fight.ring === 'whirl', r.fight.ring);
+    await until((r) => r.fight.ring === 'held', 2000);
+    await key.down('Space'); await sleep(420); r = await read(); const top = r.p[1];
+    await key.press('KeyJ'); r = await until((r) => r.fight.ring === 'slam' || r.grounded, 1500); const slam = r.fight.ring === 'slam';
+    const t0 = Date.now(); r = await until((r) => r.grounded, 3000); const fell = Date.now() - t0; await key.up('Space');
+    check('a slam from a jump drives the body down', slam && top > 1.2 && r.grounded && fell < 600, { slam, top, fell });
+    await sleep(200); await shot('06-after-slam');
+    await pick(5); for (let i = 0; i < 4; i++) { await key.press('KeyN'); await sleep(150); }
+    r = await until((r) => r.fight.bots.length >= 7 && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
+    await aimAt(); out.frames = { seven: await frames(2500) };
+    check('seven bots up, and every frame keeps up', r.fight.bots.length === 7 && out.frames.seven.median < 20, { n: r.fight.bots.length, frames: out.frames.seven });
+    await shot('07-seven');
+    await page.locator('#game-bots').click(); await sleep(250); await page.locator('#game-bot-list [data-bot="clear"]').click();
+    r = await until((r) => r.fight.bots.length === 0, 2000);
+    check('the list clears them', r.fight.bots.length === 0, r.fight);
   }
 
   if (scene === 'build') {

@@ -41,7 +41,7 @@ export const CLIMB = 1.4;               // m/s up or down a ladder
 const COYOTE = 0.1, JUMP_BUFFER = 0.12; // a jump pressed just after the edge, or just before the ground
 const STEP_UP = 0.35;                   // a step taken without a jump; a floor further down than this is fallen to
 // the world's say in this step: the body pushed out of what is solid, and the floor under it (0: the water's floor)
-const settle = (s) => (s.world ? s.world.solve(s) : 0);
+const settle = (s) => (s.floorY = s.world ? s.world.solve(s) : 0);   // kept: what the body is over (combat.js: a slam needs height)
 
 export function createBody(over = {}) {
   const s = {
