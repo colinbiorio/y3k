@@ -38,6 +38,7 @@ import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
 import { SHAPE } from '../src/game/island/lordhowe-shape.js';
+import * as LF from '../src/game/island/life.js';
 import { inflateSync } from 'node:zlib';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -2229,6 +2230,66 @@ ok('a body on the ground: it stands on the land, walks along it, is held at the 
   assert.equal(w.wet(-60, 0), true); assert.equal(w.wet(0, 0), false, 'the land is dry');
   assert.ok(w.solid([60, 5, 0]) && !w.solid([60, 25, 0]), 'what flies stops in the ground');
   assert.ok(w.eye([0, 2, 0], [80, 2, 0]) < 0.6, 'the eye stays out of the hill');
+});
+
+// ---- the island's life (island/life.js): its palms and the animals expected there
+ok('kentia palms grow thick on forest ground and here and there on the grass flats (never on the beach, the cliffs or in the sea), the same palm in the same place every time', () => {
+  const a = SHAPE.arrive, hills = [-1500, -4000];                       // the northern hills, under their forest
+  const p1 = LF.palmsNear(islandGround, hills[0], hills[1], 120), p2 = LF.palmsNear(islandGround, hills[0], hills[1], 120);
+  assert.deepEqual(p1, p2, 'the same every time');
+  assert.ok(p1.length > 400, 'a forest: ' + p1.length + ' palms within 120 m');
+  for (const p of LF.palmsNear(islandGround, a.x + 300, a.z, 200)) { assert.ok(['forest', 'grass'].includes(LF.cover(islandGround, p.x, p.z))); assert.ok(p.y > 2.9 && p.h >= 7 && p.h <= 14); }
+  assert.equal(LF.palmsNear(islandGround, a.x - 400, a.z, 60).length, 0, 'none in the lagoon');
+  const covers = new Set(); for (let k = 0; k < 400; k++) covers.add(LF.cover(islandGround, a.x - 300 + k * 6, a.z));
+  for (const c of ['sea', 'beach', 'forest']) assert.ok(covers.has(c), 'from the lagoon inland: ' + [...covers]);
+});
+
+ok('sooty terns wheel over open water off the north end, the east side and the south; tropicbirds glide high along Gower and Lidgbird, never into them', () => {
+  const flocks = LF.flocksOf(SHAPE);
+  assert.equal(flocks.length, 3);
+  for (const f of flocks) for (let k = 0; k < f.n; k += 3) for (let t = 0; t < 120; t += 7) {
+    const b = LF.ternAt(f, k, t);
+    assert.ok(islandGround.height(b.x, b.z) < 0, `over water: flock ${f.id} bird ${k} at ${t}s`); assert.ok(b.y > 25, 'in the air');
+  }
+  const trop = LF.tropicsOf(SHAPE), g = SHAPE.peaks.find((p) => p.name === 'Mount Gower');
+  assert.equal(trop.length, 8);
+  for (const b of trop) for (let t = 0; t < 200; t += 5) {
+    const q = LF.tropicAt(b, t, islandGround);
+    assert.ok(q.y > islandGround.height(q.x, q.z) + 40, 'clear of the cliffs');
+    assert.ok(Math.hypot(q.x - g.x, q.z - g.z) < 3600, 'about the two mountains');
+  }
+});
+
+ok('woodhens stay on the forest floor round the body; a body standing still draws them to a few steps off; a dash scatters them', () => {
+  const H = LF.createHens(5), body = { p: [-1500, islandGround.height(-1500, -4000), -4000], yaw: 0, dashT: 0, flying: false };   // in the northern hills' forest
+  for (let t = 0; t < 40; t += 0.05) LF.stepHens(H, islandGround, body, 0.05);
+  for (const h of H.hens) { assert.ok(h.placed); const c = LF.cover(islandGround, h.x, h.z); assert.ok(c === 'forest' || c === 'grass', 'on its ground: ' + c); near(h.y, islandGround.height(h.x, h.z), 1e-9); }
+  // one placed near: drawn in, and kept a few steps off
+  const h0 = H.hens[0]; const [px, pz] = [body.p[0] + 9, body.p[2]];
+  if (LF.cover(islandGround, px, pz) === 'forest') { h0.x = px; h0.z = pz; }
+  for (let t = 0; t < 12; t += 0.05) LF.stepHens(H, islandGround, body, 0.05);
+  const d0 = Math.hypot(h0.x - body.p[0], h0.z - body.p[2]);
+  assert.ok(d0 < LF.HEN.curious && d0 > 1.5, 'curious, and a few steps off: ' + d0.toFixed(2));
+  body.dashT = 0.2;
+  for (let t = 0; t < 1.2; t += 0.05) LF.stepHens(H, islandGround, body, 0.05);
+  assert.ok(Math.hypot(h0.x - body.p[0], h0.z - body.p[2]) > d0 + 2, 'scattered');
+});
+
+ok('green turtles cruise the lagoon under its surface and come up to breathe; a palm\'s trunk is in a body\'s way', () => {
+  const T = LF.createTurtles(islandGround, SHAPE);
+  assert.equal(T.length, LF.TURTLE.n);
+  let breaths = 0;
+  for (let t = 0; t < 120; t += 0.1) {
+    breaths += LF.stepTurtles(T, islandGround, 0.1, t).length;
+    for (const u of T) { assert.ok(islandGround.depth(u.x, u.z) > 0.5, 'in the water'); assert.ok(u.y < 0, 'under its surface'); }
+  }
+  assert.ok(breaths >= T.length * 2, 'up to breathe: ' + breaths);
+  // a trunk: walked at, the body is held off it
+  const w = createWorld(); w.ground = islandGround; w.trunks = (x, z) => LF.trunksNear(islandGround, x, z);
+  const palm = LF.palmsNear(islandGround, -1500, -4000, 60).find((p) => LF.palmsNear(islandGround, p.x - 2, p.z, 3.2).length === 1 && islandGround.depth(p.x - 2, p.z) === 0);
+  const body = B.createBody({ world: w, yaw: 0 }); body.p = [palm.x - 2, islandGround.height(palm.x - 2, palm.z), palm.z]; body.was = [...body.p];
+  walk(body, [0, 1], -Math.PI / 2, 1.5);
+  assert.ok(Math.hypot(body.p[0] - palm.x, body.p[2] - palm.z) >= BODY.rad + LF.PALM.trunk - 1e-6, 'held off the trunk: ' + Math.hypot(body.p[0] - palm.x, body.p[2] - palm.z).toFixed(3));
 });
 
 console.log(`\n${passed} checks passed.`);

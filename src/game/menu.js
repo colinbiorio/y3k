@@ -31,7 +31,7 @@ export const PLACE_LINES = {
   island: `31.55° S, 159.08° E, in the Tasman Sea: a crescent ${Math.round(SHAPE.length / 100) / 10} km long, Mount Gower at its south end, a coral lagoon in its hollow`,
 };
 // what the map says of the island, plainly: where its numbers come from, and what is not there yet
-export const ISLAND_NOTE = `Its land and peaks are from elevation data (the AWS Terrain Tiles; here SRTM, about 30 m apart), which trims the summits (Gower reads ${SHAPE.peaks[0].h} m; it is 875) and blurs the shore outward (${SHAPE.landKm2} km² of land; the island's own is 14.55). The lagoon's floor and its reef are shaped by rule, and Ball's Pyramid is modelled from its size: the data misses it. What lives there, to come: the woodhen, found nowhere else; red-tailed tropicbirds and sooty terns on the cliffs; green turtles in the lagoon; the Lord Howe stick insect.`;
+export const ISLAND_NOTE = `Its land and peaks are from elevation data (the AWS Terrain Tiles; here SRTM, about 30 m apart), which trims the summits (Gower reads ${SHAPE.peaks[0].h} m; it is 875) and blurs the shore outward (${SHAPE.landKm2} km² of land; the island's own is 14.55). The lagoon's floor and its reef are shaped by rule, and Ball's Pyramid is modelled from its size: the data misses it. What lives there: kentia palms in its forests; the woodhen, found nowhere else, curious on the forest floor; sooty terns over the sea and the land; red-tailed tropicbirds along Gower's and Lidgbird's cliffs; green turtles in the lagoon. Still to come: the Lord Howe stick insect, by night.`;
 
 // what a box says, and what it says to someone who cannot see it
 export function cellText(b, action, slot) {

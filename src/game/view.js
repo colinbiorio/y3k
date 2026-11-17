@@ -51,6 +51,7 @@ import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLA
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
+import { trunksNear } from './island/life.js';
 import { SHAPE } from './island/lordhowe-shape.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
@@ -242,6 +243,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         say('the island is coming…', 30);
         const { head, hts } = await loadIsland(ISLAND_URL);
         K.island = { ground: createGround(head, hts) }; K.worlds.island.ground = K.island.ground;
+        K.worlds.island.trunks = (x, z) => trunksNear(K.island.ground, x, z);
       }
       if (!root) return;
       const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
@@ -457,7 +459,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const pitch = clamp(pitch0 - eye.lift, PITCH[0], PITCH[1]), [fx, fy, fz] = along(pitch);
     let squeezed = false;
     if (walls) { const dd = Math.max(0.35, room(pitch, d)); squeezed = dd < d - 1e-3; d = dd; }
-    if (fy > 1e-4) d = Math.min(d, Math.max(0.5, (eye.at.y - (WATER + 0.14)) / fy));   // looking up: the eye comes in rather than go under the water
+    if (fy > 1e-4 && !K.world.ground) d = Math.min(d, Math.max(0.5, (eye.at.y - (WATER + 0.14)) / fy));   // looking up: the eye comes in rather than go under the water (on the island the ground's own line keeps it out)
     eye.d = d < eye.d ? d : eye.d + (d - eye.d) * ease(8, dt);
     // an eye that a wall has brought within arm's length of the head would be inside the body: it is not drawn then
     // (until the eye has room again; with nothing built, as it always was)
@@ -474,6 +476,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     camera.updateMatrixWorld();
 
     builds(dt);
+    if (V.live && !paused) V.live(dt, K.clock, body);            // the island's palms, birds, woodhens and turtles
     K.fight.update(K.combat, paused ? 0 : dt, camera, body);
     hud(dt);
     V.setScale(camera);
@@ -583,7 +586,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
-        ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
+        ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100) })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();

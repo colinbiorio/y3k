@@ -101,7 +101,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
 | "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
-| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | **done**: Lord Howe Island, chosen from the controls sheet's **map** tab. Its animals are next. |
+| "a small island ... under the world settings as a new tap called 'map'" (17 Nov) | **done**: Lord Howe Island, chosen from the controls sheet's **map** tab, with its palms, woodhens, terns, tropicbirds and turtles. |
 | "a mix between ancient/natural, current, and futuristic" | each of the five bodies wears all three (below). Every building and ship must. |
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
@@ -162,10 +162,25 @@ taking away to be the clean Earth the brief asks for).
   a body arrives, where the body is now and which way it faces, 2 km to
   measure by, and an arrow toward Ball's Pyramid. Each place keeps its own
   buildings and where the body last stood.
-- Not yet: **its animals** (the woodhen, red-tailed tropicbirds and sooty
-  terns on the cliffs, green turtles in the lagoon, the stick insect) and its
-  palms as trees rather than a coloured canopy, both next; the ground is
-  16 m triangles close up; the lagoon's west edge is a straight rule.
+- **What grows and lives there** (`island/life.js`, the numbers; `creatures.js`,
+  drawn; each kind one instanced shape):
+  - **kentia palms** grow on forest ground round the body, within 170 m. A
+    7 m cell's own number decides whether a palm stands in it, so the same
+    palm is in the same place every time. A few stand on the grass flats.
+    Their crowns sway and their trunks are in a body's way.
+  - **sooty terns** wheel in flocks over the sea off the north end, over the
+    lagoon and off the south, and a band of them keeps over the body
+    wherever it goes.
+  - **red-tailed tropicbirds**, white with two red streamers, glide high
+    along Gower's and Lidgbird's cliffs, never into them.
+  - **woodhens**, found nowhere else, walk the forest floor round the body.
+    A body standing still draws them to a few steps off, where they peck;
+    a dash scatters them.
+  - **green turtles** cruise the lagoon under its surface and come up to
+    breathe, ringing the water.
+- Not yet: the Lord Howe stick insect (by night); banyans and pandanus; the
+  ground is 16 m triangles close up; the lagoon's west edge is a straight
+  rule.
 
 ### The wall run (17 November 2026)
 
@@ -536,9 +551,9 @@ Each stage ends the way the first two did: playable, looked at in a browser,
 tested, shipped.
 
 This round (Colin, 17 November): **wall running** (done); **the first map**,
-Lord Howe Island, under a new **map** tab (done: its ground, sea and map).
-Next: its animals and its palms (woodhens, tropicbirds, terns, turtles, the
-stick insect). Then the buildings again.
+Lord Howe Island, under a new **map** tab, with its palms and animals (done).
+Then the buildings again (the workshop is designed), the stick insect by night,
+and more of Earth from the same tiles.
 
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
@@ -589,6 +604,8 @@ suite runs them; those that draw are read as text and looked at.
 | `island/ground.js` | the island's ground as numbers: the file read, the height on the drawn triangles, slopes, water, cliffs, the eye's line |
 | `island/island.js` | Lord Howe drawn: sky and sun, the land, the sea by its depth, haze; it stands where the void stands (draws) |
 | `island/map.js` | the island as an SVG for the map tab |
+| `island/life.js` | what grows and lives there as numbers: the palms by cell, the terns and tropicbirds by time, the woodhens and turtles stepped |
+| `island/creatures.js` | the palms, terns, tropicbirds, woodhens and turtles drawn, one instanced shape each (draws) |
 | `island/lordhowe.bin`, `lordhowe-shape.js` | made by `scripts/island/lordhowe-build.mjs` from the elevation tiles: the heights (300 KB), the coast, shallows, peaks, arrival |
 | `buildings/` | `shelter.js`, `house.js`: the two drawn (draws) |
 | `menu.js` | the controls sheet |

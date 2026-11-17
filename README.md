@@ -263,6 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (evening, later) — **Lord Howe's life: its palms and its
+  animals** (`src/game/island/life.js`, `creatures.js`; `island.js`, `world.js`,
+  `view.js`, `menu.js`). The island's expected fauna, as Colin asked: kentia
+  palm forest round the body (the same palm in the same place every time,
+  crowns swaying, trunks in your way); sooty terns wheeling over the sea and
+  a band of them over you; red-tailed tropicbirds gliding along Gower's and
+  Lidgbird's cliffs; woodhens on the forest floor, curious if you stand still,
+  scattering if you dash; green turtles cruising the lagoon and coming up to
+  breathe. Game suite 133 (4 new); the `island` smoke 12/12 (528 palms near
+  the beach, 136 terns, 8 tropicbirds, 10 woodhens, 6 turtles) at 60 frames a
+  second.
+
 - **2026-11-17** (evening) — **The first place on the map: Lord Howe Island**
   (`src/game/island/`, `scripts/island/`; `world.js`, `body.js`, `view.js`,
   `menu.js`, `state.js`). Colin: "let's pick a random small island on earth
