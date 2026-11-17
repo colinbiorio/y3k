@@ -6088,6 +6088,12 @@ body.in-void:not(.airden) .chat-air { visibility: hidden; }
 body.in-void.airden .game-hint { translate: -50% -66px; }
 .game-root.locked .game-canvas { cursor: none; }
 .game-bar .game-mode { color: #eceef2; }
+/* the build list: a second row of the bar, the five buildings, those not made yet greyed */
+.game-build { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 2px 0 1px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.game-build[hidden] { display: none; }
+.game-build .login-alt[disabled] { opacity: 0.42; cursor: default; }
+.game-build .login-alt small { margin-left: 5px; font-size: 0.66rem; letter-spacing: 0.02em; }
+.game-build .game-build-down { color: #f2c9b8; }
 /* the hint stands clear of the panel's bottom grip (20px over the hole's edge) and of the chat bar (#chat's own seat) */
 .game-hint { position: absolute; left: 50%; translate: -50% 0; z-index: 2;
   bottom: max(calc(var(--hole-b, 90px) + 46px), calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b, 90px)) + 62px));

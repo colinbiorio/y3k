@@ -32,7 +32,9 @@ import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
 import * as SH from '../src/game/shelter.js';
-import { createWorld, BODY } from '../src/game/world.js';
+import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
+import * as HO from '../src/game/house.js';
+import { solveBoxes, rayBox } from '../src/game/solids.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -1213,10 +1215,11 @@ console.log('the void: what is kept, and the door');
 
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null) });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter' });
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
-  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks });
+  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house' });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house' });
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"building":"castle"}' })).building, 'shelter', 'a building that is not made is the shelter');
   const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
   assert.equal(odd.kind, 'human', 'a kind that is not one of the five is the first');
   assert.deepEqual(odd.looks.human, { ...K.freshLook('human'), dye: 'moss' }, 'an option that is not one of the five is the first; the rest is kept');
@@ -1723,12 +1726,129 @@ ok('the sun inside: through the skylight from overhead, through the doorway when
   assert.equal(w.wet(...at(0, 0, 0).filter((_, i) => i !== 1)), false, 'no water on its floor'); assert.equal(w.wet(40, 40), true);
 });
 
+// a body in a house, stepped in the world's steps with the keys held (move: [right, forward]) at the eye's yaw
+function houseWalk(body, b, move, yaw, seconds, extra = {}) { walk(body, move, yaw, seconds, extra); const [lx, lz] = HO.toLocal(b, body.p[0], body.p[2]); return { lx, lz, y: body.p[1] }; }
+function aHouse() {
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
+  w.build(body, 'house'); w.update(10);
+  return { w, body, b: w.buildings[0] };
+}
+
+ok('a body against boxes: a step is stood on, a wall pushes it out the short way, an underside it was below is a ceiling; a ray leaves a box where it should', () => {
+  const step = { x0: 0, x1: 1, z0: 0, z1: 1, y0: 0, y1: 0.3 }, wall = { x0: 2, x1: 3, z0: -5, z1: 5, y0: 0, y1: 3 }, lid = { x0: -1, x1: 1, z0: -1, z1: 1, y0: 2, y1: 2.2 };
+  near(solveBoxes([step], 0.5, -0.2, 0, 0, 0.3, 1.7, 0.35).floor, 0.3, 1e-12, 'a step under the edge of the body');
+  const r = solveBoxes([wall], 1.85, 0, 0, 0, 0.3, 1.7, 0.35); near(r.lx, 1.7, 1e-9, 'out of the wall'); assert.ok(r.hit);
+  near(solveBoxes([lid], 0, 0, 0.5, 0.2, 0.3, 1.7, 0.35).ceiling, 2, 1e-12, 'a lid over the head');
+  const inside = solveBoxes([wall], 2.6, 0, 0, 0, 0.3, 1.7, 0.35); near(inside.lx, 3.3, 1e-9, 'its middle inside the wall: out by the nearer face');
+  near(rayBox(wall, [0, 1, 0], [1, 0, 0]), 2, 1e-12); near(rayBox(wall, [2.5, 1, 0], [1, 0, 0]), 0.5, 1e-12, 'from inside, where it leaves');
+  assert.equal(rayBox(wall, [0, 1, 0], [-1, 0, 0]), Infinity);
+});
+
+ok('the house: six by nine on its piers, a steep thatched roof (52°) to a ridge 7.3 m up, a porch, a room open to its roof, a loft over its back', () => {
+  const P = HO.SOLIDS.find((s) => s.part === 'platform');
+  near(P.x1 - P.x0, 6, 1e-9, 'six across'); near(P.z1 - P.z0, 9, 1e-9, 'nine long'); near(P.y1, HO.HOUSE.floor, 1e-9);
+  near(HO.TAN, Math.tan((52 * Math.PI) / 180), 1e-12); within(HO.RIDGE, 7.2, 7.4, 'the ridge');
+  assert.ok(HO.roofIn(HO.HOUSE.half - HO.HOUSE.wall) > HO.HOUSE.top, 'the thatch rests on the walls');
+  const standing = HO.HOUSE.plate - (HO.HOUSE.loft.top + BODY.tall - HO.HOUSE.top) / HO.TAN;
+  assert.ok(standing > 1.3, 'a body stands up in the loft, over ' + (2 * standing).toFixed(2) + ' m of it');
+  assert.ok(HO.inRoom(0, 1.5, 0) && HO.inRoom(0, 1.5, -3) && HO.inRoom(0, 3.6, -3) && !HO.inRoom(0, 3.06, -3), 'the room, under the loft, in the loft; not the loft\'s floor');
+  assert.ok(HO.inPorch(0, 1.5, 3.6) && !HO.inRoom(0, 1.5, 3.6), 'the porch is not the room');
+  assert.ok(HO.RAIL < HO.HOUSE.plate && HO.roofIn(HO.RAIL) >= HO.HOUSE.loft.top + 0.85, 'the loft\'s rail ends where the roof meets it');
+});
+
+ok('a house goes up in front of the body, its steps toward it; up the steps, across the porch, in at its door; its walls, its table and its stove hold the body; its platform is too high to step onto from the side', () => {
+  const { w, body, b } = aHouse();
+  const [sx, sz] = HO.toWorld(b, 0, HO.REACH_Z);
+  near(Math.hypot(sx - 0, sz - 0), 1.5, 1e-9, 'the outer step a stride and a half in front');
+  let q = houseWalk(body, b, [0, 1], Math.PI, 2.2);
+  assert.ok(q.lz < HO.HOUSE.porch && q.y === HO.HOUSE.floor && w.inside(body.p)?.kind === 'house', 'up the steps and in: ' + JSON.stringify(q));
+  q = houseWalk(body, b, [0, 1], Math.PI, 3);
+  near(q.lz, HO.HOUSE.back + HO.HOUSE.wall + BODY.rad, 1e-6, 'the back wall');
+  // the table: walked at from beside it
+  const [tx, tz] = HO.toWorld(b, 0.4, 0.4); body.p = [tx, HO.HOUSE.floor, tz]; body.v = [0, 0, 0]; body.grounded = true;
+  q = houseWalk(body, b, [1, 0], Math.PI, 1.5);                         // the eye looks along +z: its right is the house's +x (the house faces it)
+  assert.ok(Math.abs(q.lx - (1.0 - BODY.rad)) < 1e-6, 'the table: ' + JSON.stringify(q));
+  // the platform's side: walked at from the water it holds the body out; it does not lift it
+  const s2 = B.createBody({ world: w }); const [ox, oz] = HO.toWorld(b, -5, 0); s2.p = [ox, 0, oz];
+  walk(s2, [0, 1], Math.atan2(-(b.x - ox), -(b.z - oz)), 2);
+  const [lx2] = HO.toLocal(b, s2.p[0], s2.p[2]); near(lx2, -HO.HOUSE.half - BODY.rad, 1e-6, 'held at the platform\'s edge'); near(s2.p[1], 0, 1e-9, 'and not lifted');
+});
+
+ok('the ladder: pushed toward it the body climbs onto the loft; it walks there; pushed away at the top it climbs down; let alone it hangs; a jump lets go; the rail keeps it off the loft\'s edge', () => {
+  const { w, body, b } = aHouse();
+  const [x0, z0] = HO.toWorld(b, HO.HOUSE.ladder.x, -0.6); body.p = [x0, HO.HOUSE.floor, z0]; body.was = [...body.p]; body.v = [0, 0, 0]; body.grounded = true;
+  let q = houseWalk(body, b, [0, 1], Math.PI, 0.6);
+  assert.ok(body.climbing && q.y > 0.6, 'climbing: ' + JSON.stringify(q));
+  const hold = q.y; q = houseWalk(body, b, [0, 0], Math.PI, 0.5); near(q.y, hold, 1e-6, 'let alone it hangs');
+  q = houseWalk(body, b, [0, 1], Math.PI, 2.5);
+  assert.ok(!body.climbing && body.grounded && Math.abs(q.y - HO.HOUSE.loft.top) < 1e-9 && q.lz < HO.HOUSE.loft.z, 'on the loft: ' + JSON.stringify(q));
+  q = houseWalk(body, b, [1, 0], Math.PI, 1.0); q = houseWalk(body, b, [0, -1], Math.PI, 1.0);       // along the loft, away from the ladder's gap; then back to its edge
+  near(q.lz, HO.HOUSE.loft.z - 0.06 - BODY.rad, 1e-6, 'the rail holds it at the edge'); near(q.y, HO.HOUSE.loft.top, 1e-9, 'it did not fall');
+  // back to the ladder's gap and down
+  const [x1, z1] = HO.toWorld(b, HO.HOUSE.ladder.x, -2.4); body.p = [x1, HO.HOUSE.loft.top, z1]; body.was = [...body.p]; body.v = [0, 0, 0]; body.grounded = true;
+  q = houseWalk(body, b, [0, -1], Math.PI, 3.5);
+  assert.ok(!body.climbing && body.grounded && Math.abs(q.y - HO.HOUSE.floor) < 1e-9, 'down again: ' + JSON.stringify(q));
+  // a jump lets go part way up
+  const [x2, z2] = HO.toWorld(b, HO.HOUSE.ladder.x, -0.6); body.p = [x2, HO.HOUSE.floor, z2]; body.was = [...body.p]; body.grounded = true;
+  houseWalk(body, b, [0, 1], Math.PI, 0.9); assert.ok(body.climbing);
+  houseWalk(body, b, [0, 0], Math.PI, B.STEP, { jumpPressed: true, jump: true }); assert.ok(!body.climbing, 'let go');
+  q = houseWalk(body, b, [0, 0], Math.PI, 1.5); assert.ok(body.grounded && Math.abs(q.y - HO.HOUSE.floor) < 1e-9, 'it falls to the floor');
+});
+
+ok('in the loft the roof keeps a head under it: walked toward the eaves a body is held where its head meets the thatch; the room\'s floor under the loft has a ceiling', () => {
+  const { body, b } = aHouse();
+  const [x0, z0] = HO.toWorld(b, 0.0, -3.0); body.p = [x0, HO.HOUSE.loft.top, z0]; body.was = [...body.p]; body.grounded = true;
+  const q = houseWalk(body, b, [1, 0], Math.PI, 2);                    // toward the eaves on the house's +x
+  const head = HO.HOUSE.loft.top + BODY.tall, lim = HO.HOUSE.plate - (head - HO.HOUSE.top) / HO.TAN - BODY.rad;
+  assert.ok(Math.abs(Math.abs(q.lx) - lim) < 1e-6 || Math.abs(q.lx) < lim + 1e-6, 'held at ' + q.lx.toFixed(3) + ', its limit ' + lim.toFixed(3));
+  assert.ok(HO.roofIn(Math.abs(q.lx) + BODY.rad) >= head - 1e-6, 'its head under the thatch');
+  const under = B.createBody({ world: body.world }), [ux, uz] = HO.toWorld(b, 0, -3); under.p = [ux, HO.HOUSE.floor, uz]; under.was = [...under.p];
+  let top = 0; walk(under, [0, 0], Math.PI, 0.05, { jumpPressed: true, jump: true });
+  for (let t = 0; t < 1.5; t += B.STEP) { under.was = [...under.p]; B.stepBody(under, { move: [0, 0], yaw: Math.PI, jump: true }, B.STEP); top = Math.max(top, under.p[1]); }
+  near(top + BODY.tall, HO.HOUSE.loft.under, 1e-6, 'a jump under the loft stops at its floor');
+});
+
+ok('the house to the eye: a body in its room (or loft) keeps the eye in the room; outside, the eye stays out of its walls and roof; the sun gets in by the round window and by the doorway under the porch', () => {
+  const b = { kind: 'house', x: 0, z: 0, yaw: 0, t: 10, down: -1 }, at = (lx, y, lz) => { const [x, z] = HO.toWorld(b, lx, lz); return [x, y, z]; };
+  const head = at(0, 2.2, -0.5), back = at(0, 3.5, 6), t = HO.eyeRoom(b, head, back), q = head.map((v, i) => v + (back[i] - v) * t);
+  assert.ok(t < 1 && HO.inRoom(...(() => { const [lx, lz] = HO.toLocal(b, q[0], q[2]); return [lx, q[1], lz]; })(), 0.1), 'kept in the room: ' + t.toFixed(3));
+  const loftHead = at(-1, 4.8, -3), behind = at(-1, 5.4, 2), tl = HO.eyeRoom(b, loftHead, behind);
+  assert.ok(tl > 0.6, 'from the loft it may stand in the room\'s air behind: ' + tl.toFixed(3));
+  const out1 = at(0, 2, 8), out2 = at(0, 2.5, 14); near(HO.eyeRoom(b, out1, out2), 1, 1e-9, 'outside, in front: nothing in the way');
+  const side = at(6, 1.8, 0), across = at(-6, 2.2, 0); assert.ok(HO.eyeRoom(b, side, across) < 0.4, 'not through the walls');
+  const roofTop = at(0, 9, 0), down = at(0, 2, 0); assert.ok(HO.eyeRoom(b, roofTop, down) < 0.3, 'not down through the thatch');
+  const unit = (v) => { const m = Math.hypot(...v); return v.map((c) => c / m); };
+  assert.equal(HO.sunLocal(1.4, 1.7, HO.HOUSE.window.z, unit([1, 0.25, 0])), 1, 'by the round window');
+  assert.equal(HO.sunLocal(-1.4, 1.7, HO.HOUSE.window.z, unit([-1, 0.25, 0])), 0, 'the left wall has none');
+  assert.equal(HO.sunLocal(0, 0.6, 1.0, unit([0, 0.3, 1])), 1, 'by the doorway, a low sun in front');
+  assert.equal(HO.sunLocal(0, 0.6, 1.0, unit([0, 1.2, 1])), 0, 'a high one is caught by the porch\'s ceiling');
+  assert.equal(HO.sunLocal(0, 0.6, 1.0, unit([0, 0.3, 1]), 0), 0, 'not through a shut door');
+  assert.equal(HO.sunLocal(0.5, 0.6, -3.5, unit([1, 0.3, 0])), 0, 'under the loft, its floor and the walls shade it');
+});
+
+ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
+  assert.equal(w.build(body, 'shelter').did, 'up'); w.update(10);
+  const blocked = w.build(body, 'house'); assert.equal(blocked.did, 'blocked'); assert.equal(blocked.b.kind, 'shelter');
+  body.p = [30, 0, 0]; assert.equal(w.build(body, 'house').did, 'up'); w.update(10);
+  assert.deepEqual(w.standing().map((b) => b.kind).sort(), ['house', 'shelter'], 'both stand');
+  body.p = [80, 0, 0]; w.build(body, 'house'); w.update(HO.HOUSE.build.down + 0.1);
+  assert.equal(w.buildings.filter((b) => b.kind === 'house').length, 1, 'a second house took the first down');
+  const h = w.buildings.find((b) => b.kind === 'house'), [dx, dz] = HO.doorWorld(h);
+  assert.ok(w.wet(500, 500) && !w.wet(...HO.toWorld(h, 0, 4.9)), 'its steps are dry while it stands, the open water wet');
+  body.p = [dx, 0, dz];
+  assert.equal(w.toggle(body, 'shelter').did, 'down', 'the key at its door takes it down');
+  assert.deepEqual(BUILDINGS.map((x) => x.kind), ['shelter', 'house', 'workshop', 'tower', 'hall']);
+  assert.deepEqual(BUILDINGS.filter((x) => x.ready).map((x) => x.kind), Object.keys(KINDS), 'what is offered is what is made');
+});
+
 ok('the build key is an action like the others: two keys, a pad button, in the controls; the world is wired to the body, the eye, the light and the water', () => {
   const b = I.defaults();
   assert.deepEqual(b.keys.build, ['KeyB', '']); assert.equal(b.pad.build, 2);
   assert.ok(I.ACTIONS.find((a) => a.id === 'build')?.note);
   const view = read('src/game/view.js');
-  for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', "(b.kind === 'house' ? createHouseArt : createShelterArt)"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/buildings/house.js').includes("from '../house.js'"), 'the house drawn is not the numbers\' house');
   assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
 });
 

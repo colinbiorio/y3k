@@ -1,59 +1,90 @@
 // world.js — WHAT STANDS IN THE VOID, as numbers: the buildings a person has
-// put up (for now the shelter, the first of five), and what they ask of a
-// body (where it may go, what it stands on, how high it may reach), of the
-// eye (where it may stand), and of the light (whether the sun reaches a point
-// inside). No page, no three: the suite runs it; buildings/ draws it.
+// put up (the shelter and the house, of the five), and what they ask of a
+// body (where it may go, what it stands on, how high it may reach, a ladder to
+// climb), of the eye (where it may stand), and of the light (whether the sun
+// reaches a point inside). No page, no three: the suite runs it; buildings/
+// draws it.
 //
-// One shelter at a time: building another takes the first down. They stand as
-// long as the page does, as the body does (stage 6 will keep things).
+// One of each kind stands at a time: building another of a kind takes the
+// first down. A building is not put up over another. They stand as long as the
+// page does, as the body does (stage 6 will keep things).
 import * as SH from './shelter.js';
+import * as HO from './house.js';
 
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
-export const REACH = 8;                               // m: a building this near is the one the build key takes down
+export const REACH = 9;                               // m: within this of a building's door, the build key takes it down
+
+// the kinds, each as its module answers: placing, solving, inside, the eye, the sun, how it goes up, where its door is
+export const KINDS = {
+  shelter: { name: 'shelter', place: SH.placeShelter, solve: SH.solve, inside: SH.inside, eyeRoom: SH.eyeRoom, sunIn: SH.sunIn, phase: SH.phase, door: SH.doorWorld, dry: SH.dry, foot: SH.FOOT },
+  house: { name: 'house', place: HO.placeHouse, solve: HO.solve, inside: HO.inside, eyeRoom: HO.eyeRoom, sunIn: HO.sunIn, phase: HO.phase, door: HO.doorWorld, dry: HO.dry, foot: HO.FOOT },
+};
+// the five, in the order they are offered; those not yet made say so
+export const BUILDINGS = [
+  { kind: 'shelter', label: 'shelter', ready: true }, { kind: 'house', label: 'house', ready: true },
+  { kind: 'workshop', label: 'workshop', ready: false }, { kind: 'tower', label: 'tower', ready: false }, { kind: 'hall', label: 'hall', ready: false },
+];
+export const cleanBuilding = (k) => (KINDS[k] ? k : 'shelter');
+const K = (b) => KINDS[b.kind];
 
 export function createWorld() {
   const w = {
     buildings: [],
-    // the build key: near a standing building, it is taken down; else one goes up in front of the body
-    toggle(body) {
-      const near = w.near(body.p);
-      if (near && near.down < 0) { near.down = 0; return { did: 'down', b: near }; }
-      for (const b of w.buildings) if (b.down < 0) b.down = 0;
-      const b = SH.placeShelter(body);
+    // a building of a kind put up in front of the body: another of its kind comes down; one would stand on another: not built
+    build(body, kind = 'shelter') {
+      const k = KINDS[cleanBuilding(kind)], b = k.place(body);
+      for (const o of w.buildings) if (o.down < 0 && o.kind !== b.kind && Math.hypot(o.x - b.x, o.z - b.z) < k.foot + K(o).foot) return { did: 'blocked', b: o };
+      for (const o of w.buildings) if (o.down < 0 && o.kind === b.kind) o.down = 0;
       w.buildings.push(b);
       return { did: 'up', b };
     },
-    near(p) { let best = null, bd = REACH; for (const b of w.buildings) { const d = Math.hypot(p[0] - b.x, p[2] - b.z); if (d < bd) { bd = d; best = b; } } return best; },
+    // the build key: near a standing building's door it is taken down; else the kind chosen goes up
+    toggle(body, kind = 'shelter') {
+      const near = w.near(body.p);
+      if (near) { near.down = 0; return { did: 'down', b: near }; }
+      return w.build(body, kind);
+    },
+    near(p) {
+      let best = null, bd = REACH;
+      for (const b of w.buildings) {
+        if (b.down >= 0) continue;
+        const [dx, dz] = K(b).door(b), d = Math.min(Math.hypot(p[0] - dx, p[2] - dz), K(b).inside(b, p[0], p[2], p[1]) ? 0 : Infinity);
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best;
+    },
     // time passes: what is going up goes on up; what is coming down comes down and is gone
     update(dt) {
       for (const b of w.buildings) { if (b.down >= 0) b.down += dt; else b.t += dt; }
-      w.buildings = w.buildings.filter((b) => !SH.phase(b).gone);
+      w.buildings = w.buildings.filter((b) => !K(b).phase(b).gone);
     },
     // the origin moved under the body (rings.js, rebase): the same places in new numbers
     shift(dx, dz) { for (const b of w.buildings) { b.x -= dx; b.z -= dz; } },
     standing: () => w.buildings.filter((b) => b.down < 0),
-    // a body's step against everything standing (body.js calls it): pushed out of walls; its head kept under
-    // ceilings. Answers the floor under it.
+    // a body's step against everything standing (body.js calls it): pushed out of walls, its head kept under
+    // ceilings, a ladder found (s.climb). Answers the floor under it.
     solve(s) {
-      let floor = 0, ceiling = Infinity;
+      let floor = 0, ceiling = Infinity, climb = null;
       for (const b of w.buildings) {
         if (b.down >= 0) continue;
-        const r = SH.solve(b, s.p, s.was || s.p, BODY.rad, BODY.tall);
+        const r = K(b).solve(b, s.p, s.was || s.p, BODY.rad, BODY.tall, STEP_UP);
         s.p[0] = r.p[0]; s.p[2] = r.p[2];
         floor = Math.max(floor, r.floor); ceiling = Math.min(ceiling, r.ceiling);
+        if (r.climb) climb = r.climb;
       }
+      s.climb = climb;
       if (s.p[1] + BODY.tall > ceiling) { s.p[1] = Math.max(floor, ceiling - BODY.tall); if (s.v[1] > 0) s.v[1] = 0; s.rising = false; }
       return floor;
     },
     // which building a point is inside (feet at y), if any
-    inside(p) { for (const b of w.buildings) if (b.down < 0 && SH.inside(b, p[0], p[2], p[1])) return b; return null; },
+    inside(p) { for (const b of w.buildings) if (b.down < 0 && K(b).inside(b, p[0], p[2], p[1])) return b; return null; },
     // how far along from the body's head toward the eye the eye may stand
-    eye(from, to) { let t = 1; for (const b of w.buildings) if (b.down < 0) t = Math.min(t, SH.eyeRoom(b, from, to)); return t; },
+    eye(from, to) { let t = 1; for (const b of w.buildings) if (b.down < 0) t = Math.min(t, K(b).eyeRoom(b, from, to)); return t; },
     // whether the sun reaches a point (1) or the building it is in shades it (0); in the open, 1
-    sunAt(p, sun, doorOpen = 1) { const b = w.inside(p); return b ? SH.sunIn(b, p[0], p[1], p[2], sun, doorOpen) : 1; },
-    // the water a body treads on: none on a building's floor
-    wet(x, z) { for (const b of w.buildings) if (b.down < 0 && Math.hypot(...SH.toLocal(b, x, z)) < SH.SHELTER.out) return false; return true; },
+    sunAt(p, sun, doorOpen = 1) { const b = w.inside(p); return b ? K(b).sunIn(b, p[0], p[1], p[2], sun, doorOpen) : 1; },
+    // the water a body treads on: none on a building's floor or its steps
+    wet(x, z) { for (const b of w.buildings) if (b.down < 0 && K(b).dry(b, x, z)) return false; return true; },
   };
   return w;
 }
