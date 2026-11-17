@@ -135,6 +135,19 @@ export function createPyramidScene(stage, { rows, spec, reach = 9 }) {
   person.position.set(BASE_M / 2 + 4, 0.875, BASE_M / 2 + 4); person.castShadow = true;
   group.add(person);
 
+  // the far side of the desert: a low ring of dunes rising beyond three kilometres, so the horizon is
+  // land and not only haze (the picture's, not the survey's)
+  { const n = 360, pos = [], idx = [];
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const h = 18 + 30 * (0.5 + 0.5 * Math.sin(a * 3 + 1.3)) * (0.55 + 0.45 * Math.sin(a * 11 + 0.4)) + 9 * Math.sin(a * 29 + 2.1) + 4 * Math.sin(a * 71);
+      pos.push(c * 2900, -0.5, s * 2900, c * 3700, h, s * 3700, c * 4600, h * 0.55, s * 4600);
+    }
+    for (let i = 0; i < n; i++) { const a = i * 3, b = a + 3; idx.push(a, a + 1, b, a + 1, b + 1, b, a + 1, a + 2, b + 1, a + 2, b + 2, b + 1); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: rgb(156, 128, 98), roughness: 1, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.2 }))); }
+
   const lBase = stage.label(labels).say(`${BASE_M.toFixed(2)} m`), lTop = stage.label(labels).say(`${HEIGHT_M.toFixed(2)} m`), lCourse = stage.label(labels, 'tag on'), lPerson = stage.label(labels).say('a person, 1.75 m');
   lBase.pos.set(0, 0, BASE_M / 2 + 9); lBase.on = true;
   lTop.pos.set(0, HEIGHT_M + 5, 0); lTop.on = true;
