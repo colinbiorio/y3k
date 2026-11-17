@@ -54,7 +54,9 @@ Said to Colin before starting, and standing until he says otherwise.
 - **A person's presence travels with them**, as their companion.
 - **Alone and on the web first.** Sharing the world, and a download, later.
 - **Nothing has pixels that can be a function.** The sky, the water, its rings
-  and the five bodies are arithmetic: as sharp as the screen. The only files
+  and the five bodies are arithmetic: as sharp as the screen. (Since 17 Nov the
+  human's face, hands and the hair on its head are a mesh: MakeHuman's base,
+  released CC0, kept as numbers in `src/game/bodies/kin.js`; still no picture.) The only files
   fetched are six small grey tiles that give a surface its weave or its
   grain, and five cards in the body sheet. ("prioritize high quality, smooth
   graphics with the least pixelation".)
@@ -274,10 +276,16 @@ and skin tiles are now 512 pixels, from the same pictures (`art/v2/`). The
 octopus's arms end in points, turned toward their own side
 ("the octopus is pretty close besides the cut off tentacle arms").
 
+17 November 2026, later: the human with MakeHuman's face, hands and hair
+(`void-smoke.mjs bodies gpu`: the five kinds worn, the 125 options put on,
+each kind walked; 46 checks, no errors). Looked at by eye in each hair style,
+from the front, the three-quarter and the side.
+
 ### Rough edges, known
 
-- The human: the shaved head is a cap of stubble with a hard edge; the heavy
-  build's jacket has puffed shoulders; in a dash the wrap's skirt streams
+- The human (its face, hands and short hair MakeHuman's since 17 Nov): its
+  neck is a little long for its collar, and its face one neutral face for all
+  five skins; the heavy build's jacket has puffed shoulders; in a dash the wrap's skirt streams
   behind; a braid under a cloak hangs between the back and the cloak.
 - The robot's iron is dark plate on dark plate, and its rim of light is a
   white fringe against the pale sky. The mantis's fan wings hide its legs
@@ -454,6 +462,11 @@ they were made from are kept outside the repository.
 
 A 3D model, music and sound cannot be had from it without spending, so the
 bodies are arithmetic, and sound, when it comes, will be made in the browser.
+The one exception came from elsewhere, free: the human's face, hands and hair
+are MakeHuman's base mesh and default skeleton (released CC0 1.0 by their
+makers in September 2020), a neutral adult, shaped and posed by
+`scripts/kin/mh_build.py` into numbers (`src/game/bodies/kin.js`, 355
+kilobytes).
 Two more briefs are written and not yet run: the buildings, ships and
 weapons, and more surfaces. Whatever goes into the game is kept small and
 written down here, with what made it.

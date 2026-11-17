@@ -2,7 +2,9 @@
 //
 // The first of the five kinds (../kinds.js); its five choices are hair,
 // build, clothing, skin and dye. Drawn on the two-legged rig (./biped.js)
-// with the tools in ../shape.js: nothing here is a model file.
+// with the tools in ../shape.js; its face, its hands and the hair on its
+// head are MakeHuman's CC0 mesh, as numbers (./kin.js), since 17 Nov 2026
+// (Colin, 15 Nov: "the human isn't realistic whatsoever").
 //
 // The picture it was drawn from is ../art/v2/human.webp: a long sleeveless
 // coat of rust wool, open below a woven belt; pale plates on the shoulders,
@@ -12,11 +14,13 @@
 // scarf (now), a close suit under ceramic with seams that glow (to come).
 // Hair that hangs (the tail, the braid) is a line of points that swings, as
 // the cloth is; so no two of the twenty-five looks stand quite alike.
+import * as THREE from 'three';
 import { DoubleSide } from 'three';
 import { SKIN, DYE } from '../kinds.js';
-import { loft, limb, along, ball, hoop, placed, kit, pipe, panel, on, cloth, tube, stuff, shade, TILE } from '../shape.js';
+import { loft, limb, along, ball, hoop, placed, kit, pipe, panel, on, cloth, tube, stuff, shade, surfaced, TILE } from '../shape.js';
 import { createBiped } from './biped.js';
 import { bodyOf, wide, squared, sided } from './common.js';
+import { HEAD as FACE, HAND, CROP as CROPPED, SHAVED as SHORN, EYES, HAIR_AT, CURLS } from './kin.js';
 
 const PI = Math.PI;
 // two colours, k of the way from the first to the second
@@ -36,13 +40,6 @@ const CUT = {
 // [height, half-width, half-depth | [front, back], where its middle is (z)]
 const PELVIS = squared([[-0.1, 0.07, [0.07, 0.08]], [-0.04, 0.15, [0.09, 0.105]], [0.02, 0.168, [0.095, 0.115]], [0.08, 0.15, [0.09, 0.1]], [0.13, 0.135, [0.085, 0.09]]], 2.3);
 const TORSO = squared([[-0.02, 0.144, [0.097, 0.102]], [0.06, 0.134, [0.091, 0.095]], [0.16, 0.144, [0.1, 0.1]], [0.27, 0.166, [0.116, 0.108]], [0.36, 0.172, [0.108, 0.105]], [0.415, 0.15, [0.09, 0.095]], [0.455, 0.088, [0.07, 0.075], -0.005], [0.48, 0.06, [0.056, 0.06], -0.008]], 2.4);
-const HEAD = [[0.012, 0.045, [0.075, 0.03], 0.01], [0.04, 0.062, [0.085, 0.05], 0.005], [0.075, 0.07, [0.09, 0.068]], [0.115, 0.076, [0.092, 0.085], -0.002], [0.15, 0.078, [0.091, 0.096], -0.004], [0.178, 0.078, [0.09, 0.098], -0.005]];
-const CROP = [[0.066, 0.05, [0.001, 0.07], -0.004], [0.11, 0.0805, [0.001, 0.092], -0.004], [0.15, 0.085, [0.034, 0.104], -0.006], [0.176, 0.086, [0.062, 0.107], -0.006], [0.198, 0.085, [0.096, 0.104], -0.004]];
-// shaved: the head's own shape a hair's breadth proud of it, from the nape, round the ears, to where the brow ends
-// (`crown`: the head's round top at a height; DOME is how high that top is, as HEAD is capped below)
-const DOME = 0.88 * 0.078, crown = (y, out, front = 1) => { const sn = (y - 0.178) / DOME, cs = Math.sqrt(1 - sn * sn); return [y, 0.078 * cs + out, [(0.09 * cs + out) * front, 0.098 * cs + out], -0.005]; };
-const SHAVED = [[0.056, 0.0677, [0.001, 0.0602], 0.0027], [0.075, 0.072, [0.001, 0.07]], [0.115, 0.078, [0.004, 0.087], -0.002], [0.15, 0.08, [0.04, 0.098], -0.004], [0.178, 0.08, [0.07, 0.1], -0.005],
-  crown(0.19, 0.002, 0.93), crown(0.2, 0.002), crown(0.213, 0.002), crown(0.226, 0.002), crown(0.238, 0.002)];
 // a tail and a braid: how thick each is, point by point from where it is bound ([across, through] for the braid: it lies flat)
 const TAIL = [0.017, 0.026, 0.028, 0.026, 0.022, 0.017, 0.011, 0.005];
 const BRAID = Array.from({ length: 14 }, (_, i) => { const k = (i % 2 ? 0.74 : 1) * (1 - 0.3 * i / 13) * (i === 13 ? 0.45 : 1); return [0.019 * k, 0.014 * k]; });
@@ -55,14 +52,56 @@ const FOOT = squared([[-0.05, 0.03, [0.03, 0.03], 0.05], [-0.02, 0.041, [0.034, 
 const UPPER = [[0, 0.056, 0.058], [0.3, 0.052, 0.056], [0.75, 0.042, 0.046], [1, 0.038, 0.04]];
 const FORE = [[0, 0.04, 0.042], [0.25, 0.042, 0.046], [0.7, 0.032, 0.034], [1, 0.027, 0.024]];
 
+// The face, the hands and the hair on the head are MakeHuman's (./kin.js: a CC0 mesh, numbers only). Each is decoded
+// once; every body gets its own copy, since a right hand is a left one mirrored in place (../shape.js).
+const decoded = new Map();
+const raw = (b64, T) => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new T(u.buffer); };
+function kin(part, uvScale = 8) {
+  if (!decoded.has(part)) {
+    const pos = raw(part.pos, Int16Array), nrm = raw(part.nrm, Int8Array), uv = part.uv ? raw(part.uv, Uint16Array) : null;      // hair has no map, and no UVs
+    decoded.set(part, { pos: Float32Array.from(pos, (x) => x * 1e-5), nrm: Float32Array.from(nrm, (x) => x / 127), uv: uv ? Float32Array.from(uv, (x) => (x / 65535) * uvScale) : null,
+      idx: raw(part.idx, Uint16Array), col: part.col ? Float32Array.from(raw(part.col, Uint8Array), (x) => x / 255) : null });
+  }
+  const d = decoded.get(part), g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(d.pos.slice(), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(d.nrm.slice(), 3));
+  if (d.uv) g.setAttribute('uv', new THREE.BufferAttribute(d.uv.slice(), 2));
+  if (d.col) g.setAttribute('color', new THREE.BufferAttribute(d.col.slice(), 3));
+  g.setIndex(new THREE.BufferAttribute(d.idx.slice(), 1));
+  return g;
+}
+// an eye: white, its iris and pupil looking down +Z (a sphere's +Z is its map's u = 0.25, v = 0.5)
+let eyeMap = null;
+function eyeTexture() {
+  if (eyeMap || typeof document === 'undefined') return eyeMap;
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const g = c.getContext('2d'), cx = 64, cy = 64;
+  g.fillStyle = '#e8e1d8'; g.fillRect(0, 0, 256, 128);
+  let r = g.createRadialGradient(cx, cy, 14, cx, cy, 30); r.addColorStop(0, 'rgba(0,0,0,0)'); r.addColorStop(1, 'rgba(120,90,80,0.25)');
+  g.fillStyle = r; g.fillRect(0, 0, 256, 128);
+  r = g.createRadialGradient(cx, cy, 2, cx, cy, 19); r.addColorStop(0, '#6b4a2f'); r.addColorStop(0.7, '#4a3020'); r.addColorStop(1, '#1d130d');
+  g.fillStyle = r; g.beginPath(); g.arc(cx, cy, 19, 0, 2 * Math.PI); g.fill();
+  g.strokeStyle = 'rgba(160,120,80,0.35)'; g.lineWidth = 1;
+  for (let i = 0; i < 40; i++) { const a = (i / 40) * 2 * Math.PI; g.beginPath(); g.moveTo(cx + 8 * Math.cos(a), cy + 8 * Math.sin(a)); g.lineTo(cx + 17 * Math.cos(a + 0.05), cy + 17 * Math.sin(a + 0.05)); g.stroke(); }
+  g.fillStyle = '#080605'; g.beginPath(); g.arc(cx, cy, 7, 0, 2 * Math.PI); g.fill();
+  eyeMap = new THREE.CanvasTexture(c); eyeMap.colorSpace = THREE.SRGBColorSpace;
+  return eyeMap;
+}
+
 export function createHuman(look, { lite = false } = {}) {
   const [s, kw, kd, kl] = BUILDS[look.build] || BUILDS.even, kx = 0.3 + 0.7 * kw;
   const rig = createBiped({ scale: s, shoulder: [0.186 * kx, 0.4, 0] });
   const { hips, torso, head, legs, arms, build: B } = rig, S = stuff(lite), K = kit(), cloths = [], strands = [], front = [0, 0, 1];
   const skin = SKIN[look.skin] || SKIN.sand, dye = DYE[look.dye] || DYE.rust;
   const wear = CUT[look.clothing] ? look.clothing : 'coat', [cTop, cArm, cLegs, cBoot] = CUT[wear];
+  // skin with a soft sheen where the machine allows it (light caught in it, as skin does); the face's carries its own tints
+  const skinMat = (tinted = false) => {
+    const m = lite ? S.skin(skin) : surfaced(new THREE.MeshPhysicalMaterial({ color: skin, roughness: 0.58, metalness: 0, sheen: 0.4, sheenRoughness: 0.5, sheenColor: shade(skin, 0.3) }), 'skin', 0.35);
+    m.vertexColors = tinted;
+    return m;
+  };
   const M = {
-    skin: S.skin(skin), hair: S.plain(HAIR[look.skin] || HAIR.sand, { roughness: 0.8 }), eye: S.plain('#130e0c', { roughness: 0.1 }), lip: S.plain(shade(skin, -0.42)),
+    skin: skinMat(), hair: S.plain(HAIR[look.skin] || HAIR.sand, { roughness: 0.8 }),
     top: cTop === 'dye' ? S.wool(dye) : S.linen(cTop), legs: S.linen(cLegs), boot: S.leather(cBoot),
     belt: S.linen('#c9a877'), plate: S.ceramic('#ece6da'), bronze: S.bronze('#a9733d'),
   };
@@ -86,28 +125,21 @@ export function createHuman(look, { lite = false } = {}) {
 
   // ── the chest, the neck and the arms
   K.put(torso, M.top, loft(body, { seg: 24, tile: topTile }));
-  K.put(torso, M.skin, loft([[0.42, 0.055, 0.055, -0.012], [0.5, 0.047, 0.05, -0.008], [0.575, 0.047, 0.052, -0.006]], { seg: 12, cap: [0, 0] }));
+  // the neck, up into the face's own (./kin.js): its last ring is just inside where that one is cut, which leans forward
+  K.put(torso, M.skin, loft([[0.42, 0.055, 0.055, -0.012], [0.458, 0.059, [0.057, 0.047], -0.004], [0.486, 0.0655, [0.07, 0.037], 0]], { seg: 16, cap: [0, 0] }));
   for (const a of arms) {
     K.put(a.shoulder, M.sleeve, limb(0.29, wide(UPPER, kl), { tile: armTile }));
     K.put(a.elbow, M.sleeve, limb(0.26, wide(FORE, kl), { tile: armTile }));
-    K.put(a.hand, M.skin, sided(a.side, limb(0.1, [[0, 0.016, 0.025], [0.3, 0.017, 0.036], [0.75, 0.016, 0.039], [1, 0.014, 0.036]], { seg: 10 })));                       // the palm
-    K.put(a.hand, M.skin, sided(a.side, placed(limb(0.072, [[0, 0.013, 0.035], [0.6, 0.011, 0.031], [1, 0.008, 0.023]], { seg: 10 }), [0, -0.094, 0], [0, 0, -0.45])));   // the fingers, curled in
-    K.put(a.hand, M.skin, sided(a.side, placed(limb(0.06, [[0, 0.011, 0.012], [1, 0.008, 0.009]], { seg: 8 }), [0, -0.03, 0.034], [-0.5, 0, -0.2])));                    // the thumb
+    K.own(a.hand, sided(a.side, kin(HAND)), M.skin);                                // a hand of its own bones, relaxed (./kin.js)
   }
 
-  // ── the head: a face, ears
-  K.put(head, M.skin, loft(HEAD, { seg: 24, sub: 4, cap: [0.3, 0.88], tile: TILE.skin }));
-  const face = on(HEAD), nose = (y) => face(y, PI / 2)[2] - 0.004;
-  for (const side of [1, -1]) {
-    K.put(head, M.eye, placed(ball([0.0125, 0.0075, 0.006], 10), face(0.132, PI / 2 - side * 0.41, -0.002), [0, side * 0.45, 0]));
-    K.put(head, M.hair, pipe([0.2, 0.33, 0.47, 0.6].map((a, i) => face(0.151 + [0, 0.004, 0.004, -0.001][i], PI / 2 - side * a, 0.001)), { radius: () => 0.0032, seg: 5 }));
-    K.put(head, M.skin, placed(ball([0.007, 0.021, 0.012], 8), [side * 0.0775, 0.128, -0.004]));
-  }
-  K.put(head, M.skin, loft([[0.094, 0.0125, [0.014, 0.01], nose(0.094)], [0.106, 0.0115, [0.019, 0.01], nose(0.106)], [0.128, 0.0075, [0.012, 0.01], nose(0.128)], [0.15, 0.0065, [0.006, 0.01], nose(0.15)]], { seg: 8, sub: 2, cap: [0.5, 0.4] }));
-  K.put(head, M.lip, pipe([-0.3, -0.15, 0, 0.15, 0.3].map((a) => face(0.066 - (a ? 0 : 0.0015), PI / 2 + a, 0.0004)), { radius: () => 0.0022, seg: 5 }));
+  // ── the head: MakeHuman's face (./kin.js), its lips, brows and creases in its own tints, and eyes that look out of it
+  K.own(head, kin(FACE), skinMat(true));
+  const eyeMat = S.plain('#ffffff', { map: eyeTexture(), roughness: 0.12 });
+  for (const [x, y, z, r] of EYES) K.own(head, new THREE.SphereGeometry(r, lite ? 14 : 22, lite ? 10 : 16).translate(x, y, z), eyeMat);
 
   // ── the hair: five ways
-  const cap = () => K.put(head, M.hair, loft(CROP, { seg: 24, sub: 3, cap: [0.4, 0.72] }));
+  const cap = () => K.own(head, kin(CROPPED), M.hair);                   // short hair: a shell over the face's own scalp (./kin.js)
   // a length of it that hangs and swings: a line of points held at the back of the head (`root`), leaving it leaning back by
   // `lean`, and drawn as one strand as thick as `thick` says, point by point. It lies on the back, not in it.
   const strand = (root, lean, len, thick) => {
@@ -119,27 +151,22 @@ export function createHuman(look, { lite = false } = {}) {
     if (strands.length === 1) rig.capsule(torso, [0, 0.14, -0.004], torso, [0, 0.43, -0.004], 0.112 * Math.max(kw, kd));
   };
   if (look.hair === 'shaved') {
-    K.put(head, S.plain(mix(skin, HAIR[look.skin] || HAIR.sand, 0.5), { roughness: 0.95 }), loft(SHAVED, { seg: 24, sub: 3, cap: [0, 0.266] }));
+    K.own(head, kin(SHORN), S.plain(mix(skin, HAIR[look.skin] || HAIR.sand, 0.5), { roughness: 0.95 }));
   } else if (look.hair === 'curls') {
-    // the same cap, and a head of curls on it: three rings of them round the crown, one on top, three rows down the back
+    // the same cap, and a head of curls on it: over the crown and down the back (./kin.js: points on the cap, spread out)
     cap();
-    const wall = on(CROP), seg = lite ? 6 : 8, at = [], rnd = (i, k) => { const x = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
-    for (const [a, n, off] of [[0.2, 12, 0], [0.66, 10, 0.3], [1.08, 7, 0.1], [PI / 2, 1, 0]]) for (let i = 0; i < n; i++) {
-      const th = off + 2 * PI * i / n, cs = Math.cos(a), sn = Math.sin(th);
-      at.push([0.085 * cs * Math.cos(th), 0.198 + 0.0612 * Math.sin(a), -0.004 + (sn >= 0 ? 0.096 : 0.104) * cs * sn]);
-    }
-    for (const [y, n, a0, a1] of [[0.168, 8, PI - 0.4, 2 * PI + 0.4], [0.128, 7, PI + 0.1, 2 * PI - 0.1], [0.09, 5, PI + 0.45, 2 * PI - 0.45]]) for (let i = 0; i < n; i++) at.push(wall(y, a0 + (a1 - a0) * i / (n - 1), 0));
-    at.forEach((p, i) => { const r = 0.023 + 0.007 * rnd(i, 1); K.put(head, M.hair, placed(ball([r, r * (0.8 + 0.2 * rnd(i, 2)), r], seg), p)); });
+    const seg = lite ? 6 : 8, rnd = (i, k) => { const x = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
+    CURLS.forEach(([x, y, z, nx, ny, nz], i) => { const r = 0.021 + 0.007 * rnd(i, 1), out = r * 0.42; K.put(head, M.hair, placed(ball([r, r * (0.8 + 0.2 * rnd(i, 2)), r], seg), [x + nx * out, y + ny * out, z + nz * out])); });
   } else if (look.hair === 'tail') {
     // drawn back and bound high in a ring of bronze: the length that hangs from it
     cap();
-    K.put(head, M.bronze, placed(hoop(0.021, 0.0065, [1, 1], 12), [0, 0.168, -0.117], [PI / 2 - 0.55, 0, 0]));
-    strand([0, 0.17, -0.112], 1.1, 0.046, TAIL);
+    K.put(head, M.bronze, placed(hoop(0.021, 0.0065, [1, 1], 12), HAIR_AT.tail, [PI / 2 - 0.55, 0, 0]));
+    strand([0, HAIR_AT.tail[1] + 0.002, HAIR_AT.tail[2] + 0.005], 1.1, 0.046, TAIL);
   } else if (look.hair === 'braid') {
     // drawn back and plaited: one rope of it down the back
     cap();
-    K.put(head, M.hair, placed(ball([0.023, 0.021, 0.017], 10), [0, 0.1, -0.09]));
-    strand([0, 0.098, -0.094], 0.5, 0.034, BRAID);
+    K.put(head, M.hair, placed(ball([0.023, 0.021, 0.017], 10), [0, HAIR_AT.braid[1], HAIR_AT.braid[2] + 0.004]));
+    strand([0, HAIR_AT.braid[1] - 0.002, HAIR_AT.braid[2]], 0.5, 0.034, BRAID);
   } else cap();
 
   // ── what it wears: five things, made of these

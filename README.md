@@ -261,6 +261,22 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **The human has a real face, real hands and hair
+  that fits** (`src/game/bodies/kin.js`, `human.js`; `scripts/kin/`; GAME.md).
+  Colin, 15 Nov: "the human isn't realistic whatsoever". The face, the hands
+  and the hair on the head are now MakeHuman's base mesh and default skeleton,
+  which its makers released as CC0 1.0 (their LICENSE.md: "The base mesh and
+  proxies", "Targets and modifiers"): a neutral adult (half one sex and half the
+  other, a third of each of its three ethnic shapes, aged 25), its lips, brows
+  and creases as tints, eyes with an iris and pupil, the hands curled a little
+  by their own finger bones, set on the game's own head and hand bones. The
+  crop and the shaved head are smooth shells over that scalp with a hairline
+  that is a function (clean, with sideburns), the crop fuller on the crown; the
+  tail, the braid and the curls are placed on it. Skin has a soft sheen. The
+  clothes, the builds and the rig are as they were. `scripts/kin/mh_build.py`
+  makes the numbers again, byte for byte, from MakeHuman's files. 95 game
+  checks (one new, its parts broken once); the bodies smoke 46/46 on the GPU.
+
 - **2026-11-17** (dawn) — **The pyramid: follow the course, and read any
   course by pointing at it** (`src/frequencies.js`). "Follow the course" lifts
   the point the eye looks at with the working surface as the build plays, so

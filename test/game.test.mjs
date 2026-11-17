@@ -27,6 +27,7 @@ import * as K from '../src/game/kinds.js';
 import * as Ch from '../src/game/chooser.js';
 import { leave } from '../src/game/drape.js';
 import * as F from '../src/game/fine.js';
+import * as Kin from '../src/game/bodies/kin.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
@@ -1525,6 +1526,50 @@ ok('a watch that was away drops what it was in the middle of, a try under way ta
   assert.equal(JSON.stringify(w), before);
   // a canvas that came to have fewer steps (another screen): the step is brought within them
   const v = F.createWatch(); v.level = 4; F.watch(v, VS, F.ratios(1, 1280, 800)); assert.equal(v.level, 2);
+});
+
+// ── the human's face and hands (17 Nov 2026). Colin, 15 Nov: "the human isn't realistic whatsoever". They are MakeHuman's
+// CC0 mesh now, in the game's own bone frames (./bodies/kin.js), decoded by ./bodies/human.js.
+const dec = (b64, T) => { const b = Buffer.from(b64, 'base64'); return new T(b.buffer, b.byteOffset, b.byteLength / T.BYTES_PER_ELEMENT); };
+const partOf = (part) => ({ pos: Float32Array.from(dec(part.pos, Int16Array), (x) => x * 1e-5), nrm: dec(part.nrm, Int8Array), idx: dec(part.idx, Uint16Array), uv: part.uv ? dec(part.uv, Uint16Array) : null, col: part.col ? dec(part.col, Uint8Array) : null });
+const within = (x, lo, hi, what) => assert.ok(x >= lo && x <= hi, `${what}: ${x} is not in [${lo}, ${hi}]`);
+const box = (pos) => { const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], pos[i + k]); hi[k] = Math.max(hi[k], pos[i + k]); } return [lo, hi]; };
+
+ok('the human\'s face, hands and hair are MakeHuman\'s CC0 mesh, whole and in its bones\' frames', () => {
+  const src = read('src/game/bodies/kin.js');
+  assert.match(src, /released as CC0 1\.0/); assert.match(src, /makehumancommunity\/makehuman/);
+  assert.ok(statSync(join(ROOT, 'src/game/bodies/kin.js')).size < 400000, 'a few hundred kilobytes of numbers, no more');
+  for (const [name, part] of Object.entries({ HEAD: Kin.HEAD, HAND: Kin.HAND, CROP: Kin.CROP, SHAVED: Kin.SHAVED })) {
+    const d = partOf(part);
+    assert.equal(d.pos.length, part.n * 3, name); assert.equal(d.nrm.length, part.n * 3, name);
+    assert.ok(d.idx.length % 3 === 0 && d.idx.length > 3000 && d.idx.every((i) => i < part.n), name + ': its triangles are its own');
+    for (let i = 0; i < d.nrm.length; i += 3) assert.ok(Math.hypot(d.nrm[i], d.nrm[i + 1], d.nrm[i + 2]) > 100, name + ': a normal of no length');
+    if (d.uv) assert.equal(d.uv.length, part.n * 2, name);
+    if (d.col) assert.equal(d.col.length, part.n * 3, name);
+  }
+  // the head: upright in the head bone's frame (y up from the top of the neck, the face toward +z), its size a head's
+  const [lo, hi] = box(partOf(Kin.HEAD).pos);
+  near(lo[1], -0.02, 1e-4, 'cut level at the neck'); within(hi[1] - lo[1], 0.24, 0.29, 'chin-to-crown with the neck');
+  within(hi[0] - lo[0], 0.15, 0.19, 'ear to ear'); assert.ok(hi[2] > 0.14 && lo[2] > -0.08, 'the nose forward, the back of the head behind');
+  // two eyes, level, either side, in front, an eye's size
+  const [l, r] = Kin.EYES;
+  near(l[0], -r[0], 1e-9, 'either side'); near(l[1], r[1], 1e-9, 'level'); within(l[0], 0.026, 0.036, 'apart'); within(l[3], 0.011, 0.018, 'an eye\'s radius');
+  assert.ok(l[2] > 0.09 && l[1] > 0.11 && l[1] < 0.15, 'in front, at the eyes\' height');
+  // a left hand in the hand bone's frame: the fingers toward -y, the thumb toward +z, the palm toward -x (the body's middle)
+  const hand = partOf(Kin.HAND).pos, [hl, hh] = box(hand);
+  within(-hl[1], 0.12, 0.2, 'wrist to fingertip'); assert.ok(hh[1] < 0.02, 'nothing above the wrist but its crease');
+  let thumb = -Infinity, palm = 0; for (let i = 0; i < hand.length; i += 3) { thumb = Math.max(thumb, hand[i + 2]); palm += hand[i]; }
+  assert.ok(thumb > 0.04, 'the thumb forward'); assert.ok(palm / (hand.length / 3) < -0.005, 'curled toward the palm, which faces in');
+  // hair over the scalp, not the face: its hairline above the eyes in front; the tail and the braid behind the head
+  const crop = partOf(Kin.CROP).pos;
+  for (let i = 0; i < crop.length; i += 3) if (crop[i + 2] > 0.09 && Math.abs(crop[i]) < 0.03) assert.ok(crop[i + 1] > l[1] + 0.03, 'no hair on the face');
+  for (const k of ['tail', 'braid']) { const [x, y, z] = Kin.HAIR_AT[k]; assert.ok(x === 0 && z < -0.05 && y > 0.05, k + ' behind the head'); }
+  assert.ok(Kin.CURLS.length >= 30 && Kin.CURLS.every(([x, y, z, nx, ny, nz]) => Math.abs(Math.hypot(nx, ny, nz) - 1) < 1e-3 && y > 0.04), 'curls over the crown and the back');
+  // …and the human wears them: the face with its tints, the hands mirrored for the right, the hair on the scalp
+  const human = read('src/game/bodies/human.js');
+  for (const line of ['K.own(head, kin(FACE), skinMat(true));', 'K.own(a.hand, sided(a.side, kin(HAND)), M.skin);', 'const cap = () => K.own(head, kin(CROPPED), M.hair);', 'm.vertexColors = tinted;'])
+    assert.ok(human.includes(line), 'human.js lacks: ' + line);
+  assert.match(human, /if \(d\.uv\) g\.setAttribute\('uv'/, 'hair has no UVs, and is still made');
 });
 
 ok('an octopus arm ends in a point and its roll is turned to its own side: it does not look cut off', () => {
