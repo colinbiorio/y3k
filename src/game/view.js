@@ -19,6 +19,13 @@
 // pixels, edges smoothed, turned down only when its own drawing is what makes
 // the frames long. The page's guess at a tier (../gfx.js) is not read.
 //
+// What stands in the void (world.js) is built with the build key: the shelter,
+// first of the five buildings, a few steps in front, its door toward the body.
+// The body is pushed out of its walls and stands on its floor (body.js); the
+// eye comes in rather than go through them; inside, the body is seen by the
+// light that gets in (the hearth, the skylight, the doorway), and its steps
+// make no rings on a dry floor.
+//
 // The body is one of five kinds (kinds.js), made by figure.js as the body
 // sheet (chooser.js) says. While that sheet is open the game does not wait
 // as it does under the controls: the hands are not read, the body turns to
@@ -36,6 +43,9 @@ import { cleanKind, cleanLook } from './kinds.js';
 import { createMenu } from './menu.js';
 import { createChooser, standIn } from './chooser.js';
 import { ratios, createWatch, watch, rest, chosen } from './fine.js';
+import { createWorld, BODY } from './world.js';
+import { SHELTER, phase, doorWorld } from './shelter.js';
+import { createShelterArt } from './buildings/shelter.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
@@ -81,8 +91,12 @@ function stage(lite, st) {
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
     camera.layers.enable(1);            // the sky's dome is on layer 1: this eye sees it, the mirror's does not
     // the body begins with its back to the eye, looking where the eye looks
-    kept = { body: createBody({ yaw: Math.PI }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null };
+    kept = { body: createBody({ yaw: Math.PI }), world: createWorld(), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1 };
+    // the hearths' light: always in the scene (a light that came and went would make every material be compiled again)
+    kept.hearth = new THREE.PointLight(0x8fb4ff, 0, 7, 2);
+    v.scene.add(kept.hearth);
   }
+  kept.body.world = kept.world;
   return kept;
 }
 
@@ -154,10 +168,46 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     let v = null, made = null;
     try { v = createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
     K.figure.dispose(); K.void.dispose();
-    v.scene.add(made.group); made.setEnv(LIGHTS[v.light].env);
+    for (const art of K.arts.values()) art.dispose();
+    K.arts.clear();
+    v.scene.add(made.group, K.hearth); made.setEnv(LIGHTS[v.light].env);
     K.void = v; K.figure = made; K.lite = true; K.worn = worn(st); K.size = null; standT = 0;
     shown(K.body, pos); made.update(K.body, 0, pos);
     size();
+  }
+
+  // the build key: a shelter in front of the body, or the one it is near taken down
+  function buildHere() {
+    if (K.body.flying || !K.body.grounded) { say('stand on the water to build'); return; }
+    const r = K.world.toggle(K.body);
+    if (r.did === 'up') say(touch ? 'a shelter goes up · walk in through its door · build again near it takes it down' : `a shelter goes up · walk in through its door · ${keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build'} again near it takes it down`, 6);
+    else say('the shelter comes down', 3);
+  }
+  // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
+  const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
+  function builds(dt) {
+    const V = K.void, L = LIGHTS[V.light], seen = new Set();
+    SUN.copy(V.key.position).sub(V.key.target.position).normalize();
+    sunCol.set(L.key).multiplyScalar(L.keyAmt);
+    skyCol.set(L.horizon).lerp(new THREE.Color(L.zenith), 0.5).multiplyScalar(0.55 * L.env);
+    let flame = 0, flameAt = null;
+    for (const b of K.world.buildings) {
+      let art = K.arts.get(b);
+      if (!art) { art = createShelterArt({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
+      seen.add(b);
+      const [dx, dz] = doorWorld(b), near = Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || !!K.world.inside(K.body.p);
+      const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol });
+      if (r.flame > flame) { flame = r.flame; flameAt = art.flameAt.clone().applyMatrix4(art.group.matrixWorld); }
+    }
+    for (const [b, art] of K.arts) if (!seen.has(b)) { V.scene.remove(art.group); art.dispose(); K.arts.delete(b); }
+    // the hearth's light; and inside, the body seen by what gets in (the sun's own patch, or the shade)
+    K.hearth.intensity = 2.2 * flame;
+    if (flameAt) K.hearth.position.copy(flameAt);
+    const inside = K.world.inside(K.body.p), head = [K.body.p[0], K.body.p[1] + BODY.tall * 0.8, K.body.p[2]];
+    const want = inside ? 0.12 + 0.88 * K.world.sunAt(head, [SUN.x, SUN.y, SUN.z]) : 1;
+    K.indoor += (want - K.indoor) * ease(5, dt);
+    V.setIndoor(K.indoor);
+    K.figure.setEnv(LIGHTS[V.light].env * (0.3 + 0.7 * K.indoor));
   }
 
   function size() {
@@ -197,13 +247,16 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       eye.pitch = clamp(eye.pitch + inp.look[1], PITCH[0], PITCH[1]);
       if (inp.zoom) { st.zoom = clamp(st.zoom * Math.exp(inp.zoom), ZOOM.min, ZOOM.max); saveT = now + 600; }
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
+      if (inp.build) buildHere();
       if (inp.menu) openMenu();
+      K.world.update(dt);
       advance(body, { ...inp, yaw: eye.yaw, pitch: eye.pitch }, dt);
       // what the body did, on the water
       for (const e of body.events.splice(0)) {
         const at = e.at || body.p;
-        if (e.type === 'jump') V.drop(at[0], at[2], 0.2);
-        else if (e.type === 'land') { figure.land(e.speed); V.drop(at[0], at[2], clamp(0.12 + 0.045 * e.speed, 0.12, 0.6)); if (e.speed > 5) V.drop(at[0] + 0.05, at[2] - 0.03, 0.25); }
+        const wet = K.world.wet(at[0], at[2]) && at[1] < 0.05;
+        if (e.type === 'jump') { if (wet) V.drop(at[0], at[2], 0.2); }
+        else if (e.type === 'land') { figure.land(e.speed); if (wet) { V.drop(at[0], at[2], clamp(0.12 + 0.045 * e.speed, 0.12, 0.6)); if (e.speed > 5) V.drop(at[0] + 0.05, at[2] - 0.03, 0.25); } }
         else if (e.type === 'dash') wake = 0;
         else if (e.type === 'fly') showMode();
       }
@@ -211,16 +264,16 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       const speed = Math.hypot(body.v[0], body.v[2]);
       const low = body.dashT > 0 ? body.p[1] < 0.6 : body.flying && body.p[1] < 1.6 && speed > 5;
       wake -= dt;
-      if (low && wake <= 0) { V.drop(body.p[0], body.p[2], body.dashT > 0 ? 0.26 : 0.16 * (1 - body.p[1] / 1.6)); wake = body.dashT > 0 ? 0.04 : 0.09; }
+      if (low && wake <= 0 && K.world.wet(body.p[0], body.p[2])) { V.drop(body.p[0], body.p[2], body.dashT > 0 ? 0.26 : 0.16 * (1 - body.p[1] / 1.6)); wake = body.dashT > 0 ? 0.04 : 0.09; }
     }
     // the body sheet: the eye goes to it and comes back; the body turns to face the person, and as the sheet's buttons turn it
     pose += ((posing ? 1 : 0) - pose) * ease(7, dt);
     if (posing) { let by = eye.yaw + turned - body.yaw; by -= 2 * Math.PI * Math.round(by / (2 * Math.PI)); body.yaw += by * ease(6, dt); }
     shown(body, pos);
-    for (const [x, z] of figure.update(body, paused ? 0 : dt, pos)) V.drop(x, z, 0.1 + 0.012 * Math.hypot(body.v[0], body.v[2]));
+    for (const [x, z] of figure.update(body, paused ? 0 : dt, pos)) if (pos[1] < 0.05 && K.world.wet(x, z)) V.drop(x, z, 0.1 + 0.012 * Math.hypot(body.v[0], body.v[2]));
     // far from where the numbers began, they begin again under the body
     const far = rebase(body.p[0], body.p[2]);
-    if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); }
+    if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); }
 
     // the eye. While the body sheet is open it stands back far enough for the whole body, level with its middle,
     // and the body is put in what the sheet leaves of the room
@@ -232,15 +285,32 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         if (sheet) stand = standIn(cv, { left: room.left, right: room.right, bottom: room.bottom, top: Math.max(room.top, bar ? bar.bottom : room.top) }, sheet, { fov: FOV, tall: K.size.tall, wide: K.size.wide });
       }
     } else if (stand && pose < 0.002) { stand = null; pose = 0; camera.clearViewOffset(); }
-    const u = stand ? pose : 0, pitch = eye.pitch + (POSE.pitch - eye.pitch) * u;
+    const u = stand ? pose : 0, pitch0 = eye.pitch + (POSE.pitch - eye.pitch) * u;
     const tx = pos[0], ty = pos[1] + figure.look + ((K.size ? K.size.tall / 2 : figure.look) - figure.look) * u, tz = pos[2];
     if (!eye.has) { eye.at.set(tx, ty, tz); eye.has = true; eye.d = st.zoom; }
     else { const kh = ease(16, dt), kv = ease(10, dt); eye.at.x += (tx - eye.at.x) * kh; eye.at.z += (tz - eye.at.z) * kh; eye.at.y += (ty - eye.at.y) * kv; }
-    const cp = Math.cos(pitch), fy = Math.sin(pitch), sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
-    const fx = -sy * cp, fz = -cy * cp;
+    const sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
+    const along = (p) => { const c = Math.cos(p); return [-sy * c, Math.sin(p), -cy * c]; };
     let d = st.zoom + ((stand ? stand.d : st.zoom) - st.zoom) * u;
+    // a building in the way: the eye comes in rather than go into a wall or a dome; where that would leave it too near
+    // the body (its back to a wall), the eye rises instead and looks down over it
+    const from = [eye.at.x, eye.at.y, eye.at.z], walls = K.world.buildings.length && !stand;
+    const room = (p, dd) => { const f = along(p), s0 = SHOULDER * Math.min(1, dd / 4); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(WATER + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0]); };
+    let lift = 0;
+    if (walls) {
+      let best = room(pitch0, d);
+      for (const l of [0.35, 0.7, 1.0]) { if (best >= Math.min(d, 1.3)) break; const dd = room(clamp(pitch0 - l, PITCH[0], PITCH[1]), d); if (dd > best + 0.05) { best = dd; lift = l; } }
+    }
+    eye.lift = (eye.lift || 0) + (lift - (eye.lift || 0)) * ease(6, dt);
+    const pitch = clamp(pitch0 - eye.lift, PITCH[0], PITCH[1]), [fx, fy, fz] = along(pitch);
+    let squeezed = false;
+    if (walls) { const dd = Math.max(0.35, room(pitch, d)); squeezed = dd < d - 1e-3; d = dd; }
     if (fy > 1e-4) d = Math.min(d, Math.max(0.5, (eye.at.y - (WATER + 0.14)) / fy));   // looking up: the eye comes in rather than go under the water
     eye.d = d < eye.d ? d : eye.d + (d - eye.d) * ease(8, dt);
+    // an eye that a wall has brought within arm's length of the head would be inside the body: it is not drawn then
+    // (until the eye has room again; with nothing built, as it always was)
+    if (squeezed && eye.d < 0.65) eye.hide = true; else if (eye.d >= 0.65 || !walls) eye.hide = false;
+    figure.group.visible = !eye.hide;
     const side = SHOULDER * Math.min(1, eye.d / 4) * (1 - u);
     camera.position.set(eye.at.x - fx * eye.d + cy * side, Math.max(WATER + 0.1, eye.at.y - fy * eye.d), eye.at.z - fz * eye.d - sy * side);
     camera.rotation.set(pitch, eye.yaw, 0, 'YXZ');
@@ -251,6 +321,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (stand) { const cv = K.renderer.domElement; camera.setViewOffset(cv.clientWidth || 1, cv.clientHeight || 1, stand.x * u, stand.y * u, cv.clientWidth || 1, cv.clientHeight || 1); }
     camera.updateMatrixWorld();
 
+    builds(dt);
     V.setScale(camera);
     V.update(K.clock, camera, [{ x: pos[0], z: pos[2], y: pos[1], k: figure.shade }]);
     V.renderMirror(camera);
@@ -280,6 +351,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="world-bar game-bar">
         <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
+        <button type="button" id="game-build" class="login-alt" title="a shelter, a few steps in front of you; near one, it is taken down">build</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
         ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
       </div>
@@ -310,6 +382,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     press('#game-mode', () => modeTo(K.body.mode === 'survival' ? 'creative' : 'survival'));
     press('#game-controls', openMenu);
     press('#game-body-open', openBody);
+    press('#game-build', () => { if (!menu.isOpen() && !chooser.isOpen()) buildHere(); });
     press('#game-societies', () => toSocieties?.());
     for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down']]) {
       const el = $(sel); if (!el) continue;
@@ -324,7 +397,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     (globalThis.Y3K ||= {}).game = { read: () => (K ? { p: [...K.body.p], v: [...K.body.v], mode: K.body.mode, flying: K.body.flying, grounded: K.body.grounded,
       dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
-      kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen() } : null) };
+      kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
+      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(phase(b).rest >= 1) })), inside: !!K.world.inside(K.body.p), indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100 } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     focusCanvas();

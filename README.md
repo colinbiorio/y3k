@@ -261,6 +261,22 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (morning) — **The world's first building: the shelter**
+  (`src/game/shelter.js`, `world.js`, `buildings/shelter.js`; `body.js`,
+  `view.js`, `input.js`, `void.js`). Stage 3 of the open world begins. Press
+  **build** (B, or the pad's X) and a shelter goes up a few steps in front of
+  you in about four seconds: a dome of rammed earth in bands on a dry-stone
+  ring, a skylight of glass in a bronze rim, a wooden door that swings open
+  as you come near, a dark solar awning on bronze poles. Walk in: a dry
+  floor, a woven mat, a shelf of clay jars, and a stone hearth holding a
+  small steady plasma flame, the room lit only by what gets in (the
+  skylight, the doorway) and by the flame at night. Its walls hold the body,
+  the dome keeps its head down, the eye stays in the room with it (rising
+  over the body when cramped), and B again near it takes it down. GAME.md
+  has the whole of it and what is not yet. Game suite 102 (7 new); the void
+  smoke's new `build` scene 12/12, desk 16/16, phone 5/5, 60 frames a
+  second inside and out.
+
 - **2026-11-17** (morning, last) — **The pyramid's night: the stars of Khufu's
   reign** (`src/frequencies/night.mjs`, `bsc.js`, `starfield.js`;
   `scripts/stars/bsc_build.py`; `stage.js`, `pyramid3d.js`, `sun.mjs`). The

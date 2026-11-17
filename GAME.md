@@ -78,7 +78,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "traverse the entire planet of Earth" | stage 7. The heights and the colours are fetched and packed (below). |
 | "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
-| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3. |
+| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **begun**: the first of the five, the shelter, is built with a key, entered through its door and explored; its room is furnished. The house, the workshop, the tower and the hall are next. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
 | "some type of 'force'" | stage 5: the binding. |
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
@@ -96,7 +96,51 @@ Said to Colin before starting, and standing until he says otherwise.
 
 **Stages 1 and 2 are built**: the void (13 November 2026) and the five bodies
 (14 November). Open the world tab and you are standing in it. Press **body**
-and choose who you are there.
+and choose who you are there. **Stage 3 is begun** (17 November): press
+**build** (or B) and a shelter goes up in front of you.
+
+### Stage 3: the buildings (begun 17 November 2026)
+
+**The shelter**, the first of the five, from the brief written for it: "a low
+round dome about four metres across, half sunk in the ground: a dry-stone
+base, walls and roof of smooth rammed earth, a round skylight of clear glass
+with a thin bronze rim, one small wooden door, a strip of dark solar cloth
+stretched as an awning. Inside: one round room, a woven sleeping mat, a low
+stone hearth holding a small steady plasma flame, one shelf with clay jars."
+Ancient (dry stone, rammed earth, clay), present (glass, bronze, solar cloth)
+and to come (the plasma hearth). It stands on the water rather than sunk in
+the ground, because the void has no ground to sink it in.
+
+- **Built where you stand** (`world.js`, `shelter.js`): the build key (B, the
+  pad's X, or the bar's **build** button) puts it a few steps in front of the
+  body with its door toward it. It goes up in about four seconds: the stones
+  laid, the earth rising band by band with its fresh edge pale, then the door,
+  the glass, the awning and the room's things one after another. The key again
+  near it takes it down. One stands at a time for now.
+- **Entered and explored.** Its walls are solid to the body all round but for
+  the doorway; inside it stands on a dry floor (no rings on it), the hearth's
+  stones are in its way, the dome keeps its head under the roof (a jump
+  inside rises until it meets it), and it leaves only by the door. It can
+  stand on the dome from above. The body's steps against walls are in
+  `body.js` (given `s.world`, every step), so they hold at any frame rate.
+- **The eye** comes in rather than go into a wall: a body inside keeps the eye
+  in the room with it; where that would bring the eye too near (the body's
+  back to a wall), it rises and looks down over it, and if it must still come
+  within arm's length the body is not drawn for that moment, rather than the
+  eye seeing the inside of it.
+- **The light inside** is what gets in: the sun only where its ray leaves the
+  room through the skylight or the open doorway (worked out as `sunIn` in
+  `shelter.js`, and the same in the drawing's shader), the sky by how near the
+  openings a surface is, and the hearth's flame, the room's own light at
+  night. A body inside is seen by that light, not by the open sky's. The door
+  swings open as a body comes near and shuts behind it.
+- **Drawn** (`buildings/shelter.js`): the stone courses and the earth's bands
+  are arithmetic in the shader, like everything else in the void; the flame is
+  a card turned to the eye with a white core, a blue-violet sheath and slow
+  rising tongues; the mat is woven by its shader, over and under.
+- Not yet: the other four buildings; a building kept between visits (stage 6
+  keeps things); the shelter's shadow on the water (the void casts no shadows);
+  sitting on the mat or lying down.
 
 ### Stage 1: the void
 
@@ -304,7 +348,9 @@ tested, shipped.
 
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
-   through, furnished a little. Ancient, present and to come in each.
+   through, furnished a little. Ancient, present and to come in each. **The
+   shelter is built** (above); the house next, then the workshop, the tower
+   and the hall, each from its brief.
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
    there is somewhere to go.
@@ -340,6 +386,9 @@ suite runs them; those that draw are read as text and looked at.
 | `drape.js` | how a point of cloth leaves a limb it has got into |
 | `state.js`, `gate.js` | what is kept between visits; the door between the void and the societies |
 | `lights.js` | pale, dusk, night |
+| `shelter.js` | the shelter as numbers: its shell, what of it is solid, where a body may go and stand, where the eye may stand, where the sun gets in, how it goes up |
+| `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
+| `buildings/` | `shelter.js`: the shelter drawn (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |
@@ -366,15 +415,20 @@ Fixed in the code, so nobody has to find them again:
 
 ## How it is looked at
 
-- `node test/game.test.mjs` (in `npm test`), 87 checks: the jump's two
+- `node test/game.test.mjs` (in `npm test`), 102 checks (the shelter's seven
+  since 17 Nov: its shape, where it is built and taken down, walked into and
+  out of, its walls from outside, the eye, the sun inside, the build key): the jump's two
   heights, the dash in eight directions, flight's rules, the bindings, the
   controller, the page's keys, the rings, the legs (on three builds, each
   read from its body's own file), the six-armed crawl, the five kinds and
   that every option is named in the body that draws it, a cloth and the limb
   under it, the body sheet's keys and where the body stands, the door, and
   this file's quotes.
-- `node scripts/void-smoke.mjs <desk|pad|phone|bodies> [small] [gpu]
-  [firefox|webkit]`: a real browser against a throwaway server. It walks the
+- `node scripts/void-smoke.mjs <desk|pad|phone|bodies|build> [small] [gpu]
+  [firefox|webkit]`: a real browser against a throwaway server. `build` puts
+  the shelter up with the key, walks into it, is held by its far wall, turns
+  the eye inside, goes to night, walks out backward through the doorway and
+  takes it down, measuring frames inside and out. It walks the
   body through all of it, takes pictures, measures frames, and fails on any
   console error. `bodies` (run with `gpu`) opens the sheet, wears the five
   kinds in turn, puts each of the 125 options on once, scrolls each kind's

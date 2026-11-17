@@ -276,7 +276,7 @@ export function createVoid({ renderer, lite = false, light = 'pale' } = {}) {
   const fill = new THREE.HemisphereLight(0xffffff, 0xffffff, 0);
   scene.add(key, key.target, fill);
   const pmrem = new THREE.PMREMGenerator(renderer);
-  let envRT = null, lightName = '';
+  let envRT = null, lightName = '', indoor = 1;          // indoor: how much of the open sky's light reaches the body (a building's room keeps most out)
   function setLight(name) {
     const L = LIGHTS[name] || LIGHTS.pale;
     lightName = LIGHTS[name] ? name : 'pale';
@@ -287,8 +287,8 @@ export function createVoid({ renderer, lite = false, light = 'pale' } = {}) {
     waterU.uFloor.value.set(L.floor); waterU.uLine.value.set(L.line); waterU.uLineAmt.value = L.lineAmt;
     moteU.uMote.value.set(L.mote); moteU.uSolid.value = L.moteSolid;
     starU.uStars.value = L.stars; stars.visible = L.stars > 0;
-    key.color.set(L.key); key.intensity = L.keyAmt;
-    fill.color.set(L.fill[0]); fill.groundColor.set(L.fill[1]); fill.intensity = L.fillAmt;
+    key.color.set(L.key); key.intensity = L.keyAmt * indoor;
+    fill.color.set(L.fill[0]); fill.groundColor.set(L.fill[1]); fill.intensity = L.fillAmt * indoor;
     key.position.copy(sky.uGlowDir.value).multiplyScalar(30).setY(34);
     // the same sky, wrapped round whatever stands in it
     const envScene = new THREE.Scene();
@@ -309,6 +309,9 @@ export function createVoid({ renderer, lite = false, light = 'pale' } = {}) {
     scene, drops, water, mirror,
     get light() { return lightName; },
     setLight,
+    // the light a body is seen by, as a share of the open sky's (inside a building: what gets in); and the key's own
+    setIndoor(k) { indoor = k; const L = LIGHTS[lightName]; key.intensity = L.keyAmt * k; fill.intensity = L.fillAmt * k; },
+    get key() { return key; },
     // a ring on the water at (x, z); `amp` is the steepest slope it will have
     drop(x, z, amp = 0.1) { drops.add(x, z, time.value, amp); },
     // the origin moved by (dx, dz): everything kept in the world's numbers moves with it
