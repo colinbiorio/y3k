@@ -13,7 +13,7 @@
 //   kit     collects what is drawn on each bone and makes one mesh for each
 //           bone and material.
 //
-// And the surfaces: small seamless grey tiles in ./art/v1/ (made with
+// And the surfaces: small seamless grey tiles in ./art/v2/ (made with
 // Higgsfield from our brief: wool, linen, bronze, glaze, skin, engraved) that
 // a material's own colour is multiplied by, and that are its relief too.
 //
@@ -375,7 +375,7 @@ const asTile = (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace =
 const tile = (name, soft = 1) => {
   const key = soft < 1 ? `${name}:${soft}` : name;
   if (!kept.has(key)) kept.set(key, soft < 1 ? tile(name).then((t) => t && softened(t, soft)) : new Promise((res) => {
-    new THREE.TextureLoader().load(new URL(`./art/v1/${name}.webp`, import.meta.url).href, (t) => res(asTile(t)), undefined, () => res(null));
+    new THREE.TextureLoader().load(new URL(`./art/v2/${name}.webp`, import.meta.url).href, (t) => res(asTile(t)), undefined, () => res(null));
   }));
   return kept.get(key);
 };

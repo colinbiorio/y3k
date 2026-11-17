@@ -261,6 +261,28 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** — **The world is drawn at the screen's own pixels, and the
+  octopus's arms end in points** (`src/game/fine.js`, `view.js`,
+  `bodies/octopus.js`, `art/v2/`; `scripts/void-smoke.mjs fine`; GAME.md).
+  Colin, 15 Nov: "is the pixelation necessary?" It was not: the void took its
+  resolution from the site's glass tier, which starts in the middle (1.5 pixels
+  a point) and only steps down (to 1.25, edges unsmoothed). Now the void keeps
+  its own measure: the screen's own pixels, two a point at the most, edges
+  always smoothed (2560 × 1600 on his Mac, a steady 16.7 ms a frame). It turns
+  itself down only by experiment: when frames have been long, fewer pixels are
+  tried for two seconds and kept only if the frames are clearly shorter; then it
+  climbs back a step at a time while frames stay good. Where fewer pixels buy
+  nothing (a page busy with its own work, a browser held to thirty a second) they
+  are given back, and the next try waits twice as long. A first rule, which
+  timed a one-pixel read-back, measured 8 to 10 ms of wait whatever the drawing
+  cost, and turned the void down for nothing; it never shipped. The octopus's
+  arms ("pretty close besides the cut off tentacle arms") now taper to a point
+  and turn toward their own side; the bronze and skin tiles are 512 pixels.
+  `test/game.test.mjs`: 94 (the watch's six rewritten for the new rule, each
+  part broken once to see its check fail); the void's `fine` smoke on the GPU:
+  a page slowed sixty-fold and a browser held to thirty each keep the sharp
+  picture; in software drawing it is turned down to its last step, then plain.
+
 - **2026-11-17** (later still) — **The pyramid's desert has a far side**
   (`pyramid3d.js`, `stage.js`): a low ring of dunes rising beyond three
   kilometres, so the horizon is land and not only haze, and a sky that

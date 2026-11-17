@@ -4,7 +4,7 @@
 // build, clothing, skin and dye. Drawn on the two-legged rig (./biped.js)
 // with the tools in ../shape.js: nothing here is a model file.
 //
-// The picture it was drawn from is ../art/v1/human.webp: a long sleeveless
+// The picture it was drawn from is ../art/v2/human.webp: a long sleeveless
 // coat of rust wool, open below a woven belt; pale plates on the shoulders,
 // dark sleeves and trousers, tan boots. That is the coat. The four other
 // things to wear are cut from the same three times: a cloak over a linen

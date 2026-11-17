@@ -16,7 +16,7 @@ import { KINDS, kindOf, freshLook, randomLook, swatchOf } from './kinds.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // the picture a kind was drawn from
-export const cardOf = (id) => new URL(`./art/v1/${kindOf(id).id}.webp`, import.meta.url).href;
+export const cardOf = (id) => new URL(`./art/v2/${kindOf(id).id}.webp`, import.meta.url).href;
 
 // which of `options` a key goes to from `now` (the arrows go round), or null for a key that is not one of them
 export function stepTo(options, now, key) {

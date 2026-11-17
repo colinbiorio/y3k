@@ -8,7 +8,7 @@
 // 2x", "omnidirectional dash", flight "only in 'creative' mode", "options for
 // both controller and keyboard/mouse, with a dedicated 'controls' menu").
 //
-//   node scripts/void-smoke.mjs <desk|pad|phone|bodies> [small] [gpu] [firefox|webkit] [dpr=N] [--shots <dir>]
+//   node scripts/void-smoke.mjs <desk|pad|phone|bodies|fine> [small] [gpu] [firefox|webkit] [dpr=N] [--shots <dir>]
 //
 //   desk   the keys and the mouse, the pointer held, the controls sheet, a key
 //          rebound, the three lights, the societies and back, leaving the tab
@@ -16,6 +16,10 @@
 //   phone  a thumb on glass, 390 x 844 at two pixels a point, and frame times
 //   bodies the body sheet: the five kinds worn in turn, each of the 125 options put on once, the arrow keys,
 //          the sheet clear of the body, each kind walked; `small` does it at a phone's size, by touch
+//   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
+//          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
+//          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
+//          is turned down to its last step, then plain; a person's own ?gfx=low is kept
 //   gpu    the machine's own chip (the full Chromium, --use-angle=metal)
 //          instead of software drawing: only there do frame times mean anything
 //   firefox, webkit   another engine than Chromium, for desk and pad (the
@@ -35,11 +39,11 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
-const dpr = +(argv.find((a) => a.startsWith('dpr='))?.slice(4) || (scene === 'phone' || small ? 2 : 1));
+const dpr = +(argv.find((a) => a.startsWith('dpr='))?.slice(4) || (scene === 'phone' || scene === 'fine' || small ? 2 : 1));
 const tmp = mkdtempSync(join(tmpdir(), 'y3k-void-'));
 const SHOTS = argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : join(tmp, 'shots');
 const DATA = join(tmp, 'data');
@@ -100,17 +104,26 @@ try {
       args: gpu ? ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--mute-audio'] : ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio'] });
   const phone = scene === 'phone' || small;
   const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: dpr, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
-  const page = await ctx.newPage();
-  page.on('pageerror', (e) => out.errors.push('page: ' + String(e.message).slice(0, 300)));
-  page.on('console', (m) => { const t = m.text(); if (m.type() === 'error') out.errors.push('console: ' + t.slice(0, 400)); else if (m.type() === 'warning' && /THREE|WebGL|shader|void/i.test(t)) out.warnings.push(t.slice(0, 300)); });
-  page.on('requestfailed', (r) => { if (r.url().includes('/src/')) out.errors.push('failed: ' + r.url()); });
-  page.on('response', (r) => { if (r.status() >= 400 && r.url().includes('/src/')) out.errors.push(r.status() + ': ' + r.url()); });
-  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load', timeout: 60000 });
-  await page.waitForFunction(() => document.body.classList.contains('entered'), null, { timeout: 60000 }); await sleep(1200);
-  await page.locator('#login-skip').click(); await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: 30000 }); await sleep(1200);
-  await page.locator('#arrive-later').click({ timeout: 4000 }).catch(() => {});
-  await page.locator('#nav-world').click();
-  await page.waitForSelector('.game-root canvas', { timeout: 30000 });
+  const listen = (pg) => {
+    pg.on('pageerror', (e) => out.errors.push('page: ' + String(e.message).slice(0, 300)));
+    // an init script of this smoke's own is refused in a sandboxed blank frame: Chromium says so, and it is not the page's
+    pg.on('console', (m) => { const t = m.text(); if (m.type() === 'error' && /^Blocked script execution in 'about:blank' because the document's frame is sandboxed/.test(t)) { if (!out.notes.includes('a sandboxed blank frame refused the smoke\'s init script')) out.notes.push('a sandboxed blank frame refused the smoke\'s init script'); } else if (m.type() === 'error') out.errors.push('console: ' + t.slice(0, 400)); else if (m.type() === 'warning' && /THREE|WebGL|shader|void/i.test(t)) out.warnings.push(t.slice(0, 300)); });
+    pg.on('requestfailed', (r) => { if (r.url().includes('/src/')) out.errors.push('failed: ' + r.url()); });
+    pg.on('response', (r) => { if (r.status() >= 400 && r.url().includes('/src/')) out.errors.push(r.status() + ': ' + r.url()); });
+  };
+  // a guest comes in and opens the world tab
+  const arrive = async (pg, path = '/') => {
+    await pg.goto(`http://127.0.0.1:${PORT}${path}`, { waitUntil: 'load', timeout: 60000 });
+    await pg.waitForFunction(() => document.body.classList.contains('entered'), null, { timeout: 60000 }); await sleep(1200);
+    await pg.locator('#login-skip').click(); await pg.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: 30000 }); await sleep(1200);
+    await pg.locator('#arrive-later').click({ timeout: 4000 }).catch(() => {});
+    await pg.locator('#nav-world').click();
+    await pg.waitForSelector('.game-root canvas', { timeout: 30000 });
+  };
+  // the fine scene: the room is made to remember that it stepped down to `low`, by its own guess and a moment ago
+  if (scene === 'fine') await ctx.addInitScript(() => { try { localStorage.setItem('y3k.gfx', 'low'); localStorage.setItem('y3k.gfx.at', String(Date.now())); } catch { /* no storage */ } });
+  const page = await ctx.newPage(); listen(page);
+  await arrive(page);
   const read = () => page.evaluate(() => window.Y3K?.game?.read?.() || null);
   const shot = async (name) => { await page.screenshot({ path: join(SHOTS, scene + (small ? '-small-' : '-') + name + '.png') }); out.reads[name] = await read(); };
   const until = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const r = await read(); if (r && fn(r)) return r; await sleep(50); } out.notes.push('timed out waiting: ' + fn); return read(); };
@@ -262,6 +275,84 @@ try {
     await page.locator('#game-menu-close').tap(); await sleep(400);
     await page.locator('#game-mode').tap(); await sleep(400); out.creative = await page.evaluate(() => ({ mode: window.Y3K.game.read().mode, sinkShown: !document.getElementById('game-t-sink').hidden, hint: document.querySelector('.game-hint').textContent }));
     await shot('04-creative'); out.framesAfter = await frames();
+  }
+
+  if (scene === 'fine') {
+    // Colin, 15 Nov 2026: "is the pixelation necessary?" The void had taken its measure from the room's tier, which
+    // begins in the middle and only ever steps down. Here the room is made to remember that it stepped down (the
+    // init script above): the void is drawn with the screen's own pixels all the same, its edges smoothed.
+    const top = Math.min(dpr, 2);
+    const glass = (pg) => pg.evaluate(() => { const p = window.Y3K.gfx.profile(), c = document.querySelector('.game-root canvas'), gl = c.getContext('webgl2') || c.getContext('webgl');
+      return { tier: p.tier, manual: p.manual, wide: c.clientWidth, smoothed: gl.getContextAttributes().antialias, samples: gl.getParameter(gl.SAMPLES), fine: window.Y3K.game.read().fine }; });
+    // what the canvas holds, read in a frame once the game has drawn it: of a hundred points across it, how many are lit, and how many shades
+    const picture = (pg) => pg.evaluate(() => new Promise((res) => requestAnimationFrame(() => {
+      const c = document.querySelector('.game-root canvas'), gl = c.getContext('webgl2') || c.getContext('webgl'), px = new Uint8Array(4), shades = new Set(); let lit = 0;
+      for (let j = 0; j < 10; j++) for (let i = 0; i < 10; i++) { gl.readPixels(Math.floor((i + 0.5) * c.width / 10), Math.floor((j + 0.5) * c.height / 10), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); if (px[0] + px[1] + px[2] > 12) lit += 1; shades.add((px[0] >> 3) + ' ' + (px[1] >> 3) + ' ' + (px[2] >> 3)); }
+      res({ lit, shades: shades.size });
+    })));
+    const whole = (g) => !!g.fine && Math.abs(g.fine.px[0] / g.wide - g.fine.ratio) < 0.01;      // the canvas has the pixels its step says
+    const first = await glass(page); out.first = first;
+    check('the room begins on the tier it remembers, and that is its own guess', ['low', 'smooth'].includes(first.tier) && first.manual === false, [first.tier, first.manual]);
+    check('the void is drawn with the screen\'s own pixels all the same', whole(first) && first.fine.ratio <= top + 1e-9 && (!gpu || (first.fine.ratio === top && first.fine.level === 0 && !first.fine.plain)), first.fine);
+    check('its edges are smoothed', first.smoothed === true && first.samples >= 2, [first.smoothed, first.samples]);
+    await shot('1-opened');
+    if (gpu) {
+      out.frames = await frames(3000);
+      check('at that, the frames are not long', out.frames.median < 21, out.frames);
+      // The page is made slow until its frames are long (its processor held back over Chromium's own protocol): its
+      // own work is the cause, and fewer pixels would buy nothing. They are tried, briefly, and given back; the
+      // picture is not left turned down, and its stuff is not made plain.
+      const cdp = await ctx.newCDPSession(page); out.throttle = [];
+      for (const rate of [20, 60, 180]) { await cdp.send('Emulation.setCPUThrottlingRate', { rate }); const f = await frames(2500); out.throttle.push({ rate, ...f }); if (f.median > 30) break; }
+      const tried = await until((r) => r.fine.trials >= 1 && !r.fine.trying, 60000);
+      await sleep(1000);
+      const busy = await read(); out.busy = busy.fine;
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      check('a page slow with its own work: fewer pixels tried, given back, nothing made plain', tried.fine.trials >= 1 && busy.fine.level === 0 && !busy.fine.plain, busy.fine);
+      await sleep(2500); out.framesAfter = await frames(3000);
+      check('…and with the page itself again, the frames are good, and the picture as fine as it began', out.framesAfter.median < 21 && (await read()).fine.level === 0, out.framesAfter);
+      await shot('2-kept-sharp');
+      // A browser that holds its pages to thirty a second (saving power), imitated: the page's frames are run every
+      // other turn of the screen. A first rule turned the void down here for nothing and never back up (16 Nov 2026).
+      const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
+      await ctx3.addInitScript(() => {
+        const raf = window.requestAnimationFrame.bind(window), waiting = []; let turn = 0;
+        const pump = (now) => { raf(pump); turn += 1; if (turn % 2) return; for (const cb of waiting.splice(0)) cb(now); };
+        window.requestAnimationFrame = (cb) => { waiting.push(cb); return waiting.length; };
+        window.cancelAnimationFrame = () => {};
+        raf(pump);
+      });
+      const page3 = await ctx3.newPage(); listen(page3);
+      await arrive(page3);
+      const read3 = () => page3.evaluate(() => window.Y3K?.game?.read?.() || null);
+      const t0 = Date.now(); let r3 = await read3();
+      while (Date.now() - t0 < 45000 && !(r3 && r3.fine.trials >= 1 && !r3.fine.trying)) { await sleep(250); r3 = await read3(); }
+      await sleep(1000); r3 = await read3(); out.held = r3.fine;
+      check('held to thirty a second: fewer pixels tried and given back; the picture is not left turned down', r3.fine.trials >= 1 && r3.fine.level === 0 && !r3.fine.plain && r3.fine.mean > 25, r3.fine);
+      await page3.screenshot({ path: join(SHOTS, 'fine-3-held-to-thirty.png') });
+      await ctx3.close();
+    } else {
+      // software drawing: the drawing is the cause. Down to its last step, the canvas with it, and then plain
+      const low = await until((r) => r.fine.level === r.fine.steps - 1, 120000);
+      const g1 = await glass(page); out.turnedDown = g1;
+      check('a drawing that is the cause is turned down to its last step, and the canvas with it', low.fine.level === low.fine.steps - 1 && low.fine.steps > 1 && whole(g1) && g1.fine.ratio < first.fine.ratio + 1e-9, [low.fine, g1.fine]);
+      await shot('2-turned-down');
+      const pl = await until((r) => r.fine.plain, 120000);
+      check('at the bottom its stuff is made plain', pl.fine.plain, pl.fine);
+      await sleep(4000); await shot('3-plain'); out.picturePlain = await picture(page);
+      check('made plain, it is still drawn', out.picturePlain.lit > 50 && out.picturePlain.shades > 5, out.picturePlain);
+    }
+    // a person's own choice of a lighter page is kept (?gfx=low, for one load): fewer pixels a point, plain
+    // stuff, and the edges smoothed as ever
+    await ctx.close();
+    const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: dpr });
+    const page2 = await ctx2.newPage(); listen(page2);
+    await arrive(page2, '/?gfx=low'); await sleep(2500 * slow);
+    const own = await glass(page2); out.chosen = own;
+    check('a person\'s own choice of a lighter page is kept', own.manual === true && own.tier === 'low' && own.fine.plain === true && whole(own) && (gpu ? own.fine.ratio === Math.min(dpr, 1.25) : own.fine.ratio <= 1.25 + 1e-9) && own.smoothed === true, own);
+    await page2.screenshot({ path: join(SHOTS, 'fine-4-chosen.png') });
+    out.pictureChosen = await picture(page2);
+    check('chosen so, it is drawn', out.pictureChosen.lit > 50 && out.pictureChosen.shades > 5, out.pictureChosen);
   }
 
   if (scene === 'bodies') {

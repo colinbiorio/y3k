@@ -5,7 +5,7 @@
 // stiffer carriage than the human's: its arms swing less, its hips bounce
 // less, and it stands straighter.
 //
-// The picture it was drawn from is ../art/v1/robot.webp. Ancient: plates cut
+// The picture it was drawn from is ../art/v2/robot.webp. Ancient: plates cut
 // with circles and ticks, a length of linen at the waist. Now: the joints.
 // To come: a face that is one pale oval with a rim of light.
 import { DoubleSide } from 'three';
