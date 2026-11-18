@@ -76,6 +76,9 @@ html, body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
+/* the door's quiet way to the other two places (travel.js) */
+.login .login-travel { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+.login .login-travel:hover, .login .login-travel:focus-visible { opacity: 1; }
 /* WORDS YOU CAN TAKE (Colin, 18 Nov 2026: "i notice i can't highlight/ copy paste your messages"). The page is
    unselectable by default (above: a drag across the room never paints its glass blue), and the conversation's
    words are not: kode's messages, their code and the tools' output select and copy as text (the prompt marks and

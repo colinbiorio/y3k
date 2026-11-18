@@ -201,10 +201,10 @@ await (async () => {
     const { createPortal } = await import('../src/portal.js');
     const p = createPortal();
     disc.fire('click');
-    ok('one portal click opens one window, though window.open answers null', () => {
-      assert.equal(opened.length, 1, 'a click opened ' + opened.length + ' windows: ' + JSON.stringify(opened));
-      assert.equal(opened[0][1], 'airden-portal');
-      assert.ok(/noopener,noreferrer$/.test(opened[0][2]), 'the window can reach back into y3k, or is told where it came from');
+    // (18 Nov 2026) the tree opens the screen of the three places (travel.js, its own test), which goes to 4irden by a
+    // link in a new tab: a click opens no window of its own any more, so the old double-window trap cannot come back
+    ok('a click on the tree opens no window: it opens the three places (travel.js)', () => {
+      assert.equal(opened.length, 0, 'a click opened ' + opened.length + ' windows: ' + JSON.stringify(opened));
     });
     p.destroy();
   } finally {
