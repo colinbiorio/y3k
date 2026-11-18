@@ -555,6 +555,43 @@ try {
   await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
   check('coming back, the session is still there', true);
 
+  // DONE FROM HERE (Colin, 18 Nov 2026: "it would be cool if orion could actually do stuff straight from the home screen
+  // too"): on the home screen a line for kode, the yes, and it runs there with the room shut; a card over the chat bar
+  // follows it to its end, and the presence says how it went (main.js homeRun, sayOutcome; src/home-run.js)
+  console.log('\n  done from here:');
+  await page.click('#nav-orb');
+  await page.waitForFunction(() => !document.querySelector('.code-root:not(.leaving)') && !document.body.classList.contains('in-code'), null, { timeout: 10000 });
+  const linesBefore = await page.evaluate(() => document.querySelectorAll('#chat-history .hl-ai').length);
+  await page.fill('#chat-input', 'kode: say hello from home');
+  await page.press('#chat-input', 'Enter');
+  await page.waitForSelector('.consent-card .consent-once', { timeout: 8000 });
+  const asked = await page.evaluate(() => ({ title: document.querySelector('.consent-title')?.textContent, yes: document.querySelector('.consent-once')?.textContent, always: !!document.querySelector('.consent-always') }));
+  check('the yes is asked every time, and it is from here', asked.title === 'Do it in kode, from here?' && asked.yes === 'yes, from here' && !asked.always, JSON.stringify(asked));
+  await page.click('.consent-card .consent-once');
+  await page.waitForSelector('#home-run', { timeout: 15000 });
+  await shot('5a-home-run');
+  await page.waitForFunction(() => document.querySelector('#home-run')?.dataset.tone === 'done', null, { timeout: 30000 }).catch(() => {});
+  const ran = await page.evaluate(() => {
+    const c = document.querySelector('#home-run'), r = c?.getBoundingClientRect(), air = document.querySelector('#chat-air'), chat = (air && getComputedStyle(air).visibility !== 'hidden' ? air : document.querySelector('#chat .chat-menu'))?.getBoundingClientRect();
+    return { tone: c?.dataset.tone, head: c?.querySelector('.hr-head')?.textContent, line: c?.querySelector('.hr-line')?.textContent,
+      inCode: document.body.classList.contains('in-code'), room: !!document.querySelector('.code-root:not(.leaving)'),
+      cardBottom: r ? Math.round(r.bottom) : null, chatTop: chat ? Math.round(chat.top) : null, close: !c?.querySelector('.hr-close')?.hidden };
+  });
+  check('…a card stands over the chat bar and follows it to its end: done in the folder, with the coder\'s words', ran.tone === 'done' && /^Done in /.test(ran.head || '') && /again: say hello from/.test(ran.line || '') && ran.close, JSON.stringify(ran));
+  check('…over the chat bar and its air mark, not on them', ran.cardBottom != null && ran.chatTop != null && ran.cardBottom <= ran.chatTop + 1, JSON.stringify(ran));
+  check('…and the room never opened', !ran.inCode && !ran.room, JSON.stringify(ran));
+  await page.waitForFunction((n) => document.querySelectorAll('#chat-history .hl-ai').length > n, linesBefore, { timeout: 30000 }).catch(() => {});
+  const said = await page.evaluate(() => [...document.querySelectorAll('#chat-history .hl-ai')].map((x) => x.textContent.trim()).pop() || '');
+  check('…and the presence says how it went', /say hello|again|done/i.test(said), said);
+  await shot('5b-home-done');
+  await page.click('#home-run .hr-close');
+  check('…and the card closes', !(await page.$('#home-run')));
+  // back into the room for what follows: the same conversation, with the line in it
+  await page.click('#nav-code');
+  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
+  const inRoom = await page.evaluate(() => [...document.querySelectorAll('.cv-list .us-text')].map((x) => x.textContent).pop());
+  check('…and in kode it is the same conversation, the line in it', inRoom === 'say hello from home', String(inRoom));
+
   await page.waitForTimeout(400);
   const csp = await page.evaluate(() => window.__csp);
   const codeErrors = errors.filter((e) => /code|y3k-code|127\.0\.0\.1/i.test(e));

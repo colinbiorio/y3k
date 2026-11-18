@@ -3501,6 +3501,124 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     } finally { offline(); globalThis.fetch = realFetch; }
   });
 
+  // DONE FROM HERE (Colin, 18 Nov 2026: "it would be cool if orion could actually do stuff straight from the home
+  // screen too"): a line said with a yes outside the room runs in the conversation with the room shut (main.js homeRun)
+  await ok('the view: a line run from the home screen is sent with the room shut, and its turn followed: what it is doing, the card that waits (answered from there), how it ended; a turn still running before it is not it', async () => {
+    const eng = companionEngine();
+    const H = 'a7a7a7a7a7a7a7a7';
+    eng.auto['engine.hello'] = () => ({ ok: true, version: '0.3.12', epoch: 'e', providers: [], recent: [], sessions: [{ sid: H, provider: 'claude', cwd: '/tmp/home', title: null, mode: 'auto', state: 'running', started: 1 }] });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, meta: null, live: true, events: [
+      { sid: c.sid, seq: 2, type: 'session.started', provider: 'claude', cwd: '/Users/someone/code/home', mode: 'auto', providerSessionId: 'p-home' },
+      { sid: c.sid, seq: 3, type: 'turn.started' },
+      { sid: c.sid, seq: 4, type: 'message.user', text: 'the turn before' },
+    ] });
+    const sent = [], answers = [];
+    eng.auto['session.send'] = (c) => { sent.push(c); return { ok: true }; };
+    eng.auto['permission.answer'] = (c) => { answers.push(c); return { ok: true }; };
+    const stops = [];
+    eng.auto['session.interrupt'] = (c) => { stops.push(c.sid); return { ok: true }; };
+    try {
+      const cv = await viewWith('home-run', { toast: () => {}, settleMs: 20 });
+      const S = cv._state;
+      const ticks = [];
+      const last = () => ticks[ticks.length - 1];
+      const going = cv.run('  fix the far plane  ', (x) => ticks.push(x));
+      await until(() => eng.streams === 1);
+      eng.send({ v: 1, epoch: 'e', seq: 1, sid: null, t: 1, type: 'engine.hello', version: '0.3.12' });
+      const r = await going;
+      assert.deepEqual(r, { ok: true, sid: H, project: 'home' });
+      assert.equal(cv.isOpen(), false, 'the room stays shut');
+      assert.deepEqual(sent.map((c) => [c.sid, c.text]), [[H, 'fix the far plane']], 'said to the conversation as typed, in its own mode');
+      assert.ok(cv.homeRunning() && last() && !last().done, 'followed from the start');
+      const ev = (seq, e) => eng.send({ v: 1, epoch: 'e', seq, sid: H, t: 1000 + seq, ...e });
+      // the turn that was running when the line went ends: not this one
+      ev(5, { type: 'turn.ended', status: 'success' });
+      await until(() => S.sessions.get(H)?.state !== 'running');
+      assert.equal(ticks.filter((x) => x.done).length, 0, 'the turn before is not this one');
+      ev(6, { type: 'turn.started' });
+      ev(7, { type: 'message.user', text: 'fix the far plane' });
+      ev(8, { type: 'tool.call', callId: 'c1', name: 'Bash', kind: 'bash', title: 'npm test', input: { command: 'npm test' } });
+      await until(() => last()?.doing === 'Running npm test');
+      assert.equal(last().project, 'home');
+      ev(9, { type: 'permission.request', requestId: 'r1', callId: 'c1', tool: 'Bash', kind: 'bash', title: 'npm test', input: { command: 'npm test' }, preview: {}, risk: 'run' });
+      await until(() => last()?.request);
+      assert.deepEqual(last().request, { kind: 'permission', requestId: 'r1', tool: 'Bash', title: 'Bash: npm test' });
+      assert.equal(last().doing, 'Waiting on you');
+      assert.deepEqual(await cv.stop(H), { ok: true, error: undefined });
+      assert.deepEqual(stops, [H], 'stopped from there as Esc stops it: the turn, by interrupt');
+      assert.deepEqual(await cv.answer(H, 'r1', 'allow'), { ok: true, error: undefined });
+      assert.deepEqual(answers.map((c) => [c.sid, c.requestId, c.decision, c.scope]), [[H, 'r1', 'allow', 'once']], 'answered this once, from the home screen');
+      ev(10, { type: 'permission.resolved', requestId: 'r1', decision: 'allow' });
+      ev(11, { type: 'tool.result', callId: 'c1', status: 'ok', output: { text: 'ok' } });
+      await until(() => !last()?.request);
+      ev(12, { type: 'message.start', id: 'm9' });
+      ev(13, { type: 'message.block', id: 'm9', block: 0, kind: 'text', text: 'The far plane is **fixed**: it was clipping at 500 m.\n\n```js\nfar = 5000;\n```\nThe tests pass.' });
+      ev(14, { type: 'message.end', id: 'm9' });
+      ev(15, { type: 'turn.ended', status: 'success' });
+      await until(() => last()?.done);
+      const end = last().done;
+      assert.deepEqual([end.outcome, end.project, end.ask], ['done', 'home', 'fix the far plane']);
+      assert.match(end.did, /^The far plane is fixed: it was clipping at 500 m\./);
+      assert.ok(/The tests pass\./.test(end.reply) && !/far = 5000|```/.test(end.reply), 'said aloud: the prose, never the code: ' + end.reply);
+      assert.equal(last().request, null);
+      assert.equal(cv.homeRunning(), false, 'ended once');
+      const n = ticks.length;
+      ev(16, { type: 'turn.started' });
+      await new Promise((res) => setTimeout(res, 30));
+      assert.equal(ticks.length, n, 'what comes after is not followed');
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a quick coder\'s whole turn over the stream before the send\'s own answer still ends the run from the home screen', async () => {
+    const eng = companionEngine();
+    const Q = 'b8b8b8b8b8b8b8b8';
+    eng.auto['engine.hello'] = () => ({ ok: true, version: '0.3.12', epoch: 'e', providers: [], recent: [], sessions: [{ sid: Q, provider: 'claude', cwd: '/tmp/quick', title: null, mode: 'auto', state: 'idle', started: 1 }] });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, meta: null, live: true, events: [
+      { sid: c.sid, seq: 2, type: 'session.started', provider: 'claude', cwd: '/tmp/quick', mode: 'auto', providerSessionId: 'p-quick' },
+    ] });
+    try {
+      const cv = await viewWith('home-quick', { toast: () => {}, settleMs: 20 });
+      const ticks = [];
+      const going = cv.run('say hello', (x) => ticks.push(x));
+      await until(() => eng.streams === 1);
+      eng.send({ v: 1, epoch: 'e', seq: 1, sid: null, t: 1, type: 'engine.hello', version: '0.3.12' });
+      await until(() => eng.waiting('session.send').length === 1);
+      const ev = (seq, e) => eng.send({ v: 1, epoch: 'e', seq, sid: Q, t: 2000 + seq, ...e });
+      ev(3, { type: 'turn.started' });
+      ev(4, { type: 'message.user', text: 'say hello' });
+      ev(5, { type: 'message.start', id: 'q1' });
+      ev(6, { type: 'message.block', id: 'q1', block: 0, kind: 'text', text: 'Hello.' });
+      ev(7, { type: 'message.end', id: 'q1' });
+      ev(8, { type: 'turn.ended', status: 'success' });
+      await until(() => ticks.some((x) => x.done));
+      eng.waiting('session.send')[0].answer({ ok: true });
+      assert.deepEqual(await going, { ok: true, sid: Q, project: 'quick' });
+      assert.equal(ticks.filter((x) => x.done).length, 1, 'ended once');
+      assert.equal(ticks[ticks.length - 1].done.did, 'Hello.');
+      assert.equal(cv.homeRunning(), false);
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a line from the home screen that cannot run from there says why: not paired here, or no conversation begun yet (the folders, in kode)', async () => {
+    offline();
+    const alone = await viewWith('home-unpaired', { toast: () => {} });
+    assert.deepEqual(await alone.run('fix the far plane'), { ok: false, why: 'unpaired' });
+    assert.deepEqual(await alone.run('   '), { ok: false, why: 'empty' });
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = () => ({ ok: true, version: '0.3.12', epoch: 'e', providers: [], recent: [], sessions: [] });
+    eng.auto['session.list'] = () => ({ ok: true, sessions: [] });
+    const sent = [];
+    eng.auto['session.send'] = (c) => { sent.push(c); return { ok: true }; };
+    try {
+      const cv = await viewWith('home-none', { toast: () => {}, settleMs: 20 });
+      const going = cv.run('fix the far plane');
+      await until(() => eng.streams === 1);
+      eng.send({ v: 1, epoch: 'e', seq: 1, sid: null, t: 1, type: 'engine.hello', version: '0.3.12' });
+      assert.deepEqual(await going, { ok: false, why: 'none' });
+      assert.equal(sent.length, 0, 'nothing sent');
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
   await ok('the view: in the desktop app too, an engine that came back new goes on with the conversation on screen, by itself (2026-11-01)', async () => {
     const asked = bridge();
     const base = window.y3kCode.cmd;

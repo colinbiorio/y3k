@@ -263,6 +263,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **Done from here: kode from the home screen**
+  (`src/home-run.js`, `src/code/code-view.js` runFromSite, `src/social.js`
+  kodeRun/kodeAnswer/kodeStop, `src/main.js` askKode and sayOutcome, `styles.css`
+  "DONE FROM HERE"; `test/home-run.test.mjs`, the client test, a walk in
+  `scripts/code-smoke.mjs`; CODE.md "Done from here"). Colin: "it would be cool
+  if orion could actually do stuff straight from the home screen too." The card
+  that asks before a line goes to kode is still there every time, and its yes
+  ("yes, from here") no longer takes the person into the room: the line runs in
+  the conversation with the room shut, picked up where it was. A card over the
+  chat bar and its air mark follows that turn: what it is doing and for how
+  long, the coder's question to allow or decline this once, a stop, "open kode",
+  and how it ended; then the presence says how it went in its own voice (the
+  coder's reply, prose only, through kode's translator at the Personality rank,
+  after its own turn), and keeps it in the conversation. Followed from before
+  it is sent: a quick coder's whole turn can arrive before the send's own
+  answer (the smoke's did, and the card worked on for good). Where it cannot
+  run from here (kode not running, no conversation yet), the yes goes into kode
+  as before. The smoke walks it in a browser: home, the line, the yes, the card
+  to "Done in" its folder, the presence's line, and in kode the same
+  conversation with the line in it.
 - **2026-11-18** (afternoon) — **The free voice, chosen** (`src/voice-pick.mjs`,
   `src/voice.js` freeVoice, `src/settings.js` the drawer; `test/voice.test.mjs`
   "the free voice"). Colin: "the free browser voice makes this loud beep noise

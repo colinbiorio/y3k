@@ -100,6 +100,20 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     for (let i = 0; i < 100 && !codeView; i++) await new Promise((r) => setTimeout(r, 50));
     return codeView ? codeView.say(text) : false;
   }
+  // ...OR FROM THE HOME SCREEN, THE ROOM LEFT SHUT (main.js homeRun,
+  // 2026-11-18): the same one controller, made here if the room was never
+  // opened, and the line run in it and followed (code-view.js runFromSite).
+  async function kodeRun(text, onTick) {
+    if (!codeView) {
+      try {
+        const { createCodeView } = await import('./code/code-view.js');
+        codeView = codeView || createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
+      } catch { return { ok: false, why: 'load' }; }
+    }
+    return codeView.run(text, onTick);
+  }
+  const kodeAnswer = (sid, requestId, decision) => (codeView ? codeView.answer(sid, requestId, decision) : Promise.resolve({ ok: false }));
+  const kodeStop = (sid) => (codeView ? codeView.stop(sid) : Promise.resolve({ ok: false }));
   // An amber dot on the laptop while a coding session waits for an answer,
   // wherever you are in the house.
   const onNeedsYou = (on) => $('nav-code')?.classList.toggle('needs-you', !!on);
@@ -1607,5 +1621,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   const codeBusy = () => !!codeView?.busy();
-  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), twentyHear: (t) => twenty.hear(t), kodeSay, kodeCaption: (t, w) => (codeView ? codeView.caption(t, w) : false), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, lifeHear: (t) => lifeView.hear(t), twentyHear: (t) => twenty.hear(t), kodeSay, kodeRun, kodeAnswer, kodeStop, kodeCaption: (t, w) => (codeView ? codeView.caption(t, w) : false), codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }
