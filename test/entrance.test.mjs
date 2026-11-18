@@ -176,7 +176,8 @@ ok('every row of the card rises, in the order it stands', () => {
       assert.ok(delays.has(i) || (tail && i >= +tail[1]), `${name}'s row ${i} of ${rows} has no delay and surfaces at 0s`);
     }
   }
-  assert.equal(childCount(html, '<form id="login-form" class="login-card"'), 12, 'the entrance changed shape: check its rise and this count together');
+  // 13 since 18 Nov 2026: the door's line to the other two places (travel.js), the last row, rising with the catch-all
+  assert.equal(childCount(html, '<form id="login-form" class="login-card"'), 13, 'the entrance changed shape: check its rise and this count together');
   // and they rise in order, the catch-all last
   const keys = [...delays.keys()].sort((a, b) => a - b);
   keys.forEach((k, i) => { assert.equal(k, i + 1, 'a gap in the stagger'); if (i) assert.ok(delays.get(k) > delays.get(keys[i - 1]), `row ${k} rises before row ${keys[i - 1]}`); });

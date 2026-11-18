@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **Travel: the three places** (`src/travel.js`,
+  `src/portal.js`, the entrance's last line; `test/travel.test.mjs`). Colin, the
+  day univispira.org went live: "can we link all 3 websites? 4irden.com,
+  yearthreethousand.com, and univispira.org? like, i want a screen that let's
+  you travel between all three that is available from each!" One screen, the
+  same file on all three sites: three stars on a line, as Orion's belt has
+  three, each a place (airden, yearthreethousand, univispira) with its domain
+  and one line; the one you are in says "you are here", the other two open in a
+  new tab so the one you leave stays as it was. Here the tree at the top bar's
+  left end opens it (it went straight to 4irden before), and so does a quiet
+  last line on the entrance, "elsewhere: airden · univispira", for whoever has
+  not come in yet. Escape, the close and the dark around it close it; the keys
+  stay inside while it is open. Self-contained (its own styles, nothing
+  fetched). Walked in a browser at desk and phone sizes, from the door and
+  from the tree.
 - **2026-11-18** (afternoon) — **The thread, the fourth weapon** (`src/game/combat.js`
   THREAD, `src/game/fight.js` the spindle and the filament, `src/game/view.js`
   its words; `test/game.test.mjs`, `scripts/void-smoke.mjs` fight; GAME.md "The

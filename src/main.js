@@ -40,6 +40,7 @@ import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
 import { shrinkPicture } from './picture.js';
 import { hasFiles, dropTarget } from './kode-drop.js';
 import { kodeLine } from './kode-route.mjs';
+import { openTravel } from './travel.js';
 import { createHomeRun, outcomeWords } from './home-run.js';
 import { getRank } from './code/voice.js';
 import { createScore } from './score.js';
@@ -441,6 +442,7 @@ async function submitAuth() {
 }
 loginForm?.addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
 $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no account
+$('login-travel')?.addEventListener('click', () => openTravel()); // the three places, from the door too (travel.js)
 
 // Google / Apple: the entrance only offers a button the server can honour, so
 // nobody ever clicks into a dead end. A failed round trip comes back as

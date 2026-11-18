@@ -1,5 +1,11 @@
 // THE PORTAL — a way through to 4irden, which is the other world Colin keeps.
 //
+// NOW A WAY TO ALL THREE (Colin, 18 Nov 2026: "i want a screen that let's you
+// travel between all three that is available from each!"): the tree opens
+// travel.js, the screen of the three places (airden, yearthreethousand,
+// univispira), the same screen on each of them. Below is how a click used to
+// go straight to 4irden; the screen goes there by a link now, in a new tab.
+//
 // A simple tree in unimat at the top bar's left end (Colin, 2026-10-20: "let's
 // change the airden glyph from the portal to just a simple tree in unimat").
 // It used to be an oval of light with 4irden live behind it, an iframe of the
@@ -17,6 +23,8 @@
 // exercise the crossing locally is to point this at a local 4irden. The override
 // accepts LOCALHOST ONLY — this value is handed to window.open(), and a query
 // parameter that could name any origin is an open redirect with extra steps.
+import { openTravel } from './travel.js';
+
 const DEFAULT_HOME = 'https://4irden.com';
 const HOME = (() => {
   try {
@@ -39,6 +47,8 @@ export function createPortal() {
     window.open(HOME, 'airden-portal',
       `popup=yes,width=${w},height=${h},left=${left},top=${top},noopener,noreferrer`);
   };
-  el.addEventListener('click', go);
-  return { destroy() { el.removeEventListener('click', go); } };
+  // the tree opens the three places; with ?airden=localhost (a local 4irden, for working on both) it still goes straight there
+  const open = () => (HOME === DEFAULT_HOME ? openTravel() : go());
+  el.addEventListener('click', open);
+  return { destroy() { el.removeEventListener('click', open); } };
 }
