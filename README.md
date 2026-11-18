@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (morning) — **Stage 5 begun: the binding, the force**
+  (`src/game/combat.js` BINDING; `fight.js`, `input.js`, `view.js`). As
+  decided with Colin, the force is the binding, "love as what binds: it pulls,
+  holds, joins and lets go", and now a power of its own. Held (X or H, the
+  pad's LB, a **bind** button on a phone), it pulls the bot you look at to
+  you and holds it up beside your head, struggling, unable to move or shoot;
+  let go, it is thrown where you look (at another bot near that line, if
+  there is one, bending after it); thrown into another, the two are joined,
+  each struck about 62, and tumble into the water. Only machines. Drawn as a
+  thread of warm gold light from the left hand, a halo, a flash where two are
+  joined. Game suite 164 (four tests: pulled and held, thrown, joined, thrown
+  into the water, let go when struck down or broken in its hold, the keys);
+  the `fight` smoke holds and throws one (17 checks, 60 frames a second with
+  eight bots up).
+
 - **2026-11-18** (before dawn) — **The fifth ship: the carrier; stage 4 is
   done** (`src/game/ships/carrier.js`; `ships.js`, `view.js`). From its
   brief: a vast carrier about four hundred metres long, like a floating

@@ -16,12 +16,18 @@
 // Bolts are short streaks of their sender's colour (a parried one is the
 // ring's); sparks fly where things meet; the slam's wave runs out over the
 // water. Everything here is in the scene, so the water's mirror shows it too.
+//
+// The binding: a thread of warm gold light from the left hand to what it holds,
+// waving a little, its pulses running in toward the hand; a halo round the bot
+// it holds, which struggles in it; with nothing to take, the thread goes out
+// along the eye's line and comes back. A bot it throws spins as it flies; two it
+// joins go up in a flash of gold.
 import * as THREE from 'three';
-import { LEVELS, RING } from './combat.js';
+import { LEVELS, RING, BINDING, leftHandOf } from './combat.js';
 import { WATER } from './body.js';
 
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
-const PLASMA = new THREE.Color(0.55, 0.85, 1.0);
+const PLASMA = new THREE.Color(0.55, 0.85, 1.0), GOLD = new THREE.Color(1.0, 0.8, 0.42);
 const levelCol = (l) => new THREE.Color(...LEVELS[Math.max(1, Math.min(5, l)) - 1].colour);
 
 // a soft round glow, made once (a sprite's picture)
@@ -97,6 +103,21 @@ export function createFightArt(scene, { lite = false } = {}) {
     fragmentShader: 'varying float vA; uniform vec3 uCol; void main() { gl_FragColor = vec4(mix(uCol, vec3(1.0), vA * 0.5), vA * vA * 0.75);\n#include <colorspace_fragment>\n}',
   }))));
   trail.frustumCulled = false;
+  // ---- the binding's thread: a ribbon from the left hand to what it holds, and the halo round it
+  const BN = 28, bindPos = new Float32Array(BN * 2 * 3), bindA = new Float32Array(BN * 2);
+  const bindGeo = geo(new THREE.BufferGeometry());
+  bindGeo.setAttribute('position', new THREE.BufferAttribute(bindPos, 3).setUsage(THREE.DynamicDrawUsage));
+  bindGeo.setAttribute('aA', new THREE.BufferAttribute(bindA, 1).setUsage(THREE.DynamicDrawUsage));
+  { const idx = []; for (let i = 0; i < BN - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } bindGeo.setIndex(idx); }
+  const thread = add(new THREE.Mesh(bindGeo, mat(new THREE.ShaderMaterial({
+    uniforms: { uCol: { value: GOLD.clone() } }, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: 'attribute float aA; varying float vA; void main() { vA = aA; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    // gold over a bright sky as over a dark one (added light would go white by day), its pulses paler
+    fragmentShader: 'varying float vA; uniform vec3 uCol; void main() { gl_FragColor = vec4(mix(uCol * 0.9, vec3(1.0, 0.95, 0.8), (vA - 0.55) * 1.4), 0.35 + 0.6 * vA);\n#include <colorspace_fragment>\n}',
+  }))));
+  thread.frustumCulled = false; thread.visible = false;
+  const haloMat = mat(new THREE.SpriteMaterial({ map: tex, color: GOLD.clone().multiplyScalar(0.7), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  const bindHalo = add(new THREE.Sprite(haloMat)); bindHalo.visible = false;
 
   // ---- bolts: two instanced streaks, a core and a halo, in their sender's colour
   const NB = 64, M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), V3 = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, 1);
@@ -220,6 +241,10 @@ export function createFightArt(scene, { lite = false } = {}) {
         else if (ev.type === 'deflect' || ev.type === 'parry') burst(at, PLASMA, ev.type === 'parry' ? 26 : 12, 6);
         else if (ev.type === 'splash') { drop(at[0], at[2], ev.size || 0.15); burst([at[0], WATER + 0.02, at[2]], new THREE.Color(0.7, 0.85, 1), 6, 2.5, 2.5); }
         else if (ev.type === 'spawn') drop(at[0], at[2], 0.3);
+        else if (ev.type === 'bind') burst(at, GOLD, 18, 4, 1);
+        else if (ev.type === 'fling') burst(at, GOLD, 14, 5, 1);
+        else if (ev.type === 'join') { burst(at, GOLD, 46, 10, 3); burst(at, new THREE.Color(1, 0.97, 0.9), 20, 6, 2); }
+        else if (ev.type === 'bind-miss') burst(at, GOLD, 6, 2, 0.5);
         else if (ev.type === 'slam') { wave(at, ev.radius); drop(at[0], at[2], 0.6); for (let k = 0; k < 6; k++) { const a = k * 1.047; drop(at[0] + Math.cos(a) * 1.2, at[2] + Math.sin(a) * 1.2, 0.2); } burst([at[0], at[1] + 0.2, at[2]], PLASMA, 40, 8, 3); }
         else if (ev.type === 'broken' || ev.type === 'gone') { const d = drawn.get(ev.id); if (d) { drawn.delete(ev.id); if (ev.type === 'broken') breakBot(d, at, ev.v || [0, 0, 0], ev.r || 0.5); else { burst(at, d.col, 12, 3); unmake(d); } } }
       }
@@ -270,6 +295,31 @@ export function createFightArt(scene, { lite = false } = {}) {
       }
       trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.aA.needsUpdate = true;
       trail.visible = trailPts.length > 1;
+      // ---- the binding's thread: to the bot it holds, or out along the eye's line and back when there was nothing to take
+      const Bd = c.bind, holdBot = Bd.mode === 'hold' ? c.bots.find((b) => b.id === Bd.target) : null;
+      let to = null;
+      if (holdBot) to = holdBot.p;
+      else if (Bd.miss > 0) {
+        const hf = leftHandOf(body), ext = Math.sin(Math.PI * (1 - Bd.miss / BINDING.miss)) * 9;
+        to = [hf[0] + Bd.missDir[0] * ext, hf[1] + Bd.missDir[1] * ext, hf[2] + Bd.missDir[2] * ext];
+      }
+      thread.visible = !!to && c.player.down <= 0;
+      if (thread.visible) {
+        const from = leftHandOf(body), T = time.value, L = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+        for (let i = 0; i < BN; i++) {
+          const u = i / (BN - 1), sway = Math.sin(Math.PI * u) * Math.min(0.35, L * 0.03);
+          const p = [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u + sway * Math.sin(u * 9 - T * 7), from[2] + (to[2] - from[2]) * u];
+          const n = i < BN - 1 ? [from[0] + (to[0] - from[0]) * (u + 1 / (BN - 1)), from[1] + (to[1] - from[1]) * (u + 1 / (BN - 1)), from[2] + (to[2] - from[2]) * (u + 1 / (BN - 1))] : [to[0] + (to[0] - from[0]) * 0.01, to[1], to[2] + (to[2] - from[2]) * 0.01];
+          const tx = n[0] - p[0], ty = n[1] - p[1], tz = n[2] - p[2], vx = camPos.x - p[0], vy = camPos.y - p[1], vz = camPos.z - p[2];
+          let wx = ty * vz - tz * vy, wy = tz * vx - tx * vz, wz = tx * vy - ty * vx; const wm = Math.hypot(wx, wy, wz) || 1, w = 0.02 + 0.018 * Math.sin(Math.PI * u);
+          wx *= w / wm; wy *= w / wm; wz *= w / wm;
+          bindPos.set([p[0] + wx, p[1] + wy, p[2] + wz, p[0] - wx, p[1] - wy, p[2] - wz], i * 6);
+          const a = (0.55 + 0.45 * Math.max(0, Math.sin(u * 14 + T * 12))) * (holdBot ? 1 : 0.7); bindA[i * 2] = bindA[i * 2 + 1] = a;
+        }
+        bindGeo.attributes.position.needsUpdate = true; bindGeo.attributes.aA.needsUpdate = true;
+      }
+      bindHalo.visible = !!holdBot;
+      if (holdBot) { bindHalo.position.set(holdBot.p[0], holdBot.p[1], holdBot.p[2]); bindHalo.scale.setScalar((holdBot.r * 3.2) * (1 + 0.08 * Math.sin(time.value * 9))); }
 
       // ---- bots
       const seen = new Set();
@@ -280,6 +330,8 @@ export function createFightArt(scene, { lite = false } = {}) {
         d.g.position.set(b.p[0], b.p[1], b.p[2]);
         const face = Math.atan2(body.p[0] - b.p[0], body.p[2] - b.p[2]);
         d.body.rotation.set(Math.sin(b.t * 1.7 + b.phase) * 0.08 - b.v[1] * 0.04, face, Math.sin(b.t * 1.1) * 0.06 - (b.v[0] * Math.cos(face) - b.v[2] * Math.sin(face)) * 0.03);
+        if (b.mode === 'bound') { d.body.rotation.x += Math.sin(b.t * 29) * 0.14; d.body.rotation.z += Math.sin(b.t * 23 + 1) * 0.12; }   // it struggles in the binding
+        else if (b.mode === 'flung' || b.mode === 'tumble') d.body.rotation.set(b.t * 9, face + b.t * 5, b.t * 7);                     // thrown, it spins
         d.fins.rotation.z = b.t * 2.4;
         const flash = b.hitT > 0 ? b.hitT / 0.16 : 0;
         d.shellMat.emissive.setRGB(flash, flash, flash * 0.95);

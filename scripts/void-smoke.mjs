@@ -23,7 +23,7 @@
 //   fight  the ring and the bots (combat.js, fight.js): the bar's list of five levels, a drifter come up out of
 //          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
 //          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
-//          aside, the whirl, a slam from a jump; seven bots up and the frames; the list clearing them
+//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; seven bots and more up and the frames; the list clearing them
 //   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
 //          up, the body leaning into it) to its corner; run again and leapt off, out and up
 //   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
@@ -389,10 +389,19 @@ try {
     const t0 = Date.now(); r = await until((r) => r.grounded, 3000); const fell = Date.now() - t0; await key.up('Space');
     check('a slam from a jump drives the body down', slam && top > 1.2 && r.grounded && fell < 600, { slam, top, fell });
     await sleep(200); await shot('06-after-slam');
+    // the binding: held, it takes the bot looked at and holds it, up beside the head; let go, it is thrown where the eye looks
+    await key.press('KeyN'); r = await until((r) => r.fight.bots.length > 0 && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
+    await aimAt(); await key.down('KeyX'); await sleep(900); r = await read();
+    const held = r.fight.bots.find((b) => b.mode === 'bound');
+    check('the binding takes the bot looked at and holds it up beside the head', !!held && held.p[1] > r.p[1] + 1.2 && Math.hypot(held.p[0] - r.p[0], held.p[2] - r.p[2]) < 5.5, r.fight.bots);
+    await shot('07-bound'); await key.up('KeyX'); await sleep(80); r = await read();
+    check('let go, it is thrown', r.fight.bots.some((b) => b.mode === 'flung' || b.mode === 'tumble') || !r.fight.bots.some((b) => b.id === held?.id), r.fight.bots);
+    await sleep(600); await shot('08-thrown');
+    const n0 = (await read()).fight.bots.length;   // the sentinels, and the one the binding threw, as many as are left
     await pick(5); for (let i = 0; i < 4; i++) { await key.press('KeyN'); await sleep(150); }
-    r = await until((r) => r.fight.bots.length >= 7 && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
+    r = await until((r) => r.fight.bots.length >= n0 + 5 && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
     await aimAt(); out.frames = { seven: await frames(2500) };
-    check('seven bots up, and every frame keeps up', r.fight.bots.length === 7 && out.frames.seven.median < 20, { n: r.fight.bots.length, frames: out.frames.seven });
+    check('five more bots up (seven or more), and every frame keeps up', r.fight.bots.length === n0 + 5 && r.fight.bots.length >= 7 && out.frames.seven.median < 20, { n0, n: r.fight.bots.length, frames: out.frames.seven });
     await shot('07-seven');
     await page.locator('#game-bots').click(); await sleep(250); await page.locator('#game-bot-list [data-bot="clear"]').click();
     r = await until((r) => r.fight.bots.length === 0, 2000);

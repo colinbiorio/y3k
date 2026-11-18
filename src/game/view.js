@@ -75,7 +75,7 @@ const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t
 const worn = (st) => st.kind + ' ' + JSON.stringify(st.looks[st.kind]);
 const LEARNED = 14;        // seconds of moving after which the standing hint is put away
 const IDLE = { move: [0, 0], look: [0, 0], zoom: 0, jump: false, jumpPressed: false, dash: false, flyToggle: false, sprint: false, walk: false, up: false, down: false, modeToggle: false, menu: false, device: 'keys',
-  attack: false, attackPressed: false, whirl: false, guard: false, guardPressed: false, spawn: false };
+  attack: false, attackPressed: false, whirl: false, guard: false, guardPressed: false, bind: false, bindPressed: false, spawn: false };
 const turnTo = (a, b, max) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI; return Math.abs(d) <= max ? b : a + Math.sign(d) * max; };
 
 // how tall and how wide a body is as it stands at `at` (the body sheet fits the eye to it): the reach of what it
@@ -299,7 +299,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
-  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', spawn: 'bots', board: 'ships' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
+  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', bind: 'bind', spawn: 'bots', board: 'ships' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
 
   // ---- the ships (stage 4). The bar's ships list: the five (those not made yet greyed); near one, a line to board it;
   // aboard, one to step off; with one put, one to send it away. One ship is put at a time, in front of the body.
@@ -362,7 +362,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function callBot(level = st.level) {
     const b = spawnBot(K.combat, K.body, K.eye.yaw, level);
     if (!b) { say('twelve is as many as the void holds at once', 3); return; }
-    say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} casts the ring, held it spins up · ${actKey('whirl')} whirls · ${actKey('guard')} guards`, 6);
+    say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} casts the ring, held it spins up · ${actKey('whirl')} whirls · ${actKey('guard')} guards · ${actKey('bind')} held binds it`, 6);
   }
   let hurtT = 0, foes = '', hpShown = -1;
   function fought(e) {
@@ -479,7 +479,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       // the fight: the ring and the bots, once the body has moved (aimed along the eye's line as it was drawn last)
       camera.getWorldDirection(AIM);
       stepCombat(C, dt, { body, aim: { from: [camera.position.x, camera.position.y, camera.position.z], dir: [AIM.x, AIM.y, AIM.z] },
-        hands: down || K.aboard ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl },
+        hands: down || K.aboard ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl, bind: inp.bind, bindPressed: inp.bindPressed },
         creative: body.mode === 'creative', world: K.world });
       const evs = C.events.splice(0);
       K.fight.events(evs);
@@ -612,7 +612,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="game-hint" role="status" hidden></div>
       <div class="game-touch"${touch ? '' : ' hidden'}>
         <button type="button" id="game-t-sink" class="game-tbtn" aria-label="Sink" hidden>sink</button>
-        <div class="game-tfight"><button type="button" id="game-t-guard" class="game-tbtn" aria-label="Guard">guard</button><button type="button" id="game-t-whirl" class="game-tbtn" aria-label="Whirl">whirl</button><button type="button" id="game-t-cast" class="game-tbtn" aria-label="Cast the ring">cast</button></div>
+        <div class="game-tfight"><button type="button" id="game-t-guard" class="game-tbtn" aria-label="Guard">guard</button><button type="button" id="game-t-whirl" class="game-tbtn" aria-label="Whirl">whirl</button><button type="button" id="game-t-bind" class="game-tbtn" aria-label="The binding">bind</button><button type="button" id="game-t-cast" class="game-tbtn" aria-label="Cast the ring">cast</button></div>
         <button type="button" id="game-t-dash" class="game-tbtn" aria-label="Dash">dash</button>
         <button type="button" id="game-t-jump" class="game-tbtn game-tbtn-main" aria-label="Jump">jump</button>
       </div>`;
@@ -669,7 +669,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listShips(false); $('#game-ships')?.focus(); } }); }
     press('#game-societies', () => toSocieties?.());
-    for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down'], ['#game-t-cast', 'attack'], ['#game-t-whirl', 'whirl'], ['#game-t-guard', 'guard']]) {
+    for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down'], ['#game-t-cast', 'attack'], ['#game-t-whirl', 'whirl'], ['#game-t-guard', 'guard'], ['#game-t-bind', 'bind']]) {
       const el = $(sel); if (!el) continue;
       on(el, 'pointerdown', (e) => { e.preventDefault(); input.hold(action, true); try { el.setPointerCapture?.(e.pointerId); } catch { /* it still lifts */ } });
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) on(el, ev, () => input.hold(action, false));
