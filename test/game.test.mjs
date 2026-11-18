@@ -34,6 +34,7 @@ import { MODE_LINES, cellText } from '../src/game/menu.js';
 import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
+import * as WO from '../src/game/workshop.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
@@ -1834,6 +1835,110 @@ ok('the house to the eye: a body in its room (or loft) keeps the eye in the room
   assert.equal(HO.sunLocal(0.5, 0.6, -3.5, unit([1, 0.3, 0])), 0, 'under the loft, its floor and the walls shade it');
 });
 
+// ---- the workshop (workshop.js): ten by twelve, three brick vaults, a wall of glass
+// a body in a workshop, stepped in the world's steps with the keys held (move: [right, forward]) at the eye's yaw
+function shopWalk(body, b, move, yaw, seconds, extra = {}) { walk(body, move, yaw, seconds, extra); const [lx, lz] = WO.toLocal(b, body.p[0], body.p[2]); return { lx, lz, y: body.p[1] }; }
+function aWorkshop() {
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
+  w.build(body, 'workshop'); w.update(10);
+  return { w, body, b: w.buildings[0] };
+}
+const shopAt = (body, b, lx, lz, y = WO.WORKSHOP.floor) => { const [x, z] = WO.toWorld(b, lx, lz); body.p = [x, y, z]; body.was = [...body.p]; body.v = [0, 0, 0]; body.grounded = true; };
+
+ok('the workshop: ten by twelve of half-metre adobe; three brick barrel vaults springing 3.4 m over its floor to crowns 4.9 m over it; a wall of glass six metres of which slide open; a chimney to 10.8 m', () => {
+  const W = WO.WORKSHOP, walls = WO.SOLIDS.filter((s) => s.part === 'wall');
+  near(Math.max(...walls.map((s) => s.x1)) - Math.min(...walls.map((s) => s.x0)), 10, 1e-9, 'ten across');
+  near(Math.max(...walls.map((s) => s.z1)) - Math.min(...walls.map((s) => s.z0)), 12, 1e-9, 'twelve long');
+  near(W.wall, 0.5, 1e-9, 'thick walls'); near(WO.IN, 4.5, 1e-9);
+  near(W.spring - W.floor, 3.4, 1e-9, 'where they spring'); near(WO.CROWN - W.floor, 4.9, 1e-9, 'their crowns');
+  near(WO.vaultIn(-3), WO.CROWN, 1e-9); near(WO.vaultIn(0), WO.CROWN, 1e-9); near(WO.vaultIn(3), WO.CROWN, 1e-9);
+  for (const x of [-4.5, -1.5, 1.5, 4.5]) near(WO.vaultIn(x), W.spring, 1e-9, 'springing at ' + x);
+  near(WO.vaultOut(1.5), W.spring + 0.8, 1e-9, 'the valleys between them');
+  assert.ok(WO.WALLTOP >= WO.vaultOut(WO.IN), 'the side walls rise over the outer vaults\' haunches');
+  near(6 * W.glass.panel, 2 * WO.IN, 1e-9, 'six panels fill the wall'); near(2 * W.glass.open, 6, 1e-9, 'six metres open');
+  assert.ok(W.chimney.top - WO.vaultOut(W.kiln.x) > 5, 'the chimney stands five metres over the roof');
+  for (const part of ['bench', 'kiln', 'rack', 'stool']) assert.ok(WO.SOLIDS.some((s) => s.part === part), part);
+});
+
+ok('a workshop goes up in front of the body, its glass toward it; up its steps and in at the opening; its walls, the glass beside the opening, the bench, the kiln, the racks and the columns hold the body', () => {
+  const { w, body, b } = aWorkshop(), W = WO.WORKSHOP;
+  const [sx, sz] = WO.toWorld(b, 0, WO.REACH_Z);
+  assert.ok(Math.hypot(sx - body.p[0], sz - body.p[2]) > 1 && Math.hypot(sx - body.p[0], sz - body.p[2]) < 2, 'its steps a stride or so away');
+  let q = shopWalk(body, b, [0, 1], Math.PI, 6);
+  assert.ok(w.inside(body.p)?.kind === 'workshop', 'up the steps and in: ' + JSON.stringify(q));
+  near(q.y, W.floor, 1e-9, 'on its floor'); near(q.lz, -4.85 + BODY.rad, 1e-6, 'the back rack');
+  shopAt(body, b, 0, 4); q = shopWalk(body, b, [1, 0], Math.PI, 3); near(q.lx, WO.IN - BODY.rad, 1e-6, 'the right wall');
+  shopAt(body, b, 0, 0); q = shopWalk(body, b, [1, 0], Math.PI, 3); near(q.lx, 3.85 - BODY.rad, 1e-6, 'the right rack');
+  shopAt(body, b, 3.75, 4); q = shopWalk(body, b, [0, -1], Math.PI, 2); near(q.lz, W.glass.z - 0.1 - BODY.rad, 1e-6, 'the glass beside the opening');
+  shopAt(body, b, 0, 4); q = shopWalk(body, b, [0, -1], Math.PI, 2); assert.ok(q.lz > W.front && !w.inside(body.p), 'out through the opening: ' + JSON.stringify(q));
+  shopAt(body, b, -2, 0); q = shopWalk(body, b, [-1, 0], Math.PI, 3); near(q.lx, W.bench.x1 + BODY.rad, 1e-6, 'the bench');
+  shopAt(body, b, 3, -1); q = shopWalk(body, b, [0, 1], Math.PI, 3); near(q.lz, W.kiln.z + W.kiln.r + BODY.rad, 1e-6, 'the kiln');
+  shopAt(body, b, 0, -2); q = shopWalk(body, b, [1, 0], Math.PI, 2); near(q.lx, 1.5 - W.column - BODY.rad, 1e-6, 'a column');
+  // outside: the side wall holds a body on the ground and does not lift it; the plinth's front is two steps up
+  const s2 = B.createBody({ world: w }); const [ox, oz] = WO.toWorld(b, -7, 0); s2.p = [ox, 0, oz];
+  walk(s2, [1, 0], Math.PI, 2);
+  near(WO.toLocal(b, s2.p[0], s2.p[2])[0], -W.half - BODY.rad, 1e-6, 'held at the wall'); near(s2.p[1], 0, 1e-9, 'and not lifted');
+  assert.ok(w.wall(WO.toWorld(b, -W.half - BODY.rad - 0.05, 0).flatMap((v, i) => (i === 0 ? [v, 0] : [v])))?.d < 0.5, 'its adobe is a wall to run along');
+});
+
+ok('inside, the vaults keep a jump under them and a beam stops one under it; from above, a body stands on the vaults, down into the valleys between them, and the chimney is in its way', () => {
+  const { body, b } = aWorkshop(), W = WO.WORKSHOP;
+  const peak = (lx, lz) => {
+    shopAt(body, b, lx, lz); let top = 0; walk(body, [0, 0], Math.PI, 0.05, { jumpPressed: true, jump: true });
+    for (let t = 0; t < 2.5; t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move: [0, 0], yaw: Math.PI, jump: true }, B.STEP); top = Math.max(top, body.p[1]); }
+    return top + BODY.tall;
+  };
+  const free = peak(0, 0.8);
+  assert.ok(free <= WO.underVault(0, BODY.rad) + 1e-6, 'a jump keeps under the middle vault: ' + free.toFixed(3));
+  near(peak(1.5, 0.8), W.spring - W.beam.deep, 1e-6, 'under a beam a jump stops at it');
+  // on the roof: dropped onto the middle vault's crown it stands on it; walked across, down into the valley, up the next
+  shopAt(body, b, 0, 0, 7); body.grounded = false;
+  let q = shopWalk(body, b, [0, 0], Math.PI, 1.2);
+  near(q.y, WO.roofTop(q.lx, BODY.rad * 0.5), 1e-6, 'on the crown');
+  q = shopWalk(body, b, [1, 0], Math.PI, 0.35);
+  assert.ok(q.y < WO.CROWN + W.shell - 0.05 && q.y >= WO.vaultOut(1.5) - 1e-6, 'down toward the valley: ' + q.y.toFixed(3));
+  shopAt(body, b, W.kiln.x, 0, WO.vaultOut(W.kiln.x));
+  q = shopWalk(body, b, [0, 1], Math.PI, 4);
+  near(q.lz, W.kiln.z + W.chimney.r + BODY.rad, 1e-6, 'the chimney in its way'); assert.ok(q.y > W.spring, 'still up there');
+});
+
+ok('the workshop to the eye and the sun: the eye stays out of its walls, vaults and glass, inside and out, and may look out through the opening; the sun gets in only through the glass and its half-rounds, past the header and the beams', () => {
+  const b = { kind: 'workshop', x: 0, z: 0, yaw: 0, t: 10, down: -1 }, at = (lx, y, lz) => { const [x, z] = WO.toWorld(b, lx, lz); return [x, y, z]; };
+  const head = at(0, 2.2, -3), back = at(0, 3.5, -9), t = WO.eyeRoom(b, head, back), q = head.map((v, i) => v + (back[i] - v) * t);
+  assert.ok(t < 1 && WO.inRoom(...(() => { const [lx, lz] = WO.toLocal(b, q[0], q[2]); return [lx, q[1], lz]; })(), 0.1), 'kept in the room: ' + t.toFixed(3));
+  near(WO.eyeRoom(b, at(0, 2.2, 3), at(0, 2.5, 9)), 1, 1e-9, 'from inside, out through the opening: nothing in the way');
+  near(WO.eyeRoom(b, at(0, 2, 10), at(0, 2.5, 16)), 1, 1e-9, 'outside, in front: nothing in the way');
+  assert.ok(WO.eyeRoom(b, at(7, 2, 0), at(-7, 2.2, 0)) < 0.25, 'not through the walls');
+  assert.ok(WO.eyeRoom(b, at(0, 9, 0), at(0, 2, 0)) < 0.6, 'not down through a vault');
+  assert.ok(WO.eyeRoom(b, at(3.75, 2, 9), at(3.75, 2, 0)) < 0.5, 'not through the glass beside the opening');
+  const unit = (v) => { const m = Math.hypot(...v); return v.map((c) => c / m); };
+  assert.equal(WO.sunLocal(0, 1, 0, unit([0, 0.3, 1])), 1, 'a low sun in front, through the glass');
+  assert.equal(WO.sunLocal(0, 1, 0, unit([0, 0.6, 1])), 1, 'a higher one through a half-round');
+  assert.equal(WO.sunLocal(0, 1, 0, unit([0, 0.5, 1])), 0, 'the header between them');
+  assert.equal(WO.sunLocal(0, 1, 0, unit([1, 0.3, 0])), 0, 'the side walls have none');
+  assert.equal(WO.sunLocal(0, 1, 0, unit([0, 0.3, -1])), 0, 'nor the back');
+  assert.equal(WO.sunLocal(0, 1, 0, [0, 1, 0]), 0, 'nor the vaults');
+  assert.equal(WO.sunLocal(0.75, 1, 0, unit([0, 1, 1.5])), 1, 'beside a beam, lit');
+  assert.equal(WO.sunLocal(1.5, 1, 0, unit([0, 1, 1.5])), 0, 'under it, its shade');
+  const w = createWorld(); w.buildings.push(b);
+  assert.equal(w.sunAt(at(0, 1, 0), unit([0, 0.3, 1])), 1, 'the world asks the workshop: here, from in front (its +z is the world\'s +z)');
+  assert.equal(w.sunAt(at(0, 1, 0), unit([0, 0.3, -1])), 0, 'and from behind, its shade');
+});
+
+ok('the workshop goes up in seven and a half seconds, the plinth, the walls, the vaults one after another, the glass and the chimney, the things; taken down it goes the same way backward; its glass slides open as a body comes', () => {
+  const W = WO.WORKSHOP, b = { kind: 'workshop', x: 0, z: 0, yaw: 0, t: 0.5, down: -1 };
+  let p = WO.phase(b); near(p.base, 0.5, 1e-9); assert.equal(p.walls, 0);
+  b.t = 4.2; p = WO.phase(b); assert.ok(p.walls === 1 && p.vaults > 0.4 && p.vaults < 0.6 && p.glass === 0);
+  b.t = W.build.done; p = WO.phase(b); assert.equal(p.rest, 1);
+  b.down = W.build.down / 2; p = WO.phase(b); assert.ok(p.rest === 0 && p.walls === 1 && p.vaults > 0 && p.vaults < 1, 'half down: ' + JSON.stringify(p));
+  b.down = W.build.down; assert.equal(WO.phase(b).gone, true);
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w; w.build(body, 'workshop'); w.update(10);
+  w.toggle(body, 'workshop'); w.update(W.build.down + 0.01); assert.equal(w.buildings.length, 0, 'the key near it took it down');
+  const s = { x: 0, z: 0, yaw: 0 }, at = (lx, lz) => { const [x, z] = WO.toWorld(s, lx, lz); return [x, 0, z]; };
+  assert.ok(WO.opens(s, at(0, 9)) && WO.opens(s, at(3.5, 7)) && WO.opens(s, at(-2, -5)), 'near the opening, or inside');
+  assert.ok(!WO.opens(s, at(0, 10.5)) && !WO.opens(s, at(-7, 0)), 'not from further off, nor beside it');
+});
+
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {
   const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
   assert.equal(w.build(body, 'shelter').did, 'up'); w.update(10);
@@ -1855,7 +1960,8 @@ ok('the build key is an action like the others: two keys, a pad button, in the c
   assert.deepEqual(b.keys.build, ['KeyB', '']); assert.equal(b.pad.build, 2);
   assert.ok(I.ACTIONS.find((a) => a.id === 'build')?.note);
   const view = read('src/game/view.js');
-  for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', "(b.kind === 'house' ? createHouseArt : createShelterArt)"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', 'art = ARTS[b.kind]({ lite: K.lite })', 'k.opens ? k.opens(b, K.body.p)']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/buildings/workshop.js').includes("from '../workshop.js'"), 'the workshop drawn is not the numbers\' workshop');
   assert.ok(read('src/game/buildings/house.js').includes("from '../house.js'"), 'the house drawn is not the numbers\' house');
   assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
 });
@@ -2321,6 +2427,19 @@ ok('on the island a house stands with its way in at the ground\'s height, is wal
   assert.equal(r2.did, 'steep'); assert.ok(r2.fall > 1.4);
   // and in the void, as before: at the water's height
   const v = createWorld(), vb = B.createBody({ world: v, yaw: 0 }); assert.equal(v.build(vb, 'house').b.y, 0);
+});
+
+ok('on the island a workshop stands where a house would, its plinth at the ground\'s height before its steps; walked up them and in at its opening, the body stands on its floor', () => {
+  const w = createWorld(); w.ground = islandGround;
+  const a = SHAPE.arrive, body = B.createBody({ world: w, yaw: -Math.PI / 2 }); body.p = [a.x + 40, islandGround.floor(a.x + 40, a.z), a.z]; body.was = [...body.p];
+  const r = w.build(body, 'workshop'); assert.equal(r.did, 'up', 'built: ' + JSON.stringify(r.did === 'steep' ? r.fall : r.did));
+  const b = r.b; w.update(10);
+  const [ex, ez] = KINDS.workshop.entry(b); near(b.y, islandGround.height(ex, ez), 1e-9, 'its way in at the ground\'s height');
+  const [sx, sz] = WO.toWorld(b, 0, WO.REACH_Z + 1); body.p = [sx, islandGround.floor(sx, sz), sz]; body.was = [...body.p];
+  for (let t = 0; t < 6 && !w.inside(body.p); t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: b.yaw, pitch: 0 }, B.STEP); }
+  assert.ok(w.inside(body.p)?.kind === 'workshop', 'in at its opening: ' + body.p.map((v) => v.toFixed(2)));
+  near(body.p[1], b.y + WO.WORKSHOP.floor, 1e-6, 'on its floor, at its height');
+  assert.ok(w.built(b.x + 8, b.z) === true && w.built(b.x + 10, b.z) === false, 'no palm grows within its footprint\'s circle');
 });
 
 ok('on the island a bot comes up out of the ground where it is called and hovers over whatever is under it, never inside a hill', () => {

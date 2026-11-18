@@ -17,62 +17,11 @@
 // ceiling's shade when the sun is high.
 import * as THREE from 'three';
 import { HOUSE as H, roofIn, roofOut, TAN, RISE, RAIL, phase } from '../house.js';
+import { gatherer, boxG, slabG, circle, rect, quadG } from './parts.js';
 
 const PART = { plaster: 0, timber: 1, thatch: 2, stone: 3, solar: 4, planks: 5, ceramic: 6, linen: 7, blanket: 8, under: 9 };
 const STAGE = { piers: 0, frame: 1, walls: 2, roof: 3 };
 const IN = H.half - H.wall, Z0 = H.back + H.wall, Z1 = H.porch - H.wall;
-
-// ---- what the house is made of, gathered into one geometry
-function gatherer() {
-  const P = [], N = [], U = [], A = [], S = [];
-  const put = (g, part, stage) => {
-    const ng = g.index ? g.toNonIndexed() : g;
-    if (!ng.attributes.normal) ng.computeVertexNormals();
-    const p = ng.attributes.position, n = ng.attributes.normal, uv = ng.attributes.uv;
-    for (let i = 0; i < p.count; i++) {
-      P.push(p.getX(i), p.getY(i), p.getZ(i)); N.push(n.getX(i), n.getY(i), n.getZ(i));
-      U.push(uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0); A.push(part); S.push(stage);
-    }
-    if (ng !== g) ng.dispose();
-    g.dispose();
-  };
-  const geometry = () => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setAttribute('aPart', new THREE.Float32BufferAttribute(A, 1)); g.setAttribute('aStage', new THREE.Float32BufferAttribute(S, 1));
-    return g;
-  };
-  return { put, geometry };
-}
-// a box between two corners; its uv runs along its longest side (a timber's grain)
-function boxG(x0, x1, y0, y1, z0, z1) {
-  const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
-  const dims = [x1 - x0, y1 - y0, z1 - z0], long = dims.indexOf(Math.max(...dims));
-  const p = g.attributes.position, uv = g.attributes.uv;
-  for (let i = 0; i < p.count; i++) {
-    const c = [p.getX(i), p.getY(i), p.getZ(i)], other = [0, 1, 2].filter((k) => k !== long);
-    uv.setXY(i, c[long] + dims[long] / 2, c[other[0]] + c[other[1]]);
-  }
-  g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-  return g;
-}
-// a flat shape in the X–Y plane (with holes), as thick as z1 − z0, its uv in metres
-function slabG(points, holes, z0, z1) {
-  const sh = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
-  for (const h of holes) sh.holes.push(h);
-  const g = new THREE.ExtrudeGeometry(sh, { depth: z1 - z0, bevelEnabled: false, curveSegments: 40 });
-  g.translate(0, 0, z0);
-  return g;
-}
-const circle = (cx, cy, r) => { const p = new THREE.Path(); p.absarc(cx, cy, r, 0, Math.PI * 2, true); return p; };
-const rect = (x0, y0, x1, y1) => { const p = new THREE.Path(); p.moveTo(x0, y0); p.lineTo(x0, y1); p.lineTo(x1, y1); p.lineTo(x1, y0); p.lineTo(x0, y0); return p; };
-// a quad of four corners (anticlockwise seen from its front), as two triangles, uv given per corner
-function quadG(a, b, c, d, uvs = [[0, 0], [1, 0], [1, 1], [0, 1]]) {
-  const g = new THREE.BufferGeometry(), pos = [...a, ...b, ...c, ...a, ...c, ...d], uv = [...uvs[0], ...uvs[1], ...uvs[2], ...uvs[0], ...uvs[2], ...uvs[3]];
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.computeVertexNormals();
-  return g;
-}
 
 // GLSL: the house's frame, noise, what each part looks like
 const COMMON = `

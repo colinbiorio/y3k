@@ -450,7 +450,7 @@ try {
     await page.locator('#game-build').click(); await sleep(250);
     const listed = await page.locator('#game-build-list button').evaluateAll((els) => els.map((e) => [e.dataset.build, e.disabled]));
     out.listed = listed;
-    check('the build list offers the five, the three not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house', listed);
+    check('the build list offers the five, the two not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop', listed);
     await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
     r = await until((r) => house(r)?.built, 15000);
     check('the house goes up', !!house(r)?.built && r.world.choice === 'house', r.world);
@@ -476,6 +476,33 @@ try {
     await key.press('KeyB'); r = await until((r) => !house(r), 6000);
     check('and the key near it takes the house down', !house(r), r.world);
     check('the house\'s frames keep up', out.frames.house.median < 20, out.frames.house);
+
+    // ---- the workshop, from the build list: its glass shut while the body is away, sliding open as it comes; in at the
+    // opening to its stone floor; the kiln's light at night; the key inside takes it down
+    const shop = (r) => r.world.buildings.find((b) => b.kind === 'workshop');
+    const sLocal = (r) => { const b = shop(r), dx = r.p[0] - b.x, dz = r.p[2] - b.z, c = Math.cos(b.yaw), sn = Math.sin(b.yaw); return [c * dx - sn * dz, sn * dx + c * dz]; };
+    await page.locator('#game-build').click(); await sleep(250);
+    await page.locator('#game-build-list [data-build="workshop"]').click(); await sleep(300);
+    r = await until((r) => shop(r)?.built, 15000);
+    check('the workshop goes up', !!shop(r)?.built && r.world.choice === 'workshop', r.world);
+    await faceYaw(Math.atan2(-(shop(r).x - r.p[0]), -(shop(r).z - r.p[2]))); await sleep(300);
+    await key.down('KeyS'); r = await until((r) => sLocal(r)[1] > 11, 6000); await key.up('KeyS');
+    r = await until((r) => speed(r) < 0.1 && shop(r).open < 0.05, 5000);
+    check('its glass is shut while the body is away', shop(r).open < 0.05, { open: shop(r).open, at: sLocal(r) });
+    await shot('12-workshop');
+    await key.down('KeyW'); r = await until((r) => sLocal(r)[1] < 7.6, 6000);
+    out.shopOpening = shop(r).open;
+    r = await until((r) => r.world.inside === 'workshop' && sLocal(r)[1] < 2, 8000); await key.up('KeyW');
+    check('it slides open as the body comes, and the body walks up the steps and in to the stone floor', out.shopOpening > 0.2 && shop(r).open > 0.9 && r.world.inside === 'workshop' && Math.abs(r.p[1] - 0.5) < 0.001, { opening: out.shopOpening, open: shop(r).open, inside: r.world.inside, p: r.p, at: sLocal(r) });
+    await until((r) => speed(r) < 0.1); await sleep(500 * slow);
+    await shot('13-workshop-in');
+    out.frames.workshop = await frames(2000);
+    await page.locator('#game-controls').click(); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
+    await page.locator('#game-menu [data-light="night"]').click(); await sleep(300); await page.locator('#game-menu-close').click(); await sleep(700 * slow);
+    await shot('14-workshop-night');
+    await key.press('KeyB'); r = await until((r) => !shop(r), 6000);
+    check('the key inside it takes the workshop down', !shop(r), r.world);
+    check('the workshop\'s frames keep up', out.frames.workshop.median < 20, out.frames.workshop);
   }
 
   if (scene === 'pad') {

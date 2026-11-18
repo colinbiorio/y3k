@@ -25,7 +25,7 @@ const PLASMA = new THREE.Color(0.55, 0.85, 1.0);
 const levelCol = (l) => new THREE.Color(...LEVELS[Math.max(1, Math.min(5, l)) - 1].colour);
 
 // a soft round glow, made once (a sprite's picture)
-function glowTexture() {
+export function glowTexture() {
   const n = 64, data = new Uint8Array(n * n * 4);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const dx = (x + 0.5) / n * 2 - 1, dy = (y + 0.5) / n * 2 - 1, r = Math.hypot(dx, dy), a = Math.max(0, 1 - r) ** 2.2;

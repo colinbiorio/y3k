@@ -20,7 +20,7 @@
 // the frames long. The page's guess at a tier (../gfx.js) is not read.
 //
 // What stands in the void (world.js) is built from the bar's build list (the
-// shelter and the house, of the five) or with the build key (the kind last
+// shelter, the house and the workshop, of the five) or with the build key (the kind last
 // chosen), a few steps in front, its door toward the body.
 // The body is pushed out of its walls and stands on its floor (body.js); the
 // eye comes in rather than go through them; inside, the body is seen by the
@@ -47,6 +47,7 @@ import { ratios, createWatch, watch, rest, chosen } from './fine.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from './world.js';
 import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
+import { createWorkshopArt } from './buildings/workshop.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -207,7 +208,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   }
 
   // the build key: near a building's door it is taken down; else the kind last chosen goes up in front of the body
-  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft' };
+  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back' };
   function said(r) {
     const key = keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build';
     if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
@@ -314,6 +315,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
   // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
+  const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt };
   function builds(dt) {
     const V = K.void, L = LIGHTS[V.light], seen = new Set();
     SUN.copy(V.key.position).sub(V.key.target.position).normalize();
@@ -322,10 +324,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     let flame = 0, flameAt = null, fireCol = hearthCol, best = Infinity;
     for (const b of K.world.buildings) {
       let art = K.arts.get(b);
-      if (!art) { art = (b.kind === 'house' ? createHouseArt : createShelterArt)({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
+      if (!art) { art = ARTS[b.kind]({ lite: K.lite }); K.arts.set(b, art); V.scene.add(art.group); }
       seen.add(b);
-      const [dx, dz] = KINDS[b.kind].door(b), inIt = K.world.within(b, K.body.p);
-      const near = Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || inIt;
+      const k = KINDS[b.kind], [dx, dz] = k.door(b), inIt = K.world.within(b, K.body.p);
+      const near = k.opens ? k.opens(b, K.body.p) : Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || inIt;
       const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol, night: L.stars });
       // the light of the fire nearest the body (one light for all of them: a light that came and went would make every material again)
       const at = art.flameAt.clone().applyMatrix4(art.group.matrixWorld), d = at.distanceTo(new THREE.Vector3(K.body.p[0], K.body.p[1], K.body.p[2])) - (inIt ? 100 : 0);
@@ -585,7 +587,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
-      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1) })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
+      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
