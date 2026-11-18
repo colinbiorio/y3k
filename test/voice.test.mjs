@@ -933,4 +933,93 @@ console.log('\nthe mic waits for a longer pause:');
   });
 }
 
+// KOKORO, FREE ON THIS DEVICE (2026-11-18; src/kokoro.js, src/kokoro-worker.js). The worker is
+// a stand-in here: the real one was heard in a browser (Settings → Voice), on this Mac's own chip.
+{
+  const { kokoroVoiceOf, pickKind, sizeLine, toWav, createKokoro, KOKORO_VOICES, KINDS } = await import('../src/kokoro.js');
+  console.log('\nkokoro:');
+  await ok('a Kokoro voice is saved as kokoro:<voice>, and nothing else reads as one', () => {
+    assert.equal(kokoroVoiceOf('kokoro:af_heart'), 'af_heart');
+    for (const no of ['browser', 'af_heart', 'kokoro:', 'kokoro:../x', 'kokoro:AF_heart', null]) assert.equal(kokoroVoiceOf(no), null, String(no));
+    assert.equal(KOKORO_VOICES[0].id, 'af_heart', 'its best voice first');
+    assert.ok(KOKORO_VOICES.every((v) => /^[ab][fm]_[a-z]+$/.test(v.id) && v.name && (v.accent === 'American' || v.accent === 'British')));
+  });
+  await ok('the graphics card where the browser has one (full precision, 326 MB), else the processor (8-bit, 92 MB), said in its size', async () => {
+    assert.equal(await pickKind({ requestAdapter: async () => ({}) }), 'fp32');
+    assert.equal(await pickKind({ requestAdapter: async () => null }), 'q8');
+    assert.equal(await pickKind({ requestAdapter: async () => { throw new Error('no'); } }), 'q8');
+    assert.equal(await pickKind(undefined), 'q8');
+    assert.deepEqual([KINDS.fp32.mb, KINDS.q8.mb], [326, 92]);
+    assert.equal(sizeLine('fp32'), "about 326 MB, once, for this computer's graphics card");
+    assert.equal(sizeLine('q8'), "about 92 MB, once, for this device's processor");
+  });
+  await ok('its samples as a WAV a plain player can play: 16-bit mono at its rate, clipped', async () => {
+    const b = toWav(new Float32Array([0, 0.5, -0.5, 2, -2]), 24000);
+    const v = new DataView(await b.arrayBuffer());
+    const str = (o, n) => String.fromCharCode(...new Uint8Array(v.buffer, o, n));
+    assert.deepEqual([str(0, 4), str(8, 4), str(36, 4), b.type], ['RIFF', 'WAVE', 'data', 'audio/wav']);
+    assert.deepEqual([v.getUint16(22, true), v.getUint32(24, true), v.getUint16(34, true), v.getUint32(40, true)], [1, 24000, 16, 10]);
+    assert.deepEqual([1, 2, 3, 4].map((i) => v.getInt16(44 + i * 2, true)), [16383, -16384, 32767, -32768]);
+  });
+  // a stand-in worker: answers load with progress then ready (or an error), and say with a second of samples
+  const fakeWorker = ({ failOn = null } = {}) => {
+    const sent = [];
+    const w = { sent, onmessage: null, onerror: null, terminated: false, terminate() { w.terminated = true; },
+      postMessage(m) {
+        sent.push(m);
+        setTimeout(() => {
+          if (m.type === 'load') {
+            w.onmessage({ data: { type: 'progress', loaded: 46e6, total: 92e6, file: 'onnx/model.onnx' } });
+            w.onmessage({ data: m.dtype === failOn ? { type: 'error', message: 'no ' + m.dtype } : { type: 'ready', device: m.device, dtype: m.dtype } });
+          } else if (m.type === 'say') w.onmessage({ data: { type: 'audio', id: m.id, audio: new Float32Array(24000).fill(0.1), rate: 24000 } });
+        }, 0);
+      } };
+    return w;
+  };
+  const memStore = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), m }; };
+  await ok('it loads once, says how far it has come, remembers it was downloaded here, and speaks a text as samples', async () => {
+    const store = memStore(), workers = [];
+    const k = createKokoro({ makeWorker: () => { const w = fakeWorker(); workers.push(w); return w; }, store, gpu: { requestAdapter: async () => ({}) } });
+    assert.equal(k.downloaded(), false);
+    const seen = [];
+    k.watch((m) => seen.push(m.type === 'progress' ? `progress ${m.loaded / 1e6}/${m.total / 1e6}` : `${m.type} ${m.state}`));
+    const [a, b] = await Promise.all([k.ensure(), k.ensure()]);
+    assert.ok(a && b && k.ready());
+    assert.equal(workers.length, 1, 'one worker for the page');
+    assert.deepEqual(workers[0].sent[0], { type: 'load', device: 'webgpu', dtype: 'fp32' });
+    assert.equal(seen[0], 'state loading', 'the state first');
+    assert.ok(seen.includes('progress 46/92') && seen[seen.length - 1] === 'state ready', seen.join(' | '));
+    assert.equal(JSON.parse(store.getItem('y3k.kokoro')).kind, 'fp32', 'remembered: it loads without asking next time');
+    const said = await k.say('Hello there.', 'bf_emma', 1.1);
+    assert.equal(said.audio.length, 24000);
+    assert.equal(said.rate, 24000);
+    assert.deepEqual({ ...workers[0].sent[1], id: undefined }, { type: 'say', id: undefined, text: 'Hello there.', voice: 'bf_emma', speed: 1.1 });
+  });
+  await ok('a graphics card that will not take it falls back to the processor once; one that loads nowhere says why', async () => {
+    const workers = [];
+    const k = createKokoro({ makeWorker: () => { const w = fakeWorker({ failOn: 'fp32' }); workers.push(w); return w; }, store: memStore(), gpu: { requestAdapter: async () => ({}) } });
+    assert.equal(await k.ensure(), true);
+    assert.equal(await k.kind(), 'q8');
+    assert.deepEqual(workers.map((w) => w.sent[0].dtype), ['fp32', 'q8']);
+    assert.ok(workers[0].terminated, 'the first worker is let go');
+    const none = createKokoro({ makeWorker: () => fakeWorker({ failOn: 'q8' }), store: memStore(), gpu: undefined });
+    assert.equal(await none.ensure(), false);
+    assert.equal(none.state(), 'error');
+    assert.equal(none.error(), 'no q8');
+    await assert.rejects(none.say('x'), /no q8/);
+  });
+  await ok('voice.js speaks a Kokoro voice through the same queue and analyser as a service, never through the server; Settings downloads it only on a press', () => {
+    const src = readFileSync(join(ROOT, 'src', 'voice.js'), 'utf8');
+    assert.match(src, /export const browserVoice = \(\{ voiceId, provider \} = \{\}\) => !voiceId \|\| voiceId === 'browser' \|\| \(!kokoroVoiceOf\(voiceId\) && !getVoiceKey\(provider\)\);/);
+    assert.match(src, /if \(!k\.downloaded\(\) && !k\.ready\(\)\) throw new Error\('kokoro not downloaded'\);/, 'a voice never downloaded here is not downloaded by a reply');
+    assert.match(src, /audioBuf = ctx\.createBuffer\(1, audio\.length, rate\);\n\s+audioBuf\.copyToChannel\(audio, 0\);/);
+    assert.match(src, /if \(kokoroVoiceOf\(voiceId\)\) return false; \/\/ Kokoro speaks on this device/);
+    const set = readFileSync(join(ROOT, 'src', 'settings.js'), 'utf8');
+    const drawer = set.slice(set.indexOf('function kokoroDrawer(list) {'), set.indexOf('function sayFree(v) {'));
+    assert.ok(drawer.indexOf("btn.addEventListener('click'") < drawer.indexOf('k.ensure()'), 'the download starts in the button\'s click, nowhere before');
+    assert.match(drawer, /Download Kokoro \(\$\{sizeLine\(kind\)\}\)/, 'its size said before');
+    assert.match(set, /if \(kokoroVoiceOf\(getActive\(\)\.voiceId\) && kokoro\(\)\.downloaded\(\)\) setTimeout\(/, 'woken in the background only when chosen and downloaded already');
+  });
+}
+
 console.log(`\n${passed} checks passed.`);

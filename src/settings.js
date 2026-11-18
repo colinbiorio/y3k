@@ -24,6 +24,7 @@ import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { getVoiceKey, setVoiceKey, voiceKeyHeader, readRefusal, noteRefusal, voiceSpoke, lastRefusal, watchRefusal, refusalLine } from './voice.js';
 import { rankVoices, pickVoice, voiceLabel } from './voice-pick.mjs';
+import { kokoro, kokoroVoiceOf, KOKORO_VOICES, sizeLine, toWav } from './kokoro.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES, stepLine } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -161,6 +162,9 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     el.innerHTML = voiceSaid + (no ? '<div class="voice-last">' + esc(no) + '</div>' : '');
   }
   watchRefusal(() => sayVoiceStatus());
+  // A Kokoro voice chosen and downloaded here (kokoro.js): loaded in the background once
+  // the page is up, so the first reply does not wait for it to wake.
+  try { if (kokoroVoiceOf(getActive().voiceId) && kokoro().downloaded()) setTimeout(() => kokoro().ensure().catch(() => {}), 2500); } catch { /* no storage */ }
 
   // A voice is saved with the service whose list it came from, which is not
   // always the one the pane is browsing: switch Service and the old list stays
@@ -233,6 +237,81 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     main ? main.after(box) : list.prepend(box);
     markVoiceRows();
   }
+  // KOKORO, FREE ON THIS DEVICE (kokoro.js). A drawer under the free voices: until it is
+  // downloaded, what it is and its size, and the one press that downloads it (nothing is
+  // fetched before); while it downloads, how far; then its voices, each with its sample.
+  function kokoroDrawer(list) {
+    const k = kokoro();
+    const a = getActive();
+    const had = list.querySelector('.voice-kokoro');
+    const box = document.createElement('details');
+    box.className = 'voice-defaults voice-kokoro';
+    box.open = had ? had.open : !!kokoroVoiceOf(a.voiceId);
+    box.innerHTML = '<summary><span class="vname">Kokoro, free on this device</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
+    const inner = box.querySelector('.voice-list');
+    const meta = box.querySelector('summary .vmeta');
+    const chosen = KOKORO_VOICES.find((v) => v.id === kokoroVoiceOf(a.voiceId));
+    if (!k.downloaded() && !k.ready()) {
+      meta.textContent = 'not downloaded';
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = 'An open voice model (Kokoro-82M, Apache-2.0) that speaks in this browser: no key, no account, and what it says never leaves this device. It is downloaded once from Hugging Face.';
+      const btn = document.createElement('button');
+      btn.className = 'btn kokoro-get';
+      btn.textContent = 'Download Kokoro';
+      k.kind().then((kind) => {
+        btn.textContent = `Download Kokoro (${sizeLine(kind)})`;
+        if (kind === 'q8') note.textContent += ' This browser runs it on the processor: it is slower than it speaks, so there is a pause between sentences.';
+      });
+      const how = document.createElement('div');
+      how.className = 'muted kokoro-how';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; how.textContent = 'Starting…';
+        const off = k.watch((m) => {
+          if (m.type === 'progress' && m.total > 5e6) how.textContent = `Downloading… ${Math.round(m.loaded / 1e6)} of ${Math.round(m.total / 1e6)} MB`;
+          else if (m.type === 'state' && m.state === 'retry') how.textContent = 'The graphics card would not take it; trying the processor\'s.';
+        });
+        const ok = await k.ensure().catch(() => false);
+        off();
+        if (!ok) { how.textContent = `It did not load: ${k.error() || 'try again'}`; btn.disabled = false; return; }
+        selectVoice('kokoro:' + KOKORO_VOICES[0].id, KOKORO_VOICES[0].name);
+        kokoroDrawer(list);
+      });
+      inner.append(note, btn, how);
+    } else {
+      meta.textContent = `${KOKORO_VOICES.length} voices` + (chosen ? ` · ${chosen.name} chosen` : '');
+      for (const v of KOKORO_VOICES) {
+        const row = document.createElement('div');
+        row.className = 'voice-row';
+        row.dataset.id = 'kokoro:' + v.id;
+        row.innerHTML = '<span class="dot"></span><span class="vname"></span><span class="vmeta"></span><button class="play" title="Play sample">▶</button>';
+        row.querySelector('.vname').textContent = v.name;
+        row.querySelector('.vmeta').textContent = `${v.accent} · ${v.gender}`;
+        row.addEventListener('click', (e) => {
+          if (e.target.classList.contains('play')) return;
+          selectVoice('kokoro:' + v.id, v.name);
+          meta.textContent = `${KOKORO_VOICES.length} voices · ${v.name} chosen`;
+        });
+        const play = row.querySelector('.play');
+        play.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          play.disabled = true;
+          try {
+            const { audio, rate } = await k.say(SAMPLE, v.id, Number(getActive().settings?.speed) || 1);
+            const url = URL.createObjectURL(toWav(audio, rate));
+            const el = new Audio(url);
+            el.onended = el.onerror = () => URL.revokeObjectURL(url);
+            playExclusive(el);
+          } catch { /* not loaded: the row stays */ }
+          play.disabled = false;
+        });
+        inner.appendChild(row);
+      }
+    }
+    if (had) had.replaceWith(box);
+    else (list.querySelector('.voice-device') || list.querySelector('.voice-row[data-id="browser"]:not([data-uri])'))?.after(box) || list.appendChild(box);
+    markVoiceRows();
+  }
   function sayFree(v) {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
@@ -268,7 +347,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   // The stock voices' drawer says how many it holds, and which is chosen
   // when the chosen voice is one of them — it stays closed either way.
   function syncDefaultsSummary() {
-    const box = document.querySelector('#voice-list .voice-defaults:not(.voice-device)');
+    const box = document.querySelector('#voice-list .voice-defaults:not(.voice-device):not(.voice-kokoro)');
     if (!box) return;
     const rows = [...box.querySelectorAll('.voice-row')];
     const on = rows.find((r) => r.classList.contains('on'));
@@ -281,8 +360,9 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   function syncDelivery() {
     const a = getActive();
     const note = $('voice-delivery-note');
-    const models = a.voiceId === 'browser' ? null : modelsSeen[a.provider];
-    const m = models && (models.find((x) => x.id === a.models[a.provider]) || models[0]);
+    const kv = kokoroVoiceOf(a.voiceId);
+    const models = a.voiceId === 'browser' || kv ? null : modelsSeen[a.provider];
+    const m = kv ? { name: 'Kokoro', controls: ['speed'] } : models && (models.find((x) => x.id === a.models[a.provider]) || models[0]);
     const off = m ? Object.keys(SLIDER_NAMES).filter((k) => !m.controls.includes(k)) : [];
     for (const k of Object.keys(SLIDER_NAMES)) {
       const el = $('set-' + k);
@@ -594,7 +674,7 @@ function kommandPane() {
             'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget. On your own Claude plan it draws nothing from the budget and uses your plan instead, until you come back.')) +
         // ----- Voice -----
         pane('voice',
-          '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only and removed when you sign out. Without a key, the browser\'s built-in voice is used.</div>' +
+          '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only and removed when you sign out. Without a key, the browser\'s built-in voice is used, or Kokoro, a free voice that runs on this device.</div>' +
           '<div class="row"><span>Service</span><select id="voice-provider">' +
             Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
           '</select></div>' +
@@ -2072,6 +2152,7 @@ function kommandPane() {
       list.innerHTML = '';
       list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free)' }, p));
       deviceDrawer(list);
+      kokoroDrawer(list);
       if (!data.available) {
         sayVoiceStatus(data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
           : data.error ? esc(svc.name) + ' did not accept that key.'
@@ -2083,7 +2164,7 @@ function kommandPane() {
         return;
       }
       const a = getActive();
-      const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Current voice: ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
+      const elsewhere = a.voiceId !== 'browser' && !kokoroVoiceOf(a.voiceId) && a.provider !== p && a.voiceName ? ` Current voice: ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
       sayVoiceStatus(esc((p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere));
       $('design-sec').classList.remove('disabled');
 

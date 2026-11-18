@@ -7,6 +7,7 @@
 
 import { dominantHz } from './plate.mjs';   // what the sand plate hears: the voice's dominant frequency (2026-10-22)
 import { pickVoice } from './voice-pick.mjs';   // which of the device's voices is the free one (2026-11-18)
+import { kokoro, kokoroVoiceOf } from './kokoro.js';   // a free voice that lives on this device (2026-11-18)
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -26,7 +27,7 @@ export function voiceKeyHeader(provider) { const k = getVoiceKey(provider); retu
 // so a voice chosen from it, or any service's voice whose key was cleared, is
 // heard in the browser's voice instead of being asked of a service that can
 // only refuse every sentence of every reply.
-export const browserVoice = ({ voiceId, provider } = {}) => !voiceId || voiceId === 'browser' || !getVoiceKey(provider);
+export const browserVoice = ({ voiceId, provider } = {}) => !voiceId || voiceId === 'browser' || (!kokoroVoiceOf(voiceId) && !getVoiceKey(provider));
 
 // WHY THE VOICE CHANGED (2026-10-08). Any other refused sentence went to the
 // browser's voice with a console.warn and nothing more, so someone whose own
@@ -249,6 +250,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // --- Out: a voice service's audio, body driven by the real waveform --------
   async function speakAudio(text, voiceId, settings, { onStart, onLevel: onLvl, onEnd, provider, model } = {}) {
     if (browserVoice({ voiceId, provider })) return false; // no key of theirs: the caller's browser voice speaks instead
+    if (kokoroVoiceOf(voiceId)) return false; // Kokoro speaks on this device, through speaker(), never through a service
     try {
       const resp = await fetch('/api/voice/tts', {
         method: 'POST',
@@ -328,6 +330,9 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // and 'end' when it stops. airden.js shows each sentence as it is said and
   // keeps the next one queued behind it, so a long run of speech is gapless.
   function speaker({ voiceId, provider, model, settings, deviceVoice, onLevel: onLvl, onStart, onEnd, onChunk } = {}) {
+    // KOKORO (kokoro.js): spoken on this device, through the same queue and the same
+    // analyser as a service's sentences; one it cannot say goes to the browser voice
+    const kv = kokoroVoiceOf(voiceId);
     const browser = browserVoice({ voiceId, provider });   // the browser's, or a service on the person's own key
     let ended = false;        // end() called — no more chunks coming
     let active = 0;           // scheduled/playing chunks or utterances
@@ -390,12 +395,22 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
         const text = queue.shift();
         if (browserFallback) { pushBrowser(text); continue; }
         try {
-          const r = await fetch('/api/voice/tts', {
-            method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
-            body: JSON.stringify({ text, voiceId, settings, provider, model }),
-          });
-          if (!r.ok) { await refused(r); throw new Error('tts ' + r.status); }
-          const audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
+          let audioBuf;
+          if (kv) {
+            const k = kokoro();
+            if (!k.downloaded() && !k.ready()) throw new Error('kokoro not downloaded');   // only ever on the person's own press (settings.js)
+            const { audio, rate } = await k.say(text, kv, Number(settings?.speed) || 1);
+            if (!audio?.length) throw new Error('kokoro said nothing');
+            audioBuf = ctx.createBuffer(1, audio.length, rate);
+            audioBuf.copyToChannel(audio, 0);
+          } else {
+            const r = await fetch('/api/voice/tts', {
+              method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
+              body: JSON.stringify({ text, voiceId, settings, provider, model }),
+            });
+            if (!r.ok) { await refused(r); throw new Error('tts ' + r.status); }
+            audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
+          }
           if (cancelled) break; // stopped while the chunk was in flight — don't schedule it
           if (ctx.state === 'suspended') await ctx.resume();
           if (!analyser) { analyser = ctx.createAnalyser(); analyser.fftSize = 512; analyser.connect(ctx.destination); meterLoop(); }
@@ -404,7 +419,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
           src.connect(analyser);
           const at = Math.max(ctx.currentTime + 0.02, nextStart);
           src.start(at);
-          voiceSpoke(provider);   // the service answered with sound: the kept refusal goes
+          if (!kv) voiceSpoke(provider);   // the service answered with sound: the kept refusal goes
           nextStart = at + audioBuf.duration;
           if (!started) { started = true; onStart?.(); }
           active += 1;
