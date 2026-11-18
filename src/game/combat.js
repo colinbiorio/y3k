@@ -27,6 +27,17 @@
 //     whoever sent it, three times as hard. Pressed while the ring is out, the
 //     guard calls it back.
 //
+// THE BINDING (stage 5): the force. GAME.md: "The force is the binding. It
+// comes from Colin's own theory, love as what binds: it pulls, holds, joins and
+// lets go." Held (its own key), it reaches out along the eye's line to the bot
+// nearest it and PULLS it in; while it is held the binding HOLDS it in front of
+// the body, where the eye looks, and it can neither move nor shoot; let go, it
+// is thrown (it LETS GO) where the eye looks (at another bot near that line, if
+// there is one), and falls; flung into another bot,
+// the two are JOINED: both struck as hard as it came, they tumble together into
+// the water. Struck down there, or against a wall, a bot is hurt too, less.
+// Only machines: never a presence's people.
+//
 // THE BOTS: machines that hover over the water and shoot bolts of plasma, at
 // five levels (LEVELS): how much they take, how fast they move, how often and
 // how well they shoot (bursts, leading a moving body), whether they slip a
@@ -54,6 +65,22 @@ export const RING = {
   whirl: { time: 0.42, radius: 2.9, damage: 28, knock: 10 },
   slam: { min: 1.1, fall: 22, radius: 6.5, damage: 55, knock: 12 },
   guard: { arc: 1.25, parry: 0.24 },        // half the angle a guard covers (rad); how soon after raising it a bolt is a parry
+};
+export const BINDING = {
+  reach: 24,                                // m: as far as it reaches
+  assist: 0.32,                             // rad: a bot this near the eye's line is what it takes
+  pull: 16,                                 // m/s at most, coming in
+  hold: 4.2,                                // m out along the eye's line: where it is held (up and to the left, holdAt)
+  fling: 28,                                // m/s: let go, along the eye's line (and a little up)
+  lift: 2.5,                                // m/s up, besides
+  strike: 2.2,                              // flung into another, each is struck this much a m/s it came at (at 28: 62)
+  plunge: 0.6,                              // into the water, the ground or a wall: this share of that
+  flight: 2.2,                              // s a flung bot flies before it rights itself, if it meets nothing
+  tumble: 1.1,                              // s two joined bots tumble together before they come apart
+  fall: 9.8,                                // m/s/s: what is flung or tumbles falls
+  turn: 4,                                  // rad/s: how hard a bot thrown at another bends after it
+  rest: 0.45,                               // s after letting go before it reaches again
+  miss: 0.3,                                // s it reaches out and comes back, when there is nothing to take
 };
 // the five levels of bot: hit points, speed (m/s), the distances it keeps, seconds between bursts, shots a burst,
 // how much it leads a moving body (0..1), its aim's error (rad), the chance it slips a cast, its bolts, its size
@@ -117,6 +144,7 @@ export function createCombat({ seed = 7 } = {}) {
     guard: { up: false, t: 9 },
     face: 0, faceYaw: 0,                    // how long the body is to keep facing where the eye looks (after a cast), and that way
     queue: null,                            // an attack pressed while the ring was away: it waits for the ring's return (briefly)
+    bind: { mode: 'idle', target: null, t: 0, rest: 0, miss: 0, missDir: [0, 0, 1], joined: 0 },
     bots: [], bolts: [], level: 1, broken: 0, turned: 0, ids: 1, rand: rng(seed), events: [],
     player: { hp: PLAYER.hp, hurt: 99, mercy: 0, down: 0 },
   };
@@ -167,6 +195,47 @@ function castAim(c, hand, aim, reach) {
   if (aim.dir[1] < -1e-3) T = Math.min(T, (aim.from[1] - WATER) / -aim.dir[1]);
   const P = [aim.from[0] + aim.dir[0] * T, aim.from[1] + aim.dir[1] * T, aim.from[2] + aim.dir[2] * T];
   return { dir: unit(sub(P, hand)), target: null };
+}
+
+// what the binding takes: the bot nearest the eye's line (within BINDING.assist), within its reach, at liberty
+function bindAim(c, aim) {
+  let best = null, ba = BINDING.assist;
+  for (const b of c.bots) {
+    if (b.mode !== 'fight') continue;
+    const to = sub(b.p, aim.from), d = len(to);
+    if (d < 0.5 || d > BINDING.reach + 6) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, dot(to, aim.dir) / d)));
+    if (a < ba) { ba = a; best = b; }
+  }
+  return best;
+}
+// where a bot let go is thrown: at another bot near the eye's line (as a cast goes for one), arced for its fall, and it
+// bends after it as it flies; else along the eye's line, a little up. Answers { v, seek }
+function flingVel(c, aim, held) {
+  let best = null, ba = BINDING.assist;
+  for (const b of c.bots) {
+    if (b === held || b.mode === 'broken' || b.mode === 'rise') continue;
+    const to = sub(b.p, aim.from), d = len(to);
+    if (d < 0.5 || d > BINDING.reach * 2) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, dot(to, aim.dir) / d)));
+    if (a < ba) { ba = a; best = b; }
+  }
+  if (!best) return { v: [aim.dir[0] * BINDING.fling, aim.dir[1] * BINDING.fling + BINDING.lift, aim.dir[2] * BINDING.fling], seek: null };
+  const to = sub(best.p, held.p), d = len(to), t = d / BINDING.fling, u = unit(to);
+  return { v: [u[0] * BINDING.fling, u[1] * BINDING.fling + (BINDING.fall * t) / 2, u[2] * BINDING.fling], seek: best.id };
+}
+// where the binding holds what it has taken: out along the eye's line, up and to the left of the head (where the eye,
+// over the right shoulder, sees it, and not behind the body), never under what it hovers over
+export function holdAt(body, aim, floor = 0, r = 0.6) {
+  const fl = Math.hypot(aim.dir[0], aim.dir[2]) || 1, left = [aim.dir[2] / fl, 0, -aim.dir[0] / fl], H = BINDING.hold;
+  const p = [body.p[0] + aim.dir[0] * H + left[0] * 1.1, body.p[1] + 2.0 + aim.dir[1] * H, body.p[2] + aim.dir[2] * H + left[2] * 1.1];
+  p[1] = Math.max(p[1], floor + r + 0.15);
+  return p;
+}
+// the hand the binding goes out from: the left, as the ring is held at the right
+export function leftHandOf(body) {
+  const f = forwardOf(body.yaw), r = rightOf(body.yaw);
+  return [body.p[0] - r[0] * 0.42 + f[0] * 0.2, body.p[1] + 1.18, body.p[2] - r[2] * 0.42 + f[2] * 0.2];
 }
 
 function cast(c, hand, aim, power) {
@@ -232,11 +301,36 @@ export function stepCombat(c, dt, ctx) {
     }
     if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   } else if (R.mode === 'charging' || R.mode === 'whirl' || R.mode === 'slam') R.mode = 'held';
+  // ---- the binding: pressed, it takes what the eye looks at; held, it holds it; let go, it throws it
+  const Bn = c.bind;
+  Bn.rest = Math.max(0, Bn.rest - dt); Bn.miss = Math.max(0, Bn.miss - dt);
+  const holding = Bn.target != null ? c.bots.find((b) => b.id === Bn.target && b.mode === 'bound') : null;
+  if (Bn.mode === 'hold' && !holding) { Bn.mode = 'idle'; Bn.target = null; }      // broken in its hold, or gone
+  if (able && hands.bindPressed && Bn.mode === 'idle' && Bn.rest <= 0) {
+    const t = bindAim(c, aim);
+    if (t) {
+      Bn.mode = 'hold'; Bn.target = t.id; Bn.t = 0; t.mode = 'bound'; t.burst = 0; t.dodgeT = 0; t.armed = false;
+      c.events.push({ type: 'bind', at: [...t.p], id: t.id, level: t.level });
+    } else if (Bn.miss <= 0) { Bn.miss = BINDING.miss; Bn.missDir = [...aim.dir]; c.events.push({ type: 'bind-miss', at: leftHandOf(body), dir: [...aim.dir] }); }
+  }
+  if (Bn.mode === 'hold') {
+    Bn.t += dt;
+    if (!able || !hands.bind) {
+      const t = c.bots.find((b) => b.id === Bn.target && b.mode === 'bound');
+      if (t) {
+        // let go: thrown where the eye looks (only dropped, if the body is struck down)
+        const { v, seek } = able ? flingVel(c, aim, t) : { v: [0, 0, 0], seek: null };
+        t.mode = 'flung'; t.v = v; t.flyT = BINDING.flight; t.seek = seek;
+        c.events.push({ type: 'fling', at: [...t.p], id: t.id, v: [...v] });
+      }
+      Bn.mode = 'idle'; Bn.target = null; Bn.rest = BINDING.rest;
+    }
+  }
   const guardUp = able && !!hands.guard && R.mode === 'held';
   if (guardUp && !c.guard.up) { c.guard.t = 0; c.events.push({ type: 'guard', at: [...hand] }); }
   c.guard.up = guardUp; c.guard.t += dt;
-  if (guardUp) { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
-  c.slow = guardUp || R.mode === 'charging';
+  if (guardUp || Bn.mode === 'hold') { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
+  c.slow = guardUp || R.mode === 'charging' || Bn.mode === 'hold';      // the body walks while it holds
 
   // ---- in steps
   const n = Math.max(1, Math.ceil(dt / STEP - 1e-9)), h = dt / n;
@@ -311,6 +405,53 @@ function step(c, h, body, aim, aimYaw, world, creative) {
       const g0 = floorUnder(world, b.p[0], b.p[2]);
       b.p[1] = g0 - 0.8 + (b.alt + 0.8) * (1 - (1 - u) * (1 - u));
       if (u >= 1) b.mode = 'fight';
+      continue;
+    }
+    if (b.mode === 'bound') {
+      // held by the binding: drawn in, then held where the eye looks; it neither moves of itself nor shoots
+      const at = holdAt(body, aim, floorUnder(world, b.p[0], b.p[2]), b.r), to = sub(at, b.p), d = len(to);
+      const s = Math.min(d, Math.max(BINDING.pull * h * Math.min(1, d / 2), d * (1 - Math.exp(-10 * h))));
+      const next = d > 1e-6 ? [b.p[0] + (to[0] / d) * s, b.p[1] + (to[1] / d) * s, b.p[2] + (to[2] / d) * s] : b.p;
+      if (!world?.solid?.(next)) b.p = next;
+      b.v = [0, 0, 0];
+      continue;
+    }
+    if (b.mode === 'flung' || b.mode === 'tumble') {
+      const was = [...b.p];
+      b.v[1] -= BINDING.fall * h; b.flyT -= h;
+      const sought = b.mode === 'flung' && b.seek != null ? live.find((o) => o.id === b.seek && o.mode !== 'broken') : null;
+      if (sought) {
+        // thrown at another, it bends after it as hard as BINDING.turn allows, at the speed it has
+        const sp = len(b.v), cur = unit(b.v), want = unit(sub(sought.p, b.p)), a = Math.acos(Math.max(-1, Math.min(1, dot(cur, want)))), k = a > 1e-6 ? Math.min(1, (BINDING.turn * h) / a) : 0;
+        const nd = unit([cur[0] + (want[0] - cur[0]) * k, cur[1] + (want[1] - cur[1]) * k, cur[2] + (want[2] - cur[2]) * k]);
+        b.v = [nd[0] * sp, nd[1] * sp, nd[2] * sp];
+      }
+      b.p = [b.p[0] + b.v[0] * h, b.p[1] + b.v[1] * h, b.p[2] + b.v[2] * h];
+      const speed = len(b.v);
+      if (b.mode === 'flung') {
+        // flung into another: the two are joined, each struck as hard as it came, and tumble together
+        const o = live.find((o) => o !== b && o.mode !== 'broken' && o.mode !== 'rise' && o.mode !== 'tumble' && segPoint(was, b.p, o.p) < b.r + o.r);
+        if (o) {
+          const dmg = Math.round(BINDING.strike * speed), v = [(b.v[0] + o.v[0]) * 0.35, Math.max(1.5, (b.v[1] + o.v[1]) * 0.35), (b.v[2] + o.v[2]) * 0.35];
+          c.bind.joined++;
+          c.events.push({ type: 'join', at: [(b.p[0] + o.p[0]) / 2, (b.p[1] + o.p[1]) / 2, (b.p[2] + o.p[2]) / 2], ids: [b.id, o.id], damage: dmg });
+          for (const x of [b, o]) {
+            if (c.bind.target === x.id) { c.bind.mode = 'idle'; c.bind.target = null; }
+            hit(c, x, dmg, x === b ? was : b.p, 'join', 0);
+            if (x.mode !== 'broken') { x.mode = 'tumble'; x.v = [...v]; x.flyT = BINDING.tumble; }
+          }
+          continue;
+        }
+      }
+      const fl = floorUnder(world, b.p[0], b.p[2]);
+      if (b.p[1] - b.r < fl || world?.solid?.(b.p)) {
+        // into the water, the ground or a wall: struck too, less; and it rights itself
+        const wet = b.p[1] - b.r < fl;
+        if (wet) b.p[1] = fl + b.r; else b.p = was;
+        hit(c, b, Math.round(BINDING.strike * speed * BINDING.plunge), wet ? [b.p[0], fl - 1, b.p[2]] : b.p, 'plunge', 0);
+        c.events.push(wet ? { type: 'splash', at: [b.p[0], fl, b.p[2]], size: 0.25 + speed * 0.01 } : { type: 'spark', at: [...b.p] });
+        if (b.mode !== 'broken') { b.mode = 'fight'; b.v = [b.v[0] * 0.2, 2, b.v[2] * 0.2]; b.fire = Math.max(b.fire, 1); b.seek = null; }
+      } else if (b.flyT <= 0) { b.mode = 'fight'; b.seek = null; }
       continue;
     }
     const to = [target[0] - b.p[0], 0, target[2] - b.p[2]], dist = Math.hypot(to[0], to[2]) || 1e-6, dh = [to[0] / dist, 0, to[2] / dist];

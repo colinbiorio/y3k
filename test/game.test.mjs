@@ -2568,6 +2568,91 @@ ok('the fight\'s hands: cast, whirl, guard and a bot have keys and pad buttons; 
   assert.equal(S.loadState(store({ [S.STATE_KEY]: JSON.stringify({ level: 9 }) })).level, 1, 'not believed');
 });
 
+// ---- the binding (combat.js BINDING; stage 5). GAME.md: "it pulls, holds, joins and lets go". Only machines.
+const toward = (from, p) => { const d = [p[0] - from[0], p[1] - from[1], p[2] - from[2]], m = Math.hypot(...d); return [d[0] / m, d[1] / m, d[2] / m]; };
+
+ok('the binding: pressed, it takes the bot nearest the eye\'s line and pulls it in; held, it holds it in front of the body where the eye looks, the body walking, and the bot neither moves of itself nor shoots; let go, it is thrown where the eye looks', () => {
+  const { c, body, aim } = arena(), b = standBot(c, body, [0.5, 1.6, -12]);
+  b.fire = 0.2;   // free, it would shoot in a moment
+  let evs = fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true });
+  assert.equal(kinds(evs, 'bind').length, 1, 'taken'); assert.equal(b.mode, 'bound'); assert.equal(c.bind.mode, 'hold');
+  evs = fightFor(c, body, aim, 1.2, { bind: true });
+  let at = CB.holdAt(body, aim, 0, b.r);
+  assert.ok(Math.hypot(b.p[0] - at[0], b.p[1] - at[1], b.p[2] - at[2]) < 0.05, 'pulled in and held where the eye looks: ' + b.p.map((v) => v.toFixed(2)));
+  assert.equal(kinds(evs, 'bolt').length, 0, 'held, it does not shoot'); assert.ok(c.slow, 'the body walks while it holds');
+  const aim2 = { from: aim.from, dir: [-Math.sin(0.5), 0, -Math.cos(0.5)] };
+  fightFor(c, body, aim2, 0.8, { bind: true });
+  at = CB.holdAt(body, aim2, 0, b.r);
+  assert.ok(Math.hypot(b.p[0] - at[0], b.p[1] - at[1], b.p[2] - at[2]) < 0.05, 'the eye turns, and what it holds goes with it');
+  evs = fightFor(c, body, aim2, FRAME, {});
+  const f = kinds(evs, 'fling');
+  assert.equal(f.length, 1, 'let go'); assert.equal(b.mode, 'flung'); assert.equal(c.bind.mode, 'idle');
+  const v = f[0].v, along = v[0] * aim2.dir[0] + v[1] * aim2.dir[1] + v[2] * aim2.dir[2];
+  assert.ok(along > CB.BINDING.fling - 0.5 && v[1] > 0, 'thrown where the eye looks, a little up: ' + v.map((x) => x.toFixed(1)));
+  evs = fightFor(c, body, aim2, FRAME, { bind: true, bindPressed: true });
+  assert.equal(kinds(evs, 'bind').length + kinds(evs, 'bind-miss').length, 0, 'it rests a moment after letting go');
+});
+
+ok('the binding joins: a bot thrown at another (the throw goes for it, arced for its fall) strikes it, each struck as hard as it came, and the two tumble together; a bot thrown down into the water is struck less and rights itself; with nothing to take it reaches out and comes back', () => {
+  let { c, body, aim } = arena();
+  const a = standBot(c, body, [0, 1.6, -8]), o = standBot(c, body, [3, 1.6, -20], 3);
+  fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true });
+  assert.equal(a.mode, 'bound', 'the nearer the eye\'s line is taken');
+  fightFor(c, body, aim, 1, { bind: true });
+  const atO = { from: aim.from, dir: toward(aim.from, o.p) };
+  fightFor(c, body, atO, 0.3, { bind: true });
+  let evs = fightFor(c, body, atO, 1.5, {});
+  const j = kinds(evs, 'join');
+  assert.equal(j.length, 1, 'joined: ' + JSON.stringify(kinds(evs, 'fling')));
+  assert.ok(j[0].damage > 50 && j[0].damage < 75, 'struck as hard as it came: ' + j[0].damage);
+  assert.ok(kinds(evs, 'broken').some((e) => e.id === a.id), 'the drifter, struck as hard, breaks');
+  assert.ok(o.hp <= o.max - j[0].damage, 'the sentinel struck too: ' + o.hp);
+  assert.ok(kinds(evs, 'hit').some((e) => e.id === o.id && e.kind === 'plunge') || o.mode === 'tumble', 'and it tumbles, into the water');
+  assert.equal(c.bind.joined, 1);
+  // thrown down into the water
+  ({ c, body, aim } = arena());
+  const w = standBot(c, body, [0, 1.6, -9], 5);
+  fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true }); fightFor(c, body, aim, 1, { bind: true });
+  const down = { from: aim.from, dir: [0, -0.55, -0.835] };
+  evs = fightFor(c, body, down, 2, (t) => (t < 0.3 ? { bind: true } : {}));
+  const plunge = kinds(evs, 'hit').filter((e) => e.id === w.id && e.kind === 'plunge');
+  assert.equal(plunge.length, 1, 'struck going into the water'); assert.ok(plunge[0].damage > 10 && plunge[0].damage < 50, 'less than a join: ' + plunge[0].damage);
+  assert.ok(kinds(evs, 'splash').length >= 1); assert.equal(w.mode, 'fight', 'and it rights itself'); assert.ok(w.p[1] > 0);
+  // nothing near the eye's line
+  ({ c, body, aim } = arena());
+  standBot(c, body, [9, 1.6, -9]);
+  evs = fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true });
+  assert.equal(kinds(evs, 'bind-miss').length, 1); assert.equal(c.bind.mode, 'idle'); assert.ok(c.bind.miss > 0, 'the thread goes out and comes back');
+});
+
+ok('the binding lets go of what it holds when the body is struck down (only dropped), and when its bot is broken in its hold', () => {
+  let { c, body, aim } = arena();
+  const b = standBot(c, body, [0, 1.6, -10], 2);
+  fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true }); fightFor(c, body, aim, 1, { bind: true });
+  c.player.down = 1;
+  const evs = fightFor(c, body, aim, FRAME, { bind: true });
+  const f = kinds(evs, 'fling'); assert.equal(f.length, 1); assert.deepEqual(f[0].v, [0, 0, 0], 'dropped, not thrown'); assert.equal(c.bind.mode, 'idle');
+  ({ c, body, aim } = arena());
+  const b2 = standBot(c, body, [0, 1.6, -10], 1);
+  fightFor(c, body, aim, FRAME, { bind: true, bindPressed: true }); fightFor(c, body, aim, 0.6, { bind: true });
+  b2.hp = 1; fightFor(c, body, aim, FRAME, { bind: true, attack: true, attackPressed: true }); fightFor(c, body, aim, 0.5, { bind: true });
+  assert.ok(!c.bots.includes(b2) && c.bind.mode === 'idle', 'broken in its hold by the ring: the binding is empty again');
+});
+
+ok('the binding\'s hands: X (or H) held, the pad\'s LB; a button on a phone; the view passes it to the fight and draws its thread', () => {
+  const d = I.defaults();
+  assert.deepEqual(d.keys.bind, ['KeyX', 'KeyH']); assert.equal(d.pad.bind, 4);
+  assert.ok(I.ACTIONS.find((a) => a.id === 'bind')?.note);
+  const all = Object.values(d.keys).flat().filter(Boolean); assert.equal(new Set(all).size, all.length, 'one key, one thing');
+  const pads = Object.values(d.pad).filter((n) => n >= 0); assert.equal(new Set(pads).size, pads.length, 'one button, one thing');
+  const inp = I.createInput(I.defaults());
+  inp.down('KeyX'); let f = inp.frame(); assert.ok(f.bind && f.bindPressed); f = inp.frame(); assert.ok(f.bind && !f.bindPressed, 'held, pressed once');
+  const view = read('src/game/view.js');
+  for (const line of ['bind: inp.bind, bindPressed: inp.bindPressed', 'id="game-t-bind"', "['#game-t-bind', 'bind']"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  const fight = read('src/game/fight.js');
+  assert.ok(fight.includes('leftHandOf(body)') && fight.includes("ev.type === 'join'"), 'the thread and the joining are not drawn');
+});
+
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {
   const view = read('src/game/view.js');
   for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen, K.lean)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
