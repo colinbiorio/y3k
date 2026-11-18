@@ -76,6 +76,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
+/* WORDS YOU CAN TAKE (Colin, 18 Nov 2026: "i notice i can't highlight/ copy paste your messages"). The page is
+   unselectable by default (above: a drag across the room never paints its glass blue), and the conversation's
+   words are not: kode's messages, their code and the tools' output select and copy as text (the prompt marks and
+   a diff's gutters stay out of it: .tl-prompt, .df-no, .df-sign), and so does a caption wherever one shows. At
+   home a drag on the lines scrolls them (history.js), so a line is taken by a double-click there. */
+.cv-list .it, #caption, #chat-history .hl { user-select: text; -webkit-user-select: text; }
+.cv-list .it { cursor: auto; }
 
 /* Form controls do NOT inherit font-family — every browser hands them its own
    default (Arial here), so without this every button, input and select on the

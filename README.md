@@ -263,6 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **Words you can take: messages select and copy**
+  (`styles.css` "WORDS YOU CAN TAKE", `src/history.js` the double-click;
+  `scripts/code-smoke.mjs`). Colin: "i notice i can't highlight/ copy paste
+  your messages." The whole page is `user-select: none` (so a drag across the
+  room never paints its glass blue), and no message had opted back in. Now
+  kode's messages, their code and the tools' output select as text (a prompt's
+  mark and a diff's gutters stay out of the copy), and so does a caption
+  wherever one shows. At home a drag on the lines already scrolls through the
+  past, so a line is taken by a double-click there: selected whole, for the
+  copy key (the orb's disc and the furniture keep theirs). The smoke does both
+  with a real mouse: a double-click on the presence's line at home selects
+  exactly its words; a drag across the coder's reply in kode selects its words.
 - **2026-11-18** (afternoon) — **Kokoro: a free voice that lives on this device**
   (`src/kokoro.js`, `src/kokoro-worker.js`, `src/vendor/kokoro-js@1.2.1` and
   `src/vendor/transformers@3.5.1`, `src/voice.js` speaker, `src/settings.js`

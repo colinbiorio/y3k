@@ -583,6 +583,13 @@ try {
   await page.waitForFunction((n) => document.querySelectorAll('#chat-history .hl-ai').length > n, linesBefore, { timeout: 30000 }).catch(() => {});
   const said = await page.evaluate(() => [...document.querySelectorAll('#chat-history .hl-ai')].map((x) => x.textContent.trim()).pop() || '');
   check('…and the presence says how it went', /say hello|again|done/i.test(said), said);
+  // WORDS YOU CAN TAKE (Colin, 18 Nov 2026: "i can't highlight/ copy paste your messages"): at home a drag on the
+  // lines scrolls them, so a double-click on one selects it whole, for the copy key
+  const lineBox = await page.evaluate(() => { const l = [...document.querySelectorAll('#chat-history .hl-ai')].pop(); const r = l?.getBoundingClientRect(); return r && { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2, text: l.textContent.trim() }; });
+  if (lineBox) await page.mouse.dblclick(lineBox.x, lineBox.y);
+  const picked = await page.evaluate(() => (window.getSelection()?.toString() || '').trim());
+  check('…and a double-click on its line selects the line whole, to copy', !!lineBox && picked === lineBox.text, JSON.stringify({ picked, want: lineBox?.text }));
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await shot('5b-home-done');
   await page.click('#home-run .hr-close');
   check('…and the card closes', !(await page.$('#home-run')));
@@ -591,6 +598,12 @@ try {
   await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
   const inRoom = await page.evaluate(() => [...document.querySelectorAll('.cv-list .us-text')].map((x) => x.textContent).pop());
   check('…and in kode it is the same conversation, the line in it', inRoom === 'say hello from home', String(inRoom));
+  // …and kode's messages select as text: a drag across the coder's reply takes its words
+  const reply = await page.evaluate(() => { const m = [...document.querySelectorAll('.cv-list .it.as')].pop(); m?.scrollIntoView({ block: 'center' }); const r = m?.getBoundingClientRect(); return r && { x0: r.left + 4, y0: r.top + r.height / 2, x1: r.right - 4, y1: r.top + r.height / 2, text: m.textContent }; });
+  if (reply) { await page.mouse.move(reply.x0, reply.y0); await page.mouse.down(); await page.mouse.move((reply.x0 + reply.x1) / 2, reply.y1, { steps: 4 }); await page.mouse.move(reply.x1, reply.y1, { steps: 4 }); await page.mouse.up(); }
+  const took = await page.evaluate(() => (window.getSelection()?.toString() || '').trim());
+  check('…and in kode a drag across the coder\'s reply selects its words, to copy', !!reply && took.length >= 6 && reply.text.includes(took.slice(0, 6)), JSON.stringify({ took: took.slice(0, 60) }));
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
   await page.waitForTimeout(400);
   const csp = await page.evaluate(() => window.__csp);

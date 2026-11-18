@@ -758,6 +758,31 @@ export function createHistory() {
     samples = [[performance.now(), scroll]];
     e.stopPropagation();
   }, { capture: true });
+  // WORDS YOU CAN TAKE (Colin, 18 Nov 2026: "i notice i can't highlight/ copy
+  // paste your messages"). A drag on the words scrolls them (above), so a line
+  // is taken by a double-click instead: it is selected whole, for the copy key.
+  // The orb's disc and the hands-off furniture stay theirs.
+  function lineAt(x, y) {
+    for (const line of el.querySelectorAll('.hl')) {
+      if (line.style.visibility === 'hidden') continue;
+      const r = line.getBoundingClientRect();
+      if (r.width && r.height && x >= r.left - PAD_X && x <= r.right + PAD_X && y >= r.top - PAD_Y && y <= r.bottom + PAD_Y) return line;
+    }
+    return null;
+  }
+  window.addEventListener('dblclick', (e) => {
+    if (!live()) return;
+    if (Math.hypot(e.clientX - cx(), e.clientY - cy()) < R() * 1.05) return;
+    if (e.target.closest && e.target.closest(HANDS_OFF)) return;
+    const line = lineAt(e.clientX, e.clientY);
+    const sel = line && window.getSelection?.();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    e.preventDefault();
+  }, { capture: true });
   window.addEventListener('pointermove', (e) => {
     if (dragId === null || e.pointerId !== dragId) return;
     const max = maxScroll();
