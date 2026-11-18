@@ -263,6 +263,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (night) — **The workshop, the third building**
+  (`src/game/workshop.js`, `buildings/workshop.js`, `buildings/parts.js`;
+  `world.js`, `view.js`). From its brief: ten by twelve metres of thick adobe
+  under three fired-brick barrel vaults, a tall bronze chimney, and a whole
+  wall of glass in pale alloy frames that slides open as you come. Inside are
+  a workbench with its tools, a tool board, racks of timber and metal bars, a
+  stool, and a ceramic kiln whose mouth holds a slow swirl of violet plasma.
+  Build it from the bar's list, walk up its steps and in, and fly up to stand
+  on its vaults. The sun gets in only through the glass; at night the kiln
+  lights the room. It stands on the island too. Game suite 141 (6 new); the
+  `build` smoke 25/25 (the glass shut while you are away and open as you come,
+  in, and down again) at 60 frames a second.
+
 - **2026-11-17** (evening, last) — **Building and fighting on the island**
   (`src/game/world.js`, `buildings/*.js`, `combat.js`, `island/creatures.js`).
   The buildings and the bots had assumed the void's flat water at height 0,

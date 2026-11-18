@@ -91,7 +91,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
 | "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
-| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **two of five**: the shelter and the house, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder. The workshop, the tower and the hall are next. |
+| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **three of five**: the shelter, the house and the workshop, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come. The tower and the hall are next. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
 | "some type of 'force'" | stage 5: the binding. The ring is already held by it rather than by a hand. |
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
@@ -114,7 +114,8 @@ Said to Colin before starting, and standing until he says otherwise.
 **Stages 1 and 2 are built**: the void (13 November 2026) and the five bodies
 (14 November). Open the world tab and you are standing in it. Press **body**
 and choose who you are there. **Stage 3 is begun** (17 November): press
-**build** (or B) and a shelter goes up in front of you. **The first weapon and
+**build** (or B) and a shelter goes up in front of you; three of the five
+(the shelter, the house, the workshop) are in the bar's build list. **The first weapon and
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
@@ -319,7 +320,7 @@ the ground, because the void has no ground to sink it in.
   are arithmetic in the shader, like everything else in the void; the flame is
   a card turned to the eye with a white core, a blue-violet sheath and slow
   rising tongues; the mat is woven by its shader, over and under.
-- Not yet: the workshop, the tower and the hall; a building kept between visits
+- Not yet: the tower and the hall; a building kept between visits
   (stage 6 keeps things); a building's shadow on the water (the void casts no
   shadows); sitting on the mat or lying down.
 
@@ -356,6 +357,53 @@ of light."
   eaves up, then the things one after another.
 - Rough edges: climbing, the body holds its jump's pose; in the loft's low
   corners the eye is close and the body is then not drawn.
+
+**The workshop** (17 November, night), from its brief: "about ten by twelve
+metres: thick adobe walls, a roof of three fired-brick barrel vaults, a tall
+bronze chimney, one whole wall a sliding door of glass in a pale alloy frame.
+Inside: a long workbench with hand tools, a ceramic kiln whose mouth glows with
+contained plasma, racks of timber and metal bars, a stone floor."
+
+- **Built from the bar's list**, as the others. It goes up in about seven and a
+  half seconds: the stone plinth, the adobe walls with the alloy beams and
+  their columns, the three vaults one after another (each rising from both its
+  springings to its crown), the chimney and the glass, then the things. Taken
+  down, it goes the same way backward.
+- **Walked.** Two broad steps up to a stone floor half a metre up. The glass
+  wall is six panels a metre and a half wide on three tracks: when a body
+  comes within four metres they slide aside, two over each end panel, and
+  leave six metres open; they close when it walks off. The walls, the glass
+  beside the opening, the workbench, the kiln, both racks, the stool and the
+  four columns are in the way. The vaults keep a jump under them, and a beam
+  stops one under it. Flying, a body stands on the vaults, walks down into the
+  valleys between them, and meets the chimney up there. Its adobe is a wall to
+  run along (`workshop.js`).
+- **The eye** may follow a body's look out through the opening (six metres
+  wide, unlike the house's door) and is kept out of the walls, the vaults and
+  the glass.
+- **The light inside**: the sun only through the glass and the half-rounds
+  over the header, and on out under the vaults' front ends (`sunLocal`, the
+  same in the numbers and in the shader). A low sun lays a long patch on the
+  floor and the side wall, cut by the header's shadow and the vaults' curves,
+  and the beams cast their lines. The sky by how near the glass a surface is;
+  at night the kiln's violet light, and from outside the glass glows a little
+  with it.
+- **Drawn** (`buildings/workshop.js`): adobe over faint block courses on a
+  stone footing; bricks laid in rings along each vault, their voussoirs at its
+  ends; pale alloy beams, columns, header, tracks and the half-rounds' fans of
+  mullions; steel tie rods across the vaults' feet with their plates on the
+  walls outside; the bronze chimney's joints, collar, rain cap and three stays,
+  green where the rain runs down it over the roof; the kiln's celadon glaze,
+  crazed, sooty round its mouth; the plasma there a slow swirl, violet at its
+  rim and white at its heart. The shapes the three buildings are put together
+  from are one module now (`buildings/parts.js`).
+- **On the island** it stands where the ground allows, by the house's rule (its
+  plinth clears 0.45 m of rise behind). Of 2,060 places on land within 600 m of
+  the beach, 933 take it in one of four facings, and 1,189 the house.
+- Rough edges: the glass is drawn sliding, but a body may always pass the
+  opening (the glass opens within four metres, sooner than a body can run to
+  it). Against the back rack and turned to face it, the eye rises over the
+  body and looks down.
 
 ### Stage 1: the void
 
@@ -563,14 +611,14 @@ tested, shipped.
 
 This round (Colin, 17 November): **wall running** (done); **the first map**,
 Lord Howe Island, under a new **map** tab, with its palms and animals (done).
-Then the buildings again (the workshop is designed), the stick insect by night,
-and more of Earth from the same tiles.
+Then the buildings again: **the workshop** (done, the same night), the tower
+and the hall; the stick insect by night; and more of Earth from the same tiles.
 
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
    through, furnished a little. Ancient, present and to come in each. **The
-   shelter is built** (above); the house next, then the workshop, the tower
-   and the hall, each from its brief.
+   shelter, the house and the workshop are built** (above); the tower and
+   the hall next, each from its brief.
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
    there is somewhere to go.
@@ -609,6 +657,7 @@ suite runs them; those that draw are read as text and looked at.
 | `shelter.js` | the shelter as numbers: its shell, what of it is solid, where a body may go and stand, where the eye may stand, where the sun gets in, how it goes up |
 | `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
 | `house.js` | the house as numbers: its solids, the room's and the porch's air, the ladder, the eye, the sun through its window and door, how it goes up |
+| `workshop.js` | the workshop as numbers: its vaults, solids and airs, the glass that opens as a body comes, standing on the vaults, the eye, the sun through the glass, how it goes up and comes down |
 | `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
 | `combat.js` | the fight as numbers: the ring's five ways, the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
 | `fight.js` | the ring, its trail and shield, the bots, bolts, sparks, debris and the slam's wave (draws) |
@@ -618,7 +667,7 @@ suite runs them; those that draw are read as text and looked at.
 | `island/life.js` | what grows and lives there as numbers: the palms by cell, the terns and tropicbirds by time, the woodhens and turtles stepped |
 | `island/creatures.js` | the palms, terns, tropicbirds, woodhens and turtles drawn, one instanced shape each (draws) |
 | `island/lordhowe.bin`, `lordhowe-shape.js` | made by `scripts/island/lordhowe-build.mjs` from the elevation tiles: the heights (300 KB), the coast, shallows, peaks, arrival |
-| `buildings/` | `shelter.js`, `house.js`: the two drawn (draws) |
+| `buildings/` | `shelter.js`, `house.js`, `workshop.js`: the three drawn; `parts.js`, the shapes they are put together from (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |
