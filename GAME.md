@@ -1006,7 +1006,10 @@ of Earth from the same tiles.
 
 Owed from stage 2, small: a run that draws every option and counts what
 changes, so that "no choice does nothing" is held by a run and not by one
-measurement; something that points a first visitor to the body button.
+measurement. (The other, something that points a first visitor to the body
+button, is done, 18 November: until the body sheet has been opened once, its
+button breathes a pale light, and a few seconds in a line says "five kinds of
+body, and this is one · the body button makes it yours".)
 
 ## How it is built
 

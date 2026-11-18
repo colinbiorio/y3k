@@ -141,7 +141,7 @@ function stage(lite, st) {
 export function createGameView({ toast = () => {}, toSocieties = null, storage = null } = {}) {
   let root = null, raf = 0, ro = null, wire = null, menu = null, chooser = null, K = null, input = null, st = null;
   let pose = 0, turned = 0, stand = null, standT = 0;      // the body sheet: how far the eye has gone to it (0..1), how far its buttons have turned the body, where the body stands, when that is asked again
-  let last = 0, wake = 0, sayUntil = 0, standing = '', menuShut = 0, saveT = 0, locked = false, touch = false, still = 0;
+  let last = 0, wake = 0, sayUntil = 0, standing = '', menuShut = 0, saveT = 0, locked = false, touch = false, still = 0, beckonAt = 0;
   let hand = 0;                     // how fine it is drawn (fine.js): a person's own choice of fewer pixels (0: none)
   const offs = [];
   const pos = [0, 0, 0];
@@ -185,7 +185,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function openBody() {
     if (!chooser || chooser.isOpen() || menu.isOpen() || performance.now() - menuShut < 250) return;
     wire?.release(); input.clear(); turned = 0; chooser.open();
+    if (!st.bodyMet) { st.bodyMet = true; save(); beckon(); }
+    beckonAt = 0; if ($('.game-hint')?.textContent === BECKON) say('', 0);      // found: the line has done its work
   }
+  // a first visitor is pointed to the body sheet: its button breathes, and once, a few seconds in, a line says what it
+  // is for; both stop for good once the sheet has been opened (state.js bodyMet)
+  const BECKON = 'five kinds of body, and this is one · the body button makes it yours';
+  function beckon() { $('#game-body-open')?.classList.toggle('beckon', !st.bodyMet); }
   // the body, made again as it was chosen, standing where it stood. One that cannot be made leaves the one that was.
   function dress() {
     let made = null;
@@ -607,6 +613,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
     if (!paused && Math.hypot(body.v[0], body.v[2]) > 1) K.learned += dt;
     if (sayUntil && now > sayUntil) sayUntil = 0;
+    if (beckonAt && now > beckonAt && !sayUntil) { beckonAt = 0; if (!st.bodyMet && !chooser?.isOpen() && !menu?.isOpen()) say(BECKON, 7); }
     if (!sayUntil) { const h = hint(); if (h !== standing) { standing = h; const el = $('.game-hint'); if (el) { el.textContent = h; el.hidden = !h; } } } else standing = '';
     if (saveT && now > saveT) { saveT = 0; save(); }
   }
@@ -718,7 +725,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) on(el, ev, () => input.hold(action, false));
       on(el, 'contextmenu', (e) => e.preventDefault());
     }
-    labelWeapon();
+    labelWeapon(); beckon(); beckonAt = st.bodyMet ? 0 : performance.now() + 6000;
     on(holder, 'pointerdown', (e) => { if (e.pointerType === 'touch' && !touch) { touch = true; $('.game-touch').hidden = false; standing = ' '; } });
     ro = new ResizeObserver(size); ro.observe(holder); size();
     // read only, for whoever is checking the game from outside it (a test's browser, the console). `seen` is where the body's middle is on the canvas, in px
