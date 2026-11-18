@@ -54,6 +54,7 @@ import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, 
 import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
+import { createArkArt } from './ships/ark.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -319,17 +320,20 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
     if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
     K.world.ships = [placeShip(K.body, floorAt, kind)];
-    say(`a ${kind} comes down ${kind === 'skiff' ? 'in front of' : 'beside'} you · ${actKey('board')} ${kind === 'dhow' ? 'takes you up to its helm' : 'boards it'}`, 5);
+    nearSaid = K.world.ships[0];   // this says how to board it: the hint near its seat is not said over it at once
+    const up = { dhow: 'takes you up to its helm', ark: 'lifts you up into its dome' }[kind] || 'boards it';
+    const where = { skiff: 'in front of', ark: 'ahead of' }[kind] || 'beside';
+    say(`${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} comes down ${where} you · ${actKey('board')} ${up}`, 5);
   }
   function boardOrLeave() {
     if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
     const s = nearShip(K.world.ships, K.body.p);
-    if (!s) { if (K.world.ships.length) say(`walk to the ${K.world.ships[0].kind}'s seat to board it`, 3); return; }
+    if (!s) { const k = K.world.ships[0]?.kind; if (k) say(`walk to the ${k}'s ${SHIP_KIND[k].door ? 'stern' : 'seat'} to board it`, 3); return; }
     board(s, K.body); K.aboard = s;
     say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
   }
   // the ships drawn, and those let be coasting to a stop
-  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt };
+  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt, ark: createArkArt };
   let shipWake = 0, nearSaid = null;
   function ships(dt) {
     const V = K.void, seen = new Set();

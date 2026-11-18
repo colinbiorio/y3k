@@ -263,6 +263,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (after midnight) — **The fourth ship: the ark**
+  (`src/game/ships/ark.js`; `ships.js`, `view.js`). From its brief: an
+  exploring ship about eighty metres long, a long spine of pale alloy and
+  stone-grey ceramic, a slowly turning ring habitat round its middle with
+  gardens under glass, a rounded prow with an observatory dome of brass and
+  glass, four plasma engines in a cross at the stern. It comes down ahead of
+  you, far enough off to be seen whole; R from the water near its stern lifts
+  you up into the dome (a ship may now be boarded from a door apart from its
+  seat). The heaviest yet (28 m/s, 70 opened up, seven seconds to its speed,
+  half a radian a second); the ring turns once a minute, its gardens lit by
+  lamps at night. Also: the call-down line is no longer said over at once by
+  the hint near the seat. Game suite 159; the `ship` smoke flies all four, 60
+  frames a second each.
+
 - **2026-11-17** (near midnight) — **The third ship: the dhow**
   (`src/game/ships/dhow.js`; `ships.js`, `view.js`). From its brief: a cargo
   ship about twenty-eight metres long, a wide rounded belly of timber ribs and
