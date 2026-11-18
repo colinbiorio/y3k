@@ -36,6 +36,7 @@ import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
 import * as WO from '../src/game/workshop.js';
 import * as TO from '../src/game/tower.js';
+import * as HA from '../src/game/hall.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
@@ -2065,6 +2066,88 @@ ok('the tower goes up in about eight seconds, the shaft and its stair, the floor
   assert.equal(TO.wall(b, [...(() => { const [x, z] = TO.toWorld(b, 0, T.ro + 0.3); return [x, 0, z]; })()].slice(0, 3)), null, 'not across its doorway');
 });
 
+// ---- the hall (hall.js): thirty by forty on three terraces, the hangar in the lowest
+function aHall() {
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
+  w.build(body, 'hall'); w.update(20);
+  return { w, body, b: w.buildings[0] };
+}
+const hallAt = (body, b) => { const [lx, lz] = HA.toLocal(b, body.p[0], body.p[2]); return { lx, lz, y: body.p[1] }; };
+function hallTo(body, b, lx, lz, seconds) {
+  for (let t = 0; t < seconds; t += B.STEP) {
+    const [x, z] = HA.toWorld(b, lx, lz), dx = x - body.p[0], dz = z - body.p[2];
+    if (Math.hypot(dx, dz) < 0.15) break;
+    body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: Math.atan2(-dx, -dz), pitch: 0 }, B.STEP);
+  }
+  return hallAt(body, b);
+}
+
+ok('the hall: thirty by forty on three terraces, the lowest the tallest with the hangar in it; its floor 7 m up, its ridge 17 m over that; seven arches on stone columns each side; a hangar mouth 18 m wide', () => {
+  const W = HA.HALL, [t1, t2, t3] = W.terraces;
+  near(2 * W.half, 30, 1e-9, 'thirty across'); near(W.front - W.back, 40, 1e-9, 'forty long');
+  assert.ok(t1.hx > t2.hx && t2.hx > t3.hx && t3.hx > W.half && t1.hz > t2.hz && t2.hz > t3.hz && t3.hz > W.front, 'three terraces, each round the next, the hall on the top one');
+  near(HA.P, 7, 1e-9, 'the hall\'s floor'); assert.ok(t1.top > (t2.top - t1.top) * 3, 'the lowest the tallest');
+  near(HA.roofIn(0) - HA.P, W.ridge, 1e-9, 'the ridge');
+  near(W.lower.steps * W.lower.rise, t1.top, 1e-9, 'the lower flights reach the lowest terrace\'s top');
+  near(W.upper.steps * W.upper.rise, t2.top - t1.top, 1e-9); near(W.upper.steps * W.upper.rise, t3.top - t2.top, 1e-9, 'the middle flights each a terrace');
+  assert.equal(W.columns.zs.length, 7); near(2 * W.hangar.mouth, 18, 1e-9, 'the mouth'); near(HA.archTop(0), W.hangar.ceil, 1e-9, 'its arch\'s crown');
+  assert.ok(HA.SOLIDS.filter((s) => s.part === 'bed').length >= 10, 'gardens along the terraces');
+});
+
+ok('a hall goes up in front of the body, its stairs toward it: up a lower flight, across the lowest terrace, up the middle flights, in at its door; round its hearth and its table; out, down, and into the hangar to its back wall', () => {
+  const { w, body, b } = aHall(), W = HA.HALL;
+  let q = hallTo(body, b, -14, 42, 6); q = hallTo(body, b, -14, 31, 6);
+  near(q.y, W.terraces[0].top, 1e-9, 'up a lower flight');
+  q = hallTo(body, b, 0, 31, 6); near(q.y, W.terraces[0].top, 1e-9, 'across');
+  q = hallTo(body, b, 0, 23, 6); near(q.y, HA.P, 1e-9, 'up the middle flights');
+  q = hallTo(body, b, 0, 15, 4); assert.ok(w.inside(body.p)?.kind === 'hall', 'in at its door');
+  q = hallTo(body, b, 0, 3, 4); near(q.lz, W.hearth.z + W.hearth.half + BODY.rad, 1e-6, 'the hearth in the way');
+  q = hallTo(body, b, 4, 3, 3); q = hallTo(body, b, 4, -10, 4); q = hallTo(body, b, -4, -10, 3);
+  near(q.lx, W.bench.x + W.bench.half + BODY.rad, 1e-6, 'the table and its benches in the way');
+  q = hallTo(body, b, 16, -7.5, 4); near(q.lx, HA.IN - BODY.rad, 1e-6, 'the side wall between two columns');
+  q = hallTo(body, b, 0, 15, 6); q = hallTo(body, b, 0, 22, 4); q = hallTo(body, b, 0, 31, 6); q = hallTo(body, b, 14, 31.5, 6); q = hallTo(body, b, 14, 43, 6);
+  near(q.y, 0, 1e-9, 'out and down');
+  q = hallTo(body, b, 0, 36, 6); q = hallTo(body, b, 0, 10, 6); q = hallTo(body, b, 0, -5, 4);
+  assert.ok(w.inside(body.p)?.kind === 'hall', 'in the hangar'); near(q.lz, W.hangar.back + BODY.rad, 1e-6, 'to its back wall'); near(q.y, 0.05, 1e-9);
+});
+
+ok('the hall\'s roof keeps a head under it and is stood on from above; in the hangar a jump meets its vault; the eye stays in the hall with a body there; the sun gets into the hall by the glass under its eaves and the open door, and into the hangar by its mouth', () => {
+  const { w, body, b } = aHall(), W = HA.HALL;
+  // a jump in the hangar
+  const [hx, hz] = HA.toWorld(b, 0, 20); body.p = [hx, 0.05, hz]; body.was = [...body.p]; body.v = [0, 0, 0]; body.grounded = true;
+  let top = 0; walk(body, [0, 0], Math.PI, 0.05, { jumpPressed: true, jump: true });
+  for (let t = 0; t < 1.5; t += B.STEP) { body.was = [...body.p]; B.stepBody(body, { move: [0, 0], yaw: Math.PI, jump: true }, B.STEP); top = Math.max(top, body.p[1]); }
+  near(top + BODY.tall, W.hangar.ceil, 1e-6, 'a held jump in the hangar meets its vault');
+  // on the roof
+  const [rx, rz] = HA.toWorld(b, 0, 0); body.p = [rx, HA.RIDGE + 2, rz]; body.was = [...body.p]; body.grounded = false; body.v = [0, 0, 0];
+  walk(body, [0, 0], Math.PI, 1.5);
+  near(body.p[1], HA.RIDGE, 1e-6, 'stands on the ridge');
+  const at = (lx, y, lz) => { const [x, z] = HA.toWorld(b, lx, lz); return [x, y, z]; }, unit = (v) => { const m = Math.hypot(...v); return v.map((c) => c / m); };
+  const head = at(0, HA.P + 2, -5), t = HA.eyeRoom(b, head, at(0, HA.P + 3, 30));
+  assert.ok(t < 1 && t > 0.3, 'the eye kept in the hall: ' + t.toFixed(3));
+  near(HA.eyeRoom(b, at(0, 3, 50), at(0, 4, 60)), 1, 1e-9, 'in front of it, nothing in the way');
+  assert.ok(HA.eyeRoom(b, at(-30, 2, 0), at(30, 2, 0)) < 0.2, 'not through the terraces');
+  // the sun: through the glass band, not the stone under it nor the roof; by the door; the hangar by its mouth
+  assert.equal(HA.sunLocal(12, HA.P + 2.5, 0, unit([1, 1, 0])), 1, 'through the glass under the eaves');
+  assert.equal(HA.sunLocal(12, HA.P + 2.5, 0, unit([1, 0.3, 0])), 0, 'not through the stone wall');
+  assert.equal(HA.sunLocal(10, HA.P + 1.5, 0, unit([1, 1.2, 0])), 0, 'a high sun is held by the roof');
+  assert.equal(HA.sunLocal(0, HA.P + 1.5, 0, [0, 1, 0]), 0, 'not through the roof');
+  assert.equal(HA.sunLocal(0, HA.P + 1, 10, unit([0, 0.2, 1]), 1), 1, 'by the open door'); assert.equal(HA.sunLocal(0, HA.P + 1, 10, unit([0, 0.2, 1]), 0), 0, 'not by a shut one');
+  assert.equal(HA.sunLocal(0, 1, 25, unit([0, 0.2, 1])), 1, 'into the hangar by its mouth'); assert.equal(HA.sunLocal(0, 1, 25, unit([1, 0.2, 0.2])), 0, 'not through its sides');
+  const w2 = createWorld(); w2.buildings.push(b);
+  assert.equal(w2.sunAt(at(12, HA.P + 2.5, 0), unit([...(() => { const c = Math.cos(b.yaw), s = Math.sin(b.yaw); return [c, 1, s]; })()])), 1, 'the world asks the hall');
+});
+
+ok('the hall goes up in eight and a half seconds, the terraces, the walls and columns, the arches, the roof and the glass, the things; comes down backward; its terraces and walls are walls to run along', () => {
+  const W = HA.HALL, b = { kind: 'hall', x: 0, z: 0, yaw: 0, t: 1, down: -1 };
+  let p = HA.phase(b); near(p.base, 0.5, 1e-9); assert.equal(p.walls, 0);
+  b.t = W.build.done; assert.equal(HA.phase(b).rest, 1);
+  b.down = W.build.down / 4; p = HA.phase(b); assert.ok(p.rest === 0 && p.roof > 0 && p.roof < 1, 'a quarter down, the things gone first: ' + JSON.stringify(p));
+  b.down = -1;
+  const r = HA.wall(b, [-(W.terraces[0].hx + 0.3), 0, 0]); assert.ok(r && Math.abs(r.d - 0.3) < 1e-9 && r.n[0] < -0.99, 'the lowest terrace\'s side');
+  const r2 = HA.wall(b, [HA.IN - 0.3, HA.P, -7.5]); assert.ok(r2 && r2.n[0] < -0.99, 'the hall\'s wall from inside');
+});
+
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {
   const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
   assert.equal(w.build(body, 'shelter').did, 'up'); w.update(10);
@@ -2089,6 +2172,7 @@ ok('the build key is an action like the others: two keys, a pad button, in the c
   for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', 'art = ARTS[b.kind]({ lite: K.lite })', 'k.opens ? k.opens(b, K.body.p)']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/buildings/workshop.js').includes("from '../workshop.js'"), 'the workshop drawn is not the numbers\' workshop');
   assert.ok(read('src/game/buildings/tower.js').includes("from '../tower.js'"), 'the tower drawn is not the numbers\' tower');
+  assert.ok(read('src/game/buildings/hall.js').includes("from '../hall.js'"), 'the hall drawn is not the numbers\' hall');
   assert.ok(read('src/game/buildings/house.js').includes("from '../house.js'"), 'the house drawn is not the numbers\' house');
   assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
 });
@@ -2567,6 +2651,15 @@ ok('on the island a workshop stands where a house would, its plinth at the groun
   assert.ok(w.inside(body.p)?.kind === 'workshop', 'in at its opening: ' + body.p.map((v) => v.toFixed(2)));
   near(body.p[1], b.y + WO.WORKSHOP.floor, 1e-6, 'on its floor, at its height');
   assert.ok(w.built(b.x + 8, b.z) === true && w.built(b.x + 10, b.z) === false, 'no palm grows within its footprint\'s circle');
+});
+
+ok('on the island the hall stands in the lagoon\'s shallows by the beach, facing the water; where the ground falls away under its broad terraces, it is not built', () => {
+  const w = createWorld(); w.ground = islandGround;
+  const a = SHAPE.arrive, body = B.createBody({ world: w, yaw: -Math.PI / 2 }); body.p = [a.x - 20, islandGround.floor(a.x - 20, a.z), a.z];
+  const built = w.build(body, 'hall'); assert.equal(built.did, 'up', 'built: ' + JSON.stringify(built.did === 'steep' ? built.fall : built.did));
+  const w2 = createWorld(); w2.ground = islandGround;
+  const at = B.createBody({ world: w2, yaw: -Math.PI / 2 }); at.p = [a.x + 40, islandGround.floor(a.x + 40, a.z), a.z];
+  assert.equal(w2.build(at, 'hall').did, 'steep', 'where the house stands (the ground falls 5.6 m under the hall\'s terraces)');
 });
 
 ok('on the island a bot comes up out of the ground where it is called and hovers over whatever is under it, never inside a hill', () => {

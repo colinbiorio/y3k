@@ -91,7 +91,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
 | "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
-| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **four of five**: the shelter, the house, the workshop and the tower, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome. The hall is next. |
+| "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
 | "some type of 'force'" | stage 5: the binding. The ring is already held by it rather than by a hand. |
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
@@ -114,8 +114,8 @@ Said to Colin before starting, and standing until he says otherwise.
 **Stages 1 and 2 are built**: the void (13 November 2026) and the five bodies
 (14 November). Open the world tab and you are standing in it. Press **body**
 and choose who you are there. **Stage 3 is begun** (17 November): press
-**build** (or B) and a shelter goes up in front of you; four of the five
-(the shelter, the house, the workshop, the tower) are in the bar's build list. **The first weapon and
+**build** (or B) and a shelter goes up in front of you; all five (the shelter,
+the house, the workshop, the tower, the hall) are in the bar's build list. **The first weapon and
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
@@ -320,7 +320,7 @@ the ground, because the void has no ground to sink it in.
   are arithmetic in the shader, like everything else in the void; the flame is
   a card turned to the eye with a white core, a blue-violet sheath and slow
   rising tongues; the mat is woven by its shader, over and under.
-- Not yet: the hall; a building kept between visits
+- Not yet: a building kept between visits
   (stage 6 keeps things); a building's shadow on the water (the void casts no
   shadows); sitting on the mat or lying down.
 
@@ -450,6 +450,43 @@ from the dome."
   stair's ramp is up to a tenth of a metre off the drawn treads, so the feet
   float or sink that much; the eye, kept inside a shaft five metres across, is
   close to the body.
+
+**The hall** (17 November, night), from its brief: "a great hall on a stepped
+platform: three broad terraces of pale limestone planted with low gardens,
+wide stairs up the middle, on top a long hall about thirty by forty metres with
+tall laminated-timber arches, a band of clear glass under a roof of dark solar
+tiles, and in the lowest terrace a wide arched hangar mouth. Inside: a vast
+long room under the timber arches, a long wooden table, a central stone hearth
+with a steady plasma flame, stone columns, woven hangings."
+
+- **The terraces** (`hall.js`): the lowest is the tallest (4.6 m), and holds
+  the hangar; the two above are 1.2 m each, the hall's floor 7 m up. Garden
+  beds run along every terrace's edge, planted with low shrubs (rosemary and
+  lavender greys and greens, some in flower) that grow in last.
+- **The stairs**: two flights of twenty steps climb the lowest terrace either
+  side of the hangar's mouth; from its top the stairs go up the middle of the
+  two above, five steps each, to the forecourt and the hall's door. The beds
+  stop where the stairs come and go.
+- **The hangar**: a vaulted room 22 m wide and 32 deep inside the lowest
+  terrace, its mouth an 18 m arch in the middle of the front, lamps along its
+  vault; the sun gets in only by the mouth. It is empty: it waits for the
+  ships (stage 4).
+- **The hall**: 30 by 40 m. Stone walls to 4.5 m, then a band of clear glass
+  2 m tall along both sides in pale alloy frames, under eaves of dark solar
+  tiles; the gables solid stone, the front one with a great door of two
+  leaves that swing in as you come. Inside, seven pairs of stone columns carry
+  seven laminated-timber arches (their lamellae drawn) up to the roof, with
+  purlins and a ridge beam between them; woven hangings in madder, indigo and
+  ochre hang on the walls between the columns; the long table and its two
+  benches toward the back; the round stone hearth in the middle, its pool of
+  plasma white and its flame violet, the hall's light at night. It is big
+  enough that a body inside keeps the eye inside with it.
+- **On the island** it needs broad flat ground, or the shallows: just west of
+  where you arrive, facing the lagoon, it stands with its lowest terrace in
+  the water (203 places within 900 m of the beach take it).
+- Rough edges: the hangar is empty; the flame is three glows, not a shaped
+  flame; on the island, standing in the shallows, the water may come into the
+  hangar's mouth.
 
 ### Stage 1: the void
 
@@ -657,15 +694,14 @@ tested, shipped.
 
 This round (Colin, 17 November): **wall running** (done); **the first map**,
 Lord Howe Island, under a new **map** tab, with its palms and animals (done).
-Then the buildings again: **the workshop** and **the tower** (done, the same
-night), and the hall; the stick insect by night; and more of Earth from the
-same tiles.
+Then the buildings again: **the workshop**, **the tower** and **the hall**
+(done, the same night: stage 3 is done); the stick insect by night; and more
+of Earth from the same tiles.
 
 3. **The five buildings**: a shelter, a house, a workshop, a tower, a hall.
    Different in design and size, built where you stand, entered, walked
-   through, furnished a little. Ancient, present and to come in each. **The
-   shelter, the house, the workshop and the tower are built** (above); the
-   hall next, from its brief.
+   through, furnished a little. Ancient, present and to come in each. **All
+   five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
    there is somewhere to go.
@@ -706,6 +742,7 @@ suite runs them; those that draw are read as text and looked at.
 | `house.js` | the house as numbers: its solids, the room's and the porch's air, the ladder, the eye, the sun through its window and door, how it goes up |
 | `workshop.js` | the workshop as numbers: its vaults, solids and airs, the glass that opens as a body comes, standing on the vaults, the eye, the sun through the glass, how it goes up and comes down |
 | `tower.js` | the tower as numbers: worked round its axis; the stair's ramp, its turns and rails, the landings, the gallery and the ledge, the dome, the eye, the sun through its windows and dome, how it goes up and comes down |
+| `hall.js` | the hall as numbers: the terraces, stairs and beds, the hangar and its arched mouth, the hall's walls, roof, columns and things, the eye, the sun through its glass band, door and mouth, how it goes up and comes down |
 | `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
 | `combat.js` | the fight as numbers: the ring's five ways, the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
 | `fight.js` | the ring, its trail and shield, the bots, bolts, sparks, debris and the slam's wave (draws) |
@@ -715,7 +752,7 @@ suite runs them; those that draw are read as text and looked at.
 | `island/life.js` | what grows and lives there as numbers: the palms by cell, the terns and tropicbirds by time, the woodhens and turtles stepped |
 | `island/creatures.js` | the palms, terns, tropicbirds, woodhens and turtles drawn, one instanced shape each (draws) |
 | `island/lordhowe.bin`, `lordhowe-shape.js` | made by `scripts/island/lordhowe-build.mjs` from the elevation tiles: the heights (300 KB), the coast, shallows, peaks, arrival |
-| `buildings/` | `shelter.js`, `house.js`, `workshop.js`, `tower.js`: the four drawn; `parts.js`, the shapes they are put together from (draws) |
+| `buildings/` | `shelter.js`, `house.js`, `workshop.js`, `tower.js`, `hall.js`: the five drawn; `parts.js`, the shapes they are put together from (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |

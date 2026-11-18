@@ -450,7 +450,7 @@ try {
     await page.locator('#game-build').click(); await sleep(250);
     const listed = await page.locator('#game-build-list button').evaluateAll((els) => els.map((e) => [e.dataset.build, e.disabled]));
     out.listed = listed;
-    check('the build list offers the five, the one not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop,tower', listed);
+    check('the build list offers the five, all of them made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop,tower,hall', listed);
     await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
     r = await until((r) => house(r)?.built, 15000);
     check('the house goes up', !!house(r)?.built && r.world.choice === 'house', r.world);
@@ -527,6 +527,40 @@ try {
     await key.press('KeyB'); r = await until((r) => !tower(r), 6000);
     check('the key inside it takes the tower down', !tower(r), r.world);
     check('the tower\'s frames keep up', out.frames.tower.median < 20, out.frames.tower);
+
+    // ---- the hall, from the build list: into the hangar under its terraces and out; up a lower flight, across, up the
+    // middle flights and in at its door; the key inside takes it down
+    const hall = (r) => r.world.buildings.find((b) => b.kind === 'hall');
+    const hallW = (h, lx, lz) => { const c = Math.cos(h.yaw), s = Math.sin(h.yaw); return [h.x + c * lx + s * lz, h.z - s * lx + c * lz]; };
+    const goTo = async (lx, lz, ms = 9000) => {
+      const t0 = Date.now();
+      for (;;) {
+        const r = await read(), [x, z] = hallW(hall(r), lx, lz), dx = x - r.p[0], dz = z - r.p[2], d = Math.hypot(dx, dz);
+        if (d < 0.6 || Date.now() - t0 > ms) return r;
+        await faceYaw(Math.atan2(-dx, -dz)); await key.down('KeyW'); await sleep(Math.max(80, Math.min(500, (d / 5.6) * 700))); await key.up('KeyW'); await sleep(150);
+      }
+    };
+    await page.locator('#game-build').click(); await sleep(250);
+    await page.locator('#game-build-list [data-build="hall"]').click(); await sleep(300);
+    r = await until((r) => hall(r)?.built, 20000);
+    check('the hall goes up', !!hall(r)?.built && r.world.choice === 'hall', r.world);
+    await faceYaw(Math.atan2(-(hall(r).x - r.p[0]), -(hall(r).z - r.p[2]))); await sleep(300);
+    await shot('17-hall');
+    await goTo(0, 36); r = await goTo(0, 20);
+    check('into the hangar in its lowest terrace', r.world.inside === 'hall' && Math.abs(r.p[1] - 0.05) < 0.001, { inside: r.world.inside, p: r.p });
+    await shot('18-hall-hangar');
+    await goTo(0, 37); await goTo(-14, 42); r = await goTo(-14, 31);
+    check('up a lower flight beside the hangar\'s mouth', Math.abs(r.p[1] - 4.6) < 0.001, r.p);
+    await goTo(0, 31); r = await goTo(0, 23);
+    check('across, and up the middle flights to the top terrace', Math.abs(r.p[1] - 7) < 0.001, r.p);
+    r = await goTo(0, 12);
+    check('in at the hall\'s door', r.world.inside === 'hall' && Math.abs(r.p[1] - 7) < 0.001, { inside: r.world.inside, p: r.p });
+    await until((r) => speed(r) < 0.1); await sleep(500 * slow);
+    await shot('19-hall-in');
+    out.frames.hall = await frames(2000);
+    await key.press('KeyB'); r = await until((r) => !hall(r), 8000);
+    check('the key inside it takes the hall down', !hall(r), r.world);
+    check('the hall\'s frames keep up', out.frames.hall.median < 20, out.frames.hall);
   }
 
   if (scene === 'pad') {
