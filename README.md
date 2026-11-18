@@ -263,6 +263,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (late night, last) — **The second ship: the dart**
+  (`src/game/ships/dart.js`; `ships.js`, `view.js`). From its brief: a fast
+  two-seater about eleven metres long, shaped like a spearpoint: a narrow bronze
+  hull with fine engraved lines, a long clear canopy over two seats in tandem,
+  short swept wings of pale alloy, two slim plasma engines. It comes down
+  beside you, its canopy lifted; R takes the front seat and the canopy shuts.
+  It flies like the skiff but faster: 42 m/s, 96 opened up. Ships now look
+  along their whole way for walls, so a quick one no longer slips through a
+  thin wall between two frames. Game suite 157; the `ship` smoke now flies
+  both.
+
 - **2026-11-17** (late night, later) — **The first ship: the skiff** (`src/game/ships.js`,
   `ships/skiff.js`; `gait.js`, `input.js`, `world.js`, `view.js`). Stage 4
   begins. From its brief: a one-seat open craft about five metres long, a slim

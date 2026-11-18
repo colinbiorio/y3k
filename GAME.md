@@ -89,7 +89,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | asked | where it stands |
 |---|---|
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
-| "at least 5 different types of spaceships of varying size and design" | stage 4, **begun** (17 November): the skiff, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The dart, the dhow, the ark and the carrier are next. |
+| "at least 5 different types of spaceships of varying size and design" | stage 4, **two of five** (17 November): the skiff and the dart, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The dhow, the ark and the carrier are next. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
@@ -313,9 +313,31 @@ outrigger fins on thin struts, one glowing plasma ring engine at the stern."
   fins; at the stern, on a pylon, the bronze ring holding a swirl of plasma
   that brightens and quickens as it is driven, with its glow and a streak of
   light behind. Low and quick over the water, it drags a wake of rings.
-- Not yet: the dart, the dhow, the ark and the carrier; a ship kept between
-  visits; landing it in the hall's hangar (it fits the mouth); a phone's own
+- Not yet: the dhow, the ark and the carrier; a ship kept between visits;
+  landing one in the hall's hangar (the skiff fits the mouth); a phone's own
   button to board (the list does it).
+
+**The dart** (17 November, late night), from its brief: "a fast two-seat craft
+about eleven metres long, shaped like a spearpoint: a narrow bronze hull with
+fine engraved lines, a long clear canopy over two seats in tandem, short swept
+wings of pale alloy, two slim plasma engines."
+
+- **Called down beside you** (it is too long to put in front): pointing your
+  way, its cockpit at your shoulder. R takes the front seat; the canopy, lifted
+  while it waits, shuts over you.
+- **Flown** as the skiff is, faster: 42 m/s, 96 opened up, turning a little
+  slower (2 radians a second); the eye stands 13 m back. Its wingtips meet what
+  is solid as its middle does, and every ship's way is now looked at every
+  fifth of a metre, so a quick one cannot pass through a thin wall between two
+  frames (at 42 m/s the dart had passed through a house's).
+- **Drawn** (`ships/dart.js`): the hull a blade's lozenge in section, widest
+  behind its middle and drawn out to the point, engraved with lines along it
+  and a chevron toward the point (in its shader), its cockpit open under the
+  canopy: a floor, two leather seats one behind the other, a lever, a dial and
+  a pane of light; the canopy a long bubble on a bronze rim with an alloy spine,
+  hinged at its back; the swept wings, a little lifted at the tips, their
+  leading edges bronze; the two slim nacelles by the tail, their nozzles'
+  rings, swirls, glows and streaks.
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -741,7 +763,8 @@ of Earth from the same tiles.
    five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
-   there is somewhere to go. **The skiff is built** (above); the dart next.
+   there is somewhere to go. **The skiff and the dart are built** (above);
+   the dhow next.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people.
@@ -768,8 +791,8 @@ suite runs them; those that draw are read as text and looked at.
 | `input.js` | the hands: keys, mouse, controller, touch, as twenty actions; the bindings and their keeping (an action added later gives way to a key already kept for another) |
 | `rings.js` | a ring on the water as a function; the pool of drops; the floor's lattice and the rebase |
 | `gait.js` | how a body on two legs carries itself: the stride with its feet planted, the two-bone leg, landings, sitting in a ship; told a build (the mantis's long legs, the robot's stiffness) |
-| `ships.js` | the ships as numbers: the five offered, the skiff put, flown under the hands, boarded and stepped off |
-| `ships/` | `skiff.js`: the skiff drawn (draws) |
+| `ships.js` | the ships as numbers: the five offered, each made kind's measures; put, flown under the hands (their way looked at for walls every fifth of a metre), boarded and stepped off |
+| `ships/` | `skiff.js`, `dart.js`: the two drawn (draws) |
 | `crawl.js` | how a body on many arms carries itself: six tips, three always on the floor |
 | `kinds.js` | the five kinds: their choices, options and colours; a look made fresh, cleaned, or drawn by chance |
 | `chooser.js` | the body sheet: its rows, its keys, and where the body stands beside it |

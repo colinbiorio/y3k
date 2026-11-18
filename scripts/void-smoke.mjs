@@ -569,7 +569,7 @@ try {
     await page.locator('#game-ships').click(); await sleep(250);
     const listed = await page.locator('#game-ship-list button').evaluateAll((els) => els.map((e) => [e.dataset.ship, e.disabled]));
     out.shipsListed = listed;
-    check('the ships list offers the five, the skiff made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff', listed);
+    check('the ships list offers the five, the skiff and the dart made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart', listed);
     await page.locator('#game-ship-list [data-ship="skiff"]').click(); await sleep(500);
     let r = await read();
     check('a skiff comes down in front of the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'skiff' && Math.hypot(r.world.ships[0].p[0] - r.p[0], r.world.ships[0].p[2] - r.p[2]) < 4, r.world.ships);
@@ -590,6 +590,22 @@ try {
     check('R again steps off: beside it, down to the water', !r.world.aboard && !r.world.seated && Math.abs(r.p[1]) < 0.05, { p: r.p, aboard: r.world.aboard, seated: r.world.seated });
     await shot('04-off');
     check('its frames keep up, flying', out.frames.flying.median < 20, out.frames.flying);
+    // the dart: put beside the body, boarded, driven faster, stepped off
+    await page.locator('#game-ships').click(); await sleep(250);
+    await page.locator('#game-ship-list [data-ship="dart"]').click(); await sleep(500);
+    r = await read();
+    check('a dart comes down beside the body, in place of the skiff', r.world.ships.length === 1 && r.world.ships[0].kind === 'dart', r.world.ships);
+    await sleep(1200); await shot('05-dart');
+    await key.press('KeyR'); await sleep(400); r = await read();
+    check('R boards the dart', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard });
+    await key.down('KeyW'); await sleep(2000 * slow); r = await read();
+    check('W drives the dart faster than the skiff', r.world.ships[0].speed > 35, r.world.ships[0]);
+    out.frames.dart = await frames(2000);
+    await shot('06-dart-flying'); await key.up('KeyW');
+    await until((r) => r.world.ships[0].speed < 0.5, 6000);
+    await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 4000);
+    check('and off it again', !r.world.aboard && !r.world.seated, { aboard: r.world.aboard, seated: r.world.seated });
+    check('its frames keep up, flying the dart', out.frames.dart.median < 20, out.frames.dart);
   }
 
   if (scene === 'pad') {
