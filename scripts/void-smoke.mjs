@@ -450,7 +450,7 @@ try {
     await page.locator('#game-build').click(); await sleep(250);
     const listed = await page.locator('#game-build-list button').evaluateAll((els) => els.map((e) => [e.dataset.build, e.disabled]));
     out.listed = listed;
-    check('the build list offers the five, the two not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop', listed);
+    check('the build list offers the five, the one not yet made greyed', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop,tower', listed);
     await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
     r = await until((r) => house(r)?.built, 15000);
     check('the house goes up', !!house(r)?.built && r.world.choice === 'house', r.world);
@@ -503,6 +503,30 @@ try {
     await key.press('KeyB'); r = await until((r) => !shop(r), 6000);
     check('the key inside it takes the workshop down', !shop(r), r.world);
     check('the workshop\'s frames keep up', out.frames.workshop.median < 20, out.frames.workshop);
+    await page.locator('#game-controls').click(); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
+    await page.locator('#game-menu [data-light="pale"]').click(); await sleep(300); await page.locator('#game-menu-close').click(); await sleep(400 * slow);
+
+    // ---- the tower, from the build list: in at its door to its stone floor; looking up its well the eye stays inside
+    // and over the floor; the key inside takes it down
+    const tower = (r) => r.world.buildings.find((b) => b.kind === 'tower');
+    await page.locator('#game-build').click(); await sleep(250);
+    await page.locator('#game-build-list [data-build="tower"]').click(); await sleep(300);
+    r = await until((r) => tower(r)?.built, 15000);
+    check('the tower goes up', !!tower(r)?.built && r.world.choice === 'tower', r.world);
+    await faceYaw(Math.atan2(-(tower(r).x - r.p[0]), -(tower(r).z - r.p[2]))); await sleep(300);
+    await shot('15-tower');
+    await key.down('KeyW'); r = await until((r) => r.world.inside === 'tower' && Math.hypot(r.p[0] - tower(r).x, r.p[2] - tower(r).z) < 1.2, 8000); await key.up('KeyW');
+    check('in at its door to its stone floor', r.world.inside === 'tower' && Math.abs(r.p[1] - 0.3) < 0.001, { inside: r.world.inside, p: r.p });
+    await until((r) => speed(r) < 0.1); await sleep(400 * slow);
+    await drag(0, -450); await sleep(700 * slow); r = await read();
+    const tw = tower(r), eyeR = Math.hypot(r.world.eye[0] - tw.x, r.world.eye[2] - tw.z);
+    check('looking up its well, the eye stays inside it and over its floor', eyeR < 2.5 && r.world.eye[1] > 0.3, { eye: r.world.eye, eyeR, pitch: r.pitch });
+    await shot('16-tower-up');
+    out.frames.tower = await frames(2000);
+    await drag(0, 450); await sleep(300);
+    await key.press('KeyB'); r = await until((r) => !tower(r), 6000);
+    check('the key inside it takes the tower down', !tower(r), r.world);
+    check('the tower\'s frames keep up', out.frames.tower.median < 20, out.frames.tower);
   }
 
   if (scene === 'pad') {

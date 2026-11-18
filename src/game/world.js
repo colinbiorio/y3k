@@ -1,5 +1,5 @@
 // world.js — WHAT STANDS IN THE VOID, as numbers: the buildings a person has
-// put up (the shelter, the house and the workshop, of the five), and what they ask of a
+// put up (the shelter, the house, the workshop and the tower, of the five), and what they ask of a
 // body (where it may go, what it stands on, how high it may reach, a ladder to
 // climb), of the eye (where it may stand), and of the light (whether the sun
 // reaches a point inside). No page, no three: the suite runs it; buildings/
@@ -14,7 +14,7 @@
 // the island, at the ground's height just in front of its door (or the sea's
 // level over water), so its way in meets the ground; not at all where the
 // ground under it rises behind more than its own `rise` (the house's piers
-// lift its floor 0.45 m clear, as the workshop's plinth does; the half-sunk shelter takes 0.55) or falls more
+// lift its floor 0.45 m clear, as the workshop's plinth does; the tower's 0.25; the half-sunk shelter takes 0.55) or falls more
 // than STEEP_SITE below it (its piers and steps reach that far down). Each kind's module works in its
 // own frame from y = 0; this world takes a point down into that frame and its
 // answers back up.
@@ -25,6 +25,7 @@
 import * as SH from './shelter.js';
 import * as HO from './house.js';
 import * as WO from './workshop.js';
+import * as TO from './tower.js';
 
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
@@ -37,11 +38,12 @@ export const KINDS = {
   shelter: { name: 'shelter', entry: (b) => SH.toWorld(b, 0, SH.SHELTER.out + 0.4), rise: 0.55, place: SH.placeShelter, solve: SH.solve, inside: SH.inside, eyeRoom: SH.eyeRoom, sunIn: SH.sunIn, phase: SH.phase, door: SH.doorWorld, dry: SH.dry, foot: SH.FOOT, solid: SH.solid },
   house: { name: 'house', entry: (b) => HO.toWorld(b, 0, HO.REACH_Z + 0.3), rise: 0.45, place: HO.placeHouse, solve: HO.solve, inside: HO.inside, eyeRoom: HO.eyeRoom, sunIn: HO.sunIn, phase: HO.phase, door: HO.doorWorld, dry: HO.dry, foot: HO.FOOT, solid: HO.solid, wall: HO.wall },
   workshop: { name: 'workshop', entry: (b) => WO.toWorld(b, 0, WO.REACH_Z + 0.3), rise: 0.45, place: WO.placeWorkshop, solve: WO.solve, inside: WO.inside, eyeRoom: WO.eyeRoom, sunIn: WO.sunIn, phase: WO.phase, door: WO.doorWorld, dry: WO.dry, foot: WO.FOOT, solid: WO.solid, wall: WO.wall, opens: WO.opens },
+  tower: { name: 'tower', entry: (b) => TO.toWorld(b, 0, TO.REACH_Z + 0.3), rise: 0.25, place: TO.placeTower, solve: TO.solve, inside: TO.inside, eyeRoom: TO.eyeRoom, sunIn: TO.sunIn, phase: TO.phase, door: TO.doorWorld, dry: TO.dry, foot: TO.FOOT, solid: TO.solid, wall: TO.wall },
 };
 // the five, in the order they are offered; those not yet made say so
 export const BUILDINGS = [
   { kind: 'shelter', label: 'shelter', ready: true }, { kind: 'house', label: 'house', ready: true },
-  { kind: 'workshop', label: 'workshop', ready: true }, { kind: 'tower', label: 'tower', ready: false }, { kind: 'hall', label: 'hall', ready: false },
+  { kind: 'workshop', label: 'workshop', ready: true }, { kind: 'tower', label: 'tower', ready: true }, { kind: 'hall', label: 'hall', ready: false },
 ];
 export const cleanBuilding = (k) => (KINDS[k] ? k : 'shelter');
 const K = (b) => KINDS[b.kind];

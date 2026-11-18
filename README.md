@@ -263,6 +263,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (night, later) — **The tower, the fourth building**
+  (`src/game/tower.js`, `buildings/tower.js`; `world.js`, `view.js`). From its
+  brief: a slender round tower of pale limestone banded with blue-green glazed
+  tiles, six metres across and about twenty-four tall, with narrow windows
+  spiralling up it. Inside, a hundred stone steps climb the wall to a gallery
+  under a dome of brass ribs and clear glass; a brass rail runs along the
+  stair, and the well is open from the floor to the dome. Two wooden landings
+  hold a desk with a plasma lamp and a shelf of scrolls. In the dome an
+  armillary sphere turns slowly over the well; a telescope stands on the
+  gallery; a door opens onto a small stone ledge 20 m up. The stair's surface
+  is a smooth ramp, so you run up it without a jolt; a building's floor now
+  keeps the eye from sinking into it when you look up. Game suite 147 (6 new);
+  the `build` smoke now walks into the tower and looks up its well.
+
 - **2026-11-17** (night) — **The workshop, the third building**
   (`src/game/workshop.js`, `buildings/workshop.js`, `buildings/parts.js`;
   `world.js`, `view.js`). From its brief: ten by twelve metres of thick adobe
