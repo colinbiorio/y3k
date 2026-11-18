@@ -23,6 +23,7 @@ import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { getVoiceKey, setVoiceKey, voiceKeyHeader, readRefusal, noteRefusal, voiceSpoke, lastRefusal, watchRefusal, refusalLine } from './voice.js';
+import { rankVoices, pickVoice, voiceLabel } from './voice-pick.mjs';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES, stepLine } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -139,7 +140,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   function setActive(a) { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch { /* private window: this visit only */ } }
   // What a speaker needs: main.js spreads this into voice.speaker().
   function speakWith(a = getActive()) {
-    return { voiceId: a.voiceId, provider: a.provider, model: a.models[a.provider] || undefined, settings: a.settings };
+    return { voiceId: a.voiceId, provider: a.provider, model: a.models[a.provider] || undefined, settings: a.settings, deviceVoice: a.deviceVoice || undefined };
   }
 
   // The service the Voice pane is showing — the chosen voice's, to begin with.
@@ -166,14 +167,78 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   // on screen until the new one has loaded, and a voice id belongs to its own
   // service only. Saved under the new one, every reply failed over to the
   // browser voice.
-  function selectVoice(id, name, p = browsing) {
+  function selectVoice(id, name, p = browsing, device) {
     const a = getActive();
     a.voiceId = id;
     if (id !== 'browser') { a.provider = p; a.voiceName = name || ''; }
+    else a.deviceVoice = device || '';    // the free voice's own row: the best here; a device row: that one
     setActive(a);
-    document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === id));
+    markVoiceRows();
     syncDefaultsSummary();
     syncDelivery();
+  }
+  // Which row is lit: a device voice's when one is chosen, else the chosen id's.
+  function markVoiceRows() {
+    const a = getActive();
+    document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.uri
+      ? a.voiceId === 'browser' && a.deviceVoice === r.dataset.uri
+      : r.dataset.id === a.voiceId && !(a.voiceId === 'browser' && a.deviceVoice)));
+  }
+
+  // THE FREE VOICES ON THIS DEVICE (2026-11-18; voice-pick.mjs). Under the
+  // browser voice's row, a drawer of this device's English voices, best
+  // first, each with its sample: choose one and the free voice is that one
+  // wherever this device has it. The browser voice's own row is the best
+  // one here, named, so the free voice is never a stranger.
+  function deviceVoices() {
+    try { return 'speechSynthesis' in window ? rankVoices(window.speechSynthesis.getVoices()) : []; } catch { return []; }
+  }
+  function deviceDrawer(list) {
+    const a = getActive();
+    const voices = deviceVoices();
+    const best = pickVoice(voices, { prefer: a.deviceVoice });
+    const main = list.querySelector('.voice-row[data-id="browser"]:not([data-uri])');
+    const auto = voices[0] ? voiceLabel(voices[0]).name : '';
+    if (main) main.querySelector('.vmeta').textContent = auto ? 'the best here: ' + auto : '';
+    list.querySelector('.voice-device')?.remove();
+    if (voices.length < 2) return;
+    const box = document.createElement('details');
+    box.className = 'voice-defaults voice-device';
+    box.innerHTML = '<summary><span class="vname">Free voices on this device</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
+    const inner = box.querySelector('.voice-list');
+    for (const v of voices) {
+      const l = voiceLabel(v);
+      const row = document.createElement('div');
+      row.className = 'voice-row';
+      row.dataset.id = 'browser';
+      row.dataset.uri = v.voiceURI || v.name;
+      row.innerHTML = '<span class="dot"></span><span class="vname"></span><span class="vmeta"></span><button class="play" title="Play sample">▶</button>';
+      row.querySelector('.vname').textContent = l.name;
+      row.querySelector('.vmeta').textContent = [l.lang, l.kind, l.local ? '' : 'online'].filter(Boolean).join(' · ');
+      row.addEventListener('click', (e) => { if (!e.target.classList.contains('play')) selectVoice('browser', '', browsing, row.dataset.uri); });
+      row.querySelector('.play').addEventListener('click', (e) => { e.stopPropagation(); sayFree(v); });
+      inner.appendChild(row);
+    }
+    box.querySelector('summary .vmeta').textContent = `${voices.length} voices` + (a.voiceId === 'browser' && a.deviceVoice && best ? ` · ${voiceLabel(best).name} chosen` : '');
+    if (/Mac/.test(navigator.platform || navigator.userAgent || '')) {
+      const more = document.createElement('div');
+      more.className = 'muted';
+      more.textContent = 'More, free: System Settings → Accessibility → Spoken Content → System voice → Manage Voices (Ava, Zoe and Evan are premium). Reload after.';
+      inner.appendChild(more);
+    }
+    box.addEventListener('click', () => setTimeout(() => {   // the summary follows a choice made inside
+      const now = getActive(), on = now.voiceId === 'browser' && now.deviceVoice && pickVoice(deviceVoices(), { prefer: now.deviceVoice });
+      box.querySelector('summary .vmeta').textContent = `${voices.length} voices` + (on ? ` · ${voiceLabel(on).name} chosen` : '');
+    }, 0));
+    main ? main.after(box) : list.prepend(box);
+    markVoiceRows();
+  }
+  function sayFree(v) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(SAMPLE);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    window.speechSynthesis.speak(u);
   }
 
   function voiceRow(v, p = browsing) {
@@ -187,7 +252,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     const deletable = v.id !== 'browser' && !!v.own && p === 'elevenlabs';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
-      (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
+      '<button class="play" title="Play sample">▶</button>' +
       (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
@@ -203,7 +268,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   // The stock voices' drawer says how many it holds, and which is chosen
   // when the chosen voice is one of them — it stays closed either way.
   function syncDefaultsSummary() {
-    const box = document.querySelector('#voice-list .voice-defaults');
+    const box = document.querySelector('#voice-list .voice-defaults:not(.voice-device)');
     if (!box) return;
     const rows = [...box.querySelectorAll('.voice-row')];
     const on = rows.find((r) => r.classList.contains('on'));
@@ -258,10 +323,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   }
 
   async function sample(id, btn, p = browsing) {
-    if (id === 'browser') {
-      if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(SAMPLE));
-      return;
-    }
+    if (id === 'browser') { sayFree(pickVoice(deviceVoices(), { prefer: getActive().deviceVoice })); return; }
     btn.disabled = true;
     try {
       // A sample is heard as it would speak: this service, its chosen model.
@@ -2009,6 +2071,7 @@ function kommandPane() {
       if (seq !== listSeq) return; // the service or key changed while this was loading
       list.innerHTML = '';
       list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free)' }, p));
+      deviceDrawer(list);
       if (!data.available) {
         sayVoiceStatus(data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
           : data.error ? esc(svc.name) + ' did not accept that key.'
@@ -2051,6 +2114,9 @@ function kommandPane() {
       syncDelivery();
     }
 
+    // Chrome fills its list of voices a moment after the first ask: the
+    // drawer is drawn again when it does.
+    try { window.speechSynthesis?.addEventListener?.('voiceschanged', () => { const l = $('voice-list'); if (l?.querySelector('.voice-row[data-id="browser"]')) deviceDrawer(l); }); } catch { /* no speech here */ }
     const showService = () => {
       providerSel.value = browsing;
       voiceKeyEl.value = getVoiceKey(browsing);

@@ -263,6 +263,29 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **The free voice, chosen** (`src/voice-pick.mjs`,
+  `src/voice.js` freeVoice, `src/settings.js` the drawer; `test/voice.test.mjs`
+  "the free voice"). Colin: "the free browser voice makes this loud beep noise
+  sometimes ... it'd be nice not to have to resort to an api key if not
+  needed." On a Mac set to Spanish, Chrome lists 180 voices, and the old
+  pick, the first name matching `/samantha|google us english|jenny|aria/`, was
+  **Daria, a Bulgarian voice** ("Daria" holds "aria" and comes before
+  Samantha): every reply in the free voice was read in it. Now a voice is
+  chosen by what it is: English, never one of the Mac's novelty or singing
+  voices (Bells, Cellos, Organ, Boing...), premium or natural first, then
+  enhanced, then the voices known to be good, read as its own language. Under
+  the free voice's row (which now names the best one here, with its ▶), a
+  drawer lists this device's English voices, best first, each with its sample;
+  the one chosen speaks every reply wherever this device has it. On a Mac it
+  says where Apple's premium voices are downloaded, free. Checked in Chrome on
+  the Mac: Samantha by default, Daniel once chosen, in a reply. The beep was
+  not found: nothing in the site's code sounds in the free voice's mode
+  except the sand plate's note on a tap (about 20 dB under speech) and the
+  frequencies room's tone, and Daria, Samantha and Mónica reading Orion's kind
+  of text (symbols, emoji, code) hold no tone above 500 Hz. A Claude voice: the
+  Claude API has no speech output (its features overview, read on the day), so
+  there is none to bring in; Dessa (Block's speech model) is a research preview
+  with no public API.
 - **2026-11-18** (afternoon) — **kode: the reader's own scroll, and the
   composer in its bar** (`src/code/code-view.js` follow, `styles.css` under
   "IN THE BAR, NOT OVER IT"; the client test and `scripts/code-smoke.mjs`).
