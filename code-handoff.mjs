@@ -73,5 +73,24 @@ export function createNoteCap({ perDay = NOTES_PER_DAY, now = () => Date.now() }
   };
 }
 
+// THE CODING HISTORY (Colin, 18 Nov 2026: "my vision is an integrated memory system that carries between all parts of
+// the website. i don't want orion to read the entire coding session context for every message -- just some recent,
+// relevant details and a way to remember a summarized history of what's been done in coding."). Once the person says
+// yes in kode, each turn there leaves one short entry with their presence: where (the folder's name, never a path), what
+// was asked, what was done (the coder's first words back), which files (their names), and how it ended. The page builds
+// it; this checks it. Never the session, never the code.
+export const TURN_MAX = { project: 60, ask: 240, did: 300, file: 80, files: 6 };
+export const REMEMBER_PER_DAY = 200;
+export const OUTCOMES = ['done', 'stopped', 'failed'];
+const line = (v, n) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/<<|>>|```/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+export function checkTurn(turn) {
+  if (!turn || typeof turn !== 'object') return { error: 'No turn to remember.' };
+  const ask = line(turn.ask, TURN_MAX.ask), did = line(turn.did, TURN_MAX.did);
+  if (!ask && !did) return { error: 'The turn is empty.' };
+  const files = (Array.isArray(turn.files) ? turn.files : []).map((f) => line(String(f).split(/[\\/]/).pop(), TURN_MAX.file)).filter(Boolean).slice(0, TURN_MAX.files);
+  const outcome = OUTCOMES.includes(turn.outcome) ? turn.outcome : 'done';
+  return { turn: { project: line(String(turn.project ?? '').split(/[\\/]/).pop(), TURN_MAX.project), ask, did, files, outcome } };
+}
+
 // What the page gets about the presence: its public face, and the note.
 export const publicFace = (p) => ({ handle: p.handle, name: p.name, bio: String(p.bio || '').slice(0, 300), scheme: p.scheme || null });

@@ -351,6 +351,8 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
     // the presence's journal, written without thinking, so it is guarded as
     // the finished game is
     lifeMoment: route("reqPath === '/api/life/moment'", "reqPath === '/api/chess/finished'"),
+    // the coding history (2026-11-18): a turn's short entry for the presence, kept or taken back, never thinking
+    codeHistory: route("reqPath === '/api/code/remember' || reqPath === '/api/code/forget')", "reqPath === '/api/code/handoff' || reqPath === '/api/code/note')"),
   };
   for (const [name, src] of Object.entries(doors)) {
     const code = codeOf(src);
@@ -365,7 +367,7 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
   }
   const kept = codeOf(finished);
   assert.ok(kept.indexOf('presenceOfOwner(') > kept.indexOf('json(409, RELOAD)'), 'the finished game finds a presence before it refuses');
-  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 12, 'a door refuses for another account that is not one of the twelve, or one does not');
+  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 13, 'a door refuses for another account that is not one of the thirteen, or one does not');
 });
 
 await ok('every door that may think on the sign-in tells the relay whose machine asked, as the rate limiter counts it, and what it holds while the turn waits', () => {
