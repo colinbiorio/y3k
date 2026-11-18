@@ -2150,7 +2150,7 @@ ok('the hall goes up in eight and a half seconds, the terraces, the walls and co
 });
 
 // ---- the ships (ships.js): the skiff, put, boarded, flown and stepped off
-ok('a skiff is put in front of the body, pointing its way, at its hover over the water; its seat is in reach at once; the five are offered, the skiff, the dart, the dhow and the ark made', () => {
+ok('a skiff is put in front of the body, pointing its way, at its hover over the water; its seat is in reach at once; the five are offered, all five made', () => {
   const body = B.createBody({ yaw: 0.6 }); body.p = [3, 0, -2];
   const s = SP.placeShip(body);
   near(s.yaw, 0.6, 1e-12); near(s.p[1], SP.SKIFF.hover, 1e-12);
@@ -2159,7 +2159,7 @@ ok('a skiff is put in front of the body, pointing its way, at its hover over the
   assert.equal(SP.nearShip([s], body.p), s, 'its seat in reach from where the body called it');
   body.p = [3 - 8 * Math.sin(0.6), 0, -2 - 8 * Math.cos(0.6)]; assert.equal(SP.nearShip([s], body.p), null, 'not from further off');
   assert.deepEqual(SP.SHIPS.map((x) => x.kind), ['skiff', 'dart', 'dhow', 'ark', 'carrier']);
-  assert.deepEqual(SP.SHIPS.filter((x) => x.ready).map((x) => x.kind), ['skiff', 'dart', 'dhow', 'ark']);
+  assert.deepEqual(SP.SHIPS.filter((x) => x.ready).map((x) => x.kind), ['skiff', 'dart', 'dhow', 'ark', 'carrier']);
   near(SP.SKIFF.length, 5, 1e-9, 'about five metres long');
 });
 
@@ -2267,6 +2267,42 @@ ok('the ark: eighty metres, its ring round its middle riding clear of the water;
   assert.ok(!w.solid(foot) && foot[2] < line.z && foot[2] > line.z - 2.5, 'its ring\'s foot caught at the house: ' + foot.map((v) => v.toFixed(2)) + ' against ' + line.z.toFixed(2));
 });
 
+ok('the carrier: four hundred metres, five terraces each set in from the one below, riding with its lowest clear of the water; put far ahead of the body, pointing its way, seen whole; boarded from far off near its stern, up to its helm on the top terrace; the slowest of all; never lower than its keel; its side meets what is solid', () => {
+  const C = SP.CARRIER, T = C.terraces, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
+  near(C.length, 400, 1e-9, 'about four hundred metres long'); near(T[0].z1 - T[0].z0, C.length, 1e-9, 'its lowest terrace the whole of it');
+  for (let i = 1; i < T.length; i++) {
+    assert.ok(T[i].hw < T[i - 1].hw && T[i].z0 > T[i - 1].z0 && T[i].z1 < T[i - 1].z1, 'terrace ' + i + ' set in from the one below');
+    near(T[i].y0, T[i - 1].y1, 1e-9, 'terrace ' + i + ' on the one below');
+  }
+  assert.ok(C.keel > -T[0].y0 && C.hover > C.keel, 'its lowest terrace\'s underside clear of the water, put and flown');
+  const top = T[T.length - 1], [sx, sy, sz] = C.seat;
+  assert.ok(Math.abs(sy - top.y1 - 0.6) < 0.05 && sz < top.z1 && sz > top.z1 - C.bow && Math.abs(sx) < 1, 'its helm on the top terrace, near its prow');
+  assert.ok(C.edges.some(([x, y, z]) => x === T[0].hw && y === T[0].y0 && z === T[0].z0) && C.edges.some(([, y]) => y === C.masts[0].top), 'its corners and its mastheads meet what is solid');
+  const s = SP.placeShip(body, () => 0, 'carrier'), helm = SP.seatAt(s);
+  near(s.yaw, 0, 1e-12, 'pointing the body\'s way'); assert.ok(Math.abs(s.p[0]) < 1e-9 && SP.shipPoint(s, [0, 0, T[0].z0])[2] > 100, 'far ahead of the body, its stern too');
+  const tall = Math.min(...C.masts.map((m) => m.z));   // the nearer mast: the eye, a few metres behind the body and level, has its masthead inside its 55 degrees
+  assert.ok(Math.atan2(s.p[1] + C.masts[0].top - 1.6, s.p[2] + tall + 5) < (27.5 * Math.PI) / 180 - 0.02, 'seen whole: ' + ((Math.atan2(s.p[1] + C.masts[0].top - 1.6, s.p[2] + tall + 5) * 180) / Math.PI).toFixed(1));
+  assert.equal(SP.nearShip([s], body.p), s, 'boarded from where it was called');
+  body.p = [400, 0, 0]; assert.equal(SP.nearShip([s], body.p), null, 'not from far off to the side'); body.p = [0, 0, 0];
+  SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'lifted up to its helm'); near(body.p[2], helm[2], 1e-12);
+  for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
+  assert.ok(Math.hypot(...s.v) < 2.5, 'the slowest: a second in, barely moving: ' + Math.hypot(...s.v).toFixed(2));
+  for (let t = 0; t < 11; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
+  near(Math.hypot(...s.v), C.speed, 1e-9, 'then at its speed');
+  assert.ok(C.turn < SP.ARK.turn && C.accel < SP.ARK.accel, 'slower to turn and to come up to speed than the ark');
+  for (let t = 0; t < 12; t += 1 / 60) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, 1 / 60);
+  near(s.p[1], C.keel, 1e-9, 'sunk as low as it goes'); assert.ok(SP.shipPoint(s, [T[0].hw, T[0].y0, 0])[1] > 0.5, 'its underside still over the water');
+  // flown low at a house with its middle passing well clear but its side not: caught short of it
+  const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
+  const h = w.buildings[0], low = C.keel + T[0].y0;
+  const line = [-2.5, -1.5, 1.5, 2.5, 0.8, -0.8].map((ox) => ({ ox, z: Array.from({ length: 200 }, (_, i) => h.z - 12 + i * 0.1).find((z) => w.solid([h.x + ox, low, z])) })).find((l) => l.z !== undefined);
+  assert.ok(line, 'the house stands in the way of its side');
+  const s2 = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'carrier'); s2.p = [h.x + line.ox - T[0].hw, C.keel, h.z - 300];
+  for (let t = 0; t < 30; t += 1 / 60) SP.stepShip(s2, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60, { solid: (q) => w.solid(q) });
+  const front = Math.max(...C.edges.filter(([x, y]) => x === T[0].hw && y === T[0].y0).map(([, , z]) => z)), side = SP.shipPoint(s2, [T[0].hw, T[0].y0, front]);
+  assert.ok(!w.solid(side) && side[2] < line.z && side[2] > line.z - 2.5, 'its side caught at the house: ' + side.map((v) => v.toFixed(2)) + ' against ' + line.z.toFixed(2));
+});
+
 ok('seated in a ship, a body on two legs sits: its hips low over the seat, its thighs forward and its knees bent, its hands out on the controls', () => {
   const g = Gt.createGait(), body = B.createBody({ yaw: 0 }); body.seated = {};
   assert.equal(Gt.stateOf(body), 'seat');
@@ -2288,6 +2324,8 @@ ok('the board key: R, and the pad\'s left on the cross; the view wires the ships
   assert.ok(read('src/game/ships/dhow.js').includes("from '../ships.js'"), 'the dhow drawn is not the numbers\' dhow');
   assert.ok(read('src/game/ships/ark.js').includes("from '../ships.js'"), 'the ark drawn is not the numbers\' ark');
   assert.ok(view.includes('ark: createArkArt'), 'the view does not draw the ark');
+  assert.ok(read('src/game/ships/carrier.js').includes("from '../ships.js'"), 'the carrier drawn is not the numbers\' carrier');
+  assert.ok(view.includes('carrier: createCarrierArt'), 'the view does not draw the carrier');
 });
 
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {

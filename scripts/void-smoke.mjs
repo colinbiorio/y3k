@@ -104,7 +104,7 @@ const end = async (code) => {
   console.log(JSON.stringify(out, null, 1));
   process.exit(code);
 };
-const dog = setTimeout(() => { out.errors.push('watchdog: took too long'); end(3); }, scene === 'bodies' ? 1500000 : 420000);      // the bodies scene presses 125 options
+const dog = setTimeout(() => { out.errors.push('watchdog: took too long'); end(3); }, scene === 'bodies' ? 1500000 : scene === 'ship' ? 900000 : 420000);      // the bodies scene presses 125 options; the ship scene flies five, the carrier slow to start and stop
 const check = (name, ok, got) => { out.checks[name] = ok ? 'ok' : 'NO: ' + JSON.stringify(got); if (!ok) out.errors.push('check failed: ' + name + ' ' + JSON.stringify(got)); };
 try {
   for (let i = 0; i < 80; i++) {
@@ -569,7 +569,7 @@ try {
     await page.locator('#game-ships').click(); await sleep(250);
     const listed = await page.locator('#game-ship-list button').evaluateAll((els) => els.map((e) => [e.dataset.ship, e.disabled]));
     out.shipsListed = listed;
-    check('the ships list offers the five, the skiff, the dart, the dhow and the ark made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart,dhow,ark', listed);
+    check('the ships list offers the five, all made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart,dhow,ark,carrier', listed);
     await page.locator('#game-ship-list [data-ship="skiff"]').click(); await sleep(500);
     let r = await read();
     check('a skiff comes down in front of the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'skiff' && Math.hypot(r.world.ships[0].p[0] - r.p[0], r.world.ships[0].p[2] - r.p[2]) < 4, r.world.ships);
@@ -639,6 +639,23 @@ try {
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 8000);
     check('and off the ark, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
     check('its frames keep up, flying the ark', out.frames.ark.median < 20, out.frames.ark);
+    // the carrier: put far ahead, the body lifted from the water up to its helm on the top terrace, flown, stepped off
+    await page.locator('#game-ships').click(); await sleep(250);
+    await page.locator('#game-ship-list [data-ship="carrier"]').click(); await sleep(300);
+    out.carrierSaid = await hintText(); r = await read();
+    const far = r.world.ships[0] ? (r.world.ships[0].p[0] - r.p[0]) * -Math.sin(r.yaw) + (r.world.ships[0].p[2] - r.p[2]) * -Math.cos(r.yaw) : 0;
+    check('a carrier comes down far ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'carrier' && far > 300 && /^a carrier comes down ahead of you/.test(out.carrierSaid), { ships: r.world.ships, far, said: out.carrierSaid });
+    await sleep(2500); await shot('11-carrier');
+    await key.press('KeyR'); await sleep(500); r = await read();
+    check('R lifts the body up to its helm, high on the top terrace', r.world.aboard === true && r.p[1] > 50, { aboard: r.world.aboard, p: r.p });
+    await key.down('KeyW'); await sleep(5000 * slow); r = await read();
+    check('W moves it, the slowest of all, toward its speed', r.world.ships[0].speed > 6, r.world.ships[0]);
+    out.frames.carrier = await frames(2000);
+    await shot('12-carrier-under-way'); await key.up('KeyW');
+    await until((r) => r.world.ships[0].speed < 0.5, 15000);
+    await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 12000);
+    check('and off the carrier, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('its frames keep up, flying the carrier', out.frames.carrier.median < 20, out.frames.carrier);
   }
 
   if (scene === 'pad') {

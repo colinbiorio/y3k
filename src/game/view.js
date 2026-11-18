@@ -55,6 +55,7 @@ import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
 import { createArkArt } from './ships/ark.js';
+import { createCarrierArt } from './ships/carrier.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -321,8 +322,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
     K.world.ships = [placeShip(K.body, floorAt, kind)];
     nearSaid = K.world.ships[0];   // this says how to board it: the hint near its seat is not said over it at once
-    const up = { dhow: 'takes you up to its helm', ark: 'lifts you up into its dome' }[kind] || 'boards it';
-    const where = { skiff: 'in front of', ark: 'ahead of' }[kind] || 'beside';
+    const up = { dhow: 'takes you up to its helm', ark: 'lifts you up into its dome', carrier: 'lifts you up to its helm' }[kind] || 'boards it';
+    const where = { skiff: 'in front of', ark: 'ahead of', carrier: 'ahead of' }[kind] || 'beside';
     say(`${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} comes down ${where} you · ${actKey('board')} ${up}`, 5);
   }
   function boardOrLeave() {
@@ -333,7 +334,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
   }
   // the ships drawn, and those let be coasting to a stop
-  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt, ark: createArkArt };
+  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt, ark: createArkArt, carrier: createCarrierArt };
   let shipWake = 0, nearSaid = null;
   function ships(dt) {
     const V = K.void, seen = new Set();

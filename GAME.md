@@ -89,7 +89,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | asked | where it stands |
 |---|---|
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
-| "at least 5 different types of spaceships of varying size and design" | stage 4, **four of five** (17-18 November): the skiff, the dart, the dhow and the ark, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The carrier is next. |
+| "at least 5 different types of spaceships of varying size and design" | stage 4, **done** (17-18 November): the skiff, the dart, the dhow, the ark and the carrier, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
@@ -313,7 +313,7 @@ outrigger fins on thin struts, one glowing plasma ring engine at the stern."
   fins; at the stern, on a pylon, the bronze ring holding a swirl of plasma
   that brightens and quickens as it is driven, with its glow and a streak of
   light behind. Low and quick over the water, it drags a wake of rings.
-- Not yet: the carrier; a ship kept between visits; walking its
+- Not yet: a ship kept between visits; walking its
   deck while it sails;
   landing one in the hall's hangar (the skiff fits the mouth); a phone's own
   button to board (the list does it).
@@ -393,6 +393,35 @@ in a cross at the stern."
 - The call-down line is now said whole: the hint near a ship's seat had been
   said over it at once (the dhow's "R takes you up to its helm" was never
   seen).
+
+**The carrier** (18 November, before dawn), from its brief: "a vast carrier
+about four hundred metres long, like a floating stepped temple: broad terraces
+of pale stone-like ceramic stacked into a long ziggurat, hangar mouths along
+its sides with tiny craft beside them for scale, slender towers, two enormous
+sails of golden solar foil, a row of large plasma ring engines at the stern."
+**Stage 4 is done: the five ships.**
+
+- **Called down far ahead of you**, pointing your way, 450 m off so its
+  mastheads are in sight. R from anywhere within a few hundred metres of its
+  stern lifts you up to its helm, in an open pavilion at the front of the top
+  terrace; the sails come down from their yards.
+- **Flown** as the slowest of all: 18 m/s (45 opened up), ten seconds to its
+  speed, a fifth of a radian a second; the eye stands 540 m back. It rides
+  with its lowest terrace clear of the water; the corners and sides of that
+  terrace, its prow, its mastheads and yard-ends, its towers' tops and its
+  outer engines meet what is solid.
+- **Drawn** (`ships/carrier.js`): five terraces of pale stone-like ceramic,
+  laid in courses on their walls and paved on their tops, each set in from
+  the one below and narrowing over its last seventy metres to the prow, with
+  hedges along their edges; arched hangar mouths along the lowest two
+  (eighteen), warm at night, a small craft five metres long beside each of the
+  lowest's, for scale; four slender towers with lanterns and bronze caps; two
+  masts with yards and booms of bronze and their stays, and two sails of
+  golden foil, each some eighty metres across, furled up to their yards while
+  it waits; lamps along the top terrace at night; and astern a row of five
+  great plasma ring engines on their pylons.
+- The ship smoke's own limit went from seven minutes to fifteen for the ship
+  scene: five ships, the carrier slow to start and to stop.
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -818,8 +847,8 @@ of Earth from the same tiles.
    five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
-   there is somewhere to go. **The skiff, the dart, the dhow and the ark are
-   built** (above); the carrier next.
+   there is somewhere to go. **All five are built** (above): stage 4 is
+   done.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people.
