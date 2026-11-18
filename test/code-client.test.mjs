@@ -557,6 +557,41 @@ await ok('signed out: the fix as steps, with what to type set apart; the turn sa
   assert.doesNotMatch(end.textContent, /API Error/);
 });
 
+await ok('every message and action shows when (Colin, 2026-11-17): today as "11:14 pm", another day with its date, the whole of it held over it; a running tool shows how long it has run, an amber ring, apart from done (a green dot) and stopped (a grey square)', async () => {
+  const items = await import('../src/code/render/items.js');
+  const now = new Date(2026, 10, 17, 23, 30, 0).getTime(), at = new Date(2026, 10, 17, 23, 14, 5).getTime(), earlier = new Date(2026, 10, 16, 9, 5).getTime();
+  assert.equal(items.whenOf(at, now), '11:14 pm'); assert.equal(items.whenOf(earlier, now), 'Nov 16, 9:05 am');
+  assert.equal(items.whenOf(new Date(2025, 0, 2, 0, 7).getTime(), now), 'Jan 2 2025, 12:07 am');
+  const us = renderItem({ uid: 9400, kind: 'user', text: 'hello', at }, noCtx), t = us.querySelector('time.us-at');
+  assert.ok(t && /\d{1,2}:\d{2} [ap]m/.test(t.textContent), 'the person\'s message, its time');
+  assert.equal(t.getAttribute('datetime'), new Date(at).toISOString()); assert.ok(t.getAttribute('title').length > 12, 'held over: the whole date');
+  assert.ok(renderItem({ uid: 9401, kind: 'assistant', id: 'mx', blocks: [{ i: 0, kind: 'text', text: 'hi', done: true }], done: true, at }, noCtx).querySelector('time.as-at'), 'the reply, its time');
+  assert.equal(renderItem({ uid: 9402, kind: 'user', text: 'no stamp' }, noCtx).querySelector('time'), null, 'no time where none was said');
+  const run = renderItem({ uid: 9403, kind: 'tool', tkind: 'bash', name: 'Bash', title: 'wait', input: { command: 'sleep 9' }, status: 'running', at: Date.now() - 12500 }, noCtx);
+  assert.ok(run.querySelector('span.tl-status.st-running'), 'running'); assert.equal(run.querySelector('span.tl-st-t').textContent, '12s', 'and for how long, counting');
+  assert.ok(run.querySelector('time.tl-at'), 'the action, its time');
+  const done = renderItem({ uid: 9404, kind: 'tool', tkind: 'bash', name: 'Bash', input: { command: 'true' }, status: 'ok', ms: 2300, at }, noCtx);
+  assert.equal(done.querySelector('span.tl-st-t').textContent, '2.3s'); assert.ok(done.querySelector('span.tl-status.st-ok'));
+  const stopped = renderItem({ uid: 9405, kind: 'tool', tkind: 'bash', name: 'Bash', input: { command: 'yes' }, status: 'stopped', at }, noCtx);
+  assert.equal(stopped.querySelector('span.tl-st-t').textContent, 'stopped');
+  assert.equal(items.runningFor({ at: Date.now() - 75000 }), '1m 15s');
+});
+
+await ok('a turn stopped part way leaves no foreground tool "running" (one sent to the background goes on); a live task heard of without a stamp has a clock from then; each message keeps its stamp', () => {
+  const S = createState(), sid = 'sx', T = 1_000_000;
+  for (const e of [{ type: 'session.started', sid, title: 't' }, { type: 'turn.started', sid, t: T }, { type: 'message.user', sid, text: 'go', t: T },
+    { type: 'tool.call', sid, callId: 'c1', name: 'Bash', kind: 'bash', input: { command: 'sleep 99' }, t: T + 10 },
+    { type: 'tool.call', sid, callId: 'c2', name: 'Bash', kind: 'bash', input: { command: 'sleep 99', run_in_background: true }, t: T + 20 }]) apply(S, e);
+  const s = S.sessions.get(sid), c1 = s.byKey.get('t:c1'), c2 = s.byKey.get('t:c2');
+  c2.background = true;
+  assert.equal(s.items.find((i) => i.kind === 'user').at, T, 'the message keeps its stamp');
+  apply(S, { type: 'subagent.started', sid, taskId: 'b1', kind: 'shell', description: 'a long one' });
+  assert.ok(Math.abs(s.agents.get('b1').at - Date.now()) < 1000, 'a clock from when it was heard of');
+  apply(S, { type: 'turn.ended', sid, status: 'interrupted', t: T + 500 });
+  assert.equal(c1.status, 'stopped', 'stopped with its turn'); assert.equal(c2.status, 'running', 'the background one goes on');
+  assert.equal(s.items.find((i) => i.kind === 'turn-end').at, T + 500);
+});
+
 await ok('a reply keeps its element for its whole life; thinking grows in place', () => {
   const it = { uid: 9001, kind: 'assistant', id: 'm1', blocks: [{ i: 0, kind: 'thinking', text: 'hmm', done: false, open_th: true }], done: false };
   const el = renderItem(it, noCtx);
@@ -1569,7 +1604,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       const line = $('div.cv-list div.cv-taskdone');
       assert.ok(line, 'a line where the conversation is');
       assert.ok(line.classList.contains('st-ok'));
-      assert.match(line.textContent, /^Count the tests finished\s*general-purpose\s*1 tool use · 14\.1k tokens · 10\.5s$/);
+      assert.match(line.textContent, /^Count the tests finished\s*general-purpose\s*1 tool use · 14\.1k tokens · 10\.5s\s*\d{1,2}:\d{2} [ap]m$/, 'and when');
       cv._feed({ sid, type: 'subagent.ended', taskId: 'tb', status: 'killed', summary: 'stopped', t: T + 73000 });
       tick();
       assert.equal($('div.cv-agents'), null, 'nothing running: no strip');
@@ -1809,7 +1844,7 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
   const thinking = () => [...$$('span.th-shimmer')].filter((x) => x.textContent === 'thinking…').length;
   const drawn = () => $('div.cv-list').childNodes.map((n) => ['us', 'as', 'tl', 'pm', 'or', 'sys'].find((c) => n.classList?.contains(c)) || '?');
   // (the words of the last reply drawn, without the "pass to" button a finished one carries)
-  const lastReply = () => $$('div.cv-list > div.it.as').pop().childNodes.filter((n) => !n.classList?.contains('pass-row')).map((n) => n.textContent).join('');
+  const lastReply = () => $$('div.cv-list > div.it.as').pop().childNodes.filter((n) => !n.classList?.contains('pass-row') && !n.classList?.contains('as-at')).map((n) => n.textContent).join('');
   const sayToPresence = async (words) => {
     $('button.cv-who').click();
     const ta = $('textarea.cv-input');
@@ -4037,7 +4072,13 @@ await ok('the stylesheet: a rise only on entry, a pane frosted only at the top t
   assert.match(code, /\.th-shimmer \{[^}]*animation: cv-breathe/);
   assert.ok(!/@keyframes cv-shimmer/.test(code), 'the shimmer is not a moving background');
   const still = ':root:is([data-gfx="smooth"], [data-motion="less"])';
-  for (const sel of [' .cv-orbit::before', ' .code-root .pm-pulse::after', ' .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live)']) assert.ok(code.includes(still + sel), sel);
+  for (const sel of [' .cv-orbit::before', ' .code-root .pm-pulse::after', ' .code-root :is(.th-shimmer, .cv-live)']) assert.ok(code.includes(still + sel), sel);
+  // 2026-11-17 (Colin: "when a shell is running, the loading icon doesn't move at all"): the smooth tier keeps the small
+  // spinners turning (a running shell read as halted); less motion, chosen, stills them, as a ring round a dot
+  assert.ok(!code.includes(still + ' .code-root :is(.th-shimmer, .td-spin'), 'the smooth tier stills the spinners again');
+  assert.ok(code.includes(':root[data-motion="less"] .code-root :is(.td-spin, .tl-status i)'), 'less motion no longer stills them');
+  assert.match(code, /:root\[data-motion="less"\] \.code-root :is\(\.td-spin, \.tl-status\.st-running i\) \{ border-right-color: #ffbd2e; background: radial-gradient/, 'stilled, a running ring is not drawn as a whole ring round a dot');
+  assert.match(code, /\.tl-status\.st-running i \{[^}]*animation: cv-spin/, 'a running tool is not a turning ring');
   assert.match(code, /\.cv-scroll \{ contain: strict; \}/);
   assert.match(code, /content-visibility: auto; contain-intrinsic-size: auto 160px;/);
   assert.match(code, /body\.code-shifting #stage \{ opacity: 0; \}/);

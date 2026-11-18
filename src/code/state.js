@@ -374,8 +374,11 @@ export function apply(S, e, { replay = false } = {}) {
       for (const it of s.byKey.values()) if (it.kind === 'assistant' && closeReply(it)) touch(it);
       s.openReply.clear();
       if (e.status !== 'success') {
-        const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth });
+        const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth, at: e.t || null });
         s.items.push(n); touch(n);
+        // stopped (or failed) part way: a command it was waiting on is not running any more, whatever was last heard of it
+        // (one sent to the background goes on, and says when it ends)
+        for (const it of s.byKey.values()) if (it.kind === 'tool' && it.status === 'running' && !it.background) { it.status = 'stopped'; touch(it); }
       }
       const t = s.turn;
       const sum = t && e.status === 'success' ? turnSummary(t, e.t) : null;
@@ -388,7 +391,7 @@ export function apply(S, e, { replay = false } = {}) {
 
     case 'message.user': {
       // (`auto`: a line the switch sent on the person's behalf — drawn as its own, keep.mjs)
-      const it = item('user', { text: e.text, images: e.images || 0, withNote: !!e.withNote, auto: e.auto || null });
+      const it = item('user', { text: e.text, images: e.images || 0, withNote: !!e.withNote, auto: e.auto || null, at: e.t || null });
       s.items.push(it); touch(it);
       break;
     }
@@ -411,7 +414,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'message.start': {
       let it = s.byKey.get('m:' + e.id);
       if (!it) {
-        it = item('assistant', { id: e.id, model: e.model || null, blocks: [], done: false });
+        it = item('assistant', { id: e.id, model: e.model || null, blocks: [], done: false, at: e.t || null });
         s.byKey.set('m:' + e.id, it);
         place(s, it, e.parentCallId);
         begun(s, it, touch);
@@ -422,7 +425,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'message.delta': case 'message.block': {
       let it = s.byKey.get('m:' + e.id);
       if (!it) {
-        it = item('assistant', { id: e.id, model: null, blocks: [], done: false });
+        it = item('assistant', { id: e.id, model: null, blocks: [], done: false, at: e.t || null });
         s.byKey.set('m:' + e.id, it);
         place(s, it, e.parentCallId);
         begun(s, it, touch);
@@ -537,7 +540,8 @@ export function apply(S, e, { replay = false } = {}) {
     // (its call, then the CLI's own word, which knows more), so what comes is
     // merged into what is known.
     case 'subagent.started': {
-      const a = s.agents.get(e.taskId) || { taskId: e.taskId, status: 'running', text: '', at: e.t || null };
+      // (its clock runs from the engine's stamp; a live one without a stamp, from when it was first heard of)
+      const a = s.agents.get(e.taskId) || { taskId: e.taskId, status: 'running', text: '', at: e.t || (replay ? null : Date.now()) };
       for (const k of ['callId', 'description', 'agentType', 'kind', 'background']) if (e[k] != null && e[k] !== '') a[k] = e[k];
       s.agents.set(e.taskId, a);
       const t = a.callId && s.byKey.get('t:' + a.callId);
@@ -570,7 +574,7 @@ export function apply(S, e, { replay = false } = {}) {
         a.told = true;
         // (what it was, kept as it ended: the line is drawn from this alone)
         const task = { kind: a.kind || null, agentType: a.agentType || null, status: a.status, tokens: a.tokens ?? null, tools: a.tools ?? null, ms: a.ms ?? (a.end && a.at ? a.end - a.at : null) };
-        const n = item('task-done', { taskId: a.taskId, callId: a.callId || null, description: a.description || '', task });
+        const n = item('task-done', { taskId: a.taskId, callId: a.callId || null, description: a.description || '', task, at: e.t || null });
         s.items.push(n); touch(n);
       }
       out.meta = true;
@@ -623,12 +627,12 @@ export function apply(S, e, { replay = false } = {}) {
     // room answers itself (/status), and a shell line (`!`) with its output —
     // kept with the conversation on screen, never sent to the coder.
     case 'local.note': {
-      const it = item('note', { text: String(e.text || ''), title: e.title || null });
+      const it = item('note', { text: String(e.text || ''), title: e.title || null, at: Date.now() });
       s.items.push(it); touch(it);
       break;
     }
     case 'local.shell': {
-      const it = item('shell', { id: e.id, command: String(e.command || ''), output: '', status: 'running', code: null, error: null, ms: 0, truncated: false });
+      const it = item('shell', { id: e.id, command: String(e.command || ''), output: '', status: 'running', code: null, error: null, ms: 0, truncated: false, at: Date.now() });
       s.byKey.set('sh:' + e.id, it);
       s.items.push(it); touch(it);
       break;

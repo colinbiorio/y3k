@@ -12,7 +12,7 @@ import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
 import { waitForVersion, setLiveModel } from '../own-brain.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering } from './state.js';
-import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary } from './render/items.js';
+import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary, runningFor } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf, usdText } from './render/meters.js';
 import { mdStream } from './render/markdown.js';
 import { contextPanel } from './render/context-panel.js';
@@ -2684,6 +2684,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     workLine();
     const s = currentSession();
     if (s && dockUi?.agents.el) agentRows(dockUi.agents.el, runningTasks(s));
+    // and each running tool's own clock, on its card (items.js statusDot): it counts on while the tool runs
+    if (s) for (const it of s.byKey.values()) {
+      if (it.kind !== 'tool' || it.status !== 'running') continue;
+      const t = els.get(it.uid)?.querySelector('.tl-st-t');
+      if (t) put(t, 'textContent', runningFor(it));
+    }
   }
   function runningTasks(s) { return [...s.agents.values()].filter((a) => a.status === 'running'); }
   // The strip's words, rewritten where they changed: the count, and each

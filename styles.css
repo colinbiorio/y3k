@@ -5027,12 +5027,21 @@ body.in-code .home-panel-head { display: none; }
 .tl-sum { color: #8b93a1; font-size: 0.78rem; flex: none; }
 .tl-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; color: #8b93a1; flex: none; font-variant-numeric: tabular-nums; }
 .tl-status i { width: 7px; height: 7px; border-radius: 50%; background: #4dd865; }
-.tl-status.st-running i { animation: cv-pulse 1.2s ease-in-out infinite; }
+/* running is not done: an amber ring that turns (and its clock counts on beside it); done stays a still green dot;
+   stopped is a grey square. Colin, 2026-11-17: "can we clearly identify when a process is actively being run and
+   when it has been halted?" */
+.tl-status.st-running { color: #ffcf6e; }
+.tl-status.st-running i { width: 10px; height: 10px; box-sizing: border-box; background: none; border: 1.6px solid #ffbd2e; border-right-color: transparent; animation: cv-spin 0.8s linear infinite; }
 .tl-status.st-waiting i { background: #ffbd2e; animation: cv-pulse 1s ease-in-out infinite; }
 .tl-status.st-waiting { color: #ffcf6e; }
 .tl-status.st-error i, .tl-status.st-denied i { background: #ff5147; }
 .tl-status.st-error, .tl-status.st-denied { color: #ff8a80; }
-.tl-status.st-stopped i { background: #6b7280; }
+.tl-status.st-stopped i { background: #8b93a1; border-radius: 1.5px; }
+.tl-status.st-stopped { color: #a8aeb8; }
+/* when: every message and action's time, small and quiet (items.js stamp) */
+.tl-at, .us-at, .as-at, .sys-at { font-size: 0.7rem; color: #737b88; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.us-at { display: block; text-align: right; margin-top: 4px; }
+.as-at { display: block; margin-top: 6px; }
 .tl-cmd { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: 10px; background: #0a0c10; border: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.82rem; }
 .tl-cmd code { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; color: #f0f2f6; }
 .tl-prompt { color: #4dd865; user-select: none; }
@@ -5364,12 +5373,17 @@ body.in-code .home-panel-head { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .code-root, .code-root .it, .cv-drawer { animation: none; }
   .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live), .code-root .pm-pulse::after, .cv-orbit::before, #nav-code.needs-you::after { animation: none; }
+  .code-root :is(.td-spin, .tl-status.st-running i) { border-right-color: #ffbd2e; background: radial-gradient(circle, #ffbd2e 0 32%, transparent 38%); }
 }
+/* (the smooth tier keeps the small spinners turning: an 8 px ring turning costs nothing a slow machine feels, and still
+   it read as halted; less motion, chosen, stills them, drawn then as a whole ring round a dot: still, but not done's dot) */
+:root[data-motion="less"] .code-root :is(.td-spin, .tl-status.st-running i) { border-right-color: #ffbd2e; background: radial-gradient(circle, #ffbd2e 0 32%, transparent 38%); }
 /* The smooth mode, and "less motion" chosen in Settings, are reduced motion
    too (gfx.js sets these on <html>): the same list, stilled. (Pseudo-elements
    cannot go inside :is(), so they are listed one by one.) */
 :root:is([data-gfx="smooth"], [data-motion="less"]) :is(.code-root, .code-root .it, .cv-drawer),
-:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root :is(.th-shimmer, .td-spin, .tl-status i, .cv-live),
+:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root :is(.th-shimmer, .cv-live),
+:root[data-motion="less"] .code-root :is(.td-spin, .tl-status i),
 :root:is([data-gfx="smooth"], [data-motion="less"]) .code-root .pm-pulse::after,
 :root:is([data-gfx="smooth"], [data-motion="less"]) .cv-orbit::before,
 :root:is([data-gfx="smooth"], [data-motion="less"]) #nav-code.needs-you::after { animation: none; }

@@ -44,8 +44,10 @@ command-line tool and turns what it does into one stream the page can draw.
    the permission mode the person chose for that folder, and the mode is
    remembered per folder. The mode that skips every permission is never offered.
 5. **Visible, stoppable, audited.** Every tool call, diff and decision is shown as
-   it happens. One key interrupts. Every action is written to a local audit log
-   on the person's machine.
+   it happens, each with its time. What is running says so and counts its
+   time on (an amber ring that turns); what is done, stopped or failed says
+   which, and is drawn so. One key interrupts. Every action is written to a
+   local audit log on the person's machine.
 6. **Private.** Code never publishes anything: not while live (Code and going
    live refuse each other), not to the feed, not into orion's memory. The one
    exception is the short, factual note about a session that the person chooses
