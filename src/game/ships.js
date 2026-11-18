@@ -1,6 +1,6 @@
 // ships.js — THE SHIPS, AS NUMBERS: where one is put, how it flies under the
 // hands, where its pilot sits, how a body gets aboard and off. No page, no
-// three (the suite runs it); ships/ draws them (skiff.js, dart.js).
+// three (the suite runs it); ships/ draws them (skiff.js, dart.js, dhow.js, ark.js).
 //
 // GAME.md, stage 4: "The five ships: a skiff, a dart, a dhow, an ark, a
 // carrier. From one seat to a carrier. Boarded and flown in the void, so they
@@ -15,7 +15,11 @@
 // metres long: a wide rounded belly of timber ribs and ceramic plating, a
 // raised stern cabin with round windows, two tall folding sails of golden
 // solar foil rigged like a lateen sailing boat, a ring of plasma engines under
-// the stern."
+// the stern." The ark's: "an exploring ship about eighty metres long: a long
+// spine of pale alloy and stone-grey ceramic, a slowly turning ring habitat
+// round its middle with gardens under glass, a rounded prow with an
+// observatory dome of brass and glass, four plasma engines in a cross at the
+// stern."
 //
 // A ship's frame is a body's: its front is +Z, its left +X, and its yaw is
 // atan2(x, z) of the way it points. Flown, it turns toward where the eye looks;
@@ -27,7 +31,7 @@
 
 export const SHIPS = [
   { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: true }, { kind: 'dhow', label: 'dhow', ready: true },
-  { kind: 'ark', label: 'ark', ready: false }, { kind: 'carrier', label: 'carrier', ready: false },
+  { kind: 'ark', label: 'ark', ready: true }, { kind: 'carrier', label: 'carrier', ready: false },
 ];
 export const SKIFF = {
   length: 5.0, beam: 0.95,
@@ -63,7 +67,30 @@ export const DHOW = {
   edges: [[3.4, 0.5, 0], [-3.4, 0.5, 0], [0, 15.5, 3], [0, 10.5, -4.5], [0, 2.8, 13.6], [0, 3, -13.8]],   // its sides, mastheads, prow, stern
   view: 34,
 };
-export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW };
+// the ark's ring (round the spine, its axis the ship's +Z), its dome on the prow, its four engines in a cross at the stern;
+// what of them meets what is solid: the ring's rim all round (eight points), the dome's top, the engines' outer rims
+const ARK_RING = { r: 12, tube: 2.2, z: -4, turn: (2 * Math.PI) / 60 }, ARK_DOME = { at: [0, 3.2, 29], r: 2.8 }, ARK_ENGINES = { off: 6, r: 1.25, z0: -37, z1: -29 };
+const ARK_RIM = ARK_RING.r + ARK_RING.tube;
+export const ARK = {
+  length: 80, beam: 2 * ARK_RIM,
+  spine: 2.6,                       // m: the spine's radius
+  ring: ARK_RING,                   // the habitat: its radius to the tube's middle, the tube's, where it stands along the spine, its turn (once a minute)
+  dome: ARK_DOME, engines: ARK_ENGINES,
+  keel: ARK_RIM + 0.4, hover: 16,       // its ring's foot rides clear of the water
+  seat: [0, 3.65, 29.4],            // the helm: inside the dome, looking out ahead over the prow
+  speed: 28, boost: 70, back: 0.2, slide: 2.5, climb: 5,
+  accel: 4, turn: 0.5,              // the heaviest yet: the slowest to come up to speed and to turn
+  // put ahead of the body, pointing its way, far enough off to be seen whole (its ring's top inside the eye's view); boarded
+  // from the water near its stern, from where it was called: the board key lifts the body up into the dome
+  door: [0, 0, -40], board: 32, reach: 22, put: [0, 68],
+  edges: [
+    ...[0, 1, 2, 3, 4, 5, 6, 7].map((k) => [ARK_RIM * Math.cos((k * Math.PI) / 4), ARK_RIM * Math.sin((k * Math.PI) / 4), ARK_RING.z]),
+    [0, ARK_DOME.at[1] + ARK_DOME.r, ARK_DOME.at[2]],
+    ...[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([x, y]) => [x * (ARK_ENGINES.off + ARK_ENGINES.r), y * (ARK_ENGINES.off + ARK_ENGINES.r), ARK_ENGINES.z0]),
+  ],
+  view: 95,
+};
+export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW, ark: ARK };
 const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -74,6 +101,7 @@ export const ahead = (s) => [Math.sin(s.yaw), 0, Math.cos(s.yaw)];
 export const leftOf = (s) => [Math.cos(s.yaw), 0, -Math.sin(s.yaw)];
 export function shipPoint(s, [x, y, z]) { const c = Math.cos(s.yaw), n = Math.sin(s.yaw); return [s.p[0] + c * x + n * z, s.p[1] + y, s.p[2] - n * x + c * z]; }
 export const seatAt = (s) => shipPoint(s, kindOf(s).seat);
+export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   // where it is boarded from: its seat, or (the ark) its door
 
 // put by the body (its seat in reach), pointing the way it faces, riding at its hover over what is under it
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
@@ -119,11 +147,11 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   return s;
 }
 
-// the nearest ship whose seat a body is near enough to take (on its way to it, not far below or above it)
+// the nearest ship whose seat (or door) a body is near enough to take (on its way to it, not far below or above it)
 export function nearShip(ships, p) {
   let best = null, bd = Infinity;
   for (const s of ships) {
-    const q = seatAt(s), d = Math.hypot(q[0] - p[0], q[2] - p[2]);
+    const q = doorAt(s), d = Math.hypot(q[0] - p[0], q[2] - p[2]);
     if (d < kindOf(s).board && d < bd && Math.abs(q[1] - p[1]) < kindOf(s).reach) { bd = d; best = s; }
   }
   return best;

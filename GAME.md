@@ -89,7 +89,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | asked | where it stands |
 |---|---|
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
-| "at least 5 different types of spaceships of varying size and design" | stage 4, **three of five** (17 November): the skiff, the dart and the dhow, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The ark and the carrier are next. |
+| "at least 5 different types of spaceships of varying size and design" | stage 4, **four of five** (17-18 November): the skiff, the dart, the dhow and the ark, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The carrier is next. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
@@ -313,7 +313,7 @@ outrigger fins on thin struts, one glowing plasma ring engine at the stern."
   fins; at the stern, on a pylon, the bronze ring holding a swirl of plasma
   that brightens and quickens as it is driven, with its glow and a streak of
   light behind. Low and quick over the water, it drags a wake of rings.
-- Not yet: the ark and the carrier; a ship kept between visits; walking its
+- Not yet: the carrier; a ship kept between visits; walking its
   deck while it sails;
   landing one in the hall's hangar (the skiff fits the mouth); a phone's own
   button to board (the list does it).
@@ -363,6 +363,36 @@ under the stern."
   foil drawn with their cells and a belly, folded up along their yards while
   it waits and spreading when someone takes the helm; the ring of eight plasma
   engines under the stern.
+
+**The ark** (18 November, after midnight), from its brief: "an exploring ship
+about eighty metres long: a long spine of pale alloy and stone-grey ceramic, a
+slowly turning ring habitat round its middle with gardens under glass, a
+rounded prow with an observatory dome of brass and glass, four plasma engines
+in a cross at the stern."
+
+- **Called down ahead of you**, pointing your way, far enough off to be seen
+  whole (its ring's top inside the eye's view from where you stand). It is
+  boarded from the water near its stern, from where it was called: R lifts you
+  up into the dome on its prow (a ship may now say where it is boarded from,
+  apart from its seat). Its ring rides with its foot clear of the water.
+- **Flown** as the heaviest of them: 28 m/s (70 opened up), seven seconds to
+  come up to speed, turning at half a radian a second; the eye stands
+  95 m back. Its ring's rim all round, the dome's top and the engines' outer
+  rims meet what is solid.
+- **Drawn** (`ships/ark.js`): the spine in bands nine metres long, pale alloy
+  and stone-grey ceramic plates; round its middle, on four spokes from a hub
+  between two brass collars, the ring, turning once a minute: its outer part
+  a ceramic hull with rows of windows (warm at night), the rest glass over a
+  garden of grass, flower beds and a path, cypresses and round trees growing
+  toward the spine, lamps along the path at night; two radiators behind it,
+  their lights red to the left and green to the right; the rounded prow, and
+  on it the observatory dome, brass ribs over glass on a brass skirt, with the
+  helm inside, a brass telescope on its tripod and a lamp at night; at the
+  stern four plasma engines in a cross on their pylons, each a ring with its
+  swirl and glow.
+- The call-down line is now said whole: the hint near a ship's seat had been
+  said over it at once (the dhow's "R takes you up to its helm" was never
+  seen).
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -788,8 +818,8 @@ of Earth from the same tiles.
    five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
-   there is somewhere to go. **The skiff, the dart and the dhow are built**
-   (above); the ark next.
+   there is somewhere to go. **The skiff, the dart, the dhow and the ark are
+   built** (above); the carrier next.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people.

@@ -569,7 +569,7 @@ try {
     await page.locator('#game-ships').click(); await sleep(250);
     const listed = await page.locator('#game-ship-list button').evaluateAll((els) => els.map((e) => [e.dataset.ship, e.disabled]));
     out.shipsListed = listed;
-    check('the ships list offers the five, the skiff, the dart and the dhow made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart,dhow', listed);
+    check('the ships list offers the five, the skiff, the dart, the dhow and the ark made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart,dhow,ark', listed);
     await page.locator('#game-ship-list [data-ship="skiff"]').click(); await sleep(500);
     let r = await read();
     check('a skiff comes down in front of the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'skiff' && Math.hypot(r.world.ships[0].p[0] - r.p[0], r.world.ships[0].p[2] - r.p[2]) < 4, r.world.ships);
@@ -622,6 +622,23 @@ try {
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 5000);
     check('and off it again, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
     check('its frames keep up, sailing the dhow', out.frames.dhow.median < 20, out.frames.dhow);
+    // the ark: put beside, the body lifted from the water up into its dome, flown, stepped off
+    await page.locator('#game-ships').click(); await sleep(250);
+    await page.locator('#game-ship-list [data-ship="ark"]').click(); await sleep(300);
+    out.arkSaid = await hintText(); r = await read();
+    const ahead = r.world.ships[0] ? (r.world.ships[0].p[0] - r.p[0]) * -Math.sin(r.yaw) + (r.world.ships[0].p[2] - r.p[2]) * -Math.cos(r.yaw) : 0;
+    check('an ark comes down ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'ark' && ahead > 40 && /^an ark comes down ahead of you/.test(out.arkSaid), { ships: r.world.ships, ahead, said: out.arkSaid });
+    await sleep(2500); await shot('09-ark');
+    await key.press('KeyR'); await sleep(500); r = await read();
+    check('R lifts the body up into its dome, high on the prow', r.world.aboard === true && r.p[1] > 15, { aboard: r.world.aboard, p: r.p });
+    await key.down('KeyW'); await sleep(5000 * slow); r = await read();
+    check('W flies it, the heaviest, up toward its speed', r.world.ships[0].speed > 12, r.world.ships[0]);
+    out.frames.ark = await frames(2000);
+    await shot('10-ark-flying'); await key.up('KeyW');
+    await until((r) => r.world.ships[0].speed < 0.5, 12000);
+    await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 8000);
+    check('and off the ark, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('its frames keep up, flying the ark', out.frames.ark.median < 20, out.frames.ark);
   }
 
   if (scene === 'pad') {
