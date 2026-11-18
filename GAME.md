@@ -97,7 +97,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
 | "Optimize for web, but also offer a download option" | the web: so far, yes (measured below). A download: stage 6; the desktop window in `desktop/` already exists. |
 | "run this smoothly on my mac" | **measured** on an M2 MacBook Air: 16.7 ms a frame. |
-| "make up 5 different plasma weapons" | **four of five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air); **the bell**, four (strike, toll that stuns, peal, rung from below); **the thread**, four (lash, snare, circle, a line in the air). T, or the bar's **weapons** list, changes the one in hand. The torch to come. |
+| "make up 5 different plasma weapons" | **done: all five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air); **the bell**, four (strike, toll that stuns, peal, rung from below); **the thread**, four (lash, snare, circle, a line in the air); **the torch**, four (an ember that sets the ground alight, a flame, a wall of fire, a jet in the air), and what it heats all the way flares. T, or the bar's **weapons** list, changes the one in hand. |
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
 | "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
@@ -387,6 +387,41 @@ is struck once, all of it, not only the first.
   plasma from the hand to the lash's tip, round overhead in the circle, taut to
   where the line caught, wound round a snared bot. On a phone the buttons read
   **lash** and **circle**.
+
+### The torch, the fifth weapon (18 November 2026)
+
+A haft of bronze with a wrapped grip and a cup at its head; in the cup a flame
+of plasma held in a coil (`combat.js` TORCH). What its fire touches burns and is
+**heated**; a machine heated all the way **flares**: its core bursts.
+
+- **Ember** (the attack, a tap): thrown in an arc where the eye looks (at the
+  bot nearest that line, if one is near it, where it will be). It bursts where
+  it lands or strikes: 28 at its heart, less to 3.2 m, and heats what it
+  strikes. Near the land or the water it leaves a **fire** there, 2.6 m across,
+  for 4 s: what hovers over it burns, 16 a second.
+- **Flame** (the attack, held): after a sixth of a second, for as long as it is
+  held, a flame streams out 8 m where the eye looks, widening a fifth of a
+  metre a metre; what is in it burns, 34 a second at its root and half that at
+  its end. A wall cuts it short, and nothing behind the wall burns. The body
+  walks while it streams.
+- **Wall of fire** (the whirl's key): laid across the eye's way 5 m out, 9 m
+  across, burning 4.5 s: what hovers in it burns, 20 a second.
+- **Jet** (the attack, in the air): pointed down, held, it bears the body up
+  at 2.4 m/s for up to 1.8 s a time in the air (whole again once the body
+  stands), and burns what is under it.
+- **Heat and the flare**: burning heats a machine (0.75 a second at the
+  flame's root, less elsewhere); out of the fire it cools 0.3 a second. At full
+  heat it flares: struck 40 itself, and each bot within 4 m struck 22, knocked
+  back and heated a third more, so a close group can go up one after another.
+  What burns is struck every quarter second with what it burned in it.
+- Drawn: the torch sits upright at the right shoulder with a small flame in its
+  cup; streaming, it turns along its flame; in the jet, head down. The fire is
+  instanced flames, each a soft disc turned to the eye, white at the root, the
+  plasma's blue, violet as it goes; on the land they stand taller than wide. Seen
+  from behind, a stream is end on, so it billows where it ends and wraps what it
+  burns. A heated bot glows as metal does, red, orange, near white, and warm
+  flames lick up off it; a flare bursts in warm fire. On a phone the buttons
+  read **flame** and **wall**.
 
 ### Stage 4: the ships (begun 17 November 2026)
 
@@ -959,8 +994,9 @@ of Earth from the same tiles.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people. **The binding is
-   begun** (above: pulls, holds, lets go, joins, on the bots); the ring, the
-   bow, the bell and the thread are made; the torch next.
+   begun** (above: pulls, holds, lets go, joins, on the bots); **all five
+   weapons are made** (the torch last, 18 November). Left in this stage: the
+   binding on things other than bots (the land, hazards), and hazards to act on.
 6. **What survival is for**: things to find, make and keep. Full screen. A
    download.
 7. **The physical universe.** Earth from NASA's data, clean, with only what

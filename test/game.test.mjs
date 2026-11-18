@@ -1230,7 +1230,8 @@ ok('what the void keeps between visits, and junk is not believed', () => {
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
   S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
   assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
-  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"torch"}' })).weapon, 'ring', 'a weapon not made yet is the ring');
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"blade"}' })).weapon, 'ring', 'a weapon that is not one of the five is the ring');
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"torch"}' })).weapon, 'torch', 'the torch, made, is kept');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"place":"mars"}' })).place, 'void', 'a place not on the map is the void');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"building":"castle"}' })).building, 'shelter', 'a building that is not made is the shelter');
   const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
@@ -2657,10 +2658,10 @@ ok('the binding\'s hands: X (or H) held, the pad\'s LB; a button on a phone; the
 // ---- the bow (combat.js BOW; stage 5): the second of the five weapons
 const still = (...bots) => { for (const b of bots) b.L = { ...b.L, speed: 0 }; };   // bots that keep where they are put
 
-ok('the bow: chosen, it is in hand (one not made yet changes nothing); a tap looses an arrow at the bot very near the eye\'s line, striking it once for 24, an arrow that falls a little as it flies; it rests a moment before it is drawn again', () => {
+ok('the bow: chosen, it is in hand (one that is not a weapon changes nothing); a tap looses an arrow at the bot very near the eye\'s line, striking it once for 24, an arrow that falls a little as it flies; it rests a moment before it is drawn again', () => {
   const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
   assert.equal(c.weapon, 'ring');
-  assert.equal(CB.chooseWeapon(c, 'torch'), false); assert.equal(c.weapon, 'ring', 'not made yet');
+  assert.equal(CB.chooseWeapon(c, 'blade'), false); assert.equal(c.weapon, 'ring', 'not one of the five');
   assert.equal(CB.chooseWeapon(c, 'bow'), true); assert.equal(c.weapon, 'bow');
   let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
   assert.equal(kinds(evs, 'nock').length, 1); assert.equal(c.bow.mode, 'drawing'); assert.equal(c.ring.mode, 'held', 'the ring is not cast');
@@ -2851,10 +2852,109 @@ ok('the thread in the air: a line out where the eye looks catches on a wall and 
   assert.equal(g.c.thread.mode, 'held');
 });
 
-ok('the weapons: the five listed, the ring, the bow, the bell and the thread made; the next is the next made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
+// ---- the torch (combat.js TORCH; stage 5): the fifth weapon
+ok('the torch: a tap throws an ember in an arc at the bot looked at; it bursts there, striking it and the one near it (less, further off) and heating them; the water under it burns a while, striking what hovers over it every quarter second; one far off is untouched', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'torch');
+  const b = standBot(c, body, [0.4, 1.6, -10], 5), by = standBot(c, body, [2.4, 1.6, -10.5], 5), far = standBot(c, body, [9, 1.6, -10]);
+  still(b, by, far);
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  assert.equal(c.torch.mode, 'lit'); assert.equal(c.ring.mode, 'held', 'the ring is not cast');
+  evs = evs.concat(fightFor(c, body, aim, FRAME, {}));
+  assert.equal(kinds(evs, 'throw').length, 1, 'thrown'); assert.equal(c.torch.mode, 'held');
+  const e = c.bolts.find((x) => x.kind === 'ember'); assert.ok(e && e.v[1] > 2, 'in an arc: ' + e?.v.map((x) => x.toFixed(1)));
+  evs = evs.concat(fightFor(c, body, aim, 0.9));
+  const burst = kinds(evs, 'ember'); assert.equal(burst.length, 1, 'it bursts');
+  assert.ok(Math.hypot(burst[0].at[0] - 0.4, burst[0].at[2] + 10) < 1.2, 'on the bot looked at: ' + burst[0].at.map((x) => x.toFixed(2)));
+  const first = (id) => kinds(evs, 'hit').find((x) => x.id === id && x.kind === 'ember');
+  assert.ok(first(b.id) && first(by.id), 'it and the one near it struck');
+  assert.ok(first(b.id).damage > first(by.id).damage, 'less further off: ' + first(b.id).damage + ', ' + first(by.id).damage);
+  assert.ok(b.heat > 0.2 && by.heat > 0.2, 'heated');
+  assert.equal(c.fires.length, 1); assert.equal(c.fires[0].kind, 'patch'); assert.ok(Math.abs(c.fires[0].at[1]) < 0.05, 'on the water');
+  const hp = b.hp; evs = fightFor(c, body, aim, 1.25);
+  const burns = kinds(evs, 'hit').filter((x) => x.id === b.id && x.kind === 'torch');
+  assert.ok(burns.length >= 4 && b.hp < hp - 15, 'it burns over the fire: ' + burns.length + ' strikes, ' + (hp - b.hp));
+  assert.equal(far.hp, far.max, 'far off, untouched');
+  fightFor(c, body, aim, 3);
+  assert.equal(c.fires.length, 0, 'gone out after its time');
+});
+
+ok('the torch held: its flame streams out where the eye looks to 8 m, the body walking; what is in it burns, hardest nearest; heated all the way, a machine flares, struck hard, and the one near it is struck too; one past it is untouched; let go, it goes out; a wall cuts it short', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'torch');
+  const a = standBot(c, body, [0.5, 1.6, -3.5], 5), b = standBot(c, body, [0.4, 1.9, -7.4], 5), past = standBot(c, body, [0.3, 1.9, -13], 5), side = standBot(c, body, [3.6, 1.6, -3.5], 5);
+  still(a, b, past, side);
+  const held = (t) => ({ attack: true, attackPressed: t < FRAME / 2 });
+  let evs = fightFor(c, body, aim, 0.25, held);
+  assert.equal(kinds(evs, 'flame').length, 1); assert.equal(kinds(evs, 'throw').length, 0, 'held, not thrown');
+  assert.equal(c.torch.mode, 'flame'); assert.ok(c.slow, 'the body walks while it streams');
+  near(c.torch.reach, CB.TORCH.flame.reach, 1e-9, 'nothing in its way');
+  evs = evs.concat(fightFor(c, body, aim, 1.2, { attack: true }));
+  const burned = (id) => kinds(evs, 'hit').filter((x) => x.id === id && x.kind === 'torch').reduce((s, x) => s + x.damage, 0);
+  assert.ok(burned(a.id) > burned(b.id) && burned(b.id) > 0, 'both burn, the nearer harder: ' + burned(a.id) + ', ' + burned(b.id));
+  assert.equal(kinds(evs, 'flare').length, 0, 'not heated all the way yet');
+  assert.equal(side.hp, side.max, 'beside the flame, untouched by it');
+  evs = fightFor(c, body, aim, 0.6, { attack: true });
+  const fl = kinds(evs, 'flare'); assert.ok(fl.some((x) => x.id === a.id), 'the near one flares: ' + JSON.stringify(fl.map((x) => x.id)));
+  assert.equal(kinds(evs, 'hit').find((x) => x.id === a.id && x.kind === 'flare').damage, CB.TORCH.flare.damage);
+  const s = kinds(evs, 'hit').find((x) => x.id === side.id && x.kind === 'flare');
+  assert.ok(s && s.damage === CB.TORCH.flare.splash && side.heat > 0.2, 'the one beside it struck by the flare, and heated');
+  assert.equal(past.hp, past.max, 'past the flame and the flares, untouched');
+  evs = fightFor(c, body, aim, FRAME, {});
+  assert.equal(kinds(evs, 'flame-off').length, 1); assert.equal(c.torch.mode, 'held'); assert.equal(c.slow, false);
+  // a wall between: the flame stops at it, and what is behind it does not burn
+  const g = arena(); CB.chooseWeapon(g.c, 'torch');
+  const hid = standBot(g.c, g.body, [0.5, 1.6, -3.5], 5); still(hid);
+  const wall = { solid: (p) => Math.abs(p[2] + 2) < 0.15 && p[1] < 5 };
+  fightFor(g.c, g.body, g.aim, 1, held, { world: wall });
+  assert.ok(g.c.torch.reach < 2, 'cut short at the wall: ' + g.c.torch.reach);
+  assert.equal(hid.hp, hid.max, 'behind it, untouched');
+});
+
+ok('the torch\'s wall: the whirl\'s key lays a wall of fire across the eye\'s way, 5 m out and 9 m across; what hovers in it burns, at its end as in its middle; one before it or past it is untouched; not again at once; it goes out after its time', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'torch');
+  const mid = standBot(c, body, [0.2, 1.6, -5], 5), end = standBot(c, body, [-4, 1.6, -5.2], 5), before = standBot(c, body, [0, 1.6, -2], 5), past = standBot(c, body, [3, 1.6, -9], 5);
+  still(mid, end, before, past);
+  let evs = fightFor(c, body, aim, FRAME, { sweep: true });
+  assert.equal(kinds(evs, 'wall').length, 1); assert.equal(c.fires.length, 1); assert.equal(c.fires[0].kind, 'wall');
+  const w = c.fires[0]; near(Math.hypot(w.a[0] - w.b[0], w.a[2] - w.b[2]), 2 * CB.TORCH.wall.half, 1e-9); near(w.at[2], -CB.TORCH.wall.at, 1e-9);
+  evs = evs.concat(fightFor(c, body, aim, FRAME, { sweep: true }), fightFor(c, body, aim, 1.4));
+  assert.equal(kinds(evs, 'wall').length, 1, 'not again at once');
+  const burns = (id) => kinds(evs, 'hit').filter((x) => x.id === id && x.kind === 'torch').length;
+  assert.ok(burns(mid.id) >= 4 && burns(end.id) >= 4, 'in it, the middle and the end burn: ' + burns(mid.id) + ', ' + burns(end.id));
+  assert.equal(before.hp, before.max, 'before it'); assert.equal(past.hp, past.max, 'past it');
+  fightFor(c, body, aim, 3.5);
+  assert.equal(c.fires.length, 0, 'gone out after its time');
+});
+
+ok('the torch in the air: held, its jet bears the body up and burns what is under it; spent after 1.8 s, the body falls; let go, it falls at once; standing again, the jet is whole', () => {
+  const up = (holdFor, seconds, withBot = false) => {
+    const g = arena(); CB.chooseWeapon(g.c, 'torch');
+    g.body.p = [0, 6, 0]; g.body.grounded = false; g.body.v = [0, 0, 0]; g.aim.from = [0.3, 7.9, 5.5];
+    const b = withBot ? standBot(g.c, g.body, [0.3, 1.8, 0.2], 5) : null; if (b) still(b);
+    const evs = [];
+    for (let t = 0; t < seconds; t += FRAME) {
+      B.advance(g.body, { move: [0, 0], yaw: Math.PI }, FRAME);
+      CB.stepCombat(g.c, FRAME, { body: g.body, aim: g.aim, hands: t < holdFor ? { attack: true, attackPressed: t < FRAME / 2 } : {} });
+      evs.push(...g.c.events.splice(0));
+    }
+    return { g, evs, b };
+  };
+  let { g, evs, b } = up(9, 1, true);
+  assert.equal(kinds(evs, 'jet').length, 1); assert.equal(g.c.torch.mode, 'jet'); assert.equal(kinds(evs, 'throw').length, 0, 'in the air, not thrown');
+  assert.ok(g.body.p[1] > 7.5, 'borne up: ' + g.body.p[1].toFixed(2));
+  assert.ok(kinds(evs, 'hit').some((x) => x.id === b.id && x.kind === 'torch'), 'what is under it burns');
+  ({ g, evs } = up(9, 2.4));
+  assert.equal(kinds(evs, 'jet-off').length, 1, 'spent'); assert.ok(g.c.torch.fuel <= 0);
+  assert.ok(g.body.v[1] < -2, 'falling once it is spent: ' + g.body.v[1].toFixed(2));
+  ({ g, evs } = up(0.3, 0.6));
+  assert.equal(kinds(evs, 'jet-off').length, 1); assert.ok(g.body.v[1] < 0, 'let go, it falls: ' + g.body.v[1].toFixed(2));
+  g.body.grounded = true; CB.stepCombat(g.c, FRAME, { body: g.body, aim: g.aim, hands: {} });
+  near(g.c.torch.fuel, CB.TORCH.jet.time, 1e-9, 'whole again');
+});
+
+ok('the weapons: all five listed and made; the next is the next; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
   assert.deepEqual(CB.WEAPONS.map((w) => w.id), ['thread', 'bow', 'ring', 'bell', 'torch']);
-  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['thread', 'bow', 'ring', 'bell']);
-  assert.equal(CB.nextWeapon('ring'), 'bell'); assert.equal(CB.nextWeapon('bell'), 'thread'); assert.equal(CB.nextWeapon('thread'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
+  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['thread', 'bow', 'ring', 'bell', 'torch']);
+  assert.equal(CB.nextWeapon('ring'), 'bell'); assert.equal(CB.nextWeapon('bell'), 'torch'); assert.equal(CB.nextWeapon('torch'), 'thread'); assert.equal(CB.nextWeapon('thread'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
   const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
   fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, FRAME, {});
   assert.equal(c.ring.mode, 'out');
@@ -2866,8 +2966,11 @@ ok('the weapons: the five listed, the ring, the bow, the bell and the thread mad
   assert.ok(read('src/game/fight.js').includes('const bow = add(new THREE.Group())'), 'the bow is not drawn');
   // every made weapon has its words in all three places: the line when it is taken, a phone's buttons, the line when a bot rises
   for (const line of ["if (w === 'thread') return `the thread ·", "thread: ['lash', 'Lash the thread', 'circle', 'A circle overhead']", "thread: ['lashes the thread, held it snares', 'a circle overhead']"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ["if (w === 'torch') return `the torch ·", "torch: ['flame', 'Throw an ember, or hold for the flame', 'wall', 'A wall of fire']", "torch: ['throws an ember, held it streams a flame', 'a wall of fire']"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
   const fight = read('src/game/fight.js');
   assert.ok(fight.includes('const spindle = add(new THREE.Group())') && fight.includes('const filament = add(new THREE.Mesh(filGeo'), 'the thread is not drawn');
+  assert.ok(fight.includes('const torch = add(new THREE.Group())') && fight.includes('const flames = add(new THREE.Mesh(flGeo'), 'the torch is not drawn');
+  assert.ok(fight.includes("c.weapon === 'ring' || flying || guardAmt > 0.02"), 'the ring shows beside another weapon');
 });
 
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {

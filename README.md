@@ -263,6 +263,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (late afternoon) — **The torch, the fifth weapon: all five made**
+  (`src/game/combat.js` TORCH, `src/game/fight.js` the torch and its flames,
+  `src/game/view.js` its words; `test/game.test.mjs`, `scripts/void-smoke.mjs`
+  fight; GAME.md "The torch"). A haft of bronze with a cup at its head and a
+  flame of plasma held in a coil. A tap throws an **ember** in an arc that bursts
+  where it lands or strikes and leaves the water (or the land) **burning** for 4 s;
+  held, a **flame** streams out 8 m where the eye looks, widening, cut short by a
+  wall; the whirl's key lays a **wall of fire** 9 m across, 5 m out; in the air,
+  held, its **jet** bears the body up for 1.8 s and burns what is under it. What
+  its fire touches is **heated** (it glows red, orange, near white, and flames
+  lick off it); a machine heated all the way **flares**: struck 40, and the bots
+  within 4 m struck 22 and heated, so a cluster can go up one after another. The
+  fire is drawn as instanced flames turned to the eye, laid over the sky rather
+  than added (added, they went white by day). T now goes round all five: ring,
+  bell, torch, thread, bow. In the browser on the M2: the six torch checks pass
+  (the flame streams and burns, a wall, an ember, T on round). The Mac was on 16%
+  battery and drew 30 frames a second, main as this branch (both 33.3 ms
+  medians): the seven-bots frame check failed on both, and one older aim check
+  missed on each (the bow's arrow here, the snare on main). Retry those on
+  power before reading anything into them.
 - **2026-11-18** (afternoon) — **Travel: the three places** (`src/travel.js`,
   `src/portal.js`, the entrance's last line; `test/travel.test.mjs`). Colin, the
   day univispira.org went live: "can we link all 3 websites? 4irden.com,
