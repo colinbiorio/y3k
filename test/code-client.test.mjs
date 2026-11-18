@@ -882,6 +882,19 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     sc.scrollTop = 4500; sc.dispatch('scroll');
   });
 
+  await ok('the view: a reader\'s hand going up a pixel at a time near the bottom (a trackpad) leaves it at once; its settle a little way back down does not pin it again; at the very bottom it follows again', () => {
+    const sc = $('div.cv-scroll'), more = (n) => { cv._feed({ sid, type: 'message.delta', id: 'mv2', block: 0, kind: 'text', text: ' and more ' + n }); tick(); };
+    Object.assign(sc, { scrollHeight: 5000, clientHeight: 500, scrollTop: 4500 }); sc.dispatch('scroll');
+    more(1); assert.equal(sc.scrollTop, 5000, 'at the bottom it follows');
+    Object.assign(sc, { scrollHeight: 5000, scrollTop: 4500 }); sc.dispatch('scroll');
+    sc.dispatch('wheel', { deltaY: -0.6 }); sc.scrollTop = 4499.4; sc.dispatch('scroll');
+    more(2); assert.equal(sc.scrollTop, 4499.4, 'a step of less than a pixel up, and it is not pulled down');
+    sc.scrollTop = 4420; sc.dispatch('scroll'); sc.scrollTop = 4440; sc.dispatch('scroll');
+    more(3); assert.equal(sc.scrollTop, 4440, 'settling back down 60px short of the bottom does not pin it');
+    sc.scrollTop = 4499; sc.dispatch('scroll');
+    more(4); assert.equal(sc.scrollTop, 5000, 'back at the very bottom, it follows again');
+  });
+
   await ok('the view: a long session opens with a few items at once and the rest in slices; "show earlier" adds a page', async () => {
     cv._feed({ sid: 'long1', type: 'session.started', provider: 'claude', cwd: '/tmp/long1', mode: 'ask' });
     for (let i = 0; i < 800; i++) {

@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **kode: the reader's own scroll, and the
+  composer in its bar** (`src/code/code-view.js` follow, `styles.css` under
+  "IN THE BAR, NOT OVER IT"; the client test and `scripts/code-smoke.mjs`).
+  Colin: "when i scroll up in the kode conversation, something fights the
+  scroll ... the text box is a lil misaligned with the nav bar ... the extended
+  chat stays small instead of actually taking up the extended space." The
+  follow said "at the bottom" again whenever a trackpad's own settle moved the
+  view a pixel back down near the end, and the next streamed line pulled the
+  reader down: a hand going up (a wheel up, at any size) now leaves the bottom at
+  once, and for a second after it only the very bottom counts as coming back.
+  The composer was laid over the bar's top edge (its line stood above the
+  silver one) and kept its small size when the bar grew: it now fits inside the
+  bar, and the extended bar is filled by the box and its words. The smoke checks
+  both: a long prompt's edge is not above the bar's, and extended, the composer
+  fills the bar.
 - **2026-11-18** (midday) — **Orion remembers what we do in kode**
   (`memory.mjs` coding history, `code-handoff.mjs` checkTurn, `server.mjs`
   `/api/code/remember` and `/api/code/forget` and the presence's prompt,

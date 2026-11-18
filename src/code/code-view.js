@@ -102,6 +102,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let rebuildGen = 0;             // bumped by every rebuild: stale slices stop
   let prepending = false;
   let atBottom = true;            // the reader is at the newest line (see follow)
+  let wentUpAt = -1e9;            // when the reader's own hand last scrolled up (see follow)
   let ro = null;
   let raf = 0;
   let hello = null;
@@ -2161,22 +2162,33 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // scroll events fire), and a ResizeObserver on the list — which runs after
   // layout — pins the view to the bottom whenever the transcript grows and the
   // reader was there. It also catches growth nothing else sees: a fold opened,
-  // the final pass of a reply, the composer getting taller. Scrolling UP leaves
-  // the bottom at once (within 8px); coming back down within 120px rejoins it.
+  // the final pass of a reply, the composer getting taller.
+  //   THE READER'S OWN HAND (Colin, 18 Nov 2026: "when i scroll up in the kode
+  // conversation, something fights the scroll"). A wheel upward leaves the bottom
+  // at once, however small its step: a trackpad's first steps are a pixel or
+  // less, and the rule was a step of more than one, so the view stayed pinned and
+  // the coder's next line pulled it back down. Scrolling up leaves it unless it is
+  // right at the bottom; coming back down rejoins within 48px, but for a moment
+  // after the hand went up only at the very bottom (a trackpad's settle, a little
+  // way back down, had rejoined within 120px and pinned the view again).
   function follow() {
     atBottom = true;
     let lastTop = 0;
     const sc = ui.scroll;
+    sc.addEventListener('wheel', (e) => { if (e.deltaY < 0) wentUp(); }, { passive: true });
     sc.addEventListener('scroll', () => {
-      const gap = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
-      atBottom = sc.scrollTop < lastTop - 1 ? gap < 8 : gap < 120;
+      const gap = sc.scrollHeight - sc.scrollTop - sc.clientHeight, d = sc.scrollTop - lastTop;
       lastTop = sc.scrollTop;
+      const handUp = Date.now() - wentUpAt < 1200;
+      if (d < -0.5) atBottom = !handUp && gap < 2;   // up: off it (a layout's own shrink, with no hand, may stay on)
+      else if (d > 0.5) atBottom = gap < (handUp ? 4 : 48);
     }, { passive: true });
     if (typeof ResizeObserver !== 'function') return;
     ro = new ResizeObserver(() => { if (atBottom && ui) ui.scroll.scrollTop = ui.scroll.scrollHeight; });
     ro.observe(ui.list);
     ro.observe(ui.scroll);
   }
+  function wentUp() { wentUpAt = Date.now(); atBottom = false; }
   // To the bottom, and stay there. Observing afresh makes the observer report
   // after the next layout even if nothing changed size, so this never forces a
   // layout itself.
@@ -3067,6 +3079,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function onWheel(e) {
     if (!ui || ui.scroll.hidden || !e.deltaY) return;
     if (!e.target?.closest?.('#stage')) return;
+    if (e.deltaY < 0) wentUp();   // the hand going up over the orb is the reader's too
     ui.scroll.scrollTop += e.deltaY;
   }
   function onDrop(e) {
