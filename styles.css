@@ -6031,6 +6031,18 @@ body.kode-chat .chat-menu > .cv-composer::after { display: none; }   /* the bar'
 body.kode-chat .chat-menu > .cv-composer:focus-within { box-shadow: none; }
 /* a long prompt stays in the bar: three lines, then it scrolls (2026-11-02) */
 body.kode-chat .cv-input { max-height: calc(4.5em + 12px); overflow-y: auto; }
+/* IN THE BAR, NOT OVER IT (Colin, 18 Nov 2026: "the text box is a lil misaligned with the nav bar -- notice how the
+   green/blue line extends above the silver one -- also, the extended chat stays small instead of actually taking up
+   the extended space"). Folded, the composer keeps inside the bottom bar however long the prompt: its words scroll
+   (three lines had made it 17px taller than the bar). Extended (the bar's arrow, body.chat-typing), it is the whole of
+   the bar: one row, not the site form's grid, the words filling it and the buttons at its foot. */
+body.kode-chat:not(.chat-typing) #chat { max-height: calc(var(--hole-b) - 14px); }
+body.kode-chat:not(.chat-typing) .cv-input { max-height: max(1.45em, calc(var(--hole-b) - 50px)); }
+body.kode-chat.chat-typing #chat { width: auto; height: var(--hole-b); max-height: none; }
+body.kode-chat.chat-typing .chat-menu { display: flex; align-items: stretch; height: 100%; }
+body.kode-chat.chat-typing .chat-menu > .cv-composer { align-self: stretch; align-items: stretch; }
+body.kode-chat.chat-typing .chat-menu > .cv-composer > :not(.cv-input) { align-self: flex-end; }
+body.kode-chat.chat-typing .cv-input { max-height: none; height: auto !important; field-sizing: fixed; align-self: stretch; padding-top: 10px; }
 /* in kode a caption is a message in the conversation (code-view.js caption), never over it */
 body.in-code #caption { display: none !important; }
 

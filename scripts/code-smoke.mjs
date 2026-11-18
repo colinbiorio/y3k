@@ -225,6 +225,26 @@ try {
   check('orion writes Claude a note, cleaned, for you to read first', /Colin is building y3kode/.test(noteShown) && !/<<|HACKED|\[tender/.test(noteShown), noteShown);
   await page.fill('.cv-notecard .cv-noteta', noteShown + ' (edited)');
   await shot('3a-note');
+  // THE COMPOSER IN THE BAR (Colin, 18 Nov: "the text box is a lil misaligned with the nav bar -- notice how the
+  // green/blue line extends above the silver one -- also, the extended chat stays small instead of actually taking up
+  // the extended space"): a long prompt stays inside the bottom bar; the bar extended, the composer fills it
+  const barFit = () => page.evaluate(() => {
+    const r = (el) => el.getBoundingClientRect(), chat = r(document.getElementById('chat')), bar = r(document.getElementById('home-nav-bottom'));
+    const menu = r(document.querySelector('#chat .chat-menu')), comp = r(document.querySelector('#chat .chat-menu > .cv-composer')), ta = r(document.querySelector('#chat .cv-input'));
+    return { chatTop: Math.round(chat.top), barTop: Math.round(bar.top), menuW: Math.round(menu.width), compW: Math.round(comp.width), menuH: Math.round(menu.height), compH: Math.round(comp.height), taH: Math.round(ta.height) };
+  });
+  const draft0 = await page.inputValue('.cv-input');
+  await page.fill('.cv-input', 'A long prompt for the coder, its first line going on past the edge of the box and further still\nand a second line\nand a third line\nand a fourth');
+  await page.waitForTimeout(300);
+  let fit = await barFit(); await shot('3b-long-prompt');
+  check('a long prompt stays inside the bottom bar: the composer\'s edge is not above the bar\'s', fit.chatTop >= fit.barTop - 1, JSON.stringify(fit));
+  await page.evaluate(() => document.body.classList.add('chat-typing'));   // the bar's arrow extends it
+  await page.waitForTimeout(700);
+  fit = await barFit(); await shot('3c-extended');
+  check('the bar extended, the composer fills it, the words with it', fit.compW >= fit.menuW - 40 && fit.compH >= fit.menuH - 40 && fit.taH >= fit.compH * 0.6, JSON.stringify(fit));
+  await page.evaluate(() => document.body.classList.remove('chat-typing'));
+  await page.waitForTimeout(500);
+  await page.fill('.cv-input', draft0);
   await page.fill('.cv-input', "Use the Edit tool to change the word 'world' to 'y3k' in hello.txt.");
   await page.keyboard.press('Enter');
   await page.waitForSelector('.it.pm:not(.done)', { timeout: 10000 });
