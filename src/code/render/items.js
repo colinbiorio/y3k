@@ -27,6 +27,19 @@ export function taskName(a) {
   if (a.kind === 'shell' || a.agentType === 'local_bash') return 'shell';
   return a.agentType && !/^local_/.test(a.agentType) ? a.agentType : a.kind === 'task' ? 'task' : 'agent';
 }
+// WHEN: every message and action carries its time (Colin, 2026-11-17: "add timestamps to each action/message in kode").
+// Today: "11:14 pm"; another day: "Nov 16, 11:14 pm". Held over it: the whole date and time, to the second.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export function whenOf(at, now = Date.now()) {
+  const d = new Date(at), n = new Date(now), h12 = d.getHours() % 12 || 12;
+  const clock = `${h12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
+  const today = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  return today ? clock : `${MONTHS[d.getMonth()]} ${d.getDate()}${d.getFullYear() === n.getFullYear() ? '' : ` ${d.getFullYear()}`}, ${clock}`;
+}
+export const stamp = (it, cls = 'it-at') => (it && Number.isFinite(it.at) && it.at > 0
+  ? h('time.' + cls, { datetime: new Date(it.at).toISOString(), title: new Date(it.at).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'medium' }) }, whenOf(it.at))
+  : null);
+
 // How long: whole seconds while it runs (a clock that ticks), tenths once done.
 const taskTime = (ms, running) => {
   const t = Math.max(0, ms) / 1000;
@@ -111,9 +124,13 @@ function outputBlock(out, lang) {
   return box;
 }
 
+// How a tool stands: running (an amber ring that turns, and how long it has been running, counting on: the view's clock
+// rewrites it each second), done (a still green dot and how long it took), stopped (a grey square), an error (red).
+export const runningFor = (it, now = Date.now()) => (Number.isFinite(it?.at) ? taskTime(now - it.at, true) : '');
 function statusDot(it) {
   const st = it.status || 'running';
-  return h('span.tl-status.st-' + st, { title: STATUS[st] ?? st }, h('i'), st === 'ok' || st === 'running' ? (it.ms != null && st === 'ok' ? secs(it.ms) : '') : STATUS[st]);
+  const said = st === 'running' ? runningFor(it) : st === 'ok' ? (it.ms != null ? secs(it.ms) : '') : STATUS[st];
+  return h('span.tl-status.st-' + st, { title: STATUS[st] || (st === 'ok' ? 'done' : st) }, h('i'), h('span.tl-st-t', said));
 }
 
 function toolBody(it) {
@@ -191,6 +208,7 @@ function toolCard(it, ctx) {
     h('span.tl-name', it.tkind === 'mcp' ? it.name.replace(/^mcp__/, '').replace(/__/, ' · ') : it.name),
     h('span.tl-title', it.title && it.title !== it.name ? it.title : ''),
     h('span.tl-sum', toolSummary(it)),
+    stamp(it, 'tl-at'),
     statusDot(it));
   // built when the card first opens (see fold)
   const body = () => {
@@ -355,6 +373,9 @@ const VIEWS = new WeakMap(); // element → { blocks: Map(i → view), pass }
 function assistant(it, ctx) {
   const el = h('div.it.as');
   VIEWS.set(el, { blocks: new Map(), pass: null });
+  // its time, after its words (the blocks go in before it, in order: patchAssistant)
+  const at = stamp(it, 'as-at');
+  if (at) el.appendChild(at);
   patchAssistant(it, el, ctx);
   return el;
 }
@@ -469,7 +490,7 @@ export function renderItem(it, ctx) {
   switch (it.kind) {
     case 'user': return h('div.it.us' + (it.auto ? '.auto' : ''),
       it.auto ? h('div.us-note', 'keep going, on its own') : it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null,
-      h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null, backButton(ctx, it));
+      h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null, backButton(ctx, it), stamp(it, 'us-at'));
     case 'assistant': return assistant(it, ctx);
     case 'orion': return h('div.it.or.or-' + it.who,
       h('div.or-who', h('span.or-dot'), it.who === 'you' ? `you → ${it.name || ctx.companionName}` : (it.name || ctx.companionName), h('span.muted', ' · the coder does not see this')),
@@ -489,20 +510,20 @@ export function renderItem(it, ctx) {
       const stats = taskStats(t);
       return h('div.it.sys.cv-taskdone.st-' + st, h('i.cv-taskmark'),
         h('span', `${it.description || taskName(t)} ${st === 'ok' ? 'finished' : st === 'stopped' ? 'was stopped' : 'failed'}`),
-        h('span.ag-chip', taskName(t)), stats ? h('span.muted', stats) : null);
+        h('span.ag-chip', taskName(t)), stats ? h('span.muted', stats) : null, stamp(it, 'sys-at'));
     }
     case 'turn-end':
       if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
-      return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
+      return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`, stamp(it, 'sys-at'));
     // the room's own lines (state.js local.note, local.shell)
     case 'note':
-      return h('div.it.sys.cv-localnote', it.title ? h('b.cv-notetitle', it.title) : null, markdown(it.text || ''));
+      return h('div.it.sys.cv-localnote', it.title ? h('b.cv-notetitle', it.title) : null, markdown(it.text || ''), stamp(it, 'sys-at'));
     case 'shell': {
       const running = it.status === 'running';
       const send = h('button.cv-link', { type: 'button', title: 'put this line and its output in the composer' }, 'to the coder');
       send.addEventListener('click', () => { if (typeof CustomEvent === 'function') send.dispatchEvent(new CustomEvent('y3k:shell-to-coder', { bubbles: true, detail: it })); });
       return h('div.it.sys.cv-shell' + (running ? '.running' : it.error || it.code ? '.st-error' : ''),
-        h('div.cv-shellcmd', h('span.cv-shelldollar', '$ '), it.command),
+        h('div.cv-shellcmd', h('span.cv-shelldollar', '$ '), it.command, stamp(it, 'sys-at')),
         it.output ? h('pre.cv-shellout', it.output) : running ? h('div.th-live', h('span.th-shimmer', 'running… (if this computer asks, say yes there)')) : null,
         it.error ? h('div.cv-shellerr', it.error) : null,
         running ? null : h('div.cv-shellfoot',

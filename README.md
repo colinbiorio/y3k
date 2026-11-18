@@ -263,6 +263,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (night, last) — **kode: when, and what is running**
+  (`src/code/render/items.js`, `state.js`, `code-view.js`, `styles.css`). Colin:
+  "can you add an update to add timestamps to each action/message in kode? also,
+  when a shell is running, the loading icon doesn't move at all -- it stays
+  frozen -- can we clearly identify when a process is actively being run and
+  when it has been halted?" Every message and action now shows its time ("11:14
+  pm"; another day with its date; the whole date and second when held over).
+  A running tool is an amber ring that turns, with its time counting on beside
+  it, apart from done (a still green dot and how long it took), stopped (a grey
+  square) and failed (red). The spinners had been stilled in the smooth
+  graphics tier, which made a running shell look halted; they turn there now,
+  and only less motion (chosen, or the system's) stills them, as a ring round a
+  dot. A turn stopped part way now marks the commands it was waiting on as
+  stopped, rather than leaving them "running"; a background task heard of
+  without a start time counts from when it was first heard of. Client suite 139
+  (2 new).
+
 - **2026-11-17** (late night, last) — **The second ship: the dart**
   (`src/game/ships/dart.js`; `ships.js`, `view.js`). From its brief: a fast
   two-seater about eleven metres long, shaped like a spearpoint: a narrow bronze
