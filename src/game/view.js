@@ -313,9 +313,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const next = `${actKey('weapon')} the ${nextWeapon(w)}`;
     if (w === 'bow') return `the bow · ${actKey('attack')} looses an arrow, held it draws harder and goes through · ${actKey('whirl')} a volley · drawn in the air, it holds you up · ${next}`;
     if (w === 'bell') return `the bell · ${actKey('attack')} strikes it, held it tolls further and stuns · ${actKey('whirl')} a peal · struck in the air, it rings out below · ${next}`;
+    if (w === 'thread') return `the thread · ${actKey('attack')} lashes it out, held it reaches further and snares · ${actKey('whirl')} a circle overhead · in the air, a line that catches and draws you in · ${next}`;
     return `the ring · ${actKey('attack')} casts it, held it spins up · ${actKey('whirl')} whirls · in the air it slams · ${next}`;
   };
-  const WORDS = { ring: ['cast', 'Cast the ring', 'whirl', 'Whirl'], bow: ['loose', 'Loose an arrow', 'volley', 'A volley'], bell: ['strike', 'Strike the bell', 'peal', 'A peal'] };
+  const WORDS = { ring: ['cast', 'Cast the ring', 'whirl', 'Whirl'], bow: ['loose', 'Loose an arrow', 'volley', 'A volley'], bell: ['strike', 'Strike the bell', 'peal', 'A peal'], thread: ['lash', 'Lash the thread', 'circle', 'A circle overhead'] };
   // a phone's buttons say what the weapon in hand does
   function labelWeapon() {
     const [c1, c2, w1, w2] = WORDS[K?.combat?.weapon] || WORDS.ring, cast = $('#game-t-cast'), whirl = $('#game-t-whirl');
@@ -390,7 +391,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function callBot(level = st.level) {
     const b = spawnBot(K.combat, K.body, K.eye.yaw, level);
     if (!b) { say('twelve is as many as the void holds at once', 3); return; }
-    const w = K.combat.weapon, does = { bow: ['looses an arrow, held it draws harder', 'a volley'], bell: ['strikes the bell, held it tolls', 'a peal'] }[w] || ['casts the ring, held it spins up', 'whirls'];
+    const w = K.combat.weapon, does = { bow: ['looses an arrow, held it draws harder', 'a volley'], bell: ['strikes the bell, held it tolls', 'a peal'], thread: ['lashes the thread, held it snares', 'a circle overhead'] }[w] || ['casts the ring, held it spins up', 'whirls'];
     say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} ${does[0]} · ${actKey('whirl')} ${does[1]} · ${actKey('guard')} guards · ${actKey('bind')} held binds it`, 6);
   }
   let hurtT = 0, foes = '', hpShown = -1;
@@ -629,7 +630,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
         <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
-        <button type="button" id="game-weapons" class="login-alt" aria-expanded="false" aria-controls="game-weapon-list" title="the weapon in hand: the ring, the bow or the bell (two more to come)">weapons</button>
+        <button type="button" id="game-weapons" class="login-alt" aria-expanded="false" aria-controls="game-weapon-list" title="the weapon in hand: the ring, the bow, the bell or the thread (one more to come)">weapons</button>
         <button type="button" id="game-bots" class="login-alt" aria-expanded="false" aria-controls="game-bot-list" title="call up a bot to fight, at one of five levels">bots</button>
         <button type="button" id="game-ships" class="login-alt" aria-expanded="false" aria-controls="game-ship-list" title="a ship in front of you, to board and fly">ships</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
@@ -729,7 +730,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, aboard: !!K.aboard, seated: !!K.body.seated,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
-      fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode, power: Math.round(K.combat.bell.power * 100) / 100, tones: K.combat.tones.length, rang: K.combat.bell.rang, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
+      fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,
+        thread: K.combat.thread.mode, spin: Math.round(K.combat.thread.power * 100) / 100, snare: K.combat.thread.snare, power: Math.round(K.combat.bell.power * 100) / 100, tones: K.combat.tones.length, rang: K.combat.bell.rang, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
