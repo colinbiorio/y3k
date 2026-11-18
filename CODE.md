@@ -153,6 +153,24 @@ newest three turns whole, and up to two older ones that share words with what
 is being said, fenced as data. Under the composer: "Orion remembers: …, forget
 it".
 
+**Done from here** (18 Nov 2026). Colin: "it would be cool if orion could
+actually do stuff straight from the home screen too." A line for kode typed
+anywhere outside the room (`kode-route.mjs` kodeLine) is still asked about
+every time, with no always ("Do it in kode, from here?"), and the yes no longer
+takes the person into the room: the line runs in the conversation with the
+room shut (`code-view.js` runFromSite: connected from the page, the
+conversation picked up where it was or continued if it had ended, the line
+sent in the mode chosen there). A card over the chat bar (`src/home-run.js`)
+follows that one turn: what it is doing and for how long, the coder's own
+question to allow or decline this once (anything else it asks is answered in
+kode), a stop that interrupts the turn as Esc does, "open kode", and how it
+ended. Then the presence says how it went: the coder's reply, prose only,
+through the same translator as kode's messages, at the Personality rank, after
+its own turn and never over it, kept in its conversation. Line 1 holds: the
+words are the person's own, sent by their yes; the presence tells, it never
+drives. Where it cannot run from here (kode not running, no conversation begun
+yet), the yes goes into kode as before.
+
 ## the orb, for the coder
 
 The orb beside y3kode is the face of whoever the person is talking to, and the

@@ -680,6 +680,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     reactTo(e);
     if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
     if (e.type === 'turn.ended' && !late) rememberTurn(S.sessions.get(e.sid), e);
+    if (homeRun && !late && e.sid) homeTick(e);   // a line said from the home screen, followed there (runFromSite)
     if (e.type === 'turn.ended' && !late && e.sid && e.sid === currentSession()?.sid && mic.release && mic.loop && !mic.target) speakReply(currentSession());
     frame();
   }
@@ -3076,6 +3077,91 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     await send(s, dockUi.ta);
     return true;
   }
+
+  // ACTING FROM THE HOME SCREEN (Colin, 18 Nov 2026: "it would be cool if
+  // orion could actually do stuff straight from the home screen too"). A
+  // line said with a yes outside the room (main.js askKode) goes to the
+  // conversation as sayFromSite's does, in the mode chosen there, with the
+  // room left shut: connected from here, the conversation picked up where it
+  // was (continueLast) or continued if it had ended, the line sent, and its
+  // turn followed for the home screen's card (main.js homeRun) until it
+  // ends: what it is doing, a card that waits on the person, how it ended.
+  // Only that turn: one still running when the line went is not it (its end
+  // is skipped, unless the newest message is already the line).
+  // → { ok, sid, project } | { ok: false, why: unpaired · offline · none · refused }
+  let homeRun = null;   // { sid, text, at, skip, onTick }
+  async function runFromSite(text, onTick) {
+    const t = String(text || '').trim();
+    if (!t) return { ok: false, why: 'empty' };
+    connect();
+    if (!transport) return { ok: false, why: 'unpaired' };
+    for (let i = 0; i < 150 && !(hello && S.conn === 'connected'); i++) await new Promise((r) => setTimeout(r, 100));
+    if (!hello || S.conn !== 'connected') return { ok: false, why: 'offline' };
+    if (helloRun) await helloRun.catch(() => {});
+    if (continuing) await continuing.catch(() => false);
+    let s = activeSession(S);
+    // never a conversation here, or none to go on with: the folders ask where it begins, in kode
+    if (!s) return { ok: false, why: 'none' };
+    if (s.state === 'ended') {
+      if (!s.providerSessionId || lost.has(s.providerSessionId)) return { ok: false, why: 'none' };
+      const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
+      if (!r?.ok) return { ok: false, why: r?.code === 'lost' ? 'none' : 'refused', error: r?.error };
+      const sid = r.sid || s.sid;
+      if (!viewingSid) S.active = sid;
+      s = (await settled(sid)) || S.sessions.get(sid);
+      if (!s || s.state === 'ended') return { ok: false, why: 'refused' };
+    }
+    // followed from before it is sent: a quick coder's whole turn can come over the stream before the
+    // send's own answer does (the smoke's does), and a turn ended unheard would leave the card working for good
+    const run = { sid: s.sid, text: t, at: Date.now(), skip: s.state === 'running' || s.state === 'waiting' ? 1 : 0, onTick: typeof onTick === 'function' ? onTick : null };
+    homeRun = run;
+    const r = await cmd({ cmd: 'session.send', sid: s.sid, text: t });
+    if (!r?.ok) { if (homeRun === run) homeRun = null; return { ok: false, why: 'refused', error: r?.error }; }
+    if (homeRun === run) homeTick();   // (unless it has ended already, before the answer came)
+    return { ok: true, sid: run.sid, project: folderName(s.cwd) };
+  }
+  // The card's answer to a card that waits: allowed or declined, this once.
+  async function answerFromSite(sid, requestId, decision) {
+    if (!sid || !requestId) return { ok: false };
+    const r = await cmd({ cmd: 'permission.answer', sid, requestId, decision: decision === 'allow' ? 'allow' : 'deny', scope: 'once' });
+    return { ok: !!r?.ok, error: r?.error };
+  }
+  const lineOf = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+  function homeTick(e) {
+    const run = homeRun;
+    if (!run) return;
+    // the conversation going on under a new id (keep going, a restart) is still this run
+    if (e?.type === 'session.started' && e.prior && e.prior === run.sid && e.sid) run.sid = e.sid;
+    if (e?.sid && e.sid !== run.sid) return;
+    const s = S.sessions.get(run.sid);
+    if (!s) return;
+    let done = null;
+    if (e?.type === 'turn.ended') {
+      let u = null;
+      for (let i = s.items.length - 1; i >= 0 && !u; i--) if (s.items[i].kind === 'user') u = s.items[i];
+      const ours = !!u && lineOf(u.text) === lineOf(run.text);
+      if (!ours && run.skip > 0) run.skip -= 1;
+      else done = { ...(turnToRemember(s, e.status) || { project: folderName(s.cwd), ask: run.text, did: '', files: [], outcome: e.status === 'success' ? 'done' : 'failed' }), reply: replyOf(s) };
+    } else if (e?.type === 'session.ended') {
+      done = { project: folderName(s.cwd), ask: run.text, did: '', files: [], outcome: s.ended?.reason === 'stopped' ? 'stopped' : 'failed', reply: '' };
+    }
+    const req = done ? null : openRequest(s);
+    const snap = { sid: run.sid, project: folderName(s.cwd), at: s.turn?.at || run.at, doing: done ? '' : nowDoing(s),
+      request: req ? { kind: req.kind, requestId: req.requestId, tool: req.tool || '', title: req.kind === 'permission' ? [req.tool, req.title].filter(Boolean).join(': ') : req.kind === 'plan' ? 'its plan' : 'a question' } : null,
+      done };
+    if (done) homeRun = null;
+    try { run.onTick?.(snap); } catch { /* the card's own trouble is the card's */ }
+  }
+  // the turn's reply, as it would be said aloud: its prose, the code taken out
+  function replyOf(s) {
+    const parts = [];
+    for (let i = s.items.length - 1; i >= 0; i--) {
+      const it = s.items[i];
+      if (it.kind === 'user') break;
+      if (it.kind === 'assistant' && it.parentUid == null) parts.unshift((it.blocks || []).filter((b) => b.kind === 'text' && b.text).map((b) => b.text).join('\n\n'));
+    }
+    return spokenProse(parts.filter(Boolean).join('\n\n'), 500);
+  }
   function onWheel(e) {
     if (!ui || ui.scroll.hidden || !e.deltaY) return;
     if (!e.target?.closest?.('#stage')) return;
@@ -4193,6 +4279,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     busy: () => liveSessions(S).length > 0,
     // a line said to the conversation from elsewhere on the site (social.kodeSay)
     say: (text) => sayFromSite(text),
+    // ...or said from the home screen and followed there, the room left shut (social.kodeRun, main.js homeRun)
+    run: (text, onTick) => runFromSite(text, onTick),
+    answer: (sid, requestId, decision) => answerFromSite(sid, requestId, decision),
+    // ...and stopped from there, as Esc in the room stops it (the turn, never the session)
+    stop: (sid) => cmd({ cmd: 'session.interrupt', sid }).then((r) => ({ ok: !!r?.ok, error: r?.error })),
+    homeRunning: () => !!homeRun,
     // a caption the house would have drawn over the room (main.js showCaption): a message here instead
     caption: (text, who) => caption(text, who),
     // the conversation as Markdown (/export), and the engine's hello, for the tests

@@ -40,6 +40,8 @@ import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
 import { shrinkPicture } from './picture.js';
 import { hasFiles, dropTarget } from './kode-drop.js';
 import { kodeLine } from './kode-route.mjs';
+import { createHomeRun, outcomeWords } from './home-run.js';
+import { getRank } from './code/voice.js';
 import { createScore } from './score.js';
 // ?perf's meter starts itself as this import evaluates (before the liquid's
 // bake and the orb's build below); inert without ?perf.
@@ -2104,18 +2106,34 @@ function computerLine(text) {
 // it in the box. Only where kode has been paired in this browser (or this
 // is the desktop app): anyone else is talking to their presence.
 function kodeHere() { try { return hasDesktopBridge() || !!savedPairing(); } catch { return false; } }
+// ...AND IT IS DONE FROM HERE (Colin, 18 Nov 2026: "it would be cool if orion
+// could actually do stuff straight from the home screen too"): the yes keeps
+// the person where they are. The line runs in kode with the room shut, a
+// card over the chat bar follows it (home-run.js), and its end is said by
+// the presence (sayOutcome). Only where it cannot run from here (kode not
+// running, no conversation begun yet) does the yes still go into kode.
+const homeRun = createHomeRun({
+  run: (t, onTick) => social.kodeRun(t, onTick),
+  answer: (sid, id, decision) => social.kodeAnswer(sid, id, decision),
+  stop: (sid) => social.kodeStop(sid),
+  openKode: () => openCodeRoom(),
+  onDone: (done) => sayOutcome(done),
+});
 async function askKode(text, line) {
   const name = myPresence?.name || myPresence?.handle || 'your presence';
   const said = line.text.length > 160 ? line.text.slice(0, 157) + '…' : line.text;
   chatInput.value = ''; collapseTyping();
   const a = await consent({ kind: 'kode-say', always: false,
-    title: 'Say it in kode?',
-    note: line.why === 'named' ? `“${said}” — to the coder, in kode, in the mode you chose there.`
-      : `“${said}” reads like something for the coder. Yes says it in kode, in the mode you chose there; no says it to ${name}.`,
-    once: 'yes, in kode', cancel: `no, it is for ${name}` });
+    title: 'Do it in kode, from here?',
+    note: line.why === 'named' ? `“${said}” goes to the coder in kode, in the mode you chose there, and is done from here: a card shows how it goes, and ${name} tells you how it went.`
+      : `“${said}” reads like something for the coder. Yes gives it to the coder in kode, in the mode you chose there, and it is done from here; no says it to ${name}.`,
+    once: 'yes, from here', cancel: `no, it is for ${name}` });
   if (a === null) { chatInput.value = text; autoGrow(chatInput); return; }   // Esc: as it was
   if (a) {
     showCaption(line.text, 'you');
+    const r = await homeRun.start(line.text);
+    if (r.ok) return;
+    if (r.why === 'refused') toast(`kode did not take it from here${r.error ? `: ${r.error}` : ''}. Opening kode.`);
     if (!(await social.kodeSay(line.text))) toast('kode could not take it — open kode and say it there.');
     return;
   }
@@ -2124,6 +2142,26 @@ async function askKode(text, line) {
   window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text } }));
   if (busy) { queueMessage(text, null, false); return; }
   handle(text, null);
+}
+// HOW IT WENT, said by the presence in its own voice: the coder's reply, prose
+// only (home-run.js outcomeWords), through the translator kode's messages
+// use (code-voice.mjs, at the rank on the Personality slider; the coder's
+// own words where there is none). After the presence's own turn, never over
+// it; kept in the conversation (noteSpoken), so what is said next knows it.
+async function sayOutcome(done) {
+  const plain = outcomeWords(done);
+  if (!plain) return;
+  let said = plain;
+  const rank = getRank();
+  if (rank > 1) {
+    const v = await codeLink.voice({ text: plain, rank, where: done.project || '', recent: [] }).catch(() => null);
+    if (v?.text) said = v.text.replace(/⟦\d+⟧/g, '…');
+  }
+  for (let i = 0; i < 120 && (busy || currentSpeak); i++) await new Promise((r) => setTimeout(r, 500));
+  if (busy || currentSpeak) return;
+  showCaption(said, 'y3k');
+  noteSpoken(said);
+  codeLink.speak(said);
 }
 
 function sendChat() {

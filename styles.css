@@ -6043,6 +6043,38 @@ body.kode-chat.chat-typing .chat-menu { display: flex; align-items: stretch; hei
 body.kode-chat.chat-typing .chat-menu > .cv-composer { align-self: stretch; align-items: stretch; }
 body.kode-chat.chat-typing .chat-menu > .cv-composer > :not(.cv-input) { align-self: flex-end; }
 body.kode-chat.chat-typing .cv-input { max-height: none; height: auto !important; field-sizing: fixed; align-self: stretch; padding-top: 10px; }
+/* DONE FROM HERE (Colin, 18 Nov 2026; src/home-run.js): a line for kode said outside the room runs there with the room
+   shut, and this card stands just over the chat bar while it does: kode's own running light, what it is doing and for
+   how long, its question when it has one, how it ended. It stands over the air mark (.chat-air, whose seat is
+   max(the chat's top + 6px, the hole + 46px), 58px tall) and rises with the bar as it does, and is not drawn in kode,
+   where the room shows the same conversation. */
+.home-run { position: fixed; left: 50%; transform: translateX(-50%); z-index: 42;
+  bottom: calc(max(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b)) + 80px, var(--hole-b) + 46px) + 66px);
+  width: min(480px, calc(100vw - 32px)); box-sizing: border-box; display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px 9px 14px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(18, 20, 26, 0.74); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); color: #e8ebef; font-size: 13px; line-height: 1.35;
+  transition: bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); animation: pane-in 0.25s ease both; }
+body.in-code .home-run { display: none; }
+.home-run .hr-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #4dd865; }
+.home-run[data-tone="run"] .hr-dot { animation: cv-pulse 1.4s ease-in-out infinite; }
+.home-run[data-tone="ask"] .hr-dot { background: #ffbd2e; }
+.home-run[data-tone="stopped"] .hr-dot { background: #6b7280; border-radius: 2px; }
+.home-run[data-tone="failed"] .hr-dot { background: #ff8a9a; }
+.home-run .hr-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.home-run .hr-head { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-run .hr-line { color: var(--muted, #9aa3ad); font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.home-run .hr-line:empty { display: none; }
+.home-run .hr-acts { display: flex; gap: 6px; flex: none; align-items: center; }
+.home-run button { font: inherit; font-size: 12px; color: #e8ebef; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.home-run button:hover { background: rgba(255, 255, 255, 0.12); }
+.home-run button:disabled { opacity: 0.5; cursor: default; }
+.home-run .hr-yes { background: rgba(200, 205, 215, 0.2); border-color: rgba(200, 205, 215, 0.45); }
+.home-run .hr-close { padding: 5px 8px; color: var(--muted, #9aa3ad); }
+.home-run button[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .home-run, .home-run[data-tone="run"] .hr-dot { animation: none; } }
+:root[data-motion="less"] .home-run, :root[data-motion="less"] .home-run[data-tone="run"] .hr-dot { animation: none; }
 /* in kode a caption is a message in the conversation (code-view.js caption), never over it */
 body.in-code #caption { display: none !important; }
 
