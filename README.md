@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (before dawn) — **The fifth ship: the carrier; stage 4 is
+  done** (`src/game/ships/carrier.js`; `ships.js`, `view.js`). From its
+  brief: a vast carrier about four hundred metres long, like a floating
+  stepped temple, broad terraces of pale stone-like ceramic stacked into a
+  long ziggurat, hangar mouths along its sides with tiny craft beside them for
+  scale, slender towers, two enormous sails of golden solar foil, a row of
+  large plasma ring engines at the stern. It comes down far ahead of you (450
+  m, its mastheads in sight); R from anywhere near its stern lifts you up to
+  its helm in a pavilion on the top terrace, and the sails come down. The
+  slowest of the five (18 m/s, 45 opened up, ten seconds to its speed); lamps,
+  lanterns and hangar mouths lit at night. Game suite 160; the `ship` smoke
+  flies all five at 60 frames a second (30 checks; its watchdog is fifteen
+  minutes now: three runs before dawn stalled on the GPU before the ark, the
+  same code then passing in two minutes).
+
 - **2026-11-18** (after midnight) — **The fourth ship: the ark**
   (`src/game/ships/ark.js`; `ships.js`, `view.js`). From its brief: an
   exploring ship about eighty metres long, a long spine of pale alloy and

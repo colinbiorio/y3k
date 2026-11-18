@@ -1,6 +1,6 @@
 // ships.js — THE SHIPS, AS NUMBERS: where one is put, how it flies under the
 // hands, where its pilot sits, how a body gets aboard and off. No page, no
-// three (the suite runs it); ships/ draws them (skiff.js, dart.js, dhow.js, ark.js).
+// three (the suite runs it); ships/ draws them (skiff.js, dart.js, dhow.js, ark.js, carrier.js).
 //
 // GAME.md, stage 4: "The five ships: a skiff, a dart, a dhow, an ark, a
 // carrier. From one seat to a carrier. Boarded and flown in the void, so they
@@ -19,7 +19,11 @@
 // spine of pale alloy and stone-grey ceramic, a slowly turning ring habitat
 // round its middle with gardens under glass, a rounded prow with an
 // observatory dome of brass and glass, four plasma engines in a cross at the
-// stern."
+// stern." The carrier's: "a vast carrier about four hundred metres long, like a
+// floating stepped temple: broad terraces of pale stone-like ceramic stacked
+// into a long ziggurat, hangar mouths along its sides with tiny craft beside
+// them for scale, slender towers, two enormous sails of golden solar foil, a
+// row of large plasma ring engines at the stern."
 //
 // A ship's frame is a body's: its front is +Z, its left +X, and its yaw is
 // atan2(x, z) of the way it points. Flown, it turns toward where the eye looks;
@@ -31,7 +35,7 @@
 
 export const SHIPS = [
   { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: true }, { kind: 'dhow', label: 'dhow', ready: true },
-  { kind: 'ark', label: 'ark', ready: true }, { kind: 'carrier', label: 'carrier', ready: false },
+  { kind: 'ark', label: 'ark', ready: true }, { kind: 'carrier', label: 'carrier', ready: true },
 ];
 export const SKIFF = {
   length: 5.0, beam: 0.95,
@@ -90,7 +94,34 @@ export const ARK = {
   ],
   view: 95,
 };
-export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW, ark: ARK };
+// the carrier: five terraces stacked into a stepped temple, each set in from the one below, the last BOW metres of each
+// narrowing to its prow; two masts with their sails on the top terrace; four slender towers; five ring engines astern
+const CARRIER_TERRACES = [
+  { hw: 60, z0: -200, z1: 200, y0: -20, y1: -8 }, { hw: 50, z0: -188, z1: 182, y0: -8, y1: 2 }, { hw: 40, z0: -176, z1: 164, y0: 2, y1: 12 },
+  { hw: 30, z0: -162, z1: 144, y0: 12, y1: 22 }, { hw: 20, z0: -148, z1: 122, y0: 22, y1: 30 },
+];
+const CARRIER_MASTS = [{ z: 50 }, { z: -70 }].map((m) => ({ ...m, foot: 30, top: 150, yard: 145, boom: 50, wide: 42, narrow: 32 }));
+const CARRIER_TOWERS = [[24, 60, 22, 85], [-24, 60, 22, 85], [14, -130, 30, 105], [-14, -130, 30, 105]].map(([x, z, y0, y1]) => ({ x, z, y0, y1 }));
+const CARRIER_ENGINES = { xs: [-40, -20, 0, 20, 40], y: -14, z: -207, r: 6 };
+export const CARRIER = {
+  length: 400, beam: 120, bow: 70, bowNarrow: 0.25,
+  terraces: CARRIER_TERRACES, masts: CARRIER_MASTS, towers: CARRIER_TOWERS, engines: CARRIER_ENGINES,
+  keel: 21, hover: 30,              // its lowest terrace's underside rides clear of the water
+  seat: [0, 30.6, 108],             // the helm: in a pavilion at the front of the top terrace, looking out over the prow
+  speed: 18, boost: 45, back: 0.15, slide: 1.5, climb: 3,
+  accel: 1.8, turn: 0.2,            // the slowest of all, a temple under way
+  // put far ahead of the body, pointing its way, so the eye sees it whole (its sails' tops inside the view); boarded from
+  // anywhere within a few hundred metres of its stern: the board key lifts the body up to its helm
+  door: [0, 0, -212], board: 280, reach: 140, put: [0, 450],
+  edges: [
+    ...[-200, -145, -90, -35, 20, 75, 130].flatMap((z) => [[60, -20, z], [-60, -20, z]]), [15, -20, 200], [-15, -20, 200],
+    ...CARRIER_MASTS.flatMap((m) => [[0, m.top, m.z], [m.wide, m.yard, m.z], [-m.wide, m.yard, m.z]]),
+    ...CARRIER_TOWERS.map((t) => [t.x, t.y1, t.z]),
+    [CARRIER_ENGINES.xs[0] - CARRIER_ENGINES.r, CARRIER_ENGINES.y, CARRIER_ENGINES.z], [CARRIER_ENGINES.xs[4] + CARRIER_ENGINES.r, CARRIER_ENGINES.y, CARRIER_ENGINES.z],
+  ],
+  view: 540,
+};
+export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW, ark: ARK, carrier: CARRIER };
 const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
