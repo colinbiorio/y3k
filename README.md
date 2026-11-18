@@ -263,6 +263,32 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **Kokoro: a free voice that lives on this device**
+  (`src/kokoro.js`, `src/kokoro-worker.js`, `src/vendor/kokoro-js@1.2.1` and
+  `src/vendor/transformers@3.5.1`, `src/voice.js` speaker, `src/settings.js`
+  kokoroDrawer, `security.mjs` connect-src; `test/voice.test.mjs` "kokoro",
+  `test/security.test.mjs`). Colin: "kokoro free yes" (and that day: "it'd be
+  nice not to have to resort to an api key if not needed"). Kokoro-82M
+  (Apache-2.0) speaks in the person's own browser: no key, no account, and the
+  words never leave the device. Settings → Voice has a drawer for it under the
+  free voices: what it is and its size first, and one press downloads it from
+  Hugging Face into the browser's cache (326 MB at full precision where the
+  browser has WebGPU, 92 MB 8-bit on the processor elsewhere; nothing is
+  fetched before the press); then thirteen voices, each with its sample.
+  Replies in it go through the same gapless queue and analyser as a paid
+  voice's, so the orb moves with the real waveform; a sentence it cannot say
+  goes to the browser voice. It runs in a worker (the orb never stalls for
+  it), wakes in the background at page load once chosen, and says one word
+  first so the graphics card builds its shaders then. The library and its ONNX
+  runtime are served from `src/vendor` (checked against npm's integrity, their
+  SHA-256s held by the security test): the model and voices are the only
+  thing fetched, as data, from that model's folder and Hugging Face's CDN.
+  Measured on this Mac's M2: on the graphics card the second sentence came in
+  1.6 s for 4 s of speech (ahead of itself); on the processor about half as
+  fast as it speaks (the pane says so: a pause between sentences). Walked in a
+  browser: the drawer, the press (no request to Hugging Face before it), the
+  download in 26 s, Heart chosen, a reply spoken in it (an audio buffer, no
+  browser speech), no page error or policy violation.
 - **2026-11-18** (afternoon) — **Done from here: kode from the home screen**
   (`src/home-run.js`, `src/code/code-view.js` runFromSite, `src/social.js`
   kodeRun/kodeAnswer/kodeStop, `src/main.js` askKode and sayOutcome, `styles.css`

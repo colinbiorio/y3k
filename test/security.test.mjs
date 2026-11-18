@@ -159,6 +159,21 @@ ok('the enforced policy is as narrow as what the page uses', () => {
   assert.equal(dir('script-src', dev), dir('script-src'), 'dev never widens what may run');
   assert.equal(dir('connect-src', dev), dir('connect-src'));
 });
+ok('Kokoro is served from here with its runtime, pinned to the published files, and what it fetches is data: its model\'s folder on Hugging Face and the CDN it redirects to, never script', () => {
+  const csp = appShellCsp([]);
+  const dir = (name) => (csp.split(';').map((x) => x.trim()).find((x) => x.startsWith(name + ' ')) || '');
+  assert.match(dir('connect-src'), /https:\/\/huggingface\.co\/onnx-community\/Kokoro-82M-v1\.0-ONNX\//, 'the model, and only its folder');
+  assert.match(dir('connect-src'), /(^|\s)https:\/\/\*\.hf\.co(\s|$)/, 'the CDN its large files redirect to');
+  assert.ok(!/\bhttps:\/\/huggingface\.co(\/)?(\s|$)/.test(dir('connect-src')), 'all of Hugging Face');
+  assert.ok(!/huggingface|hf\.co|jsdelivr/.test(dir('script-src') + dir('worker-src')), 'never as script');
+  const worker = readFileSync(join(ROOT, 'src/kokoro-worker.js'), 'utf8');
+  assert.match(worker, /^import \{ KokoroTTS, env \} from '\.\/vendor\/kokoro-js@1\.2\.1\/kokoro\.web\.js';$/m);
+  assert.match(worker, /env\.wasmPaths = new URL\('\.\/vendor\/transformers@3\.5\.1\/', import\.meta\.url\)\.href;/, 'the runtime from here, not jsDelivr');
+  const base = join(ROOT, 'src/vendor/kokoro-js@1.2.1');
+  const sums = [...readFileSync(join(base, 'README.md'), 'utf8').matchAll(/^ {4}([0-9a-f]{64}) {2}(\S+)$/gm)];
+  assert.equal(sums.length, 3, 'the bundle, and the runtime\'s loader and engine');
+  for (const [, sum, file] of sums) assert.equal(createHash('sha256').update(readFileSync(join(base, file))).digest('hex'), sum, `${file} is not the published file`);
+});
 ok('the phone lending its eye answers the vision library\'s beacon itself, once the eye starts', () => {
   // the enforced policy would refuse it anyway; answering it keeps the
   // library off its error path and the violation log a list of real problems

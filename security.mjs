@@ -119,6 +119,11 @@ export function inlineScriptHashes(html) {
 // frame from kode's "Open the y3k app". three.js is served from src/vendor, and
 // since 2026-11-05 so is the vision package, its bundle and its wasm (it came
 // from jsDelivr, the one script from a third party), so script-src is 'self'.
+// Kokoro (src/kokoro.js, 18 Nov 2026) is served from src/vendor too, its ONNX
+// runtime with it; what it fetches is data, never script: its model and voices,
+// from that model's folder on Hugging Face (its small files answer through the
+// resolve cache), the large ones redirected to Hugging Face's CDN (*.hf.co; a
+// redirect is matched by its host alone), and only after the person's own press.
 // The version here, the two importmaps and WASM_BASE in perceive.js and
 // eye.js move together (test/security.test.mjs holds them to it).
 //   dev: a server that is not the deployed one (no RENDER) may also frame
@@ -130,7 +135,7 @@ export function appShellCsp(scriptHashes = [], { dev = false } = {}) {
     "default-src 'self'",
     `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval'`.replace(/\s+/g, ' '),
     "worker-src 'self' blob:",
-    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://openrouter.ai https://storage.googleapis.com/mediapipe-models/`,
+    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://openrouter.ai https://storage.googleapis.com/mediapipe-models/ https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/ https://huggingface.co/api/resolve-cache/models/onnx-community/Kokoro-82M-v1.0-ONNX/ https://*.hf.co`,
     `img-src 'self' data: blob: https:${local}`,
     "media-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",
