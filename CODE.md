@@ -49,9 +49,12 @@ command-line tool and turns what it does into one stream the page can draw.
    which, and is drawn so. One key interrupts. Every action is written to a
    local audit log on the person's machine.
 6. **Private.** Code never publishes anything: not while live (Code and going
-   live refuse each other), not to the feed, not into orion's memory. The one
-   exception is the short, factual note about a session that the person chooses
-   to send back to their presence.
+   live refuse each other), not to the feed, not into orion's memory unasked.
+   What reaches the presence is only what the person chose: the short, factual
+   note about a session they send back, and, once they say yes (asked once,
+   18 Nov 2026, Colin's ask), the coding history: one short line a turn, each
+   shown under the composer with a way to forget it. Never the session, never
+   the code.
 7. **Trust is granted on the machine, not in the page.** Pairing the site with the
    engine, trusting a folder, adding a connector, installing a tool and running a
    line in a folder's shell (`!`, 2026-10-30) are confirmed in a native dialog (desktop) or in the engine's own terminal or
@@ -131,6 +134,24 @@ instructions, and the person reads it first and decides whether to send it.
 When a session ends, the page drafts one factual line — how long, which engine,
 how many turns, which files changed — and the person chooses whether it goes
 back to their presence as a clipping, the way a finished chess game does.
+
+**The coding history** (18 Nov 2026). Colin: "my vision is an integrated memory
+system that carries between all parts of the website. i don't want orion to
+read the entire coding session context for every message -- just some recent,
+relevant details and a way to remember a summarized history of what's been
+done in coding." After the first turn, kode asks once whether the presence may
+remember what is done here (yes, or no; the coding tools drawer turns it on or
+off). Yes: each turn leaves one short entry (`state.js` turnToRemember): the
+folder's name, what was asked, the coder's first words back (plain, at most
+280 characters), the names of the files the turn changed, and how it ended.
+The server checks it again (`code-handoff.mjs` checkTurn: names, never paths;
+nothing that could pose as a silent block), keeps the newest 80 with the
+presence (`memory.mjs`, `.code-history.json`; gone with the account), and
+`/api/code/forget` takes one back. When the presence speaks anywhere on the
+site it is given a digest (`codeHistoryFor`): the older days a line each, the
+newest three turns whole, and up to two older ones that share words with what
+is being said, fenced as data. Under the composer: "Orion remembers: …, forget
+it".
 
 ## the orb, for the coder
 

@@ -263,6 +263,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (midday) — **Orion remembers what we do in kode**
+  (`memory.mjs` coding history, `code-handoff.mjs` checkTurn, `server.mjs`
+  `/api/code/remember` and `/api/code/forget` and the presence's prompt,
+  `src/code/state.js` turnToRemember, `src/code/code-view.js`, `src/main.js`;
+  CODE.md). Colin: "my vision is an integrated memory system that carries
+  between all parts of the website ... just some recent, relevant details and a
+  way to remember a summarized history of what's been done in coding." After the
+  first turn kode asks once; on yes each turn leaves one short line with the
+  presence (the folder's name, what was asked, the coder's first words back,
+  the files' names, how it ended), shown under the composer with "forget it".
+  When the presence speaks anywhere on the site it gets a digest: older days a
+  line each, the newest three whole, and older turns that touch what is being
+  said. Never the session, never the code; gone with the account. Tests: client
+  141 (the entry; the card asked once, yes sends and shows, forget, no sends
+  nothing), routes 37 (owner-only, checked, the digest in the presence's
+  prompt, forget).
+
 - **2026-11-18** (late morning) — **The third weapon: the bell**
   (`src/game/combat.js` BELL; `fight.js`, `view.js`). A hand bell of bronze
   with a clapper of plasma; its tone goes out as a ring over the water,

@@ -432,6 +432,13 @@ try {
   const shelf = JSON.parse(readFileSync(join(tmp, 'data', '.clippings.json'), 'utf8'));
   const lines = Object.values(shelf).flat().map((c) => c.x);
   check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3kode (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
+  // the coding history (Colin, 18 Nov): asked once; yes keeps the turn with orion, shown with a way to forget it
+  await page.waitForSelector('.cv-remember', { timeout: 10000 });
+  check('kode asks once whether orion may remember what is done here', /remember what you do here/.test(await page.textContent('.cv-remember')));
+  await page.click('.cv-remember .btn-allow');
+  await page.waitForSelector('.cv-remembered', { timeout: 10000 });
+  const hist = Object.values(JSON.parse(readFileSync(join(tmp, 'data', '.code-history.json'), 'utf8'))).flat();
+  check('yes keeps the turn with orion: the folder by name, what was asked, what was done', hist.length >= 1 && /^y3k-smoke-repo-/.test(hist.at(-1).project) && !!hist.at(-1).ask && !/[\\/]/.test(hist.at(-1).project), JSON.stringify(hist.slice(-1)));
 
   // --- RENDERING: smooth, flicker-free, keeps your typing ----------------------------
   // Made-up events go in through the view's own path (the controller's _feed),

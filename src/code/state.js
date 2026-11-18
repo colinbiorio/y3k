@@ -219,6 +219,32 @@ export function compareOf(S, sid) {
 //   live    how fast it is writing now (writingRate), while it is
 export const ANSWERING = new Set(['starting', 'thinking', 'writing', 'waiting']);
 export const stillAnswering = (a) => ANSWERING.has(a?.state);
+// THE CODING HISTORY (code-handoff.mjs checkTurn; CODE.md): the newest turn of a session as one short entry for the
+// person's presence: where (the folder's name, never its path), what was asked, what was done (the coder's first words
+// back, plain), which files (their names, when the turn changed any), and how it ended. null when there is no turn.
+const plainOf = (t) => String(t || '').replace(/```[\s\S]*?```/g, ' ').replace(/`([^`]*)`/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim();
+export function turnToRemember(s, status = 'success') {
+  if (!s || !Array.isArray(s.items)) return null;
+  let u = -1;
+  for (let i = s.items.length - 1; i >= 0; i--) if (s.items[i].kind === 'user') { u = i; break; }
+  if (u < 0) return null;
+  const parts = [];
+  for (let i = u + 1; i < s.items.length; i++) {
+    const it = s.items[i];
+    if (it.kind === 'user') break;
+    if (it.kind === 'assistant') for (const b of it.blocks || []) if (b.kind === 'text' && b.text) parts.push(b.text);
+  }
+  const reply = plainOf(parts.join('\n\n'));
+  // the first sentence or two of the answer: the coder leads with what it did
+  let did = '';
+  for (const x of reply.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) || []) { const next = (did + x).trim(); if (next.length > 280) break; did = next; if (did.length >= 120) break; }
+  if (!did && reply) did = reply.slice(0, 279) + '…';
+  const ask = plainOf(s.items[u].text).slice(0, 240);
+  if (!ask && !did) return null;
+  const files = s.changedThisTurn ? [...new Set((s.files || []).map((p) => String(p).split(/[\\/]/).pop()).filter(Boolean))].slice(0, 6) : [];
+  return { project: String(s.cwd || '').split(/[\\/]/).filter(Boolean).pop() || '', ask, did, files, outcome: status === 'success' ? 'done' : status === 'interrupted' ? 'stopped' : 'failed' };
+}
+
 export function compareAnswers(S, g, now = Date.now()) {
   if (!g) return [];
   return [g.main, ...g.asides].map((sid) => answerOf(S, g, sid, now));

@@ -11,7 +11,7 @@
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
 import { waitForVersion, setLiveModel } from '../own-brain.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools, openCompare, closeCompare, compareOf, compareEnded, compareAnswers, stillAnswering, turnToRemember } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList, taskName, taskStats, taskSummary, runningFor } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf, usdText } from './render/meters.js';
 import { mdStream } from './render/markdown.js';
@@ -678,6 +678,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     markTab();
     reactTo(e);
     if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
+    if (e.type === 'turn.ended' && !late) rememberTurn(S.sessions.get(e.sid), e);
     if (e.type === 'turn.ended' && !late && e.sid && e.sid === currentSession()?.sid && mic.release && mic.loop && !mic.target) speakReply(currentSession());
     frame();
   }
@@ -2592,8 +2593,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
           h('span.ag-now.muted'), h('span.ag-stats.muted')))));
     if (ag) agentRows(ag, agents);
     const n = notes.get(s.sid);
-    keyed(d.card, [s.sid, comp?.name, viewingSid, n ? `${n.state}:${n.include}:${s.items.some((i) => i.kind === 'user')}` : '', s.noteBack && !told.has(s.sid) ? 'back' : ''].join('|'),
-      () => noteCard(s) || noteBackCard(s));
+    keyed(d.card, [s.sid, comp?.name, viewingSid, n ? `${n.state}:${n.include}:${s.items.some((i) => i.kind === 'user')}` : '', s.noteBack && !told.has(s.sid) ? 'back' : '',
+      rememberOn() || '-', s.rememberAsk ? 'ask' : '', s.remembered ? 'rem' + s.remembered.t : ''].join('|'),
+      () => noteCard(s) || noteBackCard(s) || rememberCard(s));
     arrange(d.strip, [d.work.el, d.todos.el, d.agents.el, d.card.el]);
 
     keyed(d.chips, attachments.length ? 'a' + attachVer : null, attachChips);
@@ -2816,6 +2818,50 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return h('div.cv-notecard.back',
       h('div.cv-notehead', h('span.or-dot'), h('b', `Tell ${comp.name} about it?`), h('span.muted.cv-small', ' A line for its shelf — it sees nothing else of this session.')),
       ta, h('div.cv-acts', h('label.cv-small.muted', always, ' always, without asking'), h('span.cv-grow'), skip, go));
+  }
+
+  // THE CODING HISTORY (Colin, 18 Nov: "an integrated memory system that carries between all parts of the website ...
+  // just some recent, relevant details and a way to remember a summarized history of what's been done in coding"). Asked
+  // once; then each turn leaves one short entry with the person's presence (state.js turnToRemember, checked again on the
+  // server), shown here with a way to forget it. Never the session, never the code.
+  const rememberOn = () => pref('y3k-code:remember');   // 'on', 'off', or not asked yet
+  function rememberTurn(s, e) {
+    if (!s || !companion() || !link?.remember || rememberOn() === 'off') return;
+    const turn = turnToRemember(s, e?.status);
+    if (!turn) return;
+    if (rememberOn() !== 'on') { s.rememberAsk = turn; if (currentSession()?.sid === s.sid) renderDock(); return; }
+    sendRemember(s, turn);
+  }
+  async function sendRemember(s, turn) {
+    const r = await link.remember(turn);
+    if (!r?.ok) return;   // quietly: a day's cap or a lost connection is not worth a toast every turn
+    s.remembered = { t: r.t, did: turn.did || turn.ask };
+    if (currentSession()?.sid === s.sid) renderDock();
+  }
+  function rememberCard(s) {
+    const comp = companion();
+    if (!comp) return null;
+    if (s.rememberAsk && !rememberOn()) {
+      const yes = h('button.btn.btn-allow', { type: 'button' }, `Yes, ${comp.name} remembers`);
+      yes.addEventListener('click', () => { pref('y3k-code:remember', 'on'); const t = s.rememberAsk; s.rememberAsk = null; renderDock(); sendRemember(s, t); });
+      const no = h('button.btn', { type: 'button' }, 'No');
+      no.addEventListener('click', () => { pref('y3k-code:remember', 'off'); s.rememberAsk = null; renderDock(); });
+      return h('div.cv-notecard.cv-remember',
+        h('div.cv-notehead', h('span.or-dot'), h('b', `Let ${comp.name} remember what you do here?`)),
+        h('div.muted.cv-small', `After each turn, one short line goes to ${comp.name}'s memory on this site: what you asked, what was done, which files. Then it knows what you have built when you talk to it anywhere here. Never the session, never the code. You can forget any line, and turn this off in the coding tools drawer.`),
+        h('div.cv-acts', h('span.cv-grow'), no, yes));
+    }
+    if (s.remembered && rememberOn() === 'on') {
+      const forget = h('button.cv-link.muted', { type: 'button' }, 'forget it');
+      forget.addEventListener('click', async () => {
+        const t = s.remembered.t; s.remembered = null; renderDock();
+        const r = await link.forget(t);
+        toast(r?.ok ? `${comp.name} has forgotten it` : 'It could not be forgotten just now.');
+      });
+      const did = s.remembered.did.length > 140 ? s.remembered.did.slice(0, 139) + '…' : s.remembered.did;
+      return h('div.cv-hint.cv-remembered', h('span.or-dot'), h('span.muted.cv-small', `${comp.name} remembers: `), h('span.cv-small', did), h('span.cv-grow'), forget);
+    }
+    return null;
   }
 
   function endedBar(s) {
@@ -4114,13 +4160,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const unpair = transport?.kind === 'companion' ? h('button.cv-link', { type: 'button' }, 'Disconnect this browser') : null;
     unpair?.addEventListener('click', async () => { await transport.revoke(); transport.close(); transport = null; S.conn = 'off'; hello = null; toggleDrawer('providers'); redrawHome(); renderChrome(); });
     const comp = companion();
+    const rememberRow = comp ? h('div.cv-prov', h('div.cv-provhead', h('b', `${comp.name} remembers your coding`), h('span.cv-grow'),
+      (() => { const on = rememberOn() === 'on'; const b = h('button.cv-link', { type: 'button' }, on ? 'turn off' : 'turn on'); b.addEventListener('click', () => { pref('y3k-code:remember', on ? 'off' : 'on'); renderProviders(); }); return b; })()),
+      h('div.muted.cv-small', `After each turn, one short line (what you asked, what was done, which files) goes to ${comp.name}'s memory on this site, so it knows what you have built when you talk to it anywhere here. Never the session, never the code.`)) : null;
     const notesRow = comp ? h('div.cv-prov', h('div.cv-provhead', h('b', `${comp.name}'s notes`), h('span.cv-grow'),
       (() => { const on = notesOn(); const b = h('button.cv-link', { type: 'button' }, on ? 'turn off' : 'turn on'); b.addEventListener('click', () => { pref('y3k-code:notes', on ? 'off' : 'on'); renderProviders(); }); return b; })()),
       h('div.muted.cv-small', `When a session starts, ${comp.name} writes the coder a short note from what it knows of you. You read it first; it goes only with your first message.`),
       pref('y3k-code:noteback') === 'always' ? h('div.cv-small', 'Lines back are sent without asking. ', (() => { const b = h('button.cv-link', { type: 'button' }, 'ask me again'); b.addEventListener('click', () => { pref('y3k-code:noteback', 'ask'); renderProviders(); }); return b; })()) : null) : null;
     swap(ui.drawer, drawerHead('Coding tools'),
       h('div.muted.cv-small', 'Each tool runs on its own sign-in, on this computer — y3kode starts the tool you signed into and never sees the sign-in. A key, where one is needed, stays on your computer and never reaches yearthreethousand.com.'),
-      rows, notesRow, h('div.cv-acts', refresh, unpair), cloudBox());
+      rows, notesRow, rememberRow, h('div.cv-acts', refresh, unpair), cloudBox());
   }
 
   return {

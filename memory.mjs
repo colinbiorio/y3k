@@ -125,6 +125,69 @@ export function getClippings(presenceId) {
   return list.map((c) => `- ${new Date(c.t).toISOString().slice(0, 10)}: ${c.x}`).join('\n');
 }
 
+// --- the coding history (code-handoff.mjs checkTurn; CODE.md) ------------------
+// What has been done in kode, a short entry a turn, kept with the person's
+// presence once they said yes there. The presence reads it as a digest: the
+// older days a line each, the newest few whole, and any older one its message
+// touches. Never a transcript; the person forgets any entry from kode.
+const CODE_FILE = join(DATA_DIR, '.code-history.json');
+const CODE_TURNS = 80;
+let code = {};
+try {
+  const parsed = JSON.parse(readFileSync(CODE_FILE, 'utf8'));
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) code = parsed;
+} catch { /* no history yet */ }
+function persistCode() {
+  try {
+    const tmp = CODE_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(code));
+    renameSync(tmp, CODE_FILE);
+  } catch (e) { console.error('[memory] could not persist the coding history:', e.message); }
+}
+// one checked entry; answers its time (the page's handle to forget it by)
+export function addCodeTurn(presenceId, turn, now = Date.now()) {
+  if (!presenceId || !turn) return 0;
+  const list = Array.isArray(code[presenceId]) ? code[presenceId] : [];
+  const t = Math.max(now, (list.at(-1)?.t || 0) + 1);
+  list.push({ t, ...turn });
+  code[presenceId] = list.slice(-CODE_TURNS);
+  persistCode();
+  return t;
+}
+export function dropCodeTurn(presenceId, t) {
+  const list = code[presenceId];
+  if (!Array.isArray(list)) return false;
+  const left = list.filter((x) => x.t !== t);
+  if (left.length === list.length) return false;
+  code[presenceId] = left; persistCode();
+  return true;
+}
+export const getCodeTurns = (presenceId) => (Array.isArray(code[presenceId]) ? code[presenceId].map((x) => ({ ...x })) : []);
+const STOP = new Set('the a an and or but of to in on at for with from by is are was were be been it its this that these those i you we they he she my your our their me us them what which who how why when where can could would should will do does did done have has had not no yes so if then than there here just also into out up about as more some any all very make made add added get got let lets please now one two'.split(' '));
+const sig = (s) => new Set(String(s || '').toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g)?.filter((w) => !STOP.has(w)) || []);
+const short = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…'; };
+const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+const entry = (x) => `- ${dayOf(x.t)}${x.project ? `, in ${x.project}` : ''}${x.outcome && x.outcome !== 'done' ? ` (${x.outcome})` : ''}: asked "${short(x.ask, 160)}"${x.did ? `; did: ${short(x.did, 240)}` : ''}${x.files?.length ? ` [${x.files.join(', ')}]` : ''}`;
+// The digest for a prompt ('' when there is none): the older days a line each (their newest few things), the newest
+// three whole, and up to two older ones sharing words with what is being said now.
+export function codeHistoryFor(presenceId, message = '') {
+  const turns = getCodeTurns(presenceId);
+  if (!turns.length) return '';
+  const newest = turns.slice(-3), older = turns.slice(0, -3), out = [];
+  if (older.length) {
+    const days = new Map();
+    for (const x of older) { const k = `${dayOf(x.t)}${x.project ? `, ${x.project}` : ''}`; if (!days.has(k)) days.set(k, []); days.get(k).push(short(x.did || x.ask, 70)); }
+    out.push('Earlier, day by day:');
+    for (const [k, v] of [...days].slice(-14)) out.push(`- ${k}: ${v.slice(-4).join('; ')}${v.length > 4 ? ` (and ${v.length - 4} more)` : ''}`);
+    const words = sig(message);
+    const touched = words.size ? older.map((x) => [x, [...sig(`${x.ask} ${x.did} ${x.files?.join(' ')}`)].filter((w) => words.has(w)).length]).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || b[0].t - a[0].t).slice(0, 2).map(([x]) => x) : [];
+    if (touched.length) { out.push('Earlier turns that touch what is being said now:'); for (const x of touched) out.push(entry(x)); }
+  }
+  out.push('The newest:');
+  for (const x of newest) out.push(entry(x));
+  return out.join('\n');
+}
+
 export function writePresenceMemory(presenceId, writes) {
   if (!presenceId || !writes) return false;
   let changed = false;
@@ -145,14 +208,16 @@ export function writePresenceMemory(presenceId, writes) {
 // store knows how to forget its own share; the orchestration lives in
 // server.mjs so no store has to know about any other.
 
-// The person's own notes, and each presence's memory and clippings.
+// The person's own notes, and each presence's memory, clippings and coding history.
 export function forget(uid, presenceIds) {
   if (uid) { delete store[uid]; persist(); }
-  let touchedP = false, touchedC = false;
+  let touchedP = false, touchedC = false, touchedK = false;
   for (const pid of presenceIds || []) {
     if (pid in pstore) { delete pstore[pid]; touchedP = true; }
     if (pid in clips) { delete clips[pid]; touchedC = true; }
+    if (pid in code) { delete code[pid]; touchedK = true; }
   }
   if (touchedP) persistPresence();
   if (touchedC) persistClips();
+  if (touchedK) persistCode();
 }

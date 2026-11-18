@@ -12,7 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as engineProto from '../y3k-code/protocol.mjs';
 import * as pageProto from '../src/code/protocol.js';
-import { createState, apply, needsYou, openRequest, activeSession, turnCost, nowDoing } from '../src/code/state.js';
+import { createState, apply, needsYou, openRequest, activeSession, turnCost, nowDoing, turnToRemember } from '../src/code/state.js';
 import { createStore } from '../y3k-code/store.mjs';
 import { _resetCatalog } from '../src/models.js';
 import { createEngine } from '../y3k-code/engine.mjs';
@@ -968,6 +968,64 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     assert.match(theirs.textContent, /migrations folder is gone/);
     assert.ok(theirs.querySelector('.voiced'));
     cv.close();
+  });
+
+  // THE CODING HISTORY (Colin, 18 Nov): a turn as one short entry for the presence's memory, asked once in kode
+  await ok('the coding history: a turn is one short entry, the folder and files by name, the coder\'s first words back, plain; none without a turn', () => {
+    const s = { cwd: '/Users/someone/code/y3k', changedThisTurn: true, files: ['/Users/someone/code/y3k/src/game/combat.js', 'src/game/fight.js', 'src/game/combat.js'], items: [
+      { kind: 'user', text: 'ok, now **add the bell** weapon' },
+      { kind: 'assistant', blocks: [{ kind: 'text', text: 'The **bell** is live: a tap strikes it, and held it tolls further and stuns. I also fixed the `wall` check.\n\n```js\nconst x = 1;\n```\nThe tests pass.' }] },
+    ] };
+    const t = turnToRemember(s, 'success');
+    assert.deepEqual({ ...t, did: undefined }, { project: 'y3k', ask: 'ok, now add the bell weapon', did: undefined, files: ['combat.js', 'fight.js'], outcome: 'done' });
+    assert.match(t.did, /^The bell is live: a tap strikes it, and held it tolls further and stuns\./); assert.ok(t.did.length <= 280 && !/\*|`/.test(t.did), t.did);
+    assert.equal(turnToRemember({ ...s, changedThisTurn: false }).files.length, 0, 'no files when the turn changed none');
+    assert.equal(turnToRemember(s, 'interrupted').outcome, 'stopped'); assert.equal(turnToRemember(s, 'error').outcome, 'failed');
+    assert.equal(turnToRemember({ items: [] }), null); assert.equal(turnToRemember(null), null);
+  });
+
+  await ok('the view: after a turn kode asks once whether the presence may remember what is done here; yes sends the turn\'s line and shows it, with a way to forget it; then each turn without asking; no sends nothing', async () => {
+    const hadStore = 'localStorage' in globalThis;
+    if (!hadStore) { const m = new Map(); globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); } }; }
+    localStorage.removeItem('y3k-code:remember');
+    const sent = [], forgot = [];
+    const link = { companion: () => ({ name: 'Orion' }), talk: () => {}, remember: async (t) => { sent.push(t); return { ok: true, t: 40 + sent.length }; }, forget: async (t) => { forgot.push(t); return { ok: true }; } };
+    const turn = (cv, sid, ask, did) => {
+      cv._feed({ sid, type: 'message.user', text: ask });
+      cv._feed({ sid, type: 'turn.started' });
+      cv._feed({ sid, type: 'message.block', id: ask, block: 0, kind: 'text', text: did });
+      cv._feed({ sid, type: 'message.end', id: ask });
+      cv._feed({ sid, type: 'files.changed', paths: ['/Users/someone/y3k/src/game/combat.js'] });
+      cv._feed({ sid, type: 'turn.ended', status: 'success' });
+    };
+    let cv = await viewWith('remember', { link });
+    cv._feed({ sid: 'rm1', type: 'session.started', provider: 'claude', cwd: '/Users/someone/y3k', mode: 'ask' });
+    cv.open(); await settle();
+    turn(cv, 'rm1', 'add the bell weapon', 'The bell is live: a tap strikes it.');
+    tick();
+    const card = $('div.cv-remember');
+    assert.ok(card && /Let Orion remember what you do here\?/.test(card.textContent), 'asked');
+    assert.match(card.textContent, /Never the session, never the code/);
+    assert.equal(sent.length, 0, 'nothing sent before the yes');
+    card.querySelector('button.btn-allow').click(); await settle(); tick();
+    assert.equal(sent.length, 1); assert.equal(sent[0].project, 'y3k'); assert.deepEqual(sent[0].files, ['combat.js']); assert.equal(sent[0].did, 'The bell is live: a tap strikes it.');
+    const line = $('div.cv-remembered');
+    assert.ok(line && /Orion remembers: The bell is live/.test(line.textContent), 'shown');
+    line.querySelector('button.cv-link').click(); await settle(); tick();
+    assert.deepEqual(forgot, [41], 'forgotten by its time');
+    turn(cv, 'rm1', 'and the bow', 'The bow is live.'); await settle(); tick();
+    assert.equal(sent.length, 2, 'the next turn, without asking'); assert.ok(!$('div.cv-remember'));
+    cv.close();
+    // no: kept, and nothing is sent
+    localStorage.setItem('y3k-code:remember', 'off');
+    cv = await viewWith('remember-no', { link });
+    cv._feed({ sid: 'rm2', type: 'session.started', provider: 'claude', cwd: '/Users/someone/y3k', mode: 'ask' });
+    cv.open(); await settle();
+    turn(cv, 'rm2', 'the torch', 'Not yet.'); await settle(); tick();
+    assert.equal(sent.length, 2, 'nothing sent'); assert.ok(!$('div.cv-remember'), 'not asked again');
+    cv.close();
+    localStorage.removeItem('y3k-code:remember');
+    if (!hadStore) delete globalThis.localStorage;
   });
 
   // The engine, as the desktop app's bridge hands it to the page: each command

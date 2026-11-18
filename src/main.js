@@ -956,6 +956,24 @@ const codeLink = {
       return r.ok ? { ok: true } : { error: d.error || 'That did not reach them.' };
     } catch { return { error: 'Could not reach the server.' }; }
   },
+  // THE CODING HISTORY (code-handoff.mjs checkTurn, CODE.md): a turn's short entry for the presence's memory, once the
+  // person said yes in kode; and forgetting one. Answers { ok, t } / { ok }
+  async remember(turn) {
+    if (!myPresence) return { ok: false };
+    try {
+      const r = await fetch('/api/code/remember', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ presence: myPresence.handle, turn }) });
+      const d = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true, t: d.t } : { ok: false, error: d.error };
+    } catch { return { ok: false }; }
+  },
+  async forget(t) {
+    if (!myPresence) return { ok: false };
+    try {
+      const r = await fetch('/api/code/forget', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ presence: myPresence.handle, t }) });
+      const d = await r.json().catch(() => ({}));
+      return { ok: r.ok && !!d.ok };
+    } catch { return { ok: false }; }
+  },
   talk(text) {
     const t = String(text || '').trim();
     if (!t) return;
