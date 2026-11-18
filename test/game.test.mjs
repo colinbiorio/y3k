@@ -1226,10 +1226,11 @@ console.log('the void: what is kept, and the door');
 
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1, place: 'void' });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1, place: 'void', weapon: 'ring' });
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
-  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3, place: 'island' });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island' });
+  S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"torch"}' })).weapon, 'ring', 'a weapon not made yet is the ring');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"place":"mars"}' })).place, 'void', 'a place not on the map is the void');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"building":"castle"}' })).building, 'shelter', 'a building that is not made is the shelter');
   const odd = S.loadState(store({ [S.STATE_KEY]: '{"kind":"dragon","looks":{"human":{"hair":"mohawk","dye":"moss"},"robot":7}}' }));
@@ -2651,6 +2652,72 @@ ok('the binding\'s hands: X (or H) held, the pad\'s LB; a button on a phone; the
   for (const line of ['bind: inp.bind, bindPressed: inp.bindPressed', 'id="game-t-bind"', "['#game-t-bind', 'bind']"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
   const fight = read('src/game/fight.js');
   assert.ok(fight.includes('leftHandOf(body)') && fight.includes("ev.type === 'join'"), 'the thread and the joining are not drawn');
+});
+
+// ---- the bow (combat.js BOW; stage 5): the second of the five weapons
+const still = (...bots) => { for (const b of bots) b.L = { ...b.L, speed: 0 }; };   // bots that keep where they are put
+
+ok('the bow: chosen, it is in hand (one not made yet changes nothing); a tap looses an arrow at the bot very near the eye\'s line, striking it once for 24, an arrow that falls a little as it flies; it rests a moment before it is drawn again', () => {
+  const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
+  assert.equal(c.weapon, 'ring');
+  assert.equal(CB.chooseWeapon(c, 'torch'), false); assert.equal(c.weapon, 'ring', 'not made yet');
+  assert.equal(CB.chooseWeapon(c, 'bow'), true); assert.equal(c.weapon, 'bow');
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  assert.equal(kinds(evs, 'nock').length, 1); assert.equal(c.bow.mode, 'drawing'); assert.equal(c.ring.mode, 'held', 'the ring is not cast');
+  evs = fightFor(c, body, aim, FRAME, {});
+  const l = kinds(evs, 'loose'); assert.equal(l.length, 1); assert.equal(l[0].power, 0, 'a tap is a plain arrow');
+  const arrow = c.bolts.find((x) => x.kind === 'arrow'), vy = arrow.v[1];
+  evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  assert.equal(kinds(evs, 'nock').length, 0, 'resting a moment'); assert.ok(arrow.v[1] < vy, 'an arrow falls as it flies');
+  evs = fightFor(c, body, aim, 0.6);
+  const hits = kinds(evs, 'hit').filter((e) => e.kind === 'arrow');
+  assert.equal(hits.length, 1, 'struck once'); assert.equal(b.hp, b.max - CB.BOW.loose.damage);
+});
+
+ok('the bow drawn: held, it draws for up to 0.9 s and the body walks; let go, the arrow flies faster and strikes harder, and drawn all the way it goes through what it strikes to the next, up to three', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'bow');
+  const row = [[0.2, 1.6, -9], [0.25, 1.6, -15], [0.3, 1.6, -21], [0.35, 1.6, -27]].map((p) => standBot(c, body, p, 5)); still(...row);
+  fightFor(c, body, aim, 1.2, (t) => ({ attack: true, attackPressed: t < FRAME / 2 }));
+  assert.ok(c.bow.draw > 0.99 && c.slow, 'drawn all the way, walking: ' + c.bow.draw);
+  const evs = fightFor(c, body, aim, 1.0, {});
+  assert.equal(kinds(evs, 'loose')[0].power, 1);
+  const hits = kinds(evs, 'hit').filter((e) => e.kind === 'drawn');
+  assert.deepEqual(hits.map((e) => e.id), row.slice(0, 3).map((b) => b.id), 'through the first three, in turn');
+  assert.ok(hits.every((e) => e.damage === CB.BOW.drawn.damage)); assert.equal(row[3].hp, row[3].max, 'the fourth untouched');
+});
+
+ok('the bow\'s volley: five arrows at once in a fan, two bots side by side both struck; and drawn in the air, the binding holds the body up', () => {
+  let { c, body, aim } = arena(); CB.chooseWeapon(c, 'bow');
+  const a = standBot(c, body, [-1.4, 1.6, -12]), b = standBot(c, body, [1.6, 1.6, -12]); still(a, b);
+  let evs = fightFor(c, body, aim, FRAME, { sweep: true });
+  assert.equal(kinds(evs, 'volley').length, 1); assert.equal(c.bolts.filter((x) => x.kind === 'arrow').length, CB.BOW.volley.n);
+  evs = fightFor(c, body, aim, 0.8);
+  const struck = new Set(kinds(evs, 'hit').filter((e) => e.kind === 'arrow').map((e) => e.id));
+  assert.ok(struck.has(a.id) && struck.has(b.id), 'both struck: ' + [...struck]);
+  assert.ok(kinds(evs, 'hit').every((e) => e.damage === CB.BOW.volley.damage));
+  // in the air: drawn, it comes down slowly; not drawn, it falls
+  const fall = (draw) => {
+    const g = arena(); CB.chooseWeapon(g.c, 'bow'); g.body.p = [0, 8, 0]; g.body.grounded = false; g.body.v = [0, 0, 0];
+    for (let t = 0; t < 0.7; t += FRAME) { B.advance(g.body, { move: [0, 0], yaw: Math.PI }, FRAME); CB.stepCombat(g.c, FRAME, { body: g.body, aim: g.aim, hands: draw ? { attack: true, attackPressed: t < FRAME / 2 } : {} }); }
+    return 8 - g.body.p[1];
+  };
+  const held = fall(true), free = fall(false);
+  assert.ok(held < 1.6 && free > held * 2, 'drawn in the air it comes down slowly: ' + held.toFixed(2) + ' against ' + free.toFixed(2));
+});
+
+ok('the weapons: the five listed, the ring and the bow made; the next is the other made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
+  assert.deepEqual(CB.WEAPONS.map((w) => w.id), ['thread', 'bow', 'ring', 'bell', 'torch']);
+  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['bow', 'ring']);
+  assert.equal(CB.nextWeapon('ring'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
+  const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
+  fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, FRAME, {});
+  assert.equal(c.ring.mode, 'out');
+  CB.chooseWeapon(c, 'bow'); assert.equal(c.ring.mode, 'back', 'the ring called home');
+  const d = I.defaults(); assert.deepEqual(d.keys.weapon, ['KeyT', '']); assert.equal(d.pad.weapon, -1);
+  const inp = I.createInput(I.defaults()); inp.down('KeyT'); assert.ok(inp.frame().weapon);
+  const view = read('src/game/view.js');
+  for (const line of ['id="game-weapons"', 'id="game-weapon-list"', 'takeWeapon(nextWeapon(K.combat.weapon))', 'chooseWeapon(K.combat, st.weapon)', "C.bow.mode === 'drawing' ? C.bow.draw"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/fight.js').includes('const bow = add(new THREE.Group())'), 'the bow is not drawn');
 });
 
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {

@@ -33,6 +33,7 @@ export const ACTIONS = [
   { id: 'whirl', label: 'whirl', note: 'the ring twice round you' },
   { id: 'guard', label: 'guard', note: 'held: a shield; raised just as a bolt comes, it sends it back; with the ring out, it calls it home' },
   { id: 'bind', label: 'the binding', note: 'held: it pulls the bot you look at to you and holds it; let go, it is thrown where you look; thrown into another, the two are joined' },
+  { id: 'weapon', label: 'next weapon', note: 'the ring or the bow (three more to come); the bar\'s weapons list chooses too' },
   { id: 'spawn', label: 'a bot', note: 'another, at the level last chosen under bots' },
   { id: 'board', label: 'board', note: 'near a ship, take its seat; aboard, step off' },
   { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },
@@ -54,11 +55,11 @@ export function defaults() {
       forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
       jump: ['Space', ''], dash: ['KeyQ', ''], sprint: ['ShiftLeft', 'ShiftRight'], walk: ['KeyV', ''],
       fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], build: ['KeyB', ''],
-      attack: ['Mouse0', 'KeyJ'], whirl: ['KeyE', 'KeyK'], guard: ['Mouse2', 'KeyL'], bind: ['KeyX', 'KeyH'], spawn: ['KeyN', ''], board: ['KeyR', ''],
+      attack: ['Mouse0', 'KeyJ'], whirl: ['KeyE', 'KeyK'], guard: ['Mouse2', 'KeyL'], bind: ['KeyX', 'KeyH'], weapon: ['KeyT', ''], spawn: ['KeyN', ''], board: ['KeyR', ''],
       zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
     },
     // the standard pad: 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT · 8 view · 9 menu · 10 L3 · 11 R3 · 12–15 the d-pad
-    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, attack: 7, whirl: 5, guard: 6, bind: 4, spawn: 15, board: 14, zoomIn: 12, zoomOut: 13, menu: 9 },
+    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, attack: 7, whirl: 5, guard: 6, bind: 4, weapon: -1, spawn: 15, board: 14, zoomIn: 12, zoomOut: 13, menu: 9 },
     look: { mouse: 1, stick: 1, invertY: false },
   };
 }
@@ -202,7 +203,7 @@ export function createInput(bindings = defaults()) {
         jump: on('jump'), jumpPressed: pressed.has('jump'), dash: pressed.has('dash'), flyToggle: pressed.has('fly'),
         sprint: on('sprint') || sprintLatch, walk: on('walk'), up: on('jump'), down: on('down'),
         modeToggle: pressed.has('mode'), build: pressed.has('build'), menu: pressed.has('menu'), device,
-        attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), bind: on('bind'), bindPressed: pressed.has('bind'), spawn: pressed.has('spawn'), board: pressed.has('board'),
+        attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), bind: on('bind'), bindPressed: pressed.has('bind'), weapon: pressed.has('weapon'), spawn: pressed.has('spawn'), board: pressed.has('board'),
       };
       pressed.clear(); lookX = lookY = wheel = 0;
       return out;

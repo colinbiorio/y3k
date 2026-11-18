@@ -27,6 +27,20 @@
 //     whoever sent it, three times as hard. Pressed while the ring is out, the
 //     guard calls it back.
 //
+// THE BOW, the second of the five (stage 5): a recurve of bronze limbs strung
+// with a filament of plasma, held by the binding as the ring is. Four ways:
+//
+//   · LOOSE (the attack, a tap): an arrow of plasma where the eye looks (at the
+//     bot nearest that line, if one is very near it), quick and light; arrows
+//     fall a little as they fly.
+//   · DRAWN (the attack held, then let go): drawn back for as long as it is held
+//     (to BOW.draw s); the arrow flies faster and strikes harder, and drawn all
+//     the way it passes through what it strikes to the next, up to three.
+//   · VOLLEY (the whirl's key): five arrows at once, in a fan.
+//   · DRAWN IN THE AIR: while the string is back in the air, the binding holds
+//     the body up: it comes down slowly.
+//   The guard is the ring's: it comes to it, whichever is in hand.
+//
 // THE BINDING (stage 5): the force. GAME.md: "The force is the binding. It
 // comes from Colin's own theory, love as what binds: it pulls, holds, joins and
 // lets go." Held (its own key), it reaches out along the eye's line to the bot
@@ -66,6 +80,24 @@ export const RING = {
   slam: { min: 1.1, fall: 22, radius: 6.5, damage: 55, knock: 12 },
   guard: { arc: 1.25, parry: 0.24 },        // half the angle a guard covers (rad); how soon after raising it a bolt is a parry
 };
+export const BOW = {
+  loose: { speed: 52, damage: 24, fall: 4 },
+  drawn: { speed: 78, damage: 88, fall: 2, pierce: 3 },
+  draw: 0.9,                                // s held to be drawn all the way
+  tap: 0.14,                                // s: held less than this, it is a plain loose
+  cool: 0.32,                               // s before it can be drawn again
+  volley: { n: 5, spread: 0.09, speed: 46, damage: 18, cool: 1.1 },
+  hover: -1.6,                              // m/s: drawn in the air, the body falls no faster than this
+  assist: 0.12,                             // rad: a bot this near the eye's line is what an arrow goes for
+  life: 2.2,                                // s an arrow flies
+};
+// the five plasma weapons (GAME.md's order), those made ready; the one in hand is kept between visits (state.js)
+export const WEAPONS = [
+  { id: 'thread', label: 'thread', ready: false }, { id: 'bow', label: 'bow', ready: true }, { id: 'ring', label: 'ring', ready: true },
+  { id: 'bell', label: 'bell', ready: false }, { id: 'torch', label: 'torch', ready: false },
+];
+export const cleanWeapon = (w) => (WEAPONS.some((x) => x.id === w && x.ready) ? w : 'ring');
+export const nextWeapon = (w) => { const R = WEAPONS.filter((x) => x.ready).map((x) => x.id), i = R.indexOf(w); return R[(i + 1) % R.length]; };
 export const BINDING = {
   reach: 24,                                // m: as far as it reaches
   assist: 0.32,                             // rad: a bot this near the eye's line is what it takes
@@ -145,6 +177,7 @@ export function createCombat({ seed = 7 } = {}) {
     face: 0, faceYaw: 0,                    // how long the body is to keep facing where the eye looks (after a cast), and that way
     queue: null,                            // an attack pressed while the ring was away: it waits for the ring's return (briefly)
     bind: { mode: 'idle', target: null, t: 0, rest: 0, miss: 0, missDir: [0, 0, 1], joined: 0 },
+    weapon: 'ring', bow: { mode: 'held', held: 0, draw: 0, cool: 0 },
     bots: [], bolts: [], level: 1, broken: 0, turned: 0, ids: 1, rand: rng(seed), events: [],
     player: { hp: PLAYER.hp, hurt: 99, mercy: 0, down: 0 },
   };
@@ -238,6 +271,56 @@ export function leftHandOf(body) {
   return [body.p[0] - r[0] * 0.42 + f[0] * 0.2, body.p[1] + 1.18, body.p[2] - r[2] * 0.42 + f[2] * 0.2];
 }
 
+// the weapon in hand: the ring, or the bow. The ring, if it is out, is called home; nothing half done carries over
+export function chooseWeapon(c, id) {
+  const R = c.ring;
+  if (!WEAPONS.some((x) => x.id === id && x.ready) || id === c.weapon) return false;   // one not made yet changes nothing
+  const w = id;
+  if (R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
+  if (R.mode === 'charging' || R.mode === 'whirl') { R.mode = 'held'; R.charge = 0; }
+  c.queue = null; c.bow.mode = 'held'; c.bow.held = 0; c.bow.draw = 0;
+  c.weapon = w; c.events.push({ type: 'weapon', id: w });
+  return true;
+}
+// where an arrow goes: at the bot very near the eye's line (BOW.assist), where it will be when the arrow gets there, else
+// where the eye looks, far off or on the water; arced for its fall either way
+function arrowAim(c, hand, aim, speed, fall) {
+  let best = null, ba = BOW.assist;
+  for (const b of c.bots) {
+    if (b.mode === 'broken' || b.mode === 'rise') continue;
+    const to = sub(b.p, aim.from), d = len(to);
+    if (d < 0.5 || d > speed * BOW.life) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, dot(to, aim.dir) / d)));
+    if (a < ba) { ba = a; best = b; }
+  }
+  let P;
+  if (best) { const t = len(sub(best.p, hand)) / speed; P = [best.p[0] + best.v[0] * t, best.p[1] + best.v[1] * t, best.p[2] + best.v[2] * t]; }   // where it will be
+  else {
+    let T = 60;
+    if (aim.dir[1] < -1e-3) T = Math.min(T, (aim.from[1] - WATER) / -aim.dir[1]);
+    P = [aim.from[0] + aim.dir[0] * T, aim.from[1] + aim.dir[1] * T, aim.from[2] + aim.dir[2] * T];
+  }
+  const to = sub(P, hand), d = len(to), u = unit(to), t = d / speed;
+  return { v: [u[0] * speed, u[1] * speed + (fall * t) / 2, u[2] * speed], target: best };
+}
+function loose(c, hand, aim, power) {
+  const A = BOW.loose, B = BOW.drawn, speed = lerp(A.speed, B.speed, power), fall = lerp(A.fall, B.fall, power);
+  const { v } = arrowAim(c, hand, aim, speed, fall);
+  c.bolts.push({ p: [...hand], v, owner: 'player', kind: 'arrow', damage: Math.round(lerp(A.damage, B.damage, power)), life: BOW.life, fall, pierce: power >= 0.75 ? B.pierce : 1, struck: [], power });
+  c.face = 0.3; c.faceYaw = Math.atan2(aim.dir[0], aim.dir[2]);
+  c.events.push({ type: 'loose', at: [...hand], dir: unit(v), power });
+}
+function volley(c, hand, aim) {
+  const V = BOW.volley, yaw = Math.atan2(aim.dir[0], aim.dir[2]), flat = Math.hypot(aim.dir[0], aim.dir[2]) || 1;
+  for (let k = 0; k < V.n; k++) {
+    const a = yaw + (k - (V.n - 1) / 2) * V.spread, d = [Math.sin(a) * flat, aim.dir[1], Math.cos(a) * flat];
+    const { v } = arrowAim(c, hand, { from: aim.from, dir: d }, V.speed, BOW.loose.fall);
+    c.bolts.push({ p: [...hand], v, owner: 'player', kind: 'arrow', damage: V.damage, life: BOW.life, fall: BOW.loose.fall, pierce: 1, struck: [], power: 0 });
+  }
+  c.face = 0.3; c.faceYaw = yaw;
+  c.events.push({ type: 'volley', at: [...hand], n: V.n });
+}
+
 function cast(c, hand, aim, power) {
   const R = c.ring, A = RING.cast, B = RING.charged;
   R.mode = 'out'; R.p = [...hand]; R.went = 0; R.struck = new Set(); R.charge = 0;
@@ -270,7 +353,22 @@ export function stepCombat(c, dt, ctx) {
 
   // ---- the hands
   const airborne = !body.grounded && !body.flying && !body.climbing && body.p[1] - (body.floorY ?? 0) > RING.slam.min;
-  if (able) {
+  const W = c.bow;
+  W.cool = Math.max(0, W.cool - dt);
+  if (able && c.weapon === 'bow') {
+    // ---- the bow: pressed, it is drawn; let go, it looses (a tap, a plain arrow; held, a harder one); the whirl's key, a volley
+    if (hands.attackPressed && W.mode === 'held' && W.cool <= 0) { W.mode = 'drawing'; W.held = 0; W.draw = 0; c.events.push({ type: 'nock', at: [...hand] }); }
+    if (W.mode === 'drawing') {
+      W.held += dt;
+      if (W.held > BOW.tap) W.draw = Math.min(1, (W.held - BOW.tap) / BOW.draw);
+      c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw;
+      // drawn in the air, the binding holds the body up: it comes down slowly
+      if (!body.grounded && !body.flying && !body.climbing && body.v[1] < BOW.hover) { body.v[1] = BOW.hover; body.rising = false; }
+      if (!hands.attack) { loose(c, hand, aim, W.held > BOW.tap ? W.draw : 0); W.mode = 'held'; W.held = 0; W.draw = 0; W.cool = BOW.cool; }
+    }
+    if (hands.sweep && W.mode === 'held' && W.cool <= 0) { volley(c, hand, aim); W.cool = BOW.volley.cool; }
+    if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
+  } else if (able) {
     // pressed while the ring is away, the attack calls it home (if it is still going out) and waits for it, a second at most
     if (hands.attackPressed && R.mode !== 'held' && R.mode !== 'charging' && R.mode !== 'slam') {
       if (R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
@@ -301,6 +399,7 @@ export function stepCombat(c, dt, ctx) {
     }
     if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   } else if (R.mode === 'charging' || R.mode === 'whirl' || R.mode === 'slam') R.mode = 'held';
+  if (!able || c.weapon !== 'bow') { W.mode = 'held'; W.held = 0; W.draw = 0; }
   // ---- the binding: pressed, it takes what the eye looks at; held, it holds it; let go, it throws it
   const Bn = c.bind;
   Bn.rest = Math.max(0, Bn.rest - dt); Bn.miss = Math.max(0, Bn.miss - dt);
@@ -330,7 +429,7 @@ export function stepCombat(c, dt, ctx) {
   if (guardUp && !c.guard.up) { c.guard.t = 0; c.events.push({ type: 'guard', at: [...hand] }); }
   c.guard.up = guardUp; c.guard.t += dt;
   if (guardUp || Bn.mode === 'hold') { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
-  c.slow = guardUp || R.mode === 'charging' || Bn.mode === 'hold';      // the body walks while it holds
+  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
 
   // ---- in steps
   const n = Math.max(1, Math.ceil(dt / STEP - 1e-9)), h = dt / n;
@@ -507,6 +606,7 @@ function step(c, h, body, aim, aimYaw, world, creative) {
   const keep = [];
   for (const x of c.bolts) {
     const was = [...x.p];
+    if (x.fall) x.v[1] -= x.fall * h;   // an arrow falls a little as it flies
     x.p = [x.p[0] + x.v[0] * h, x.p[1] + x.v[1] * h, x.p[2] + x.v[2] * h]; x.life -= h;
     let gone = false;
     if (x.owner === 'bot' && segSeg(was, x.p, foot, top) < PLAYER.r + 0.08 && P.down <= 0) {
@@ -536,8 +636,13 @@ function step(c, h, body, aim, aimYaw, world, creative) {
     } else if (x.owner === 'player') {
       if (x.target) { const t = c.bots.find((b) => b.id === x.target && b.mode !== 'broken'); if (t) { const s = len(x.v), d = unit(sub(t.p, x.p)); x.v = [d[0] * s, d[1] * s, d[2] * s]; } }
       for (const b of c.bots) {
-        if (b.mode === 'broken' || b.mode === 'rise') continue;
-        if (segPoint(was, x.p, b.p) < b.r + 0.1) { hit(c, b, x.damage, was, 'parry', 6); gone = true; break; }
+        if (b.mode === 'broken' || b.mode === 'rise' || x.struck?.includes(b.id)) continue;
+        if (segPoint(was, x.p, b.p) < b.r + 0.1) {
+          hit(c, b, x.damage, was, x.kind === 'arrow' ? (x.power >= 0.75 ? 'drawn' : 'arrow') : 'parry', x.kind === 'arrow' ? 3 + 5 * (x.power || 0) : 6);
+          // a drawn arrow goes on through, to the next, as many as it pierces
+          if (x.struck) { x.struck.push(b.id); x.pierce--; if (x.pierce > 0) continue; }
+          gone = true; break;
+        }
       }
     }
     if (!gone && x.p[1] < WATER) { gone = true; c.events.push({ type: 'splash', at: [x.p[0], WATER, x.p[2]], size: 0.12 }); }

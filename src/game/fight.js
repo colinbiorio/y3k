@@ -17,13 +17,19 @@
 // ring's); sparks fly where things meet; the slam's wave runs out over the
 // water. Everything here is in the scene, so the water's mirror shows it too.
 //
+// The bow: two limbs of bronze curving back from a wrapped grip and forward
+// again at their tips, strung with a filament of plasma. Held, it hangs upright
+// beside the right shoulder; drawn, it turns to where the eye looks, its string
+// pulled back as far as it is drawn, an arrow of plasma on it. Arrows are long
+// thin streaks of the ring's light.
+//
 // The binding: a thread of warm gold light from the left hand to what it holds,
 // waving a little, its pulses running in toward the hand; a halo round the bot
 // it holds, which struggles in it; with nothing to take, the thread goes out
 // along the eye's line and comes back. A bot it throws spins as it flies; two it
 // joins go up in a flash of gold.
 import * as THREE from 'three';
-import { LEVELS, RING, BINDING, leftHandOf } from './combat.js';
+import { LEVELS, RING, BOW, BINDING, leftHandOf } from './combat.js';
 import { WATER } from './body.js';
 
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
@@ -91,6 +97,29 @@ export function createFightArt(scene, { lite = false } = {}) {
       }`,
   })));
   ring.add(skin);
+  // ---- the bow: its limbs and grip in bronze; its string (two strands, to the nock) and the arrow on it in plasma
+  const bow = add(new THREE.Group()); bow.visible = false;
+  const LIMB = 0.62, limb = (t) => [-0.13 * Math.sin(Math.PI * t * 0.85) + 0.07 * Math.max(0, (t - 0.78) / 0.22) ** 2, LIMB * t];
+  for (const sd of [1, -1]) {
+    const pts = Array.from({ length: 13 }, (_, i) => { const [x, y] = limb(i / 12); return new THREE.Vector3(x, sd * y, 0); });
+    bow.add(new THREE.Mesh(geo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.023, 6)), metal));
+  }
+  bow.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.027, 0.027, 0.18, 10)), metal));
+  const tipX = limb(1)[0], stringMat = mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone().multiplyScalar(1.4) }));
+  const strand = () => { const m = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.006, 0.006, 1, 5)), stringMat); bow.add(m); return m; };
+  const strandUp = strand(), strandDown = strand();
+  const nocked = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.012, 0.012, 0.85, 6)), stringMat); nocked.rotation.z = -Math.PI / 2; bow.add(nocked);
+  const bowGlowMat = mat(new THREE.SpriteMaterial({ map: tex, color: PLASMA.clone().multiplyScalar(0.55), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  const bowGlow = new THREE.Sprite(bowGlowMat); bow.add(bowGlow);
+  const string = (pull) => {
+    // the strands from each tip to the nock, pulled back (toward the archer, -x) as far as it is drawn
+    const nx = tipX - 0.55 * pull;
+    for (const [m, sy] of [[strandUp, 1], [strandDown, -1]]) {
+      const ax = tipX, ay = sy * LIMB, dx = nx - ax, dy = -ay, L = Math.hypot(dx, dy);
+      m.position.set((ax + nx) / 2, ay / 2, 0); m.scale.set(1, L, 1); m.rotation.set(0, 0, Math.atan2(-dx, dy));
+    }
+    nocked.position.set(nx + 0.425, 0, 0); bowGlow.position.set(nx, 0, 0);
+  };
   // its trail: a ribbon through where it has been, fading
   const TRAIL = 30, trailPts = [], trailPos = new Float32Array(TRAIL * 2 * 3), trailA = new Float32Array(TRAIL * 2);
   const trailGeo = geo(new THREE.BufferGeometry());
@@ -226,7 +255,7 @@ export function createFightArt(scene, { lite = false } = {}) {
     unmake(d);
   }
 
-  let held = 0, guardAmt = 0;
+  let held = 0, guardAmt = 0, drawAmt = 0;
   const q = new THREE.Quaternion(), e = new THREE.Euler(), up = new THREE.Vector3(0, 1, 0);
   return {
     root,
@@ -268,6 +297,29 @@ export function createFightArt(scene, { lite = false } = {}) {
       } else {
         // held: upright beside the shoulder, its face half to the side and half back toward the eye, turning about its own middle
         q.setFromAxisAngle(up, body.yaw + Math.PI / 2 + 0.85); ring.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(Z, R.spin * 0.6));
+      }
+      // ---- the bow, when it is in hand (the ring comes back for the guard, and while it is still coming home)
+      const bowIn = c.weapon === 'bow', W = c.bow;
+      ring.visible = glow.visible = !bowIn || flying || guardAmt > 0.02;
+      bow.visible = bowIn && guardAmt < 0.5 && !fallen;
+      if (bow.visible) {
+        const hand = R.p, drawing = W.mode === 'drawing';
+        drawAmt += ((drawing ? 0.15 + 0.85 * W.draw : 0) - drawAmt) * (1 - Math.exp(-14 * dt));
+        string(drawAmt); nocked.visible = drawing; bowGlowMat.opacity = drawing ? 0.35 + 0.6 * W.draw : 0;
+        bowGlow.scale.setScalar(0.25 + 0.5 * W.draw);
+        if (drawing) {
+          // turned to where the eye looks, its forward along the eye's line, its limbs canted a little to the right across
+          // it (as many archers hold it; upright, from behind, it is only a line)
+          const f = camera.getWorldDirection(V3), up0 = new THREE.Vector3(0, 1, 0).addScaledVector(f, -f.y).normalize();
+          const side = new THREE.Vector3().crossVectors(f, up0), cant = 0.6, upv = up0.clone().multiplyScalar(Math.cos(cant)).addScaledVector(side, -Math.sin(cant)).normalize();
+          const zz = new THREE.Vector3().crossVectors(f, upv);
+          bow.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(f, upv, zz));
+          bow.position.set(hand[0] + f.x * 0.22, hand[1], hand[2] + f.z * 0.22);
+        } else {
+          // held: upright beside the shoulder, its back turned outward (so its curve is seen from behind), swaying a little
+          q.setFromAxisAngle(up, body.yaw + Math.PI); bow.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(Z, 0.05 * Math.sin(time.value * 1.3)));
+          bow.position.set(hand[0], hand[1] - 0.05, hand[2]);
+        }
       }
       const grow = 1 + 0.95 * guardAmt;
       ring.scale.setScalar(grow);
@@ -360,8 +412,9 @@ export function createFightArt(scene, { lite = false } = {}) {
         if (nb >= NB) break;
         const col = x.owner === 'bot' ? levelCol(x.level) : PLASMA;
         V3.set(x.v[0], x.v[1], x.v[2]); const s = V3.length() || 1; Q.setFromUnitVectors(Z, V3.multiplyScalar(1 / s));
-        M.compose(V3.set(x.p[0], x.p[1], x.p[2]), Q, S.set(0.08, 0.08, 0.48)); core.setMatrixAt(nb, M); core.setColorAt(nb, col);
-        M.compose(V3, Q, S.set(0.24, 0.24, 0.85)); halo.setMatrixAt(nb, M); halo.setColorAt(nb, col);
+        const arrow = x.kind === 'arrow';
+        M.compose(V3.set(x.p[0], x.p[1], x.p[2]), Q, arrow ? S.set(0.045, 0.045, 0.9) : S.set(0.08, 0.08, 0.48)); core.setMatrixAt(nb, M); core.setColorAt(nb, col);
+        M.compose(V3, Q, arrow ? S.set(0.16, 0.16, 1.35) : S.set(0.24, 0.24, 0.85)); halo.setMatrixAt(nb, M); halo.setColorAt(nb, col);
         nb++;
       }
       core.count = halo.count = nb;

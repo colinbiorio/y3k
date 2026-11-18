@@ -56,7 +56,7 @@ import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
 import { createArkArt } from './ships/ark.js';
 import { createCarrierArt } from './ships/carrier.js';
-import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
+import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, chooseWeapon, nextWeapon, LEVELS, PLAYER, WEAPONS } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
@@ -292,14 +292,38 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const el = $('#game-bot-list'), btn = $('#game-bots'); if (!el || !btn) return;
     const open = show ?? el.hidden;
     if (open) {
-      listBuilds(false); listShips(false);
+      listBuilds(false); listShips(false); listWeapons(false);
       const n = K.combat.bots.length;
       el.innerHTML = LEVELS.map((L, i) => `<button type="button" class="login-alt${i + 1 === st.level ? ' on' : ''}" data-bot="${i + 1}">${i + 1} · ${L.name}<small>${['easy', 'steady', 'quick', 'hard', 'fierce'][i]}</small></button>`).join('')
         + (n ? `<button type="button" class="login-alt game-build-down" data-bot="clear">clear them (${n})</button>` : '');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
-  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', bind: 'bind', spawn: 'bots', board: 'ships' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
+  // ---- the weapons (stage 5): the bar's list of the five (those not made yet greyed); T, or the list, changes the one in hand
+  function listWeapons(show) {
+    const el = $('#game-weapon-list'), btn = $('#game-weapons'); if (!el || !btn) return;
+    const open = show ?? el.hidden;
+    if (open) {
+      listBuilds(false); listBots(false); listShips(false);
+      el.innerHTML = WEAPONS.map((w) => `<button type="button" class="login-alt${w.id === K.combat.weapon ? ' on' : ''}" data-weapon="${w.id}"${w.ready ? '' : ' disabled aria-disabled="true"'}>${w.label}${w.ready ? '' : '<small>to come</small>'}</button>`).join('');
+    }
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  }
+  const weaponWords = (w) => (w === 'bow'
+    ? `the bow · ${actKey('attack')} looses an arrow, held it draws harder and goes through · ${actKey('whirl')} a volley · drawn in the air, it holds you up · ${actKey('weapon')} the ring`
+    : `the ring · ${actKey('attack')} casts it, held it spins up · ${actKey('whirl')} whirls · in the air it slams · ${actKey('weapon')} the bow`);
+  // a phone's buttons say what the weapon in hand does
+  function labelWeapon() {
+    const bow = K?.combat?.weapon === 'bow', cast = $('#game-t-cast'), whirl = $('#game-t-whirl');
+    if (cast) { cast.textContent = bow ? 'loose' : 'cast'; cast.setAttribute('aria-label', bow ? 'Loose an arrow' : 'Cast the ring'); }
+    if (whirl) { whirl.textContent = bow ? 'volley' : 'whirl'; whirl.setAttribute('aria-label', bow ? 'A volley' : 'Whirl'); }
+  }
+  function takeWeapon(w) {
+    if (!chooseWeapon(K.combat, w)) return;
+    st.weapon = K.combat.weapon; save(); labelWeapon();
+    say(weaponWords(st.weapon), 6);
+  }
+  const actKey = (id) => (touch ? { attack: K?.combat?.weapon === 'bow' ? 'loose' : 'cast', whirl: K?.combat?.weapon === 'bow' ? 'volley' : 'whirl', guard: 'guard', bind: 'bind', spawn: 'bots', board: 'ships', weapon: 'weapons' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
 
   // ---- the ships (stage 4). The bar's ships list: the five (those not made yet greyed); near one, a line to board it;
   // aboard, one to step off; with one put, one to send it away. One ship is put at a time, in front of the body.
@@ -308,7 +332,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const el = $('#game-ship-list'), btn = $('#game-ships'); if (!el || !btn) return;
     const open = show ?? el.hidden;
     if (open) {
-      listBuilds(false); listBots(false);
+      listBuilds(false); listBots(false); listWeapons(false);
       const near = !K.aboard && nearShip(K.world.ships, K.body.p), any = K.world.ships[0];
       el.innerHTML = (K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="leave">step off the ${K.aboard.kind}</button>` : '')
         + (near ? `<button type="button" class="login-alt game-build-down" data-ship="board">board the ${near.kind}</button>` : '')
@@ -362,7 +386,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function callBot(level = st.level) {
     const b = spawnBot(K.combat, K.body, K.eye.yaw, level);
     if (!b) { say('twelve is as many as the void holds at once', 3); return; }
-    say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} casts the ring, held it spins up · ${actKey('whirl')} whirls · ${actKey('guard')} guards · ${actKey('bind')} held binds it`, 6);
+    const bow = K.combat.weapon === 'bow';
+    say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} ${bow ? 'looses an arrow, held it draws harder' : 'casts the ring, held it spins up'} · ${actKey('whirl')} ${bow ? 'a volley' : 'whirls'} · ${actKey('guard')} guards · ${actKey('bind')} held binds it`, 6);
   }
   let hurtT = 0, foes = '', hpShown = -1;
   function fought(e) {
@@ -373,9 +398,9 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // what the fight shows over the picture: the mark the ring goes for, how much the body has left, a flush when it is hit
   function hud(dt) {
     const C = K.combat, live = C.bots.length, hudEl = $('.game-hud'); if (!hudEl) return;
-    const engaged = live > 0 || C.ring.mode !== 'held' || C.guard.up;
+    const engaged = live > 0 || C.ring.mode !== 'held' || C.guard.up || C.bow.mode === 'drawing';
     hudEl.classList.toggle('on', !stand && (locked || engaged));
-    hudEl.style.setProperty('--charge', C.ring.mode === 'charging' ? C.ring.charge.toFixed(2) : '0');
+    hudEl.style.setProperty('--charge', C.ring.mode === 'charging' ? C.ring.charge.toFixed(2) : C.bow.mode === 'drawing' ? C.bow.draw.toFixed(2) : '0');
     hudEl.classList.toggle('guard', C.guard.up);
     const hp = Math.round(C.player.hp), showHp = K.body.mode === 'survival' && (live > 0 || hp < PLAYER.hp);
     if (hp !== hpShown) { hpShown = hp; hudEl.style.setProperty('--hp', (hp / PLAYER.hp).toFixed(3)); }
@@ -457,6 +482,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
       if (inp.build) buildHere();
       if (inp.spawn) callBot();
+      if (inp.weapon) takeWeapon(nextWeapon(K.combat.weapon));
       if (inp.board) boardOrLeave();
       if (inp.menu) openMenu();
       K.world.update(dt);
@@ -587,6 +613,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     K = stage(lite, st);                                // throws where a canvas cannot be had: the door (gate.js) answers that
     if (!K.eye) K.eye = { yaw: 0, pitch: -0.1, at: new THREE.Vector3(), has: false, d: st.zoom, fov: FOV };
     K.eye.has = false;
+    chooseWeapon(K.combat, st.weapon); K.combat.events.length = 0;
     setMode(K.body, st.mode);
     input = createInput(loadBindings(storage));
     touch = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches;
@@ -598,11 +625,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
         <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
+        <button type="button" id="game-weapons" class="login-alt" aria-expanded="false" aria-controls="game-weapon-list" title="the weapon in hand: the ring or the bow (three more to come)">weapons</button>
         <button type="button" id="game-bots" class="login-alt" aria-expanded="false" aria-controls="game-bot-list" title="call up a bot to fight, at one of five levels">bots</button>
         <button type="button" id="game-ships" class="login-alt" aria-expanded="false" aria-controls="game-ship-list" title="a ship in front of you, to board and fly">ships</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
         ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
         <div class="game-build" id="game-build-list" role="group" aria-label="what to build" hidden></div>
+        <div class="game-build game-weapons" id="game-weapon-list" role="group" aria-label="the weapon in hand" hidden></div>
         <div class="game-build game-bots" id="game-bot-list" role="group" aria-label="a bot to fight, by level" hidden></div>
         <div class="game-build game-ships" id="game-ship-list" role="group" aria-label="a ship to fly" hidden></div>
       </div>
@@ -646,7 +675,15 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         if (k === 'down') said(K.world.toggle(K.body, st.building)); else buildHere(k);
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBuilds(false); $('#game-build')?.focus(); } });
-      on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); listShips(false); }); }
+      on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); listShips(false); listWeapons(false); }); }
+    press('#game-weapons', () => { if (!menu.isOpen() && !chooser.isOpen()) listWeapons(); });
+    { const el = $('#game-weapon-list');
+      on(el, 'click', (e) => {
+        const btn = e.target.closest?.('[data-weapon]'); if (!btn || btn.disabled) return;
+        if (e.detail > 0) focusCanvas();
+        listWeapons(false); takeWeapon(btn.dataset.weapon);
+      });
+      on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listWeapons(false); $('#game-weapons')?.focus(); } }); }
     press('#game-bots', () => { if (!menu.isOpen() && !chooser.isOpen()) listBots(); });
     { const el = $('#game-bot-list');
       on(el, 'click', (e) => {
@@ -675,6 +712,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) on(el, ev, () => input.hold(action, false));
       on(el, 'contextmenu', (e) => e.preventDefault());
     }
+    labelWeapon();
     on(holder, 'pointerdown', (e) => { if (e.pointerType === 'touch' && !touch) { touch = true; $('.game-touch').hidden = false; standing = ' '; } });
     ro = new ResizeObserver(size); ro.observe(holder); size();
     // read only, for whoever is checking the game from outside it (a test's browser, the console). `seen` is where the body's middle is on the canvas, in px
@@ -687,7 +725,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, aboard: !!K.aboard, seated: !!K.body.seated,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
-      fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
+      fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
