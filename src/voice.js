@@ -6,6 +6,7 @@
 //          an AnalyserNode. speak() is the free browser-TTS fallback.
 
 import { dominantHz } from './plate.mjs';   // what the sand plate hears: the voice's dominant frequency (2026-10-22)
+import { pickVoice } from './voice-pick.mjs';   // which of the device's voices is the free one (2026-11-18)
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -294,15 +295,23 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   }
 
   // --- Out: browser TTS fallback ---------------------------------------------
-  function speak(text, { onStart, onEnd } = {}) {
+  // THE FREE VOICE (voice-pick.mjs says why): the one the person chose in
+  // Settings → Voice while this device has it, else the best English voice
+  // here, read as its own language. Chrome fills the list a moment after the
+  // first ask, so it is asked for now, long before the first reply.
+  try { window.speechSynthesis?.getVoices(); } catch { /* no speech here */ }
+  function freeVoice(u, deviceVoice) {
+    let pick = null;
+    try { pick = pickVoice(window.speechSynthesis.getVoices(), { prefer: deviceVoice }); } catch { /* the browser's default speaks */ }
+    if (pick) { u.voice = pick; u.lang = pick.lang; }
+  }
+  function speak(text, { onStart, onEnd, deviceVoice } = {}) {
     if (!('speechSynthesis' in window) || !text) { onEnd?.(); return; }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.0;
     u.pitch = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const pick = voices.find((v) => /samantha|google us english|jenny|aria/i.test(v.name));
-    if (pick) u.voice = pick;
+    freeVoice(u, deviceVoice);
     u.onstart = () => onStart?.();
     u.onend = () => onEnd?.();
     u.onerror = () => onEnd?.();
@@ -318,7 +327,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // heard: 'start' when its sound begins (ms = how long it lasts, when known)
   // and 'end' when it stops. airden.js shows each sentence as it is said and
   // keeps the next one queued behind it, so a long run of speech is gapless.
-  function speaker({ voiceId, provider, model, settings, onLevel: onLvl, onStart, onEnd, onChunk } = {}) {
+  function speaker({ voiceId, provider, model, settings, deviceVoice, onLevel: onLvl, onStart, onEnd, onChunk } = {}) {
     const browser = browserVoice({ voiceId, provider });   // the browser's, or a service on the person's own key
     let ended = false;        // end() called — no more chunks coming
     let active = 0;           // scheduled/playing chunks or utterances
@@ -366,8 +375,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
       active += 1;
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 1.0; u.pitch = 1.0;
-      const pick = window.speechSynthesis.getVoices().find((v) => /samantha|google us english|jenny|aria/i.test(v.name));
-      if (pick) u.voice = pick;
+      freeVoice(u, deviceVoice);
       if (!started) { started = true; onStart?.(); }
       const done = () => { active -= 1; if (!cancelled) onChunk?.(text, 'end'); maybeFinish(); };
       u.onstart = () => { if (!cancelled) onChunk?.(text, 'start', 0); };

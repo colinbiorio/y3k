@@ -300,8 +300,12 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
   let stored = { voiceId: 'browser', provider: 'cartesia', models: { elevenlabs: 'eleven_v4' }, settings: {} };
   const getActive = () => JSON.parse(JSON.stringify(stored));
   const setActive = (a) => { stored = a; };
-  const selectVoice = new Function('getActive', 'setActive', 'document', 'syncDefaultsSummary', 'syncDelivery', 'browsing',
-    `${cut('  function selectVoice(', '\n  }\n')}\nreturn selectVoice;`)(getActive, setActive, { querySelectorAll: () => [] }, () => {}, () => {}, 'cartesia');
+  const selectVoice = new Function('getActive', 'setActive', 'document', 'syncDefaultsSummary', 'syncDelivery', 'browsing', 'markVoiceRows',
+    `${cut('  function selectVoice(', '\n  }\n')}\nreturn selectVoice;`)(getActive, setActive, { querySelectorAll: () => [] }, () => {}, () => {}, 'cartesia', () => {});
+  selectVoice('browser', '', 'cartesia', 'Moira');
+  assert.deepEqual([stored.voiceId, stored.deviceVoice, stored.provider], ['browser', 'Moira', 'cartesia'], 'a free voice on this device: chosen, the service left alone');
+  selectVoice('browser');
+  assert.equal(stored.deviceVoice, '', "the free voice's own row: the best one here again");
   selectVoice('rachel', 'Rachel', 'elevenlabs');
   assert.deepEqual([stored.voiceId, stored.provider], ['rachel', 'elevenlabs'], 'saved under the service it was listed by');
   const asked = [], spokeOn = [];
@@ -862,6 +866,71 @@ console.log('\nthe mic waits for a longer pause:');
       assert.deepEqual(heard.filter((t) => !t.final).map((t) => t.text), ['hello', 'hello there', 'hello there and more']);
     });
   } finally { globalThis.window = was; }
+}
+
+// THE FREE VOICE, CHOSEN (2026-11-18; src/voice-pick.mjs). The rows are the
+// start of what Chrome lists on a Mac set to Spanish, read on the day, and its
+// English voices; then a premium Apple voice, Edge's and Google's names.
+{
+  const { pickVoice, rankVoices, voiceLabel, novelty } = await import('../src/voice-pick.mjs');
+  const row = (name, lang, extra = {}) => ({ name, lang, voiceURI: name, localService: true, default: false, ...extra });
+  const mac = [
+    row('Mónica', 'es-ES', { default: true }), row('Albert', 'en-US'), row('Alice', 'it-IT'), row('Alva', 'sv-SE'),
+    row('Amélie', 'fr-CA'), row('Anna', 'de-DE'), row('Bad News', 'en-US'), row('Bahh', 'en-US'), row('Bells', 'en-US'),
+    row('Boing', 'en-US'), row('Bubbles', 'en-US'), row('Buenas noticias', 'en-US'), row('Carmit', 'he-IL'),
+    row('Cellos', 'en-US'), row('Daniel', 'en-GB'), row('Daria', 'bg-BG'), row('Eddy (español (España))', 'es-ES'),
+    row('Eddy (inglés (Reino Unido))', 'en-GB'), row('Eddy (inglés (Estados Unidos))', 'en-US'),
+    row('Flo (inglés (Estados Unidos))', 'en-US'), row('Fred', 'en-US'), row('Grandma (inglés (Estados Unidos))', 'en-US'),
+    row('Jester', 'en-US'), row('Junior', 'en-US'), row('Karen', 'en-AU'), row('Kathy', 'en-US'), row('Moira', 'en-IE'),
+    row('Organ', 'en-US'), row('Ralph', 'en-US'), row('Rishi', 'en-IN'), row('Samantha', 'en-US'),
+    row('Superstar', 'en-US'), row('Tessa', 'en-ZA'), row('Trinoids', 'en-US'), row('Whisper', 'en-US'),
+    row('Wobble', 'en-US'), row('Zarvox', 'en-US'),
+  ];
+  console.log('\nthe free voice:');
+  await ok('on a Mac in Spanish the old pick read every reply in Daria, a Bulgarian voice; the new one is Samantha', () => {
+    const old = mac.find((v) => /samantha|google us english|jenny|aria/i.test(v.name));
+    assert.equal(old.name, 'Daria');
+    assert.equal(pickVoice(mac).name, 'Samantha');
+  });
+  await ok('the drawer offers English voices only, and never the singing or novelty ones', () => {
+    const r = rankVoices(mac).map((v) => v.name);
+    for (const no of ['Mónica', 'Daria', 'Alice', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Organ', 'Bad News', 'Buenas noticias',
+      'Albert', 'Jester', 'Superstar', 'Trinoids', 'Whisper', 'Wobble', 'Zarvox', 'Bahh']) assert.ok(!r.includes(no), no);
+    assert.ok(novelty({ name: 'Buenas noticias' }) && novelty({ name: 'Bells' }) && !novelty({ name: 'Samantha' }));
+    assert.deepEqual(r.slice(0, 2), ['Samantha', 'Daniel']);
+    assert.ok(r.indexOf('Fred') > r.indexOf('Tessa') && r.indexOf('Eddy (inglés (Estados Unidos))') > r.indexOf('Rishi'), 'dated voices last');
+  });
+  await ok('a premium or enhanced voice comes first; a voice the person chose wins while this device has it', () => {
+    const more = [...mac, row('Samantha (Enhanced)', 'en-US', { voiceURI: 'com.apple.voice.enhanced.en-US.Samantha' }),
+      row('Ava (Premium)', 'en-US', { voiceURI: 'com.apple.voice.premium.en-US.Ava' })];
+    assert.deepEqual(rankVoices(more).slice(0, 3).map((v) => v.name), ['Ava (Premium)', 'Samantha (Enhanced)', 'Samantha']);
+    assert.equal(pickVoice(more, { prefer: 'Moira' }).name, 'Moira');
+    assert.equal(pickVoice(more, { prefer: 'com.apple.voice.enhanced.en-US.Samantha' }).name, 'Samantha (Enhanced)');
+    assert.equal(pickVoice(mac, { prefer: 'a voice from another device' }).name, 'Samantha');
+  });
+  await ok("other browsers' names: Edge's natural voices first, Google's when it is all there is, null with no English", () => {
+    const edge = [row('Microsoft David - English (United States)', 'en-US'), row('Microsoft Maria - Portuguese (Brazil)', 'pt-BR'),
+      row('Microsoft Aria Online (Natural) - English (United States)', 'en-US', { localService: false })];
+    assert.equal(pickVoice(edge).name, 'Microsoft Aria Online (Natural) - English (United States)');
+    const chrome = [row('Google Deutsch', 'de-DE'), row('Google US English', 'en-US', { localService: false }), row('Google UK English Male', 'en-GB')];
+    assert.equal(pickVoice(chrome).name, 'Google US English');
+    assert.equal(pickVoice([row('Fred', 'en-US'), row('Eddy (English (US))', 'en-US')]).name, 'Fred');
+    assert.equal(pickVoice([row('Mónica', 'es-ES'), row('Daria', 'bg-BG')]), null);
+    assert.equal(pickVoice([]), null);
+  });
+  await ok('a row says the name without the language the device wrote into it, and what kind of voice it is', () => {
+    assert.deepEqual(voiceLabel(row('Flo (inglés (Reino Unido))', 'en-GB')), { name: 'Flo', lang: 'en-GB', kind: '', local: true });
+    assert.deepEqual(voiceLabel(row('Samantha (Enhanced)', 'en-US')), { name: 'Samantha', lang: 'en-US', kind: 'enhanced', local: true });
+    assert.equal(voiceLabel(row('Google US English', 'en-US', { localService: false })).local, false);
+  });
+  await ok('both browser paths in voice.js speak through the pick, as the voice\'s own language; Settings passes the chosen one', () => {
+    const src = readFileSync(join(ROOT, 'src', 'voice.js'), 'utf8');
+    assert.ok(!/samantha\|google us english\|jenny\|aria/.test(src), 'the old pattern is gone');
+    assert.equal((src.match(/freeVoice\(u, deviceVoice\);/g) || []).length, 2);
+    assert.ok(/u\.voice = pick; u\.lang = pick\.lang;/.test(src));
+    const set = readFileSync(join(ROOT, 'src', 'settings.js'), 'utf8');
+    assert.ok(/deviceVoice: a\.deviceVoice \|\| undefined/.test(set), 'speakWith carries it to every speaker');
+  });
 }
 
 console.log(`\n${passed} checks passed.`);
