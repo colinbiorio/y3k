@@ -569,7 +569,7 @@ try {
     await page.locator('#game-ships').click(); await sleep(250);
     const listed = await page.locator('#game-ship-list button').evaluateAll((els) => els.map((e) => [e.dataset.ship, e.disabled]));
     out.shipsListed = listed;
-    check('the ships list offers the five, the skiff and the dart made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart', listed);
+    check('the ships list offers the five, the skiff, the dart and the dhow made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff,dart,dhow', listed);
     await page.locator('#game-ship-list [data-ship="skiff"]').click(); await sleep(500);
     let r = await read();
     check('a skiff comes down in front of the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'skiff' && Math.hypot(r.world.ships[0].p[0] - r.p[0], r.world.ships[0].p[2] - r.p[2]) < 4, r.world.ships);
@@ -606,6 +606,22 @@ try {
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 4000);
     check('and off it again', !r.world.aboard && !r.world.seated, { aboard: r.world.aboard, seated: r.world.seated });
     check('its frames keep up, flying the dart', out.frames.dart.median < 20, out.frames.dart);
+    // the dhow: put beside, its helm taken from the water, sailed, stepped off
+    await page.locator('#game-ships').click(); await sleep(250);
+    await page.locator('#game-ship-list [data-ship="dhow"]').click(); await sleep(500);
+    r = await read();
+    check('a dhow comes down beside the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'dhow', r.world.ships);
+    await sleep(1500); await shot('07-dhow');
+    await key.press('KeyR'); await sleep(500); r = await read();
+    check('R takes its helm, high on the stern cabin', r.world.aboard === true && r.p[1] > 6, { aboard: r.world.aboard, p: r.p });
+    await key.down('KeyW'); await sleep(3500 * slow); r = await read();
+    check('W sails it, heavy, up to its speed', r.world.ships[0].speed > 12, r.world.ships[0]);
+    out.frames.dhow = await frames(2000);
+    await shot('08-dhow-sailing'); await key.up('KeyW');
+    await until((r) => r.world.ships[0].speed < 0.5, 9000);
+    await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 5000);
+    check('and off it again, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('its frames keep up, sailing the dhow', out.frames.dhow.median < 20, out.frames.dhow);
   }
 
   if (scene === 'pad') {

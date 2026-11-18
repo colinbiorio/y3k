@@ -11,7 +11,11 @@
 // the stern." The dart's: "a fast two-seat craft about eleven metres long,
 // shaped like a spearpoint: a narrow bronze hull with fine engraved lines, a
 // long clear canopy over two seats in tandem, short swept wings of pale alloy,
-// two slim plasma engines."
+// two slim plasma engines." The dhow's: "a cargo ship about twenty-eight
+// metres long: a wide rounded belly of timber ribs and ceramic plating, a
+// raised stern cabin with round windows, two tall folding sails of golden
+// solar foil rigged like a lateen sailing boat, a ring of plasma engines under
+// the stern."
 //
 // A ship's frame is a body's: its front is +Z, its left +X, and its yaw is
 // atan2(x, z) of the way it points. Flown, it turns toward where the eye looks;
@@ -22,7 +26,7 @@
 // (a building, a hill) stops it.
 
 export const SHIPS = [
-  { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: true }, { kind: 'dhow', label: 'dhow', ready: false },
+  { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: true }, { kind: 'dhow', label: 'dhow', ready: true },
   { kind: 'ark', label: 'ark', ready: false }, { kind: 'carrier', label: 'carrier', ready: false },
 ];
 export const SKIFF = {
@@ -36,6 +40,7 @@ export const SKIFF = {
   put: [0, 3.4],                    // m: where it is put from the body: to its left, and ahead
   edges: [[1.3, -0.18, -0.95], [-1.3, -0.18, -0.95]],   // what else of it meets what is solid (its outriggers' tips)
   view: 8.5,                        // m: the eye stands at least this far back aboard
+  reach: 2.5,                       // m: how far above or below its seat a body may be and still take it
 };
 export const DART = {
   length: 11.0, beam: 1.3,
@@ -46,9 +51,19 @@ export const DART = {
   accel: 30, turn: 2.0,
   board: 3.6, put: [2.6, -1.3],     // beside the body, its cockpit at the body's shoulder
   edges: [[2.95, 0.08, -3.7], [-2.95, 0.08, -3.7]],   // its wingtips
-  view: 13,
+  view: 13, reach: 2.5,
 };
-export const KIND = { skiff: SKIFF, dart: DART };
+export const DHOW = {
+  length: 28, beam: 7,
+  keel: 1.8, hover: 3.0,
+  seat: [0, 4.75, -8.2],            // the helm: on the stern cabin's roof, at its front, looking over the deck and the sails
+  speed: 20, boost: 38, back: 0.25, slide: 3, climb: 4,
+  accel: 6, turn: 0.8,              // heavy: slow to come up to speed, slow to turn
+  board: 9, reach: 8.5, put: [8.5, 8], // beside the body, its stern alongside; boarded from the water, up to the helm
+  edges: [[3.4, 0.5, 0], [-3.4, 0.5, 0], [0, 15.5, 3], [0, 10.5, -4.5], [0, 2.8, 13.6], [0, 3, -13.8]],   // its sides, mastheads, prow, stern
+  view: 34,
+};
+export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW };
 const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -109,7 +124,7 @@ export function nearShip(ships, p) {
   let best = null, bd = Infinity;
   for (const s of ships) {
     const q = seatAt(s), d = Math.hypot(q[0] - p[0], q[2] - p[2]);
-    if (d < kindOf(s).board && d < bd && Math.abs(q[1] - p[1]) < 2.5) { bd = d; best = s; }
+    if (d < kindOf(s).board && d < bd && Math.abs(q[1] - p[1]) < kindOf(s).reach) { bd = d; best = s; }
   }
   return best;
 }
