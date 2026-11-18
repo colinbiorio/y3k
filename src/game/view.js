@@ -50,8 +50,9 @@ import { createHouseArt } from './buildings/house.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
-import { SHIPS, placeShip, stepShip, nearShip, board, carry, leave } from './ships.js';
+import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, leave } from './ships.js';
 import { createSkiffArt } from './ships/skiff.js';
+import { createDartArt } from './ships/dart.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -317,7 +318,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
     if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
     K.world.ships = [placeShip(K.body, floorAt, kind)];
-    say(`a ${kind} comes down in front of you · ${actKey('board')} boards it`, 5);
+    say(`a ${kind} comes down ${kind === 'dart' ? 'beside' : 'in front of'} you · ${actKey('board')} boards it`, 5);
   }
   function boardOrLeave() {
     if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
@@ -327,19 +328,20 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
   }
   // the ships drawn, and those let be coasting to a stop
+  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt };
   let shipWake = 0, nearSaid = null;
   function ships(dt) {
     const V = K.void, seen = new Set();
     for (const sh of K.world.ships) {
       let art = K.shipArts.get(sh);
-      if (!art) { art = createSkiffArt({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
+      if (!art) { art = (SHIP_ARTS[sh.kind] || createSkiffArt)({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
       seen.add(sh);
       if (sh !== K.aboard) stepShip(sh, { move: [0, 0], yaw: sh.yaw - Math.PI, pitch: 0 }, dt, { floorAt, solid: (q) => K.world.solid(q) });
-      art.update(sh, { t: K.clock, dt });
+      art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard });
       // low and quick over the water, it drags a wake from its stern
       const v = Math.hypot(sh.v[0], sh.v[2]), lowOver = sh.p[1] - floorAt(sh.p[0], sh.p[2]);
       if (sh === K.aboard && v > 4 && lowOver < 2.4 && (shipWake -= dt) <= 0) {
-        const bx = sh.p[0] - Math.sin(sh.yaw) * 2.6, bz = sh.p[2] - Math.cos(sh.yaw) * 2.6;
+        const back = SHIP_KIND[sh.kind].length / 2 + 0.1, bx = sh.p[0] - Math.sin(sh.yaw) * back, bz = sh.p[2] - Math.cos(sh.yaw) * back;
         if (K.world.wet(bx, bz)) V.drop(bx, bz, Math.min(0.5, 0.12 + v * 0.012) * (1 - lowOver / 2.6));
         shipWake = 0.05;
       }
@@ -514,7 +516,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     else { const kh = ease(16, dt), kv = ease(10, dt); eye.at.x += (tx - eye.at.x) * kh; eye.at.z += (tz - eye.at.z) * kh; eye.at.y += (ty - eye.at.y) * kv; }
     const sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
     const along = (p) => { const c = Math.cos(p); return [-sy * c, Math.sin(p), -cy * c]; };
-    const zoomNow = K.aboard ? Math.max(st.zoom, 8.5) : st.zoom;          // aboard, the eye stands back enough for the ship
+    const zoomNow = K.aboard ? Math.max(st.zoom, SHIP_KIND[K.aboard.kind].view) : st.zoom;          // aboard, the eye stands back enough for the ship
     let d = zoomNow + ((stand ? stand.d : zoomNow) - zoomNow) * u;
     // running along a wall on the eye's right, the eye stands off the body's other shoulder (the wall would bring it in close)
     const onWall = body.wallrun, flip = onWall && onWall.n[0] * cy - onWall.n[1] * sy < 0 ? -1 : 1;

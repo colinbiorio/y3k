@@ -1,6 +1,6 @@
 // ships.js — THE SHIPS, AS NUMBERS: where one is put, how it flies under the
 // hands, where its pilot sits, how a body gets aboard and off. No page, no
-// three (the suite runs it); ships/skiff.js draws the first of them.
+// three (the suite runs it); ships/ draws them (skiff.js, dart.js).
 //
 // GAME.md, stage 4: "The five ships: a skiff, a dart, a dhow, an ark, a
 // carrier. From one seat to a carrier. Boarded and flown in the void, so they
@@ -8,7 +8,10 @@
 // craft about five metres long, shaped like a slim reed canoe: a white glazed
 // ceramic hull with bronze ribs, an open seat behind a low glass windscreen,
 // two small outrigger fins on thin struts, one glowing plasma ring engine at
-// the stern."
+// the stern." The dart's: "a fast two-seat craft about eleven metres long,
+// shaped like a spearpoint: a narrow bronze hull with fine engraved lines, a
+// long clear canopy over two seats in tandem, short swept wings of pale alloy,
+// two slim plasma engines."
 //
 // A ship's frame is a body's: its front is +Z, its left +X, and its yaw is
 // atan2(x, z) of the way it points. Flown, it turns toward where the eye looks;
@@ -19,7 +22,7 @@
 // (a building, a hill) stops it.
 
 export const SHIPS = [
-  { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: false }, { kind: 'dhow', label: 'dhow', ready: false },
+  { kind: 'skiff', label: 'skiff', ready: true }, { kind: 'dart', label: 'dart', ready: true }, { kind: 'dhow', label: 'dhow', ready: false },
   { kind: 'ark', label: 'ark', ready: false }, { kind: 'carrier', label: 'carrier', ready: false },
 ];
 export const SKIFF = {
@@ -30,9 +33,23 @@ export const SKIFF = {
   speed: 24, boost: 46, back: 0.4, slide: 8, climb: 9,
   accel: 18, turn: 2.6,             // m/s/s toward the speed asked; rad/s toward the eye's way
   board: 3.2,                       // m: within this of its seat, the board key takes it (it comes down in reach)
-  put: 3.4,                         // m: how far in front of the body it is put
+  put: [0, 3.4],                    // m: where it is put from the body: to its left, and ahead
+  edges: [[1.3, -0.18, -0.95], [-1.3, -0.18, -0.95]],   // what else of it meets what is solid (its outriggers' tips)
+  view: 8.5,                        // m: the eye stands at least this far back aboard
 };
-const S = SKIFF;
+export const DART = {
+  length: 11.0, beam: 1.3,
+  keel: 0.55, hover: 1.4,
+  seat: [0, -0.25, 1.7],            // the front seat of the two (the pilot's), low under the canopy; the other behind it
+  rear: [0, -0.25, 0.35],
+  speed: 42, boost: 96, back: 0.3, slide: 10, climb: 14,
+  accel: 30, turn: 2.0,
+  board: 3.6, put: [2.6, -1.3],     // beside the body, its cockpit at the body's shoulder
+  edges: [[2.95, 0.08, -3.7], [-2.95, 0.08, -3.7]],   // its wingtips
+  view: 13,
+};
+export const KIND = { skiff: SKIFF, dart: DART };
+const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
 export const cleanShip = (k) => (SHIPS.some((s) => s.kind === k && s.ready) ? k : 'skiff');
@@ -41,17 +58,19 @@ export const cleanShip = (k) => (SHIPS.some((s) => s.kind === k && s.ready) ? k 
 export const ahead = (s) => [Math.sin(s.yaw), 0, Math.cos(s.yaw)];
 export const leftOf = (s) => [Math.cos(s.yaw), 0, -Math.sin(s.yaw)];
 export function shipPoint(s, [x, y, z]) { const c = Math.cos(s.yaw), n = Math.sin(s.yaw); return [s.p[0] + c * x + n * z, s.p[1] + y, s.p[2] - n * x + c * z]; }
-export const seatAt = (s) => shipPoint(s, S.seat);
+export const seatAt = (s) => shipPoint(s, kindOf(s).seat);
 
-// put in front of the body, pointing the way it faces, riding at its hover over what is under it
+// put by the body (its seat in reach), pointing the way it faces, riding at its hover over what is under it
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
-  const x = body.p[0] + Math.sin(body.yaw) * S.put, z = body.p[2] + Math.cos(body.yaw) * S.put;
-  return { kind: cleanShip(kind), p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, bank: 0, tilt: 0, thrust: 0, t: 0 };
+  const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
+  const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side;
+  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, bank: 0, tilt: 0, thrust: 0, t: 0 };
 }
 
 // One step of a ship under the hands (inp: move [right, forward], yaw and pitch of the eye, up, down, sprint), over a
 // floor (floorAt(x, z): the water's or the ground's height there) and against what is solid (solid([x, y, z])).
 export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } = {}) {
+  const S = kindOf(s);
   s.t += dt;
   const was = s.yaw;
   // its heading turns toward where the eye looks (the eye looks along −Z at its yaw 0: the way a body faces is that plus π)
@@ -65,11 +84,15 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const target = [f[0] * cp * mz * top - l[0] * mx * S.slide, sp * mz * top + lift, f[2] * cp * mz * top - l[2] * mx * S.slide];
   const a = S.accel * dt * (inp.sprint ? 1.6 : 1);
   for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], a);
-  const next = [s.p[0] + s.v[0] * dt, s.p[1] + s.v[1] * dt, s.p[2] + s.v[2] * dt];
-  // what is solid stops it: its middle, its bow and stern, its outriggers' tips
-  const at = { p: next, yaw: s.yaw }, h = S.length * 0.48;
-  if ([[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], [1.3, -0.18, -0.95], [-1.3, -0.18, -0.95]].some((q) => solid(shipPoint(at, q)))) { for (let i = 0; i < 3; i++) s.v[i] *= -0.2; }
-  else s.p = next;
+  // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), looked at every fifth of a
+  // metre of its way, so a quick ship does not pass through a thin wall between two steps
+  const h = S.length * 0.48, pts = [[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], ...S.edges];
+  const n = Math.max(1, Math.ceil((Math.hypot(s.v[0], s.v[1], s.v[2]) * dt) / 0.2)), from = [...s.p];
+  for (let i = 1; i <= n; i++) {
+    const at = { p: [from[0] + (s.v[0] * dt * i) / n, from[1] + (s.v[1] * dt * i) / n, from[2] + (s.v[2] * dt * i) / n], yaw: s.yaw };
+    if (pts.some((q) => solid(shipPoint(at, q)))) { for (let k = 0; k < 3; k++) s.v[k] *= -0.2; break; }
+    s.p = at.p;
+  }
   // never lower than its keel over the water or the ground
   const low = floorAt(s.p[0], s.p[2]) + S.keel;
   if (s.p[1] < low) { s.p[1] = low; if (s.v[1] < 0) s.v[1] = 0; }
@@ -83,10 +106,10 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
 
 // the nearest ship whose seat a body is near enough to take (on its way to it, not far below or above it)
 export function nearShip(ships, p) {
-  let best = null, bd = S.board;
+  let best = null, bd = Infinity;
   for (const s of ships) {
     const q = seatAt(s), d = Math.hypot(q[0] - p[0], q[2] - p[2]);
-    if (d < bd && Math.abs(q[1] - p[1]) < 2.5) { bd = d; best = s; }
+    if (d < kindOf(s).board && d < bd && Math.abs(q[1] - p[1]) < 2.5) { bd = d; best = s; }
   }
   return best;
 }
