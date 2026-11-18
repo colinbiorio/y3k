@@ -23,13 +23,18 @@
 // pulled back as far as it is drawn, an arrow of plasma on it. Arrows are long
 // thin streaks of the ring's light.
 //
+// The bell: a hand bell of bronze hanging at the right shoulder, mouth down, a
+// clapper of plasma in it; as its tone builds it shivers and the water round
+// the body ripples in rings; struck, it swings, and a ring of its tone goes out
+// over the water, wider and fainter, the water ringing under it as it passes.
+//
 // The binding: a thread of warm gold light from the left hand to what it holds,
 // waving a little, its pulses running in toward the hand; a halo round the bot
 // it holds, which struggles in it; with nothing to take, the thread goes out
 // along the eye's line and comes back. A bot it throws spins as it flies; two it
 // joins go up in a flash of gold.
 import * as THREE from 'three';
-import { LEVELS, RING, BOW, BINDING, leftHandOf } from './combat.js';
+import { LEVELS, RING, BOW, BELL, BINDING, leftHandOf } from './combat.js';
 import { WATER } from './body.js';
 
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
@@ -97,6 +102,22 @@ export function createFightArt(scene, { lite = false } = {}) {
       }`,
   })));
   ring.add(skin);
+  // ---- the bell: turned from its profile (crown to lip), a knob to hang by, a clapper of plasma; and the rings of its tone
+  const bell = add(new THREE.Group()); bell.visible = false;
+  const bellBody = new THREE.Group(); bell.add(bellBody);
+  bellBody.add(new THREE.Mesh(geo(new THREE.LatheGeometry([[0.001, 0.2], [0.05, 0.195], [0.085, 0.16], [0.095, 0.09], [0.11, 0.0], [0.15, -0.09], [0.185, -0.14], [0.18, -0.15], [0.14, -0.1], [0.1, -0.01], [0.08, 0.08], [0.06, 0.15], [0.001, 0.17]].map(([r, y]) => new THREE.Vector2(r, y)), 36)), mat(new THREE.MeshStandardMaterial({ color: BRONZE, metalness: 1, roughness: 0.28, envMapIntensity: 1.2, side: THREE.DoubleSide }))));
+  { const k = new THREE.Mesh(geo(new THREE.TorusGeometry(0.035, 0.012, 8, 20)), metal); k.position.y = 0.23; bellBody.add(k); }
+  const clapperMat = mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone().multiplyScalar(1.3) }));
+  const clapper = new THREE.Mesh(geo(new THREE.SphereGeometry(0.035, 12, 10)), clapperMat); clapper.position.y = -0.1; bellBody.add(clapper);
+  const bellGlowMat = mat(new THREE.SpriteMaterial({ map: tex, color: PLASMA.clone().multiplyScalar(0.5), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.4 }));
+  const bellGlow = new THREE.Sprite(bellGlowMat); bellGlow.position.y = -0.1; bellGlow.scale.setScalar(0.3); bellBody.add(bellGlow);
+  const TONES = 8, toneGeo = geo(new THREE.RingGeometry(0.9, 1.0, 72)), toneMeshes = [];
+  toneGeo.rotateX(-Math.PI / 2);
+  for (let i = 0; i < TONES; i++) {
+    const m = add(new THREE.Mesh(toneGeo, mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0 }))));
+    m.visible = false; m.frustumCulled = false; toneMeshes.push(m);
+  }
+  let swing = 0, swingV = 0, shiver = 0;
   // ---- the bow: its limbs and grip in bronze; its string (two strands, to the nock) and the arrow on it in plasma
   const bow = add(new THREE.Group()); bow.visible = false;
   const LIMB = 0.62, limb = (t) => [-0.13 * Math.sin(Math.PI * t * 0.85) + 0.07 * Math.max(0, (t - 0.78) / 0.22) ** 2, LIMB * t];
@@ -255,7 +276,7 @@ export function createFightArt(scene, { lite = false } = {}) {
     unmake(d);
   }
 
-  let held = 0, guardAmt = 0, drawAmt = 0;
+  let held = 0, guardAmt = 0, drawAmt = 0, bellDrop = 0;
   const q = new THREE.Quaternion(), e = new THREE.Euler(), up = new THREE.Vector3(0, 1, 0);
   return {
     root,
@@ -271,6 +292,8 @@ export function createFightArt(scene, { lite = false } = {}) {
         else if (ev.type === 'splash') { drop(at[0], at[2], ev.size || 0.15); burst([at[0], WATER + 0.02, at[2]], new THREE.Color(0.7, 0.85, 1), 6, 2.5, 2.5); }
         else if (ev.type === 'spawn') drop(at[0], at[2], 0.3);
         else if (ev.type === 'bind') burst(at, GOLD, 18, 4, 1);
+        else if (ev.type === 'toll') { swingV += 9 + 9 * (ev.power || 0); burst([at[0], at[1], at[2]], PLASMA, 8 + 20 * (ev.power || 0), 3, 1); }
+        else if (ev.type === 'stun') burst(at, PLASMA, 10, 2, 1);
         else if (ev.type === 'fling') burst(at, GOLD, 14, 5, 1);
         else if (ev.type === 'join') { burst(at, GOLD, 46, 10, 3); burst(at, new THREE.Color(1, 0.97, 0.9), 20, 6, 2); }
         else if (ev.type === 'bind-miss') burst(at, GOLD, 6, 2, 0.5);
@@ -298,9 +321,38 @@ export function createFightArt(scene, { lite = false } = {}) {
         // held: upright beside the shoulder, its face half to the side and half back toward the eye, turning about its own middle
         q.setFromAxisAngle(up, body.yaw + Math.PI / 2 + 0.85); ring.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(Z, R.spin * 0.6));
       }
+      // ---- the bell, when it is in hand: hanging at the shoulder, mouth down; it shivers as its tone builds, swings when struck
+      const bellIn = c.weapon === 'bell', Bl = c.bell;
+      bell.visible = bellIn && guardAmt < 0.5 && !fallen;
+      if (bell.visible) {
+        const ringing = Bl.mode === 'ringing';
+        swingV += -swing * 60 * dt - swingV * 5 * dt; swing += swingV * dt;
+        shiver += ((ringing ? 0.2 + 0.8 * Bl.power : 0) - shiver) * (1 - Math.exp(-12 * dt));
+        bell.position.set(R.p[0], R.p[1] + 0.05, R.p[2]);
+        q.setFromAxisAngle(up, body.yaw); bell.quaternion.copy(q);
+        bellBody.rotation.set(swing * 0.35 + Math.sin(time.value * 61) * 0.05 * shiver, 0, Math.sin(time.value * 47) * 0.05 * shiver);
+        clapper.position.z = Math.sin(swing) * 0.05;
+        bellGlowMat.opacity = 0.3 + 0.7 * shiver; bellGlow.scale.setScalar(0.25 + 0.5 * shiver);
+        // as the tone builds, the water round the body ripples in rings
+        if (ringing && (bellDrop -= dt) <= 0) {
+          bellDrop = 0.13; const rr = 1.1 + 1.4 * Bl.power;
+          for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2 + time.value; dropFn?.(body.p[0] + Math.cos(a) * rr, body.p[2] + Math.sin(a) * rr, 0.03 + 0.05 * Bl.power); }
+        }
+      }
+      // the tones going out: rings over the water, wider and fainter, the water ringing under them as they pass
+      for (let i = 0; i < TONES; i++) {
+        const T = c.tones[i], m = toneMeshes[i];
+        m.visible = !!T;
+        if (!T) continue;
+        const u = T.r / T.R;
+        m.position.set(T.at[0], T.at[1], T.at[2]); m.scale.setScalar(Math.max(0.05, T.r));
+        m.material.opacity = (1 - u) * (0.45 + 0.4 * T.power);
+        const band = Math.floor(T.r / 1.6);
+        if (band !== T.drawn) { T.drawn = band; for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + band; dropFn?.(T.at[0] + Math.cos(a) * T.r, T.at[2] + Math.sin(a) * T.r, 0.05 * (1 - u)); } }
+      }
       // ---- the bow, when it is in hand (the ring comes back for the guard, and while it is still coming home)
       const bowIn = c.weapon === 'bow', W = c.bow;
-      ring.visible = glow.visible = !bowIn || flying || guardAmt > 0.02;
+      ring.visible = glow.visible = (!bowIn && !bellIn) || flying || guardAmt > 0.02;
       bow.visible = bowIn && guardAmt < 0.5 && !fallen;
       if (bow.visible) {
         const hand = R.p, drawing = W.mode === 'drawing';

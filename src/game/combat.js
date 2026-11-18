@@ -41,6 +41,21 @@
 //     the body up: it comes down slowly.
 //   The guard is the ring's: it comes to it, whichever is in hand.
 //
+// THE BELL, the third of the five (stage 5): a hand bell of bronze with a clapper
+// of plasma, held by the binding. Its tone goes out as a ring over the water
+// (the cymatic patterns of the frequencies room, made a weapon): what hovers in
+// its way as it passes is struck once and pushed out. A wall between stops it.
+//
+//   · STRIKE (the attack, a tap): a ring of its tone out to BELL.strike.radius.
+//   · TOLL (the attack held, then let go): held, the tone builds (the water
+//     shivers in rings round the body); let go, a great toll goes out further,
+//     strikes harder and, tolled all the way, stuns: a bot struck neither moves
+//     of itself nor shoots for a moment.
+//   · PEAL (the whirl's key): three quick rings, one after another.
+//   · RUNG IN THE AIR: the tone goes down, and rings out over the water from
+//     under the body.
+//   The guard is the ring's.
+//
 // THE BINDING (stage 5): the force. GAME.md: "The force is the binding. It
 // comes from Colin's own theory, love as what binds: it pulls, holds, joins and
 // lets go." Held (its own key), it reaches out along the eye's line to the bot
@@ -91,10 +106,21 @@ export const BOW = {
   assist: 0.12,                             // rad: a bot this near the eye's line is what an arrow goes for
   life: 2.2,                                // s an arrow flies
 };
+export const BELL = {
+  strike: { radius: 9, speed: 20, damage: 22, knock: 7 },
+  toll: { radius: 16, speed: 24, damage: 70, knock: 12, stun: 2.0 },
+  hold: 1.0,                                // s held to toll it all the way
+  tap: 0.16,                                // s: held less than this, it is a strike
+  cool: 0.45,                               // s before it is struck again
+  peal: { n: 3, gap: 0.18, radius: 7, speed: 20, damage: 14, knock: 5, cool: 1.4 },
+  below: { radius: 7, speed: 20, damage: 40, knock: 10 },
+  band: 0.5,                                // m: how thick the ring of its tone is, beside what it meets
+  height: 3.5,                              // m: it strikes what hovers within this of where it rings
+};
 // the five plasma weapons (GAME.md's order), those made ready; the one in hand is kept between visits (state.js)
 export const WEAPONS = [
   { id: 'thread', label: 'thread', ready: false }, { id: 'bow', label: 'bow', ready: true }, { id: 'ring', label: 'ring', ready: true },
-  { id: 'bell', label: 'bell', ready: false }, { id: 'torch', label: 'torch', ready: false },
+  { id: 'bell', label: 'bell', ready: true }, { id: 'torch', label: 'torch', ready: false },
 ];
 export const cleanWeapon = (w) => (WEAPONS.some((x) => x.id === w && x.ready) ? w : 'ring');
 export const nextWeapon = (w) => { const R = WEAPONS.filter((x) => x.ready).map((x) => x.id), i = R.indexOf(w); return R[(i + 1) % R.length]; };
@@ -177,7 +203,7 @@ export function createCombat({ seed = 7 } = {}) {
     face: 0, faceYaw: 0,                    // how long the body is to keep facing where the eye looks (after a cast), and that way
     queue: null,                            // an attack pressed while the ring was away: it waits for the ring's return (briefly)
     bind: { mode: 'idle', target: null, t: 0, rest: 0, miss: 0, missDir: [0, 0, 1], joined: 0 },
-    weapon: 'ring', bow: { mode: 'held', held: 0, draw: 0, cool: 0 },
+    weapon: 'ring', bow: { mode: 'held', held: 0, draw: 0, cool: 0 }, bell: { mode: 'held', held: 0, power: 0, cool: 0, peal: 0, pealT: 0, rang: 0 }, tones: [],
     bots: [], bolts: [], level: 1, broken: 0, turned: 0, ids: 1, rand: rng(seed), events: [],
     player: { hp: PLAYER.hp, hurt: 99, mercy: 0, down: 0 },
   };
@@ -278,7 +304,7 @@ export function chooseWeapon(c, id) {
   const w = id;
   if (R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   if (R.mode === 'charging' || R.mode === 'whirl') { R.mode = 'held'; R.charge = 0; }
-  c.queue = null; c.bow.mode = 'held'; c.bow.held = 0; c.bow.draw = 0;
+  c.queue = null; c.bow.mode = 'held'; c.bow.held = 0; c.bow.draw = 0; c.bell.mode = 'held'; c.bell.held = 0; c.bell.power = 0; c.bell.peal = 0;
   c.weapon = w; c.events.push({ type: 'weapon', id: w });
   return true;
 }
@@ -321,6 +347,18 @@ function volley(c, hand, aim) {
   c.events.push({ type: 'volley', at: [...hand], n: V.n });
 }
 
+// whether a wall stands between two points (looked at every fifth of a metre, so a thin one is not missed)
+function walled(world, a, b) {
+  const d = len(sub(b, a)), n = Math.ceil(d / 0.2);
+  for (let i = 1; i < n; i++) { const u = i / n; if (world.solid([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u])) return true; }
+  return false;
+}
+// a ring of the bell's tone, from where it rings (on the water under the body, at the height of what it would strike)
+function ring(c, at, T, power = 0, stun = 0) {
+  c.tones.push({ at: [...at], r: 0.3, R: T.radius, speed: T.speed, damage: T.damage, knock: T.knock, stun, power, struck: new Set() });
+  c.events.push({ type: 'toll', at: [...at], radius: T.radius, power });
+}
+
 function cast(c, hand, aim, power) {
   const R = c.ring, A = RING.cast, B = RING.charged;
   R.mode = 'out'; R.p = [...hand]; R.went = 0; R.struck = new Set(); R.charge = 0;
@@ -355,7 +393,26 @@ export function stepCombat(c, dt, ctx) {
   const airborne = !body.grounded && !body.flying && !body.climbing && body.p[1] - (body.floorY ?? 0) > RING.slam.min;
   const W = c.bow;
   W.cool = Math.max(0, W.cool - dt);
-  if (able && c.weapon === 'bow') {
+  const Bl = c.bell;
+  Bl.cool = Math.max(0, Bl.cool - dt);
+  if (able && c.weapon === 'bell') {
+    // ---- the bell: pressed, its tone builds; let go, it is struck (a tap) or tolled; the whirl's key, a peal; in the air,
+    // it rings out from below
+    const here = [body.p[0], body.p[1] + 1.1, body.p[2]];
+    if (hands.attackPressed && Bl.mode === 'held' && Bl.cool <= 0) { Bl.mode = 'ringing'; Bl.held = 0; Bl.power = 0; }
+    if (Bl.mode === 'ringing') {
+      Bl.held += dt;
+      if (Bl.held > BELL.tap) Bl.power = Math.min(1, (Bl.held - BELL.tap) / BELL.hold);
+      if (!hands.attack) {
+        const p = Bl.held > BELL.tap ? Bl.power : 0, S = BELL.strike, T = BELL.toll;
+        if (airborne) ring(c, [body.p[0], (body.floorY ?? 0) + 0.8, body.p[2]], BELL.below, p);
+        else ring(c, here, { radius: lerp(S.radius, T.radius, p), speed: lerp(S.speed, T.speed, p), damage: Math.round(lerp(S.damage, T.damage, p)), knock: lerp(S.knock, T.knock, p) }, p, p >= 0.99 ? T.stun : 0);
+        Bl.mode = 'held'; Bl.held = 0; Bl.power = 0; Bl.cool = BELL.cool; Bl.rang++;
+      }
+    }
+    if (hands.sweep && Bl.mode === 'held' && Bl.cool <= 0 && Bl.peal <= 0) { Bl.peal = BELL.peal.n; Bl.pealT = 0; Bl.cool = BELL.peal.cool; }
+    if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
+  } else if (able && c.weapon === 'bow') {
     // ---- the bow: pressed, it is drawn; let go, it looses (a tap, a plain arrow; held, a harder one); the whirl's key, a volley
     if (hands.attackPressed && W.mode === 'held' && W.cool <= 0) { W.mode = 'drawing'; W.held = 0; W.draw = 0; c.events.push({ type: 'nock', at: [...hand] }); }
     if (W.mode === 'drawing') {
@@ -400,6 +457,9 @@ export function stepCombat(c, dt, ctx) {
     if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   } else if (R.mode === 'charging' || R.mode === 'whirl' || R.mode === 'slam') R.mode = 'held';
   if (!able || c.weapon !== 'bow') { W.mode = 'held'; W.held = 0; W.draw = 0; }
+  if (!able || c.weapon !== 'bell') { Bl.mode = 'held'; Bl.held = 0; Bl.power = 0; Bl.peal = 0; }
+  // a peal: its rings one after another
+  if (Bl.peal > 0) { Bl.pealT -= dt; if (Bl.pealT <= 0) { ring(c, [body.p[0], body.p[1] + 1.1, body.p[2]], BELL.peal); Bl.peal--; Bl.pealT = BELL.peal.gap; } }
   // ---- the binding: pressed, it takes what the eye looks at; held, it holds it; let go, it throws it
   const Bn = c.bind;
   Bn.rest = Math.max(0, Bn.rest - dt); Bn.miss = Math.max(0, Bn.miss - dt);
@@ -429,7 +489,7 @@ export function stepCombat(c, dt, ctx) {
   if (guardUp && !c.guard.up) { c.guard.t = 0; c.events.push({ type: 'guard', at: [...hand] }); }
   c.guard.up = guardUp; c.guard.t += dt;
   if (guardUp || Bn.mode === 'hold') { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
-  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
+  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bl.mode === 'ringing' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
 
   // ---- in steps
   const n = Math.max(1, Math.ceil(dt / STEP - 1e-9)), h = dt / n;
@@ -498,7 +558,7 @@ function step(c, h, body, aim, aimYaw, world, creative) {
   const target = chest(body), live = c.bots.filter((b) => b.mode !== 'broken');
   for (const b of live) {
     const L = b.L;
-    b.t += h; b.hitT = Math.max(0, b.hitT - h);
+    b.t += h; b.hitT = Math.max(0, b.hitT - h); b.stunT = Math.max(0, (b.stunT || 0) - h);
     if (b.mode === 'rise') {
       const u = Math.min(1, b.t / RISE);
       const g0 = floorUnder(world, b.p[0], b.p[2]);
@@ -579,12 +639,13 @@ function step(c, h, body, aim, aimYaw, world, creative) {
       }
     }
     if (b.dodgeT > 0) { b.dodgeT -= h; want = [b.dodgeDir[0] * 13, want[1], b.dodgeDir[2] * 13]; }
+    if (b.stunT > 0) want = [0, want[1], 0];   // stunned by the toll: it only hovers
     const ease = 1 - Math.exp(-(b.dodgeT > 0 ? 18 : 4) * h);
     for (let j = 0; j < 3; j++) b.v[j] += (want[j] - b.v[j]) * ease;
     const next = [b.p[0] + b.v[0] * h, Math.max(floorUnder(world, b.p[0] + b.v[0] * h, b.p[2] + b.v[2] * h) + 0.6, b.p[1] + b.v[1] * h), b.p[2] + b.v[2] * h];
     if (world?.solid?.(next)) { b.v[0] *= -0.3; b.v[2] *= -0.3; } else b.p = next;
     // shooting: a burst every so often, each bolt at where the body will be when it gets there (as well as this level can)
-    if (P.down > 0 || dist > L.range[1] + 10) continue;
+    if (P.down > 0 || dist > L.range[1] + 10 || b.stunT > 0) continue;
     b.fire -= h;
     if (b.fire <= 0 && b.burst <= 0) { b.burst = L.burst; b.burstT = 0; b.fire = L.every * (0.8 + 0.4 * c.rand()); }
     if (b.burst > 0) {
@@ -600,6 +661,21 @@ function step(c, h, body, aim, aimYaw, world, creative) {
       }
     }
   }
+
+  // ---- the bell's tones: rings going out; each strikes once what hovers in its way as it passes (not behind a wall)
+  for (const T of c.tones) {
+    const was = T.r; T.r = Math.min(T.R, T.r + T.speed * h);
+    for (const b of c.bots) {
+      if (b.mode === 'broken' || b.mode === 'rise' || T.struck.has(b.id)) continue;
+      const d = Math.hypot(b.p[0] - T.at[0], b.p[2] - T.at[2]);
+      if (d < was - BELL.band - b.r || d > T.r + BELL.band + b.r || Math.abs(b.p[1] - T.at[1]) > BELL.height) continue;
+      if (world?.solid && walled(world, T.at, b.p)) { T.struck.add(b.id); continue; }
+      T.struck.add(b.id);
+      hit(c, b, Math.round(T.damage * (1 - 0.35 * Math.min(1, d / T.R))), T.at, T.stun ? 'toll' : 'bell', T.knock);
+      if (T.stun && b.mode !== 'broken') { b.stunT = T.stun; b.burst = 0; c.events.push({ type: 'stun', at: [...b.p], id: b.id }); }
+    }
+  }
+  c.tones = c.tones.filter((T) => T.r < T.R);
 
   // ---- the bolts
   const top = [body.p[0], body.p[1] + 1.55, body.p[2]], foot = [body.p[0], body.p[1] + 0.3, body.p[2]];
@@ -658,5 +734,5 @@ export function guardAt(body, yaw) { return [body.p[0] + Math.sin(yaw) * 0.75, b
 // the origin moved by (dx, dz) under the body (rings.js, rebase): the same places in new numbers
 export function shiftCombat(c, dx, dz) {
   const m = (p) => { p[0] -= dx; p[2] -= dz; };
-  m(c.ring.p); for (const b of c.bots) m(b.p); for (const x of c.bolts) m(x.p);
+  m(c.ring.p); for (const b of c.bots) m(b.p); for (const x of c.bolts) m(x.p); for (const T of c.tones) m(T.at);
 }

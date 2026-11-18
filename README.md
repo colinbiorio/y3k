@@ -263,6 +263,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (late morning) — **The third weapon: the bell**
+  (`src/game/combat.js` BELL; `fight.js`, `view.js`). A hand bell of bronze
+  with a clapper of plasma; its tone goes out as a ring over the water,
+  striking once what hovers in its way (a wall between stops it). A tap
+  strikes it (9 m); held, it tolls (16 m, up to 70, and tolled all the way it
+  stuns: no moving, no shooting, for two seconds); the whirl's key, a peal of
+  three; struck in the air, it rings out from the water below. Game suite 171
+  (three bell tests); the `fight` smoke chooses the bow and the bell from the
+  weapons list and tolls it (26 checks, 60 frames a second).
+
 - **2026-11-18** (morning, later) — **The second weapon: the bow; and the
   weapons list** (`src/game/combat.js` BOW, WEAPONS; `fight.js`, `input.js`,
   `state.js`, `view.js`). A recurve of bronze limbs strung with plasma, held

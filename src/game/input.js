@@ -33,7 +33,7 @@ export const ACTIONS = [
   { id: 'whirl', label: 'whirl', note: 'the ring twice round you' },
   { id: 'guard', label: 'guard', note: 'held: a shield; raised just as a bolt comes, it sends it back; with the ring out, it calls it home' },
   { id: 'bind', label: 'the binding', note: 'held: it pulls the bot you look at to you and holds it; let go, it is thrown where you look; thrown into another, the two are joined' },
-  { id: 'weapon', label: 'next weapon', note: 'the ring or the bow (three more to come); the bar\'s weapons list chooses too' },
+  { id: 'weapon', label: 'next weapon', note: 'the ring, the bow or the bell (two more to come); the bar\'s weapons list chooses too' },
   { id: 'spawn', label: 'a bot', note: 'another, at the level last chosen under bots' },
   { id: 'board', label: 'board', note: 'near a ship, take its seat; aboard, step off' },
   { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },

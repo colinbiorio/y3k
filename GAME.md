@@ -97,7 +97,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
 | "Optimize for web, but also offer a download option" | the web: so far, yes (measured below). A download: stage 6; the desktop window in `desktop/` already exists. |
 | "run this smoothly on my mac" | **measured** on an M2 MacBook Air: 16.7 ms a frame. |
-| "make up 5 different plasma weapons" | **two of five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air). T, or the bar's **weapons** list, changes the one in hand. The thread, the bell and the torch to come. |
+| "make up 5 different plasma weapons" | **three of five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air); **the bell**, four (strike, toll that stuns, peal, rung from below). T, or the bar's **weapons** list, changes the one in hand. The thread and the torch to come. |
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
 | "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
@@ -339,6 +339,26 @@ visits. Four ways:
   outward; drawn, it turns to where the eye looks, canted a little, its string
   pulled back as far as it is drawn, an arrow on it, a glow at the nock. Its
   arrows are long thin streaks of the ring's light.
+
+### The bell, the third weapon (18 November 2026)
+
+A hand bell of bronze with a clapper of plasma, held by the binding (`combat.js`
+BELL). Its tone goes out as a ring over the water, the frequencies room's
+cymatic rings made a weapon: what hovers in its way as it passes is struck once
+(less further off) and pushed out; a wall between stops it.
+
+- **Strike** (the attack, a tap): a ring of its tone out to 9 m, 22 at most.
+- **Toll** (held, then let go): as its tone builds for up to a second, the
+  water round the body ripples in rings and the body walks; let go, the toll
+  goes out to 16 m and strikes up to 70; tolled all the way it stuns: a bot
+  struck neither moves of itself nor shoots for two seconds.
+- **Peal** (the whirl's key): three quick rings one after another, 14 each.
+- **Rung in the air**: the tone goes down and rings out over the water from
+  under the body, striking what hovers low (40), not what is up beside it.
+- Drawn: it hangs at the right shoulder, mouth down, and shivers as its tone
+  builds; struck, it swings; its rings go out over the water, wider and
+  fainter, the water ringing under them as they pass. On a phone the buttons
+  read **strike** and **peal**.
 
 ### Stage 4: the ships (begun 17 November 2026)
 
@@ -912,7 +932,7 @@ of Earth from the same tiles.
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people. **The binding is
    begun** (above: pulls, holds, lets go, joins, on the bots); the ring and the
-   bow are made; the thread, the bell and the torch next.
+   bow and the bell are made; the thread and the torch next.
 6. **What survival is for**: things to find, make and keep. Full screen. A
    download.
 7. **The physical universe.** Earth from NASA's data, clean, with only what
@@ -951,8 +971,8 @@ suite runs them; those that draw are read as text and looked at.
 | `tower.js` | the tower as numbers: worked round its axis; the stair's ramp, its turns and rails, the landings, the gallery and the ledge, the dome, the eye, the sun through its windows and dome, how it goes up and comes down |
 | `hall.js` | the hall as numbers: the terraces, stairs and beds, the hangar and its arched mouth, the hall's walls, roof, columns and things, the eye, the sun through its glass band, door and mouth, how it goes up and comes down |
 | `solids.js` | a body (an upright cylinder) against boxes: floors, ceilings, walls; a ray out of a box |
-| `combat.js` | the fight as numbers: the ring's five ways, the bow's four, the weapons and changing them, the binding (pulls, holds, lets go, joins), the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
-| `fight.js` | the ring, its trail and shield, the bow, its string and arrows, the binding's thread and halo, the bots, bolts, sparks, debris and the slam's wave (draws) |
+| `combat.js` | the fight as numbers: the ring's five ways, the bow's four, the bell's four, the weapons and changing them, the binding (pulls, holds, lets go, joins), the bots' five levels and their minds, bolts, the body hurt and mended; swept tests in sixtieths of a second |
+| `fight.js` | the ring, its trail and shield, the bow, its string and arrows, the bell and its rings, the binding's thread and halo, the bots, bolts, sparks, debris and the slam's wave (draws) |
 | `island/ground.js` | the island's ground as numbers: the file read, the height on the drawn triangles, slopes, water, cliffs, the eye's line |
 | `island/island.js` | Lord Howe drawn: sky and sun, the land, the sea by its depth, haze; it stands where the void stands (draws) |
 | `island/map.js` | the island as an SVG for the map tab |
