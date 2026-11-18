@@ -50,6 +50,8 @@ import { createHouseArt } from './buildings/house.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
+import { SHIPS, placeShip, stepShip, nearShip, board, carry, leave } from './ships.js';
+import { createSkiffArt } from './ships/skiff.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -105,7 +107,7 @@ let kept = null;
 function stage(lite, st) {
   if (kept && (kept.renderer.getContext().isContextLost() || kept.lite !== lite)) {
     kept.figure.dispose(); kept.fight?.dispose(); kept.void.dispose(); kept.renderer.dispose(); kept.renderer.domElement.remove();
-    kept = { body: kept.body, worlds: kept.worlds, at: kept.at, island: kept.island, combat: kept.combat, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs };
+    kept = { body: kept.body, worlds: kept.worlds, at: kept.at, island: kept.island, combat: kept.combat, eye: kept.eye, clock: kept.clock, ms: kept.ms, learned: kept.learned, fine: kept.fine, rs: kept.rs, aboard: kept.aboard };
   }
   if (!kept?.renderer) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });       // edges smoothed, whatever else is plain
@@ -120,7 +122,7 @@ function stage(lite, st) {
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
     camera.layers.enable(1);            // the sky's dome is on layer 1: this eye sees it, the mirror's does not
     // the body begins with its back to the eye, looking where the eye looks
-    kept = { body: createBody({ yaw: Math.PI }), worlds: { void: createWorld(), island: createWorld() }, at: {}, combat: createCombat({ seed: (Math.random() * 1e9) | 0 }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), indoor: 1, fallen: 0, place: 'void' };
+    kept = { body: createBody({ yaw: Math.PI }), worlds: { void: createWorld(), island: createWorld() }, at: {}, combat: createCombat({ seed: (Math.random() * 1e9) | 0 }), eye: null, clock: 0, ms: 16.7, learned: 0, fine: createWatch(), rs: null, ...(kept || {}), renderer, lite, void: v, figure, camera, worn: worn(st), size: null, arts: new Map(), shipArts: new Map(), aboard: null, indoor: 1, fallen: 0, place: 'void' };
     kept.world = kept.worlds.void;
     // the ring and the bots, drawn in the void's scene (combat.js's numbers are kept in kept.combat)
     kept.fight = createFightArt(v.scene, { lite }); kept.fight.setDrop((x, z, a) => kept.void.drop(x, z, a));
@@ -149,8 +151,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // (the controls button and its key stay), until the page is opened again
   function hint() {
     if (chooser?.isOpen()) return '';                 // the body is what is looked at: nothing is said over its feet
-    if (touch || K.learned > LEARNED) return '';
     const b = input.bindings, k = (id) => keyLabel(b.keys[id][0] || b.keys[id][1]) || '—';
+    // aboard a ship, its own short line, as long as the body is in its seat
+    if (K.aboard && !touch) return input.device === 'pad' ? `left stick drives · ${padLabel(b.pad.jump) || '—'} rises · ${padLabel(b.pad.down) || '—'} sinks · ${padLabel(b.pad.board) || '—'} steps off`
+      : `${k('forward')} drives · it turns where you look · ${k('jump')} rises · ${k('down')} sinks · ${k('sprint')} faster · ${k('board')} steps off`;
+    if (touch || K.learned > LEARNED) return '';
     if (input.device === 'pad') return `left stick moves · ${padLabel(b.pad.jump) || '—'} jumps, held longer rises higher · ${padLabel(b.pad.dash) || '—'} dashes · ${padLabel(b.pad.menu) || '—'} for the controls`;
     return `${locked ? 'esc frees the pointer · ' : 'click to look around · '}${k('forward')} ${k('left')} ${k('back')} ${k('right')} move · ${k('jump')} jumps, held longer rises higher · ${k('dash')} dashes · ${k('menu')} for the controls`;
   }
@@ -202,6 +207,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
     K.arts.clear();
+    for (const art of K.shipArts.values()) art.dispose();
+    K.shipArts.clear();
     v.scene.add(made.group, K.hearth); made.setEnv(LIGHTS[v.light].env);
     K.void = v; K.figure = made; K.lite = true; K.worn = worn(st); K.size = null; standT = 0;
     K.fight = createFightArt(v.scene, { lite: true }); K.fight.setDrop((x, z, a) => K.void.drop(x, z, a));
@@ -219,7 +226,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     else if (r.did === 'steep') say(r.rises ? `the ground rises ${r.fall.toFixed(1)} m behind it here: face downhill, or find flatter ground` : `the ground falls ${r.fall.toFixed(1)} m under it here: find flatter ground to build`, 4);
   }
   function buildHere(kind = null) {
-    if (K.body.flying || !K.body.grounded || K.body.climbing) { say('stand on the ground to build'); return; }
+    if (K.aboard || K.body.flying || !K.body.grounded || K.body.climbing) { say(K.aboard ? 'step off the ship to build' : 'stand on the ground to build'); return; }
     if (kind) { st.building = kind; save(); said(K.world.build(K.body, kind)); }
     else said(K.world.toggle(K.body, st.building));
   }
@@ -228,7 +235,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const el = $('#game-build-list'), btn = $('#game-build'); if (!el || !btn) return;
     const open = show ?? el.hidden;
     if (open) {
-      listBots(false);
+      listBots(false); listShips(false);
       const near = K.world.near(K.body.p);
       el.innerHTML = (near ? `<button type="button" class="login-alt game-build-down" data-build="down">take down the ${near.kind}</button>` : '')
         + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? '' : '<small>to come</small>'}</button>`).join('');
@@ -251,8 +258,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       }
       if (!root) return;
       const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
+      if (K.aboard) { leave(K.aboard, K.body); K.aboard = null; }
       K.at[K.place] = { p: [...K.body.p], yaw: K.body.yaw };
       K.void.scene.remove(K.figure.group, K.hearth);
+      for (const art of K.shipArts.values()) art.dispose();
+      K.shipArts.clear();
       for (const art of K.arts.values()) art.dispose();
       K.arts.clear(); K.fight.dispose(); clearBots(K.combat); K.combat.bolts = []; K.combat.events.length = 0;
       K.void.dispose();
@@ -278,14 +288,68 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const el = $('#game-bot-list'), btn = $('#game-bots'); if (!el || !btn) return;
     const open = show ?? el.hidden;
     if (open) {
-      listBuilds(false);
+      listBuilds(false); listShips(false);
       const n = K.combat.bots.length;
       el.innerHTML = LEVELS.map((L, i) => `<button type="button" class="login-alt${i + 1 === st.level ? ' on' : ''}" data-bot="${i + 1}">${i + 1} · ${L.name}<small>${['easy', 'steady', 'quick', 'hard', 'fierce'][i]}</small></button>`).join('')
         + (n ? `<button type="button" class="login-alt game-build-down" data-bot="clear">clear them (${n})</button>` : '');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
-  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', spawn: 'bots' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
+  const actKey = (id) => (touch ? { attack: 'cast', whirl: 'whirl', guard: 'guard', spawn: 'bots', board: 'ships' }[id] : input.device === 'pad' ? padLabel(input.bindings.pad[id]) : keyLabel(input.bindings.keys[id][0] || input.bindings.keys[id][1])) || id;
+
+  // ---- the ships (stage 4). The bar's ships list: the five (those not made yet greyed); near one, a line to board it;
+  // aboard, one to step off; with one put, one to send it away. One ship is put at a time, in front of the body.
+  const floorAt = (x, z) => (K.world.ground ? Math.max(0, K.world.ground.height(x, z)) : 0);
+  function listShips(show) {
+    const el = $('#game-ship-list'), btn = $('#game-ships'); if (!el || !btn) return;
+    const open = show ?? el.hidden;
+    if (open) {
+      listBuilds(false); listBots(false);
+      const near = !K.aboard && nearShip(K.world.ships, K.body.p), any = K.world.ships[0];
+      el.innerHTML = (K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="leave">step off the ${K.aboard.kind}</button>` : '')
+        + (near ? `<button type="button" class="login-alt game-build-down" data-ship="board">board the ${near.kind}</button>` : '')
+        + SHIPS.map((sh) => `<button type="button" class="login-alt" data-ship="${sh.kind}"${sh.ready ? '' : ' disabled aria-disabled="true"'}>${sh.label}${sh.ready ? '' : '<small>to come</small>'}</button>`).join('')
+        + (any && !K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="away">send the ${any.kind} away</button>` : '');
+    }
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  }
+  function putShip(kind) {
+    if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
+    if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
+    K.world.ships = [placeShip(K.body, floorAt, kind)];
+    say(`a ${kind} comes down in front of you · ${actKey('board')} boards it`, 5);
+  }
+  function boardOrLeave() {
+    if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
+    const s = nearShip(K.world.ships, K.body.p);
+    if (!s) { if (K.world.ships.length) say(`walk to the ${K.world.ships[0].kind}'s seat to board it`, 3); return; }
+    board(s, K.body); K.aboard = s;
+    say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
+  }
+  // the ships drawn, and those let be coasting to a stop
+  let shipWake = 0, nearSaid = null;
+  function ships(dt) {
+    const V = K.void, seen = new Set();
+    for (const sh of K.world.ships) {
+      let art = K.shipArts.get(sh);
+      if (!art) { art = createSkiffArt({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
+      seen.add(sh);
+      if (sh !== K.aboard) stepShip(sh, { move: [0, 0], yaw: sh.yaw - Math.PI, pitch: 0 }, dt, { floorAt, solid: (q) => K.world.solid(q) });
+      art.update(sh, { t: K.clock, dt });
+      // low and quick over the water, it drags a wake from its stern
+      const v = Math.hypot(sh.v[0], sh.v[2]), lowOver = sh.p[1] - floorAt(sh.p[0], sh.p[2]);
+      if (sh === K.aboard && v > 4 && lowOver < 2.4 && (shipWake -= dt) <= 0) {
+        const bx = sh.p[0] - Math.sin(sh.yaw) * 2.6, bz = sh.p[2] - Math.cos(sh.yaw) * 2.6;
+        if (K.world.wet(bx, bz)) V.drop(bx, bz, Math.min(0.5, 0.12 + v * 0.012) * (1 - lowOver / 2.6));
+        shipWake = 0.05;
+      }
+    }
+    for (const [sh, art] of K.shipArts) if (!seen.has(sh)) { V.scene.remove(art.group); art.dispose(); K.shipArts.delete(sh); }
+    // coming near a ship's seat, the hint says how to board it (once each time)
+    const near = !K.aboard && nearShip(K.world.ships, K.body.p);
+    if (near && near !== nearSaid) say(`${actKey('board')} boards the ${near.kind}`, 3);
+    nearSaid = near || null;
+  }
   // a bot of a level comes up out of the water ahead, where the eye looks
   function callBot(level = st.level) {
     const b = spawnBot(K.combat, K.body, K.eye.yaw, level);
@@ -385,11 +449,16 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
       if (inp.build) buildHere();
       if (inp.spawn) callBot();
+      if (inp.board) boardOrLeave();
       if (inp.menu) openMenu();
       K.world.update(dt);
       // struck down, the body does nothing; spinning the ring up or guarding, it walks
       const C = K.combat, down = C.player.down > 0;
-      advance(body, { ...(down ? IDLE : C.slow ? { ...inp, walk: true, sprint: false } : inp), yaw: eye.yaw, pitch: eye.pitch }, dt);
+      if (K.aboard) {
+        // aboard: the ship flies under the hands, and the body sits in it
+        stepShip(K.aboard, { move: inp.move, yaw: eye.yaw, pitch: eye.pitch, up: inp.up, down: inp.down, sprint: inp.sprint }, dt, { floorAt, solid: (q) => K.world.solid(q) });
+        carry(K.aboard, body);
+      } else advance(body, { ...(down ? IDLE : C.slow ? { ...inp, walk: true, sprint: false } : inp), yaw: eye.yaw, pitch: eye.pitch }, dt);
       // what the body did, on the water
       for (const e of body.events.splice(0)) {
         const at = e.at || body.p;
@@ -402,7 +471,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       // the fight: the ring and the bots, once the body has moved (aimed along the eye's line as it was drawn last)
       camera.getWorldDirection(AIM);
       stepCombat(C, dt, { body, aim: { from: [camera.position.x, camera.position.y, camera.position.z], dir: [AIM.x, AIM.y, AIM.z] },
-        hands: down ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl },
+        hands: down || K.aboard ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl },
         creative: body.mode === 'creative', world: K.world });
       const evs = C.events.splice(0);
       K.fight.events(evs);
@@ -445,7 +514,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     else { const kh = ease(16, dt), kv = ease(10, dt); eye.at.x += (tx - eye.at.x) * kh; eye.at.z += (tz - eye.at.z) * kh; eye.at.y += (ty - eye.at.y) * kv; }
     const sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
     const along = (p) => { const c = Math.cos(p); return [-sy * c, Math.sin(p), -cy * c]; };
-    let d = st.zoom + ((stand ? stand.d : st.zoom) - st.zoom) * u;
+    const zoomNow = K.aboard ? Math.max(st.zoom, 8.5) : st.zoom;          // aboard, the eye stands back enough for the ship
+    let d = zoomNow + ((stand ? stand.d : zoomNow) - zoomNow) * u;
     // running along a wall on the eye's right, the eye stands off the body's other shoulder (the wall would bring it in close)
     const onWall = body.wallrun, flip = onWall && onWall.n[0] * cy - onWall.n[1] * sy < 0 ? -1 : 1;
     eye.side = (eye.side ?? 1) + (flip - (eye.side ?? 1)) * ease(onWall ? 14 : 5, dt);
@@ -483,6 +553,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     camera.updateMatrixWorld();
 
     builds(dt);
+    ships(paused ? 0 : dt);
     if (V.live && !paused) V.live(dt, K.clock, body, K.world);   // the island's palms, birds, woodhens and turtles
     K.fight.update(K.combat, paused ? 0 : dt, camera, body);
     hud(dt);
@@ -520,10 +591,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
         <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
         <button type="button" id="game-bots" class="login-alt" aria-expanded="false" aria-controls="game-bot-list" title="call up a bot to fight, at one of five levels">bots</button>
+        <button type="button" id="game-ships" class="login-alt" aria-expanded="false" aria-controls="game-ship-list" title="a ship in front of you, to board and fly">ships</button>
         <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
         ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
         <div class="game-build" id="game-build-list" role="group" aria-label="what to build" hidden></div>
         <div class="game-build game-bots" id="game-bot-list" role="group" aria-label="a bot to fight, by level" hidden></div>
+        <div class="game-build game-ships" id="game-ship-list" role="group" aria-label="a ship to fly" hidden></div>
       </div>
       <div class="game-hud" aria-hidden="true"><i class="game-reticle"></i><div class="game-hp"><i></i></div><i class="game-hurt"></i></div>
       <div class="game-foes" role="status" hidden></div>
@@ -565,7 +638,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         if (k === 'down') said(K.world.toggle(K.body, st.building)); else buildHere(k);
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBuilds(false); $('#game-build')?.focus(); } });
-      on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); }); }
+      on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); listShips(false); }); }
     press('#game-bots', () => { if (!menu.isOpen() && !chooser.isOpen()) listBots(); });
     { const el = $('#game-bot-list');
       on(el, 'click', (e) => {
@@ -576,6 +649,17 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         st.level = Math.max(1, Math.min(5, +k || 1)); save(); callBot(st.level);
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBots(false); $('#game-bots')?.focus(); } }); }
+    press('#game-ships', () => { if (!menu.isOpen() && !chooser.isOpen()) listShips(); });
+    { const el = $('#game-ship-list');
+      on(el, 'click', (e) => {
+        const btn = e.target.closest?.('[data-ship]'); if (!btn || btn.disabled) return;
+        if (e.detail > 0) focusCanvas();
+        const k = btn.dataset.ship; listShips(false);
+        if (k === 'board' || k === 'leave') boardOrLeave();
+        else if (k === 'away') { const n = K.world.ships[0]; K.world.ships = []; if (n) say(`the ${n.kind} lifts away`, 2); }
+        else putShip(k);
+      });
+      on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listShips(false); $('#game-ships')?.focus(); } }); }
     press('#game-societies', () => toSocieties?.());
     for (const [sel, action] of [['#game-t-jump', 'jump'], ['#game-t-dash', 'dash'], ['#game-t-sink', 'down'], ['#game-t-cast', 'attack'], ['#game-t-whirl', 'whirl'], ['#game-t-guard', 'guard']]) {
       const el = $(sel); if (!el) continue;
@@ -592,7 +676,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
-        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
+        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, aboard: !!K.aboard, seated: !!K.body.seated,
+        ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };

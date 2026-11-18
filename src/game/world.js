@@ -64,6 +64,7 @@ export function siteOf(ground, b, foot) {
 export function createWorld() {
   const w = {
     buildings: [],
+    ships: [],                          // the ships put here (ships.js), flown or let be
     ground: null,                       // the island's ground (island/ground.js), or none: the void's still water
     trunks: null,                       // the palms' trunks near a point (island/life.js), or none
     // a building of a kind put up in front of the body: another of its kind comes down; one would stand on another: not built
@@ -104,7 +105,7 @@ export function createWorld() {
       w.buildings = w.buildings.filter((b) => !K(b).phase(b).gone);
     },
     // the origin moved under the body (rings.js, rebase): the same places in new numbers
-    shift(dx, dz) { for (const b of w.buildings) { b.x -= dx; b.z -= dz; } },
+    shift(dx, dz) { for (const b of w.buildings) { b.x -= dx; b.z -= dz; } for (const s of w.ships) { s.p[0] -= dx; s.p[2] -= dz; } },
     standing: () => w.buildings.filter((b) => b.down < 0),
     // a body's step against everything standing (body.js calls it): pushed out of walls, its head kept under
     // ceilings, a ladder found (s.climb). Answers the floor under it.

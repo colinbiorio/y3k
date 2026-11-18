@@ -263,6 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (late night, later) — **The first ship: the skiff** (`src/game/ships.js`,
+  `ships/skiff.js`; `gait.js`, `input.js`, `world.js`, `view.js`). Stage 4
+  begins. From its brief: a one-seat open craft about five metres long, a slim
+  reed canoe of white glazed ceramic with bronze ribs, an open seat behind a
+  low glass windscreen, two outrigger fins on thin struts, a glowing plasma
+  ring engine at the stern. Call it down from the bar's new **ships** list,
+  walk to it and press R: you sit in it (every body on two legs now sits),
+  and it flies where you look, W to drive, shift to open it up, space and C
+  to rise and sink; let be, it hovers; R steps off. It skims the void's water
+  with a wake, flies over the island, and stops at buildings and hills. Game
+  suite 156 (4 new); a new `ship` smoke scene.
+
 - **2026-11-17** (late night) — **The hall, the fifth building: all five
   stand** (`src/game/hall.js`, `buildings/hall.js`; `world.js`, `view.js`). From
   its brief: a great hall, 30 by 40 metres, on three terraces of pale
