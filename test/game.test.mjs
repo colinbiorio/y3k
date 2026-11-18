@@ -2150,7 +2150,7 @@ ok('the hall goes up in eight and a half seconds, the terraces, the walls and co
 });
 
 // ---- the ships (ships.js): the skiff, put, boarded, flown and stepped off
-ok('a skiff is put in front of the body, pointing its way, at its hover over the water; its seat is in reach at once; the five are offered, the skiff and the dart made', () => {
+ok('a skiff is put in front of the body, pointing its way, at its hover over the water; its seat is in reach at once; the five are offered, the skiff, the dart and the dhow made', () => {
   const body = B.createBody({ yaw: 0.6 }); body.p = [3, 0, -2];
   const s = SP.placeShip(body);
   near(s.yaw, 0.6, 1e-12); near(s.p[1], SP.SKIFF.hover, 1e-12);
@@ -2159,7 +2159,7 @@ ok('a skiff is put in front of the body, pointing its way, at its hover over the
   assert.equal(SP.nearShip([s], body.p), s, 'its seat in reach from where the body called it');
   body.p = [3 - 8 * Math.sin(0.6), 0, -2 - 8 * Math.cos(0.6)]; assert.equal(SP.nearShip([s], body.p), null, 'not from further off');
   assert.deepEqual(SP.SHIPS.map((x) => x.kind), ['skiff', 'dart', 'dhow', 'ark', 'carrier']);
-  assert.deepEqual(SP.SHIPS.filter((x) => x.ready).map((x) => x.kind), ['skiff', 'dart']);
+  assert.deepEqual(SP.SHIPS.filter((x) => x.ready).map((x) => x.kind), ['skiff', 'dart', 'dhow']);
   near(SP.SKIFF.length, 5, 1e-9, 'about five metres long');
 });
 
@@ -2208,6 +2208,27 @@ ok('the dart: eleven metres, put beside the body (it is too long to put in front
   near(Math.hypot(...s2.v), 0, 1, 'stopped there');
 });
 
+ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {
+  const D = SP.DHOW, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
+  near(D.length, 28, 1e-9, 'about twenty-eight metres long');
+  const s = SP.placeShip(body, () => 0, 'dhow'), helm = SP.seatAt(s);
+  assert.ok(s.p[0] > D.beam / 2 + 1, 'beside the body, clear of it: ' + s.p.map((v) => v.toFixed(2)));
+  assert.ok(helm[1] - body.p[1] > 4, 'its helm high over the water: ' + helm[1].toFixed(2));
+  assert.equal(SP.nearShip([s], body.p), s, 'and taken from the water beside it');
+  SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'up at the helm');
+  for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
+  assert.ok(Math.hypot(...s.v) < 7, 'heavy: a second in, still slow: ' + Math.hypot(...s.v).toFixed(2));
+  for (let t = 0; t < 4; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
+  near(Math.hypot(...s.v), D.speed, 1e-9, 'then at its speed');
+  assert.ok(D.turn < SP.DART.turn / 2 && D.accel < SP.SKIFF.accel / 2, 'slower to turn and to come up to speed than the small ones');
+  // flown past a house with its middle clear but its side not: stopped short
+  const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
+  const h = w.buildings[0], s2 = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dhow'); s2.p = [h.x + 5.8, 2.5, h.z - 30];
+  for (let t = 0; t < 12; t += 1 / 60) SP.stepShip(s2, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60, { solid: (q) => w.solid(q) });
+  const side = SP.shipPoint(s2, D.edges[1]);
+  assert.ok(side[2] < h.z - 2 && !w.solid(side), 'its side caught at the house: ' + side.map((v) => v.toFixed(2)));
+});
+
 ok('seated in a ship, a body on two legs sits: its hips low over the seat, its thighs forward and its knees bent, its hands out on the controls', () => {
   const g = Gt.createGait(), body = B.createBody({ yaw: 0 }); body.seated = {};
   assert.equal(Gt.stateOf(body), 'seat');
@@ -2226,6 +2247,7 @@ ok('the board key: R, and the pad\'s left on the cross; the view wires the ships
   for (const line of ['id="game-ship-list"', 'if (inp.board) boardOrLeave();', 'stepShip(K.aboard,', 'carry(K.aboard, body);', 'hands: down || K.aboard ? {}']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/ships/skiff.js').includes("from '../ships.js'"), 'the skiff drawn is not the numbers\' skiff');
   assert.ok(read('src/game/ships/dart.js').includes("from '../ships.js'"), 'the dart drawn is not the numbers\' dart');
+  assert.ok(read('src/game/ships/dhow.js').includes("from '../ships.js'"), 'the dhow drawn is not the numbers\' dhow');
 });
 
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {

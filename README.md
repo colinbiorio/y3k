@@ -263,6 +263,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (near midnight) — **The third ship: the dhow**
+  (`src/game/ships/dhow.js`; `ships.js`, `view.js`). From its brief: a cargo
+  ship about twenty-eight metres long, a wide rounded belly of timber ribs and
+  ceramic plating, a raised stern cabin with round windows, two tall folding
+  sails of golden solar foil rigged like a lateen boat, a ring of plasma
+  engines under the stern. It comes down beside you; R from the water takes
+  you up to its helm on the cabin's roof, and the sails unfold. It sails
+  heavily (20 m/s, 38 opened up, slow to turn); its windows glow at night.
+  Game suite 158; the `ship` smoke sails all three.
+
 - **2026-11-17** (night, last) — **kode: when, and what is running**
   (`src/code/render/items.js`, `state.js`, `code-view.js`, `styles.css`). Colin:
   "can you add an update to add timestamps to each action/message in kode? also,

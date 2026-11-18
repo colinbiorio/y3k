@@ -53,6 +53,7 @@ import { createHallArt } from './buildings/hall.js';
 import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, leave } from './ships.js';
 import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
+import { createDhowArt } from './ships/dhow.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -318,7 +319,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
     if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
     K.world.ships = [placeShip(K.body, floorAt, kind)];
-    say(`a ${kind} comes down ${kind === 'dart' ? 'beside' : 'in front of'} you · ${actKey('board')} boards it`, 5);
+    say(`a ${kind} comes down ${kind === 'skiff' ? 'in front of' : 'beside'} you · ${actKey('board')} ${kind === 'dhow' ? 'takes you up to its helm' : 'boards it'}`, 5);
   }
   function boardOrLeave() {
     if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
@@ -328,7 +329,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
   }
   // the ships drawn, and those let be coasting to a stop
-  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt };
+  const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt };
   let shipWake = 0, nearSaid = null;
   function ships(dt) {
     const V = K.void, seen = new Set();
@@ -337,7 +338,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (!art) { art = (SHIP_ARTS[sh.kind] || createSkiffArt)({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
       seen.add(sh);
       if (sh !== K.aboard) stepShip(sh, { move: [0, 0], yaw: sh.yaw - Math.PI, pitch: 0 }, dt, { floorAt, solid: (q) => K.world.solid(q) });
-      art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard });
+      art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard, night: LIGHTS[V.light].stars });
       // low and quick over the water, it drags a wake from its stern
       const v = Math.hypot(sh.v[0], sh.v[2]), lowOver = sh.p[1] - floorAt(sh.p[0], sh.p[2]);
       if (sh === K.aboard && v > 4 && lowOver < 2.4 && (shipWake -= dt) <= 0) {

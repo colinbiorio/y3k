@@ -89,7 +89,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | asked | where it stands |
 |---|---|
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
-| "at least 5 different types of spaceships of varying size and design" | stage 4, **two of five** (17 November): the skiff and the dart, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The dhow, the ark and the carrier are next. |
+| "at least 5 different types of spaceships of varying size and design" | stage 4, **three of five** (17 November): the skiff, the dart and the dhow, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The ark and the carrier are next. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
@@ -313,7 +313,8 @@ outrigger fins on thin struts, one glowing plasma ring engine at the stern."
   fins; at the stern, on a pylon, the bronze ring holding a swirl of plasma
   that brightens and quickens as it is driven, with its glow and a streak of
   light behind. Low and quick over the water, it drags a wake of rings.
-- Not yet: the dhow, the ark and the carrier; a ship kept between visits;
+- Not yet: the ark and the carrier; a ship kept between visits; walking its
+  deck while it sails;
   landing one in the hall's hangar (the skiff fits the mouth); a phone's own
   button to board (the list does it).
 
@@ -338,6 +339,30 @@ wings of pale alloy, two slim plasma engines."
   hinged at its back; the swept wings, a little lifted at the tips, their
   leading edges bronze; the two slim nacelles by the tail, their nozzles'
   rings, swirls, glows and streaks.
+
+**The dhow** (17 November, near midnight), from its brief: "a cargo ship
+about twenty-eight metres long: a wide rounded belly of timber ribs and ceramic
+plating, a raised stern cabin with round windows, two tall folding sails of
+golden solar foil rigged like a lateen sailing boat, a ring of plasma engines
+under the stern."
+
+- **Called down beside you**, its stern alongside. Its helm is high on the
+  stern cabin's roof; R from the water beside it takes you up to it (a ship
+  may now say how far above its seat a body may be, as well as how far away).
+- **Sailed** heavily: it comes up to its 20 m/s over a few seconds (38 opened
+  up), turns at 0.8 radians a second, climbs slowly; the eye stands 34 m back
+  to see it whole. Its sides, its mastheads, its prow and its stern meet what
+  is solid.
+- **Drawn** (`ships/dhow.js`): the belly lofted from its sections (wide, the
+  prow long and raked, the stern broad on its transom), plated in glazed
+  ceramic, a little different plate by plate, between timber ribs every
+  1.1 m; a planked deck with crates, amphorae and a coil of rope; the stern
+  cabin with eight round windows in bronze (warm at night), a railed roof, the
+  helm with its seat, levers, dial and pane of light; two masts with long
+  lateen yards and their stays and shrouds; the sails, triangles of golden
+  foil drawn with their cells and a belly, folded up along their yards while
+  it waits and spreading when someone takes the helm; the ring of eight plasma
+  engines under the stern.
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -763,8 +788,8 @@ of Earth from the same tiles.
    five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
-   there is somewhere to go. **The skiff and the dart are built** (above);
-   the dhow next.
+   there is somewhere to go. **The skiff, the dart and the dhow are built**
+   (above); the ark next.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people.
@@ -792,7 +817,7 @@ suite runs them; those that draw are read as text and looked at.
 | `rings.js` | a ring on the water as a function; the pool of drops; the floor's lattice and the rebase |
 | `gait.js` | how a body on two legs carries itself: the stride with its feet planted, the two-bone leg, landings, sitting in a ship; told a build (the mantis's long legs, the robot's stiffness) |
 | `ships.js` | the ships as numbers: the five offered, each made kind's measures; put, flown under the hands (their way looked at for walls every fifth of a metre), boarded and stepped off |
-| `ships/` | `skiff.js`, `dart.js`: the two drawn (draws) |
+| `ships/` | `skiff.js`, `dart.js`, `dhow.js`: the three drawn (draws) |
 | `crawl.js` | how a body on many arms carries itself: six tips, three always on the floor |
 | `kinds.js` | the five kinds: their choices, options and colours; a look made fresh, cleaned, or drawn by chance |
 | `chooser.js` | the body sheet: its rows, its keys, and where the body stands beside it |
