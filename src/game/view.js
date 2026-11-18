@@ -20,7 +20,7 @@
 // the frames long. The page's guess at a tier (../gfx.js) is not read.
 //
 // What stands in the void (world.js) is built from the bar's build list (the
-// shelter, the house and the workshop, of the five) or with the build key (the kind last
+// shelter, the house, the workshop and the tower, of the five) or with the build key (the kind last
 // chosen), a few steps in front, its door toward the body.
 // The body is pushed out of its walls and stands on its floor (body.js); the
 // eye comes in rather than go through them; inside, the body is seen by the
@@ -48,6 +48,7 @@ import { createWorld, BODY, KINDS, BUILDINGS } from './world.js';
 import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
 import { createWorkshopArt } from './buildings/workshop.js';
+import { createTowerArt } from './buildings/tower.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -208,7 +209,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   }
 
   // the build key: near a building's door it is taken down; else the kind last chosen goes up in front of the body
-  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back' };
+  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back', tower: 'in at its door; the stair climbs the wall to the dome' };
   function said(r) {
     const key = keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build';
     if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
@@ -315,7 +316,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
   // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
-  const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt };
+  const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt, tower: createTowerArt };
   function builds(dt) {
     const V = K.void, L = LIGHTS[V.light], seen = new Set();
     SUN.copy(V.key.position).sub(V.key.target.position).normalize();
@@ -451,7 +452,9 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     // a building in the way: the eye comes in rather than go into a wall or a dome; where that would leave it too near
     // the body (its back to a wall), the eye rises instead and looks down over it
     const from = [eye.at.x, eye.at.y, eye.at.z], walls = (K.world.buildings.length || K.world.ground) && !stand;
-    const room = (p, dd) => { const f = along(p), s0 = eye.side * (SHOULDER * Math.min(1, dd / 4) + eye.wall); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(WATER + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0]); };
+    // the lowest the eye goes: over the water, or inside a building over the floor the body stands on
+    const indoors = walls && K.world.inside(body.p), lowest = indoors ? Math.max(WATER, body.floorY ?? 0) : WATER;
+    const room = (p, dd) => { const f = along(p), s0 = eye.side * (SHOULDER * Math.min(1, dd / 4) + eye.wall); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(lowest + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0]); };
     let lift = 0;
     if (walls) {
       let best = room(pitch0, d);
@@ -462,14 +465,14 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const pitch = clamp(pitch0 - eye.lift, PITCH[0], PITCH[1]), [fx, fy, fz] = along(pitch);
     let squeezed = false;
     if (walls) { const dd = Math.max(0.35, room(pitch, d)); squeezed = dd < d - 1e-3; d = dd; }
-    if (fy > 1e-4 && !K.world.ground) d = Math.min(d, Math.max(0.5, (eye.at.y - (WATER + 0.14)) / fy));   // looking up: the eye comes in rather than go under the water (on the island the ground's own line keeps it out)
+    if (fy > 1e-4 && (!K.world.ground || indoors)) d = Math.min(d, Math.max(0.5, (eye.at.y - (lowest + 0.14)) / fy));   // looking up: the eye comes in rather than go under the water or the floor (on the island the ground's own line keeps it out)
     eye.d = d < eye.d ? d : eye.d + (d - eye.d) * ease(8, dt);
     // an eye that a wall has brought within arm's length of the head would be inside the body: it is not drawn then
     // (until the eye has room again; with nothing built, as it always was)
     if (squeezed && eye.d < 0.65) eye.hide = true; else if (eye.d >= 0.65 || !walls) eye.hide = false;
     figure.group.visible = !eye.hide;
     const side = eye.side * (SHOULDER * Math.min(1, eye.d / 4) + eye.wall) * (1 - u);
-    camera.position.set(eye.at.x - fx * eye.d + cy * side, Math.max(WATER + 0.1, eye.at.y - fy * eye.d), eye.at.z - fz * eye.d - sy * side);
+    camera.position.set(eye.at.x - fx * eye.d + cy * side, Math.max(lowest + 0.1, eye.at.y - fy * eye.d), eye.at.z - fz * eye.d - sy * side);
     camera.rotation.set(pitch, eye.yaw, 0, 'YXZ');
     const fov = FOV + 12 * smooth(SPRINT + 1, 46, Math.hypot(body.v[0], body.v[2]));    // the view opens a little at speed
     eye.fov += (fov - eye.fov) * ease(6, dt);

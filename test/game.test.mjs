@@ -35,6 +35,7 @@ import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
 import * as WO from '../src/game/workshop.js';
+import * as TO from '../src/game/tower.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
@@ -1939,6 +1940,131 @@ ok('the workshop goes up in seven and a half seconds, the plinth, the walls, the
   assert.ok(!WO.opens(s, at(0, 10.5)) && !WO.opens(s, at(-7, 0)), 'not from further off, nor beside it');
 });
 
+// ---- the tower (tower.js): six metres across, a stair round its wall to a gallery under a glass dome
+function aTower() {
+  const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
+  w.build(body, 'tower'); w.update(20);
+  return { w, body, b: w.buildings[0] };
+}
+const towerAt = (body, b) => { const [lx, lz] = TO.toLocal(b, body.p[0], body.p[2]); return { lx, lz, r: Math.hypot(lx, lz), th: Math.atan2(lz, lx), y: body.p[1] }; };
+// walk toward a point in the tower's frame (steering the eye at it each step), for up to `seconds`
+function towerTo(body, b, lx, lz, seconds) {
+  for (let t = 0; t < seconds; t += B.STEP) {
+    const [x, z] = TO.toWorld(b, lx, lz), dx = x - body.p[0], dz = z - body.p[2];
+    if (Math.hypot(dx, dz) < 0.15) break;
+    body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: Math.atan2(-dx, -dz), pitch: 0 }, B.STEP);
+  }
+  return towerAt(body, b);
+}
+// climb: each step aim a little ahead along the stair (clockwise seen from above) by the wall, until `until` says stop
+function towerClimb(body, b, seconds, until = () => false) {
+  let t = 0, low = Infinity;
+  for (; t < seconds; t += B.STEP) {
+    const q = towerAt(body, b); if (until(q)) break;
+    const a = q.th - 0.25, [x, z] = TO.toWorld(b, 1.95 * Math.cos(a), 1.95 * Math.sin(a));
+    const before = body.p[1]; body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: Math.atan2(-(x - body.p[0]), -(z - body.p[2])), pitch: 0 }, B.STEP);
+    low = Math.min(low, body.p[1] - before);
+  }
+  return { t, low, q: towerAt(body, b) };
+}
+
+ok('the tower: six metres across of half-metre limestone; a hundred steps in two and a half turns up its wall to a gallery 20 m up; two landings a turn apart, on the same side; a glass dome to about 24 m', () => {
+  const T = TO.TOWER;
+  near(2 * T.ro, 6, 1e-9, 'six across'); near(T.ro - T.ri, 0.5, 1e-9);
+  near(TO.TOP - T.floor, T.stair.steps * T.stair.rise, 1e-9); near(TO.TOP, 20.3, 1e-9, 'the gallery');
+  near(T.stair.steps / T.stair.perTurn, 2.5, 1e-9, 'two and a half turns');
+  within(TO.CROWN, 23.5, 24.5, 'about twenty-four tall');
+  const [l1, l2] = TO.LANDINGS;
+  near(l2.top - l1.top, T.stair.perTurn * T.stair.rise, 1e-9, 'a turn apart'); near(l1.dir[0], l2.dir[0], 1e-9); near(l1.dir[1], l2.dir[1], 1e-9, 'on the same side');
+  near(TO.rampAt(l1.step - 0.5), l1.top, 1e-9, 'the stair is level with each landing at its step');
+  near(TO.treadAt(0), T.floor + T.stair.rise, 1e-9, 'the first tread a step up');
+  assert.ok(TO.turnsAt(Math.PI / 2).every((t) => t.s > T.door.high + 2), 'the stair passes over the door high up');
+  assert.ok(TO.SLITS.length >= 15, 'narrow windows spiral up it: ' + TO.SLITS.length);
+});
+
+ok('a tower goes up in front of the body, its door toward it; in at the door; up the stair along the wall, held on it by its rail, to the gallery in a few seconds without a fall; and down again', () => {
+  const { w, body, b } = aTower(), T = TO.TOWER;
+  const [dx, dz] = TO.doorWorld(b); assert.ok(Math.hypot(dx - body.p[0], dz - body.p[2]) < 2.5, 'its door near the body');
+  let q = towerTo(body, b, 0, 0, 4);
+  assert.ok(w.inside(body.p)?.kind === 'tower' && q.r < 0.2, 'in at the door: ' + JSON.stringify(q)); near(q.y, T.floor, 1e-9, 'on its floor');
+  const a0 = T.stair.start + 0.15; towerTo(body, b, 1.95 * Math.cos(a0), 1.95 * Math.sin(a0), 3);
+  const up = towerClimb(body, b, 20, (q) => q.y >= TO.TOP - 1e-6);
+  near(up.q.y, TO.TOP, 1e-9, 'up to the gallery'); assert.ok(up.t < 8, 'in ' + up.t.toFixed(2) + ' s'); assert.ok(up.low > -0.05, 'never a fall: ' + up.low.toFixed(3));
+  within(up.q.r, TO.TOWER.well + BODY.rad - 1e-6, TO.TOWER.ri - BODY.rad + 1e-6, 'kept on the stair, between its rail and the wall');
+  // down: aim behind instead, anticlockwise
+  let t = 0;
+  for (; t < 20 && body.p[1] > T.floor + 1e-6; t += B.STEP) {
+    const c = towerAt(body, b), a = c.th + 0.25, [x, z] = TO.toWorld(b, 1.95 * Math.cos(a), 1.95 * Math.sin(a));
+    body.was = [...body.p]; B.stepBody(body, { move: [0, 1], yaw: Math.atan2(-(x - body.p[0]), -(z - body.p[2])), pitch: 0 }, B.STEP);
+  }
+  near(body.p[1], T.floor, 1e-9, 'down to the floor again in ' + t.toFixed(2) + ' s');
+});
+
+ok('beside each landing the stair\'s rail opens and a body steps onto it; the landings\' rails hold it there; under the stair\'s low first steps a body is kept out in the well; flying up under a landing, the head meets it', () => {
+  const { w, body, b } = aTower(), T = TO.TOWER, [L1] = TO.LANDINGS;
+  towerTo(body, b, 0, 0, 4); const a0 = T.stair.start + 0.15; towerTo(body, b, 1.95 * Math.cos(a0), 1.95 * Math.sin(a0), 3);
+  towerClimb(body, b, 20, (q) => q.y >= L1.top - 0.05);
+  let q = towerTo(body, b, 0.45, 0.6, 3); walk(body, [0, 0], 0, 0.6); q = towerAt(body, b);
+  near(q.y, L1.top, 1e-9, 'on the landing'); assert.ok(Math.hypot(q.lx, q.lz) < T.well, 'off the stair');
+  q = towerTo(body, b, -L1.dir[0], -L1.dir[1], 2);
+  near(q.lx * L1.dir[0] + q.lz * L1.dir[1], BODY.rad, 0.005, 'the rail along its open edge'); near(q.y, L1.top, 1e-9);
+  q = towerTo(body, b, 2.2 * Math.cos(L1.th - 0.9), 2.2 * Math.sin(L1.th - 0.9), 2);
+  near(q.r, T.well - BODY.rad, 1e-6, 'its curved edge has a rail too, away from the stair\'s gap'); near(q.y, L1.top, 1e-9);
+  // on the floor under the stair's first steps, walking toward the wall: kept out in the well
+  const s2 = B.createBody({ world: w }), a = T.stair.start - 0.5, [x, z] = TO.toWorld(b, 0.6 * Math.cos(a), 0.6 * Math.sin(a)); s2.p = [x, T.floor, z];
+  for (let t = 0; t < 2; t += B.STEP) { const [tx, tz] = TO.toWorld(b, 2.4 * Math.cos(a), 2.4 * Math.sin(a)); s2.was = [...s2.p]; B.stepBody(s2, { move: [0, 1], yaw: Math.atan2(-(tx - s2.p[0]), -(tz - s2.p[2])), pitch: 0 }, B.STEP); }
+  const q2 = towerAt(s2, b); assert.ok(q2.r <= T.well - BODY.rad + 1e-6 && q2.y === T.floor, 'kept off: ' + JSON.stringify(q2));
+  // flying up the well under the first landing, the head meets its underside
+  const s3 = B.createBody({ world: w }), [ux, uz] = TO.toWorld(b, 0.4 * L1.dir[0], 0.4 * L1.dir[1]); s3.p = [ux, T.floor, uz]; s3.was = [...s3.p];
+  s3.mode = 'creative'; s3.flying = true; s3.grounded = false;
+  for (let t = 0; t < 4; t += B.STEP) { s3.was = [...s3.p]; B.stepBody(s3, { move: [0, 0], yaw: 0, pitch: 0, up: true }, B.STEP); }
+  near(s3.p[1] + BODY.tall, L1.top - 0.15, 1e-6, 'flying up under the landing, the head meets it');
+});
+
+ok('from the gallery, round to its door and out onto the ledge; its side rails hold; off its front a body falls', () => {
+  const { w, body, b } = aTower(), T = TO.TOWER;
+  towerTo(body, b, 0, 0, 4); const a0 = T.stair.start + 0.15; towerTo(body, b, 1.95 * Math.cos(a0), 1.95 * Math.sin(a0), 3);
+  towerClimb(body, b, 20, (q) => q.y >= TO.TOP - 1e-6);
+  let q;
+  for (const a of [-2.4, -2.9, -3.4, -3.9, -4.4]) q = towerTo(body, b, 1.9 * Math.cos(a), 1.9 * Math.sin(a), 2);
+  near(q.y, TO.TOP, 1e-9, 'round the gallery, clockwise, past the stair\'s top');
+  q = towerTo(body, b, 0, 1.9, 2); q = towerTo(body, b, 0, 3.8, 3);
+  assert.ok(q.lz > T.ro + 0.3 && !w.inside(body.p), 'out through its door onto the ledge: ' + JSON.stringify(q)); near(q.y, TO.TOP, 1e-9);
+  q = towerTo(body, b, 3, 3.8, 1.5); near(q.lx, T.ledge.half - BODY.rad, 1e-6, 'its side rail');
+  q = towerTo(body, b, 0, 9, 2.5); assert.ok(q.y < TO.TOP - 1 && q.lz > T.ledge.out, 'off its front it falls: ' + q.y.toFixed(2));
+});
+
+ok('the tower to the eye and the sun: the eye kept inside with a body inside, out of its stone, its stair and its landings, free up the open well; the sun through a narrow window, down through the dome, by the door, not through the wall; a landing shades what is under it', () => {
+  const b = { kind: 'tower', x: 0, z: 0, yaw: 0, t: 20, down: -1 }, at = (lx, y, lz) => { const [x, z] = TO.toWorld(b, lx, lz); return [x, y, z]; };
+  const [L1] = TO.LANDINGS, unit = (v) => { const m = Math.hypot(...v); return v.map((c) => c / m); };
+  assert.ok(TO.eyeRoom(b, at(0, 2, 0), at(6, 2, 0.4)) < 0.45, 'not out through the wall');
+  near(TO.eyeRoom(b, at(0, 2, -0.8), at(0, 15, -0.8)), 1, 1e-9, 'up the open half of the well');
+  assert.ok(TO.eyeRoom(b, at(0.3, 2, 0.6), at(0.3, 12, 0.6)) < 0.62, 'not through a landing');
+  assert.ok(TO.eyeRoom(b, at(0, 1.5, 1), at(0, 2, 8)) < 0.25, 'from inside, kept inside (its door is narrow)');
+  near(TO.eyeRoom(b, at(0, 1.5, 6), at(0, 2, 12)), 1, 1e-9, 'outside, in front of the door: nothing in the way');
+  const w = TO.SLITS[3], dir = [Math.cos(w.th), Math.sin(w.th)];
+  assert.equal(TO.sunLocal(dir[0], w.y, dir[1], unit([dir[0], 0.05, dir[1]])), 1, 'through a narrow window');
+  const off = w.th + 0.4; assert.equal(TO.sunLocal(dir[0], w.y, dir[1], unit([Math.cos(off), 0.05, Math.sin(off)])), 0, 'not through the wall beside it');
+  const g = 2.5; assert.equal(TO.sunLocal(1.9 * Math.cos(g), TO.TOP + 0.05, 1.9 * Math.sin(g), [0, 1, 0]), 1, 'down through the dome onto the gallery');
+  assert.equal(TO.sunLocal(0, 0.4, -0.8, [0, 1, 0]), 1, 'down the open half of the well to the floor, when the sun is high');
+  assert.equal(TO.sunLocal(0.3, 0.4, 0.6, [0, 1, 0]), 0, 'under a landing, its shade');
+  assert.ok(L1.dir[0] * 0.3 + L1.dir[1] * 0.6 > 0);
+  assert.equal(TO.sunLocal(0, 1, 1, unit([0, 0.2, 1]), 1), 1, 'in at the open door'); assert.equal(TO.sunLocal(0, 1, 1, unit([0, 0.2, 1]), 0), 0, 'not at a shut one');
+});
+
+ok('the tower goes up in about eight seconds, the shaft and its stair, the floors, the dome, the things; comes down backward; its round wall is a wall to run along, outside and in', () => {
+  const T = TO.TOWER, b = { kind: 'tower', x: 0, z: 0, yaw: 0.7, t: 3, down: -1 };
+  let p = TO.phase(b); assert.ok(p.base === 1 && p.walls > 0.5 && p.walls < 0.7 && p.floors === 0);
+  b.t = T.build.done; assert.equal(TO.phase(b).rest, 1);
+  b.down = T.build.down / 4; p = TO.phase(b); assert.ok(p.rest === 0 && p.walls === 1 && p.floors === 1 && p.dome > 0 && p.dome < 1, 'a quarter down, the things gone first: ' + JSON.stringify(p));
+  b.down = -1;
+  const out = TO.toWorld(b, 0, -(T.ro + 0.3)), r1 = TO.wall(b, [out[0], 0, out[1]]);
+  assert.ok(r1 && Math.abs(r1.d - 0.3) < 1e-9, 'outside, by its back');
+  const back = TO.toWorld(b, 0, -1), n = [back[0] - b.x, back[1] - b.z]; assert.ok(r1.n[0] * n[0] + r1.n[1] * n[1] > 0.99 && Math.abs(Math.hypot(...r1.n) - 1) < 1e-9, 'its face looks out, away from the axis, toward the body');
+  const inn = TO.toWorld(b, -(T.ri - 0.3), 0), r2 = TO.wall(b, [inn[0], 5, inn[1]]); assert.ok(r2 && Math.abs(r2.d - 0.3) < 1e-9, 'inside, along its wall');
+  assert.equal(TO.wall(b, [...(() => { const [x, z] = TO.toWorld(b, 0, T.ro + 0.3); return [x, 0, z]; })()].slice(0, 3)), null, 'not across its doorway');
+});
+
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {
   const w = createWorld(), body = B.createBody({ yaw: 0 }); body.world = w;
   assert.equal(w.build(body, 'shelter').did, 'up'); w.update(10);
@@ -1962,6 +2088,7 @@ ok('the build key is an action like the others: two keys, a pad button, in the c
   const view = read('src/game/view.js');
   for (const line of ['kept.body.world = kept.world;', 'K.world.update(dt)', 'K.world.shift(far[0], far[1])', 'K.world.eye(', 'K.world.wet(', 'V.setIndoor(K.indoor)', 'figure.group.visible = !eye.hide;', "id=\"game-build-list\"", 'said(K.world.toggle(K.body, st.building))', 'art = ARTS[b.kind]({ lite: K.lite })', 'k.opens ? k.opens(b, K.body.p)']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/buildings/workshop.js').includes("from '../workshop.js'"), 'the workshop drawn is not the numbers\' workshop');
+  assert.ok(read('src/game/buildings/tower.js').includes("from '../tower.js'"), 'the tower drawn is not the numbers\' tower');
   assert.ok(read('src/game/buildings/house.js').includes("from '../house.js'"), 'the house drawn is not the numbers\' house');
   assert.ok(read('src/game/buildings/shelter.js').includes("from '../shelter.js'"), 'the drawing is not the numbers\' shelter');
 });
