@@ -23,7 +23,7 @@
 //   fight  the ring and the bots (combat.js, fight.js): the bar's list of five levels, a drifter come up out of
 //          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
 //          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
-//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; seven bots and more up and the frames; the list clearing them
+//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; the bell tolled; seven bots and more up and the frames; the list clearing them
 //   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
 //          up, the body leaning into it) to its corner; run again and leapt off, out and up
 //   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
@@ -397,9 +397,10 @@ try {
     await shot('07-bound'); await key.up('KeyX'); await sleep(80); r = await read();
     check('let go, it is thrown', r.fight.bots.some((b) => b.mode === 'flung' || b.mode === 'tumble') || !r.fight.bots.some((b) => b.id === held?.id), r.fight.bots);
     await sleep(600); await shot('08-thrown');
-    // the bow: T takes it in hand; held, it draws; let go, its arrow strikes; the whirl's key, a volley; T again, the ring
-    await key.press('KeyT'); await sleep(150); r = await read();
-    check('T takes the bow in hand', r.fight.weapon === 'bow' && r.fight.ring === 'held', r.fight);
+    // the bow: chosen from the bar's weapons list; held, it draws; let go, its arrow strikes; the whirl's key, a volley
+    const pickWeapon = async (w) => { await page.locator('#game-weapons').click(); await sleep(200); await page.locator(`#game-weapon-list [data-weapon="${w}"]`).click(); await sleep(150); };
+    await pickWeapon('bow'); r = await read();
+    check('the weapons list puts the bow in hand', r.fight.weapon === 'bow' && r.fight.ring === 'held', r.fight);
     const nb = r.fight.bots.length; await key.press('KeyN'); r = await until((r) => r.fight.bots.length > nb && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
     const worth = (r) => r.fight.bots.reduce((a, b) => a + b.hp, 0) - 1000 * r.fight.broken, w0 = worth(r);
     await aimAt(); await key.down('KeyJ'); await sleep(900); r = await read();
@@ -410,13 +411,24 @@ try {
     await sleep(450); await key.press('KeyE'); await sleep(60); r = await read();
     check('the whirl\'s key looses a volley', r.fight.bolts >= 5, r.fight);
     await sleep(300); await shot('10-volley');
-    await key.press('KeyT'); await sleep(150); r = await read();
-    check('T again: the ring', r.fight.weapon === 'ring', r.fight.weapon);
-    const n0 = (await read()).fight.bots.length;   // the sentinels, and the one the binding threw, as many as are left
-    await pick(5); for (let i = 0; i < 4; i++) { await key.press('KeyN'); await sleep(150); }
-    r = await until((r) => r.fight.bots.length >= n0 + 5 && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
+    // the bell: held, its tone builds; let go, it tolls, and the ring of its tone strikes what it passes; T goes on round
+    await pickWeapon('bell'); r = await until((r) => r.fight.tones === 0 && r.fight.bolts === 0, 3000);
+    check('the bell in hand', r.fight.weapon === 'bell', r.fight.weapon);
+    const w1 = worth(r);
+    await key.down('KeyJ'); await sleep(1150); r = await read();
+    check('held, the bell\'s tone builds', r.fight.bell === 'ringing' && r.fight.power > 0.9, r.fight);
+    await shot('11-tolling'); await key.up('KeyJ'); await sleep(50); r = await read();
+    check('let go, it tolls: a ring of its tone goes out', r.fight.rang >= 1 && r.fight.tones >= 1, r.fight);
+    r = await until((r) => worth(r) < w1, 3000);
+    check('and strikes what it passes', worth(r) < w1, { w1, w: worth(r), bots: r.fight.bots });
+    await sleep(150); await shot('12-toll');
+    await key.press('KeyT'); await sleep(150); const after1 = (await read()).fight.weapon; await key.press('KeyT'); await sleep(150); r = await read();
+    check('T goes on round: the bow, then the ring', after1 === 'bow' && r.fight.weapon === 'ring', { after1, now: r.fight.weapon });
+    const n0 = (await read()).fight.bots.length, more = Math.max(5, 7 - n0);   // as many as are left, and enough more for seven
+    await pick(5); for (let i = 1; i < more; i++) { await key.press('KeyN'); await sleep(150); }
+    r = await until((r) => r.fight.bots.length >= n0 + more && r.fight.bots.every((b) => b.mode === 'fight'), 6000);
     await aimAt(); out.frames = { seven: await frames(2500) };
-    check('five more bots up (seven or more), and every frame keeps up', r.fight.bots.length === n0 + 5 && r.fight.bots.length >= 7 && out.frames.seven.median < 20, { n0, n: r.fight.bots.length, frames: out.frames.seven });
+    check('seven bots and more up, and every frame keeps up', r.fight.bots.length === n0 + more && r.fight.bots.length >= 7 && out.frames.seven.median < 20, { n0, more, n: r.fight.bots.length, frames: out.frames.seven });
     await shot('07-seven');
     await page.locator('#game-bots').click(); await sleep(250); await page.locator('#game-bot-list [data-bot="clear"]').click();
     r = await until((r) => r.fight.bots.length === 0, 2000);

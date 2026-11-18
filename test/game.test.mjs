@@ -2705,10 +2705,68 @@ ok('the bow\'s volley: five arrows at once in a fan, two bots side by side both 
   assert.ok(held < 1.6 && free > held * 2, 'drawn in the air it comes down slowly: ' + held.toFixed(2) + ' against ' + free.toFixed(2));
 });
 
-ok('the weapons: the five listed, the ring and the bow made; the next is the other made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
+// ---- the bell (combat.js BELL; stage 5): the third weapon
+ok('the bell: a tap strikes it, and a ring of its tone goes out over the water to 9 m, striking once each bot in its way as it passes (less further off) and pushing it out; one beyond it is untouched', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'bell');
+  const near = standBot(c, body, [2, 1.6, -4]), far = standBot(c, body, [0, 1.6, -14]); still(near, far);
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  assert.equal(c.bell.mode, 'ringing'); assert.equal(c.ring.mode, 'held', 'the ring is not cast');
+  evs = evs.concat(fightFor(c, body, aim, FRAME, {}));
+  const t = kinds(evs, 'toll'); assert.equal(t.length, 1); assert.equal(t[0].power, 0, 'a tap is a strike'); assert.equal(t[0].radius, CB.BELL.strike.radius);
+  const d0 = Math.hypot(near.p[0], near.p[2]);
+  evs = fightFor(c, body, aim, 1);
+  const hits = kinds(evs, 'hit').filter((e) => e.kind === 'bell');
+  assert.deepEqual(hits.map((e) => e.id), [near.id], 'the near one struck once, the far one not');
+  assert.equal(hits[0].damage, Math.round(CB.BELL.strike.damage * (1 - 0.35 * d0 / CB.BELL.strike.radius)), 'less further off');
+  assert.ok(Math.hypot(near.p[0], near.p[2]) > d0 + 0.3, 'pushed out'); assert.equal(far.hp, far.max);
+  assert.equal(c.tones.length, 0, 'the ring has gone out and is done');
+});
+
+ok('the bell tolled all the way: held a second, the toll goes out to 16 m, strikes harder and stuns: a stunned bot neither moves of itself nor shoots', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'bell');
+  const b = standBot(c, body, [0, 1.6, -12], 5);   // a warden: it outlasts the toll
+  fightFor(c, body, aim, 1.25, (t) => ({ attack: true, attackPressed: t < FRAME / 2 }));
+  assert.ok(c.bell.power > 0.99 && c.slow, 'tolled all the way, the body walking: ' + c.bell.power);
+  let evs = fightFor(c, body, aim, FRAME, {});
+  assert.equal(kinds(evs, 'toll')[0].power, 1); assert.equal(kinds(evs, 'toll')[0].radius, CB.BELL.toll.radius);
+  evs = fightFor(c, body, aim, 0.7);
+  const h = kinds(evs, 'hit').find((e) => e.id === b.id && e.kind === 'toll');
+  assert.ok(h && h.damage > 40, 'struck by the toll: ' + JSON.stringify(h)); assert.equal(kinds(evs, 'stun').length, 1); assert.ok(b.stunT > 0);
+  b.fire = 0; b.L = { ...b.L, speed: 6 };   // free, it would shoot at once and go about
+  const at = [...b.p]; evs = fightFor(c, body, aim, 1.0);
+  assert.equal(kinds(evs, 'bolt').length, 0, 'stunned, it does not shoot');
+  assert.ok(Math.hypot(b.p[0] - at[0], b.p[2] - at[2]) < 1.2, 'stunned, it does not go about: ' + Math.hypot(b.p[0] - at[0], b.p[2] - at[2]).toFixed(2));
+  evs = fightFor(c, body, aim, 1.6); assert.ok(kinds(evs, 'bolt').length > 0, 'and then it shoots again');
+});
+
+ok('the bell\'s peal: three rings one after another, each striking once; struck in the air, it rings out from the water below; a wall between stops its tone', () => {
+  let { c, body, aim } = arena(); CB.chooseWeapon(c, 'bell');
+  const b = standBot(c, body, [1.5, 1.6, -3], 5); still(b);
+  let evs = fightFor(c, body, aim, FRAME, { sweep: true }); evs = evs.concat(fightFor(c, body, aim, 1.2));
+  assert.equal(kinds(evs, 'toll').length, CB.BELL.peal.n, 'three rings');
+  assert.equal(kinds(evs, 'hit').filter((e) => e.id === b.id && e.kind === 'bell').length, 3, 'struck by each');
+  // in the air
+  ({ c, body, aim } = arena()); CB.chooseWeapon(c, 'bell');
+  body.p = [0, 6, 0]; body.grounded = false; body.floorY = 0;
+  const low = standBot(c, body, [2, 1.4, -3]), high = standBot(c, body, [-2, 6.5, -3]); still(low, high);
+  evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); evs = evs.concat(fightFor(c, body, aim, FRAME, {}));
+  const t = kinds(evs, 'toll')[0]; assert.ok(t.at[1] < 1, 'it rings from the water below: ' + t.at[1]);
+  evs = fightFor(c, body, aim, 0.8);
+  const struck = kinds(evs, 'hit').map((e) => e.id);
+  assert.ok(struck.includes(low.id) && !struck.includes(high.id), 'what hovers low is struck, not what is up beside the body');
+  // a wall between
+  ({ c, body, aim } = arena()); CB.chooseWeapon(c, 'bell');
+  const front = standBot(c, body, [0, 1.6, -3]), behind = standBot(c, body, [0.5, 1.6, -7]); still(front, behind);
+  const wall = { solid: (p) => Math.abs(p[2] + 5) < 0.12 && p[1] < 4 };
+  evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }, { world: wall }); evs = evs.concat(fightFor(c, body, aim, 1, {}, { world: wall }));
+  const by = kinds(evs, 'hit').map((e) => e.id);
+  assert.ok(by.includes(front.id) && !by.includes(behind.id), 'the wall stops the tone: ' + by);
+});
+
+ok('the weapons: the five listed, the ring, the bow and the bell made; the next is the other made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
   assert.deepEqual(CB.WEAPONS.map((w) => w.id), ['thread', 'bow', 'ring', 'bell', 'torch']);
-  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['bow', 'ring']);
-  assert.equal(CB.nextWeapon('ring'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
+  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['bow', 'ring', 'bell']);
+  assert.equal(CB.nextWeapon('ring'), 'bell'); assert.equal(CB.nextWeapon('bell'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
   const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
   fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, FRAME, {});
   assert.equal(c.ring.mode, 'out');
