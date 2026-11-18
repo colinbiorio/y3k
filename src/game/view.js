@@ -20,7 +20,7 @@
 // the frames long. The page's guess at a tier (../gfx.js) is not read.
 //
 // What stands in the void (world.js) is built from the bar's build list (the
-// shelter, the house, the workshop and the tower, of the five) or with the build key (the kind last
+// five: the shelter, the house, the workshop, the tower and the hall) or with the build key (the kind last
 // chosen), a few steps in front, its door toward the body.
 // The body is pushed out of its walls and stands on its floor (body.js); the
 // eye comes in rather than go through them; inside, the body is seen by the
@@ -49,6 +49,7 @@ import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
+import { createHallArt } from './buildings/hall.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, LEVELS, PLAYER } from './combat.js';
 import { createFightArt } from './fight.js';
 import { createIsland } from './island/island.js';
@@ -209,7 +210,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   }
 
   // the build key: near a building's door it is taken down; else the kind last chosen goes up in front of the body
-  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back', tower: 'in at its door; the stair climbs the wall to the dome' };
+  const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back', tower: 'in at its door; the stair climbs the wall to the dome', hall: 'up its stairs to the door on top; the hangar is under them' };
   function said(r) {
     const key = keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build';
     if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
@@ -316,7 +317,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
   // what stands, drawn: a drawing for each building, kept while it stands; and the light a body inside is seen by
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
-  const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt, tower: createTowerArt };
+  const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt, tower: createTowerArt, hall: createHallArt };
   function builds(dt) {
     const V = K.void, L = LIGHTS[V.light], seen = new Set();
     SUN.copy(V.key.position).sub(V.key.target.position).normalize();

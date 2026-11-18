@@ -263,6 +263,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-17** (late night) — **The hall, the fifth building: all five
+  stand** (`src/game/hall.js`, `buildings/hall.js`; `world.js`, `view.js`). From
+  its brief: a great hall, 30 by 40 metres, on three terraces of pale
+  limestone planted with low gardens. Two flights climb the tallest, lowest
+  terrace either side of a wide arched hangar mouth, then stairs go up the
+  middle to the hall's door 7 m up. Inside, seven laminated-timber arches on
+  stone columns carry a roof of dark solar tiles over a band of clear glass;
+  woven hangings, a long table and benches, and a round stone hearth with a
+  steady plasma flame. The hangar under the terraces is empty, waiting for the
+  ships. On the island it stands in the lagoon's shallows by the beach. Stage
+  3 is done. Game suite 152 (5 new); the `build` smoke now walks into the
+  hangar, up the stairs and into the hall.
+
 - **2026-11-17** (night, later) — **The tower, the fourth building**
   (`src/game/tower.js`, `buildings/tower.js`; `world.js`, `view.js`). From its
   brief: a slender round tower of pale limestone banded with blue-green glazed

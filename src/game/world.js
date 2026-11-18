@@ -1,5 +1,5 @@
 // world.js — WHAT STANDS IN THE VOID, as numbers: the buildings a person has
-// put up (the shelter, the house, the workshop and the tower, of the five), and what they ask of a
+// put up (the five: the shelter, the house, the workshop, the tower and the hall), and what they ask of a
 // body (where it may go, what it stands on, how high it may reach, a ladder to
 // climb), of the eye (where it may stand), and of the light (whether the sun
 // reaches a point inside). No page, no three: the suite runs it; buildings/
@@ -26,6 +26,7 @@ import * as SH from './shelter.js';
 import * as HO from './house.js';
 import * as WO from './workshop.js';
 import * as TO from './tower.js';
+import * as HA from './hall.js';
 
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
@@ -39,11 +40,12 @@ export const KINDS = {
   house: { name: 'house', entry: (b) => HO.toWorld(b, 0, HO.REACH_Z + 0.3), rise: 0.45, place: HO.placeHouse, solve: HO.solve, inside: HO.inside, eyeRoom: HO.eyeRoom, sunIn: HO.sunIn, phase: HO.phase, door: HO.doorWorld, dry: HO.dry, foot: HO.FOOT, solid: HO.solid, wall: HO.wall },
   workshop: { name: 'workshop', entry: (b) => WO.toWorld(b, 0, WO.REACH_Z + 0.3), rise: 0.45, place: WO.placeWorkshop, solve: WO.solve, inside: WO.inside, eyeRoom: WO.eyeRoom, sunIn: WO.sunIn, phase: WO.phase, door: WO.doorWorld, dry: WO.dry, foot: WO.FOOT, solid: WO.solid, wall: WO.wall, opens: WO.opens },
   tower: { name: 'tower', entry: (b) => TO.toWorld(b, 0, TO.REACH_Z + 0.3), rise: 0.25, place: TO.placeTower, solve: TO.solve, inside: TO.inside, eyeRoom: TO.eyeRoom, sunIn: TO.sunIn, phase: TO.phase, door: TO.doorWorld, dry: TO.dry, foot: TO.FOOT, solid: TO.solid, wall: TO.wall },
+  hall: { name: 'hall', entry: (b) => HA.toWorld(b, 0, HA.HALL.terraces[0].hz + 1), rise: 0.25, place: HA.placeHall, solve: HA.solve, inside: HA.inside, eyeRoom: HA.eyeRoom, sunIn: HA.sunIn, phase: HA.phase, door: HA.mouthWorld, dry: HA.dry, foot: HA.FOOT, solid: HA.solid, wall: HA.wall, opens: HA.opens },
 };
 // the five, in the order they are offered; those not yet made say so
 export const BUILDINGS = [
   { kind: 'shelter', label: 'shelter', ready: true }, { kind: 'house', label: 'house', ready: true },
-  { kind: 'workshop', label: 'workshop', ready: true }, { kind: 'tower', label: 'tower', ready: true }, { kind: 'hall', label: 'hall', ready: false },
+  { kind: 'workshop', label: 'workshop', ready: true }, { kind: 'tower', label: 'tower', ready: true }, { kind: 'hall', label: 'hall', ready: true },
 ];
 export const cleanBuilding = (k) => (KINDS[k] ? k : 'shelter');
 const K = (b) => KINDS[b.kind];
