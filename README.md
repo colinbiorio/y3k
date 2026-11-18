@@ -263,6 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (morning, later) — **The second weapon: the bow; and the
+  weapons list** (`src/game/combat.js` BOW, WEAPONS; `fight.js`, `input.js`,
+  `state.js`, `view.js`). A recurve of bronze limbs strung with plasma, held
+  by the binding as the ring is. T (or the bar's new **weapons** list: the
+  five, the three to come greyed) changes the weapon in hand, kept between
+  visits. A tap looses an arrow (24); held, it draws for up to 0.9 s and the
+  arrow strikes up to 88 and, drawn all the way, goes through three; the
+  whirl's key looses a volley of five; drawn in the air, it holds you up. An
+  arrow goes for a bot very near the eye's line, where it will be when the
+  arrow arrives. Game suite 168 (four bow tests); the `fight` smoke takes the
+  bow, draws, strikes and looses a volley (22 checks, 60 frames a second).
+
 - **2026-11-18** (morning) — **Stage 5 begun: the binding, the force**
   (`src/game/combat.js` BINDING; `fight.js`, `input.js`, `view.js`). As
   decided with Colin, the force is the binding, "love as what binds: it pulls,
