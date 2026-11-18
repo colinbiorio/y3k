@@ -23,7 +23,7 @@
 //   fight  the ring and the bots (combat.js, fight.js): the bar's list of five levels, a drifter come up out of
 //          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
 //          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
-//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; the bell tolled; the thread lashed and a bot snared; seven bots and more up and the frames; the list clearing them
+//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; the bell tolled; the torch's flame, its wall and an ember; the thread lashed and a bot snared; seven bots and more up and the frames; the list clearing them
 //   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
 //          up, the body leaning into it) to its corner; run again and leapt off, out and up
 //   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
@@ -422,10 +422,26 @@ try {
     r = await until((r) => worth(r) < w1, 3000);
     check('and strikes what it passes', worth(r) < w1, { w1, w: worth(r), bots: r.fight.bots });
     await sleep(150); await shot('12-toll');
-    // the thread: T from the bell; held, its spindle spins up; let go, it lashes out at the bot looked at and, spun all
-    // the way, snares it; T goes on round, to the bow and the ring
+    // the torch: T from the bell; held, its flame streams and burns what is in it (walked toward it, as the bots keep
+    // off); the whirl's key, a wall of fire; a tap, an ember
     await key.press('KeyT'); await sleep(150); r = await until((r) => r.fight.tones === 0, 3000);
-    check('T goes on round: from the bell to the thread', r.fight.weapon === 'thread', r.fight.weapon);
+    check('T goes on round: from the bell to the torch', r.fight.weapon === 'torch', r.fight.weapon);
+    const w3 = worth(r);
+    await aimAt(); await key.down('KeyW'); await key.down('KeyJ'); await sleep(350); await aimAt(); await sleep(400); r = await read();
+    check('held, the torch\'s flame streams', r.fight.torch === 'flame' && r.fight.reach > 1, r.fight);
+    await shot('12d-flame');
+    for (let i = 0; i < 6 && worth(r) >= w3; i++) { await aimAt(); await sleep(350); r = await read(); }
+    await key.up('KeyJ'); await key.up('KeyW');
+    check('and burns what is in it', worth(r) < w3, { w3, w: worth(r), bots: r.fight.bots });
+    await sleep(150); await key.press('KeyE'); r = await until((r) => r.fight.fires >= 1, 1500);
+    check('the whirl\'s key lays a wall of fire', r.fight.fires >= 1, r.fight);
+    await sleep(300); await shot('12e-wall');
+    const f0 = r.fight.fires; await sleep(300); await key.press('KeyJ'); r = await until((r) => r.fight.embers > 0 || r.fight.fires > f0, 1500);
+    check('a tap throws an ember', r.fight.embers > 0 || r.fight.fires > f0, r.fight);
+    // the thread: T from the torch; held, its spindle spins up; let go, it lashes out at the bot looked at and, spun all
+    // the way, snares it; T goes on round, to the bow and the ring
+    await key.press('KeyT'); await sleep(150); r = await read();
+    check('T goes on round: from the torch to the thread', r.fight.weapon === 'thread', r.fight.weapon);
     // a fresh warden to lash: one the lash does not break outright, so there is something left to snare
     const ids0 = new Set(r.fight.bots.map((b) => b.id));
     await pick(5); await key.press('KeyN');

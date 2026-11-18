@@ -32,18 +32,39 @@
 // glowing; paid out, the filament is a fine ribbon of plasma from the hand to the
 // lash's tip, round overhead in the circle, taut to where the line caught, and
 // wound round a snared bot.
+// The torch: a haft of bronze with a wrapped grip, a cup at its head and a coil of
+// plasma over the cup, a small flame burning in it. Its fire is drawn as flames,
+// soft discs turned to the eye, white at the root, the plasma's blue, violet as
+// they go out: the flame streaming along the eye's way (the torch turned along
+// it), the jet down from its head, flames standing on the land or the water
+// where an ember burst and along a wall of fire. A machine it heats glows as
+// metal does, red, then orange, then nearly white, and flames lick up off it;
+// when it flares its core bursts in fire.
 // The binding: a thread of warm gold light from the left hand to what it holds,
 // waving a little, its pulses running in toward the hand; a halo round the bot
 // it holds, which struggles in it; with nothing to take, the thread goes out
 // along the eye's line and comes back. A bot it throws spins as it flies; two it
 // joins go up in a flash of gold.
 import * as THREE from 'three';
-import { LEVELS, RING, BOW, BELL, BINDING, THREAD, leftHandOf } from './combat.js';
+import { LEVELS, RING, BOW, BELL, BINDING, THREAD, TORCH, leftHandOf } from './combat.js';
 import { WATER } from './body.js';
 
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
 const PLASMA = new THREE.Color(0.55, 0.85, 1.0), GOLD = new THREE.Color(1.0, 0.8, 0.42);
 const levelCol = (l) => new THREE.Color(...LEVELS[Math.max(1, Math.min(5, l)) - 1].colour);
+// the torch's fire: white at the root, the plasma's blue, violet at its edge; a machine's own fire, white, orange, red
+const F_CORE = new THREE.Color(0.95, 0.98, 1.0), F_BODY = new THREE.Color(0.2, 0.5, 1.0), F_EDGE = new THREE.Color(0.4, 0.15, 0.85);
+const W_CORE = new THREE.Color(1.0, 0.95, 0.8), W_BODY = new THREE.Color(1.0, 0.55, 0.15), W_EDGE = new THREE.Color(0.55, 0.12, 0.05);
+function flameCol(u, hot, warm, out) {
+  const [a, b, e] = warm ? [W_CORE, W_BODY, W_EDGE] : [F_CORE, F_BODY, F_EDGE], k = 0.22 * hot;
+  return u < k ? out.copy(a).lerp(b, u / k) : out.copy(b).lerp(e, Math.min(1, (u - k) / (1 - k)));
+}
+// metal as it heats: dull red, orange, nearly white
+function heatCol(h, out) {
+  if (h < 0.35) return out.setRGB(0.55 * h / 0.35, 0.05 * h / 0.35, 0);
+  if (h < 0.75) return out.setRGB(0.55, 0.05, 0).lerp(W_BODY, (h - 0.35) / 0.4);
+  return out.copy(W_BODY).lerp(new THREE.Color(1.0, 0.85, 0.55), Math.min(1, (h - 0.75) / 0.25));
+}
 
 // a soft round glow, made once (a sprite's picture)
 export function glowTexture() {
@@ -193,6 +214,57 @@ export function createFightArt(scene, { lite = false } = {}) {
   }))));
   filament.frustumCulled = false; filament.visible = false;
   let spun = 0;
+  // ---- the torch: a haft, a wrapped grip, a cup turned from its profile, a coil of plasma over it, a glow
+  const torch = add(new THREE.Group()); torch.visible = false;
+  torch.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.017, 0.024, 0.52, 10)), metal));
+  { const grip = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.029, 0.029, 0.18, 12)), mat(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.2, 0.12, 0.07), roughness: 0.9 }))); grip.position.y = -0.1; torch.add(grip); }
+  { const cup = new THREE.Mesh(geo(new THREE.LatheGeometry([[0.012, 0], [0.03, 0.01], [0.052, 0.035], [0.07, 0.075], [0.076, 0.095], [0.068, 0.097], [0.06, 0.08], [0.04, 0.045], [0.001, 0.035]].map(([r, y]) => new THREE.Vector2(r, y)), 28)), mat(new THREE.MeshStandardMaterial({ color: BRONZE, metalness: 1, roughness: 0.3, envMapIntensity: 1.2, side: THREE.DoubleSide })));
+    cup.position.y = 0.25; torch.add(cup); }
+  { const coil = new THREE.Mesh(geo(new THREE.TorusGeometry(0.058, 0.007, 8, 32)), mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone().multiplyScalar(1.3) }))); coil.rotation.x = Math.PI / 2; coil.position.y = 0.375; torch.add(coil); }
+  const torchGlowMat = mat(new THREE.SpriteMaterial({ map: tex, color: PLASMA.clone().multiplyScalar(0.6), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  const torchGlow = new THREE.Sprite(torchGlowMat); torchGlow.position.y = 0.36; torchGlow.scale.setScalar(0.3); torch.add(torchGlow);
+  // its fire: flames, each a soft disc turned to the eye (an instanced square, turned in the eye's own space), growing
+  // and fading as it goes; laid over what is behind, not added to it (added, they went white by day)
+  const NF = lite ? 360 : 720, fl = [], fPos = new Float32Array(NF * 3), fSize = new Float32Array(NF), fTall = new Float32Array(NF), fCol = new Float32Array(NF * 4);
+  for (let i = 0; i < NF; i++) fl.push({ p: [0, -99, 0], v: [0, 0, 0], life: 0, max: 1, s0: 0.1, s1: 0.1, up: 0, drag: 0, a: 1, hot: 1, warm: false, tall: 1 });
+  let flAt = 0, fAcc = 0, rAcc = 0, jAcc = 0, eAcc = 0, jDrop = 0;
+  const flGeo = geo(new THREE.InstancedBufferGeometry());
+  flGeo.setIndex([0, 2, 1, 2, 3, 1]);
+  flGeo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0.5, 0, 0.5, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0], 3));
+  flGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 0, 0, 1, 0], 2));
+  flGeo.setAttribute('iPos', new THREE.InstancedBufferAttribute(fPos, 3).setUsage(THREE.DynamicDrawUsage));
+  flGeo.setAttribute('iSize', new THREE.InstancedBufferAttribute(fSize, 1).setUsage(THREE.DynamicDrawUsage));
+  flGeo.setAttribute('iTall', new THREE.InstancedBufferAttribute(fTall, 1).setUsage(THREE.DynamicDrawUsage));
+  flGeo.setAttribute('iCol', new THREE.InstancedBufferAttribute(fCol, 4).setUsage(THREE.DynamicDrawUsage));
+  flGeo.instanceCount = 0;
+  const flames = add(new THREE.Mesh(flGeo, mat(new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    // a flame standing on the land is drawn taller than it is wide (iTall), narrowing toward its top
+    vertexShader: `attribute vec3 iPos; attribute float iSize; attribute float iTall; attribute vec4 iCol; varying vec2 vUv; varying vec4 vCol; varying float vTall;
+      void main() { vUv = uv; vCol = iCol; vTall = iTall; vec4 mv = modelViewMatrix * vec4(iPos, 1.0); mv.xy += vec2(position.x, position.y * iTall) * iSize; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `varying vec2 vUv; varying vec4 vCol; varying float vTall;
+      void main() {
+        vec2 q = vUv * 2.0 - 1.0; q.x *= 1.0 + 0.7 * max(0.0, q.y) * min(1.0, vTall - 1.0);
+        float r = length(q); if (r > 1.0) discard;
+        float a = 1.0 - smoothstep(0.0, 1.0, r);
+        gl_FragColor = vec4(mix(vCol.rgb, vec3(1.0), pow(1.0 - r, 3.0) * 0.5), pow(a, 1.4) * vCol.a);
+        #include <colorspace_fragment>
+      }`,
+  }))));
+  flames.frustumCulled = false;
+  // one flame: from p, moving v, for `life` s, growing from s0 to s1 across; it rises (up) and slows (drag) as it goes
+  function flame(p, v, life, s0, s1, up = 0, drag = 0, a = 0.85, hot = 1, warm = false, tall = 1) {
+    const f = fl[flAt]; flAt = (flAt + 1) % NF;
+    f.p = [p[0], p[1], p[2]]; f.v = [v[0], v[1], v[2]]; f.life = f.max = life; f.s0 = s0; f.s1 = s1; f.up = up; f.drag = drag; f.a = a; f.hot = hot; f.warm = warm; f.tall = tall;
+  }
+  // a puff of fire out from a point, as wide as `radius`
+  function puff(at, radius, n = 26, warm = false) {
+    for (let k = 0; k < n; k++) {
+      const u = Math.random() * 2 - 1, a = Math.random() * 6.283, r = Math.sqrt(1 - u * u), m = radius * (1.6 + 1.4 * Math.random());
+      flame(at, [r * Math.cos(a) * m, Math.abs(u) * m * 0.6 + 0.5, r * Math.sin(a) * m], 0.32 + 0.2 * Math.random(), 0.35, 0.9 + 0.3 * radius, 1.5, 3, 0.85, 1, warm);
+    }
+  }
+  const HEAD = new THREE.Vector3(), X1 = new THREE.Vector3(), Y1 = new THREE.Vector3(), C3 = new THREE.Color(), rnd = () => Math.random() - 0.5;
 
   // ---- bolts: two instanced streaks, a core and a halo, in their sender's colour
   const NB = 64, M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), V3 = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, 1);
@@ -311,7 +383,7 @@ export function createFightArt(scene, { lite = false } = {}) {
       for (const ev of evs) {
         if (ev.type === 'cast' || ev.type === 'whirl' || ev.type === 'dive') trailPts.length = 0;
         const at = ev.at;
-        if (ev.type === 'hit') burst(at, ev.kind === 'parry' ? PLASMA : new THREE.Color(1, 0.9, 0.75), ev.kind === 'charged' ? 30 : 16, ev.kind === 'charged' ? 9 : 6);
+        if (ev.type === 'hit') { if (ev.kind === 'torch') burst(at, W_BODY, 3, 2.5, 1.5); else burst(at, ev.kind === 'parry' ? PLASMA : new THREE.Color(1, 0.9, 0.75), ev.kind === 'charged' ? 30 : 16, ev.kind === 'charged' ? 9 : 6); }
         else if (ev.type === 'spark') burst(at, ev.level ? levelCol(ev.level) : PLASMA, 10, 4);
         else if (ev.type === 'deflect' || ev.type === 'parry') burst(at, PLASMA, ev.type === 'parry' ? 26 : 12, 6);
         else if (ev.type === 'splash') { drop(at[0], at[2], ev.size || 0.15); burst([at[0], WATER + 0.02, at[2]], new THREE.Color(0.7, 0.85, 1), 6, 2.5, 2.5); }
@@ -325,6 +397,11 @@ export function createFightArt(scene, { lite = false } = {}) {
         else if (ev.type === 'fling') burst(at, GOLD, 14, 5, 1);
         else if (ev.type === 'join') { burst(at, GOLD, 46, 10, 3); burst(at, new THREE.Color(1, 0.97, 0.9), 20, 6, 2); }
         else if (ev.type === 'bind-miss') burst(at, GOLD, 6, 2, 0.5);
+        else if (ev.type === 'throw') burst(at, F_BODY, 6, 2, 0.5);
+        else if (ev.type === 'ember') { puff(at, ev.radius * 0.7, 30); burst(at, F_BODY, 24, 7, 2); burst(at, F_CORE, 10, 4, 1); if (at[1] < 1) drop(at[0], at[2], 0.25); }
+        else if (ev.type === 'flare') { puff(at, ev.radius * 0.6, 36, true); burst(at, W_BODY, 40, 10, 2); burst(at, W_CORE, 20, 6, 1); }
+        else if (ev.type === 'wall') { for (let k = 0; k < 24; k++) { const u = k / 23; flame([ev.a[0] + (ev.b[0] - ev.a[0]) * u, ev.a[1] + 0.1, ev.a[2] + (ev.b[2] - ev.a[2]) * u], [rnd() * 2, 3 + 2 * Math.random(), rnd() * 2], 0.4, 0.5, 1.4, 1, 2.5, 0.8, 1); } }
+        else if (ev.type === 'jet') burst(at, F_BODY, 10, 3, -1);
         else if (ev.type === 'slam') { wave(at, ev.radius); drop(at[0], at[2], 0.6); for (let k = 0; k < 6; k++) { const a = k * 1.047; drop(at[0] + Math.cos(a) * 1.2, at[2] + Math.sin(a) * 1.2, 0.2); } burst([at[0], at[1] + 0.2, at[2]], PLASMA, 40, 8, 3); }
         else if (ev.type === 'broken' || ev.type === 'gone') { const d = drawn.get(ev.id); if (d) { drawn.delete(ev.id); if (ev.type === 'broken') breakBot(d, at, ev.v || [0, 0, 0], ev.r || 0.5); else { burst(at, d.col, 12, 3); unmake(d); } } }
       }
@@ -380,7 +457,7 @@ export function createFightArt(scene, { lite = false } = {}) {
       }
       // ---- the bow, when it is in hand (the ring comes back for the guard, and while it is still coming home)
       const bowIn = c.weapon === 'bow', W = c.bow;
-      ring.visible = glow.visible = (!bowIn && !bellIn && c.weapon !== 'thread') || flying || guardAmt > 0.02;
+      ring.visible = glow.visible = c.weapon === 'ring' || flying || guardAmt > 0.02;
       bow.visible = bowIn && guardAmt < 0.5 && !fallen;
       if (bow.visible) {
         const hand = R.p, drawing = W.mode === 'drawing';
@@ -494,6 +571,76 @@ export function createFightArt(scene, { lite = false } = {}) {
       bindHalo.visible = !!holdBot;
       if (holdBot) { bindHalo.position.set(holdBot.p[0], holdBot.p[1], holdBot.p[2]); bindHalo.scale.setScalar((holdBot.r * 3.2) * (1 + 0.08 * Math.sin(time.value * 9))); }
 
+      // ---- the torch, when it is in hand: upright at the shoulder, leaning a little forward, its small flame in the cup;
+      // streaming, turned along its flame; its jet, head down
+      const To = c.torch;
+      torch.visible = c.weapon === 'torch' && guardAmt < 0.5 && !fallen;
+      if (torch.visible) {
+        torch.position.set(R.p[0], R.p[1] - 0.04, R.p[2]);
+        if (To.mode === 'flame' && To.from) torch.quaternion.setFromUnitVectors(up, V3.set(To.dir[0], To.dir[1], To.dir[2]));
+        else if (To.mode === 'jet') torch.quaternion.setFromUnitVectors(up, V3.set(0, -1, 0));
+        else { q.setFromAxisAngle(up, body.yaw); torch.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(X1.set(1, 0, 0), 0.22)); }
+        const head = HEAD.set(0, 0.37, 0).applyQuaternion(torch.quaternion).add(torch.position), hp = [head.x, head.y, head.z];
+        const lit = To.mode === 'lit', busy = To.mode === 'flame' || To.mode === 'jet';
+        torchGlowMat.opacity = busy ? 0.8 : lit ? 0.85 : 0.5; torchGlow.scale.setScalar(busy ? 0.36 : lit ? 0.4 : 0.3);
+        if (!busy) {
+          // the small flame in the cup, bigger once it is lit
+          rAcc += dt * (lit ? 60 : 28);
+          for (; rAcc >= 1; rAcc--) flame([hp[0] + rnd() * 0.03, hp[1], hp[2] + rnd() * 0.03], [rnd() * 0.15, 0.7 + 0.5 * Math.random(), rnd() * 0.15], 0.28 + 0.15 * Math.random(), lit ? 0.14 : 0.1, 0.02, 0.5, 0, 0.9);
+        } else if (To.mode === 'flame') {
+          // the flame along its way, widening as the numbers do, dying where it reaches (cut short at a wall)
+          const d = To.dir, reach = Math.max(0.4, To.reach), sp = 15;
+          X1.set(d[0], d[1], d[2]).cross(up); if (X1.lengthSq() < 1e-4) X1.set(1, 0, 0); X1.normalize(); Y1.set(d[0], d[1], d[2]).cross(X1).normalize();
+          fAcc += dt * (lite ? 170 : 300);
+          for (; fAcc >= 1; fAcc--) {
+            const core = Math.random() < 0.5, a = Math.random() * 6.283, m = Math.sqrt(Math.random()) * TORCH.flame.spread * (core ? 0.3 : 0.85);
+            const s = (core ? 17 : sp) * (0.85 + 0.3 * Math.random()), ca = Math.cos(a) * m, sa = Math.sin(a) * m;
+            flame(hp, [(d[0] + X1.x * ca + Y1.x * sa) * s, (d[1] + X1.y * ca + Y1.y * sa) * s, (d[2] + X1.z * ca + Y1.z * sa) * s], (reach / s) * (0.8 + 0.3 * Math.random()),
+              core ? 0.12 : 0.16, core ? 0.55 : 0.4 + 0.2 * reach, 1.2, 0.6, core ? 1 : 0.8, core ? 1.6 : 0.8);
+          }
+          // seen from behind a stream is end on, so it shows where it ends and what it wraps: it billows at its end, and
+          // what is in it (as the numbers have it) is wrapped in flame
+          const end = [hp[0] + d[0] * reach, hp[1] + d[1] * reach, hp[2] + d[2] * reach];
+          eAcc += dt * (lite ? 24 : 40);
+          for (; eAcc >= 1; eAcc--) flame([end[0] + rnd() * 0.6, end[1] + rnd() * 0.6, end[2] + rnd() * 0.6], [d[0] * 2 + rnd(), d[1] * 2 + 0.8, d[2] * 2 + rnd()], 0.45 + 0.2 * Math.random(), 0.7, 1.7, 1.5, 1.5, 0.75, 0.6);
+          for (const b of c.bots) {
+            const v = [b.p[0] - To.from[0], b.p[1] - To.from[1], b.p[2] - To.from[2]], along = v[0] * d[0] + v[1] * d[1] + v[2] * d[2];
+            if (along < -b.r || along > To.reach + b.r) continue;
+            const off = Math.hypot(v[0] - d[0] * along, v[1] - d[1] * along, v[2] - d[2] * along);
+            if (off > b.r + 0.3 + Math.max(0, along) * TORCH.flame.spread || Math.random() > dt * 30) continue;
+            flame([b.p[0] + rnd() * b.r * 1.4, b.p[1] + rnd() * b.r * 1.4, b.p[2] + rnd() * b.r * 1.4], [d[0] * 1.5, 1, d[2] * 1.5], 0.35, b.r * 1.1, b.r * 1.8, 1, 1, 0.85, 0.7);
+          }
+          if (To.reach < TORCH.flame.reach - 0.3 && Math.random() < dt * 20) burst([hp[0] + d[0] * To.reach, hp[1] + d[1] * To.reach, hp[2] + d[2] * To.reach], F_BODY, 3, 3, 1);
+        } else {
+          // the jet, down from the head; the water under it stirred
+          jAcc += dt * (lite ? 140 : 240);
+          for (; jAcc >= 1; jAcc--) {
+            const core = Math.random() < 0.5, s = 11 * (0.85 + 0.3 * Math.random()), w = core ? 0.08 : 0.25;
+            flame(hp, [rnd() * w * s, -s, rnd() * w * s], 0.42 * (0.8 + 0.4 * Math.random()), core ? 0.14 : 0.18, core ? 0.55 : 1.4, 2, 1, core ? 1 : 0.8, core ? 1.6 : 0.8, false, core ? 1 : 1.6);
+          }
+          if ((jDrop -= dt) <= 0 && body.p[1] - WATER < TORCH.jet.reach) { jDrop = 0.1; dropFn?.(body.p[0] + rnd() * 0.6, body.p[2] + rnd() * 0.6, 0.05); }
+        }
+      }
+      // the fires it has laid: flames standing over a patch, or all along a wall; they catch, and die down at the end
+      for (const F of c.fires) {
+        const fade = Math.min(1, F.t / 0.25) * Math.min(1, (F.life - F.t) / 0.6);
+        if (F.kind === 'wall') {
+          const ax = F.b[0] - F.a[0], az = F.b[2] - F.a[2], L = Math.hypot(ax, az) || 1, nx = -az / L, nz = ax / L;
+          F.acc = (F.acc || 0) + dt * (lite ? 60 : 110) * fade;
+          for (; F.acc >= 1; F.acc--) {
+            const u = Math.random(), w = rnd() * TORCH.wall.band * 1.2;
+            flame([F.a[0] + ax * u + nx * w, F.a[1] + 0.45, F.a[2] + az * u + nz * w], [rnd() * 0.4, 2.4 + 1.4 * Math.random(), rnd() * 0.4], 0.6 + 0.35 * Math.random(), 0.95, 0.3, 0.8, 0.4, 0.9, 0.7, false, 2.2);
+          }
+        } else {
+          F.acc = (F.acc || 0) + dt * (lite ? 26 : 45) * fade;
+          for (; F.acc >= 1; F.acc--) {
+            const a = Math.random() * 6.283, rr = Math.sqrt(Math.random()) * F.r * 0.85;
+            flame([F.at[0] + Math.cos(a) * rr, F.at[1] + 0.4, F.at[2] + Math.sin(a) * rr], [rnd() * 0.3, 1.6 + 1.0 * Math.random(), rnd() * 0.3], 0.55 + 0.35 * Math.random(), 0.9, 0.3, 0.8, 0.4, 0.9, 0.7, false, 1.9);
+          }
+          if (F.at[1] < 0.1 && Math.random() < dt * 4) dropFn?.(F.at[0] + rnd() * F.r, F.at[2] + rnd() * F.r, 0.03);
+        }
+      }
+
       // ---- bots
       const seen = new Set();
       for (const b of c.bots) {
@@ -506,8 +653,12 @@ export function createFightArt(scene, { lite = false } = {}) {
         if (b.mode === 'bound') { d.body.rotation.x += Math.sin(b.t * 29) * 0.14; d.body.rotation.z += Math.sin(b.t * 23 + 1) * 0.12; }   // it struggles in the binding
         else if (b.mode === 'flung' || b.mode === 'tumble') d.body.rotation.set(b.t * 9, face + b.t * 5, b.t * 7);                     // thrown, it spins
         d.fins.rotation.z = b.t * 2.4;
-        const flash = b.hitT > 0 ? b.hitT / 0.16 : 0;
-        d.shellMat.emissive.setRGB(flash, flash, flash * 0.95);
+        const flash = b.hitT > 0 ? b.hitT / 0.16 : 0, ht = Math.min(1, b.heat || 0);
+        heatCol(ht, C3); d.shellMat.emissive.setRGB(Math.max(flash, C3.r), Math.max(flash, C3.g), Math.max(flash * 0.95, C3.b));
+        if (ht > 0.35 && b.mode !== 'rise') {
+          d.lick = (d.lick || 0) + dt * ht * 14;
+          for (; d.lick >= 1; d.lick--) flame([b.p[0] + rnd() * b.r * 0.9, b.p[1] + b.r * 0.6, b.p[2] + rnd() * b.r * 0.9], [rnd() * 0.3, 1.2 + Math.random(), rnd() * 0.3], 0.4, 0.55 * b.r, 0.1, 1, 0.3, 0.9, 0.6, true, 1.7);
+        }
         d.hover.position.set(0, -b.r * 0.95, 0); d.hover.material.opacity = 0.6 + 0.4 * Math.sin(b.t * 13 + b.phase) ** 2;
         V3.set(Math.sin(face), 0, Math.cos(face)).multiplyScalar(b.r * 0.98); d.eyeGlow.position.copy(V3);
         d.bar.visible = b.hp < b.max && b.mode !== 'rise';
@@ -531,11 +682,12 @@ export function createFightArt(scene, { lite = false } = {}) {
       let nb = 0;
       for (const x of c.bolts) {
         if (nb >= NB) break;
-        const col = x.owner === 'bot' ? levelCol(x.level) : PLASMA;
+        const ember = x.kind === 'ember', col = x.owner === 'bot' ? levelCol(x.level) : ember ? F_BODY : PLASMA;
+        if (ember) flame(x.p, [x.v[0] * 0.05, x.v[1] * 0.05, x.v[2] * 0.05], 0.22, 0.2, 0.05, 0.5, 0, 0.9);
         V3.set(x.v[0], x.v[1], x.v[2]); const s = V3.length() || 1; Q.setFromUnitVectors(Z, V3.multiplyScalar(1 / s));
         const arrow = x.kind === 'arrow';
-        M.compose(V3.set(x.p[0], x.p[1], x.p[2]), Q, arrow ? S.set(0.045, 0.045, 0.9) : S.set(0.08, 0.08, 0.48)); core.setMatrixAt(nb, M); core.setColorAt(nb, col);
-        M.compose(V3, Q, arrow ? S.set(0.16, 0.16, 1.35) : S.set(0.24, 0.24, 0.85)); halo.setMatrixAt(nb, M); halo.setColorAt(nb, col);
+        M.compose(V3.set(x.p[0], x.p[1], x.p[2]), Q, ember ? S.set(0.12, 0.12, 0.14) : arrow ? S.set(0.045, 0.045, 0.9) : S.set(0.08, 0.08, 0.48)); core.setMatrixAt(nb, M); core.setColorAt(nb, col);
+        M.compose(V3, Q, ember ? S.set(0.36, 0.36, 0.42) : arrow ? S.set(0.16, 0.16, 1.35) : S.set(0.24, 0.24, 0.85)); halo.setMatrixAt(nb, M); halo.setColorAt(nb, col);
         nb++;
       }
       core.count = halo.count = nb;
@@ -548,6 +700,23 @@ export function createFightArt(scene, { lite = false } = {}) {
         sp.set(s.life > 0 ? s.p : [0, -99, 0], i * 3); sc.set([s.c[0] * k, s.c[1] * k, s.c[2] * k], i * 3);
       }
       sparkGeo.attributes.position.needsUpdate = true; sparkGeo.attributes.color.needsUpdate = true;
+      // ---- flames
+      let nf = 0;
+      for (const f of fl) {
+        if (f.life <= 0) continue;
+        f.life -= dt; if (f.life <= 0) continue;
+        const k = Math.exp(-f.drag * dt);
+        f.v[0] *= k; f.v[1] = f.v[1] * k + f.up * dt; f.v[2] *= k;
+        f.p[0] += f.v[0] * dt; f.p[1] += f.v[1] * dt; f.p[2] += f.v[2] * dt;
+        const u = 1 - f.life / f.max;
+        flameCol(u, f.hot, f.warm, C3);
+        fPos.set(f.p, nf * 3); fSize[nf] = f.s0 + (f.s1 - f.s0) * u; fTall[nf] = f.tall;
+        fCol[nf * 4] = C3.r; fCol[nf * 4 + 1] = C3.g; fCol[nf * 4 + 2] = C3.b; fCol[nf * 4 + 3] = f.a * Math.min(1, u * 8) * (1 - u) ** 1.2;
+        nf++;
+      }
+      flGeo.instanceCount = nf;
+      flGeo.attributes.iPos.needsUpdate = flGeo.attributes.iSize.needsUpdate = flGeo.attributes.iTall.needsUpdate = flGeo.attributes.iCol.needsUpdate = true;
+      flames.visible = nf > 0;
       // ---- waves
       for (let i = waves.length - 1; i >= 0; i--) {
         const w = waves[i]; w.t += dt;
@@ -561,6 +730,7 @@ export function createFightArt(scene, { lite = false } = {}) {
       for (const p of trailPts) { p[0] -= dx; p[2] -= dz; }
       for (const p of debris) { p.m.position.x -= dx; p.m.position.z -= dz; }
       for (const s of sl) { s.p[0] -= dx; s.p[2] -= dz; }
+      for (const f of fl) { f.p[0] -= dx; f.p[2] -= dz; }
       for (const w of waves) { w.m.position.x -= dx; w.m.position.z -= dz; }
     },
     dispose() {

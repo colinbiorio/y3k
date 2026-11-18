@@ -74,6 +74,24 @@
 //     as long as the attack is held.
 //   The guard is the ring's.
 //
+// THE TORCH, the fifth of the five (stage 5): a haft of bronze with a cup at its
+// head, and in the cup a flame of plasma held in a coil, held by the binding. What
+// its fire touches burns and is HEATED; a machine heated all the way FLARES: its
+// core bursts, it is struck hard, and what hovers near it is struck and heated too.
+// Four ways:
+//
+//   · EMBER (the attack, a tap): thrown in an arc where the eye looks (at the bot
+//     nearest that line, if one is near it); it bursts where it lands or strikes,
+//     and the ground (or the water) burns there a while.
+//   · FLAME (the attack, held): for as long as it is held, a flame streams out
+//     where the eye looks, widening as it goes; what is in it burns, hardest
+//     nearest. A wall cuts it short. The body walks while it streams.
+//   · WALL (the whirl's key): a wall of fire laid across the eye's way, a few
+//     steps out; what crosses it or hovers in it burns.
+//   · JET (the attack, in the air): pointed down, held, it bears the body up for
+//     a while (until it touches ground again), and burns what is under it.
+//   The guard is the ring's.
+//
 // THE BINDING (stage 5): the force. GAME.md: "The force is the binding. It
 // comes from Colin's own theory, love as what binds: it pulls, holds, joins and
 // lets go." Held (its own key), it reaches out along the eye's line to the bot
@@ -147,10 +165,24 @@ export const THREAD = {
   line: { reach: 22, speed: 17, time: 1.4, near: 1.6, cool: 0.5 },   // m it reaches; m/s it draws the body; s at most; m from where it caught
   assist: 0.22,                             // rad: a bot this near the eye's line is what a lash goes for
 };
+export const TORCH = {
+  ember: { speed: 21, fall: 9.8, reach: 30, life: 3.5, radius: 3.2, damage: 28, knock: 6, heat: 0.3 },   // a tap: thrown in an arc; it bursts this wide
+  flame: { reach: 8, spread: 0.2, dps: 34, heat: 0.75 },   // held: m it reaches; m it widens a m; damage and heat a second at its root (half at its end)
+  fire: { r: 2.6, life: 4, dps: 16, heat: 0.45, height: 3.2 },   // where an ember bursts: m across, s it burns; it burns what hovers this high over it
+  wall: { at: 5, half: 4.5, band: 0.8, life: 4.5, dps: 20, heat: 0.55, height: 3.8, cool: 1.6 },   // m out, m to each side, m thick
+  jet: { time: 1.8, rise: 2.4, reach: 6, dps: 26, heat: 0.6 },   // s of it a time in the air; m/s it bears the body up; m under it it burns
+  flare: { damage: 40, radius: 4, splash: 22, knock: 8, heat: 0.35, after: 0.2 },   // heated all the way: struck itself, and what is near it, heated more
+  cool: 0.3,                                // heat a machine loses a second, out of the fire
+  tap: 0.16,                                // s: held less than this, it throws an ember
+  rest: 0.35,                               // s after an ember before the next
+  every: 0.25,                              // s: what burns is struck in steps this long (what it burned in them, summed)
+  fires: 6,                                 // fires burning at once, at most (the oldest goes out)
+  assist: 0.15,                             // rad: a bot this near the eye's line is what an ember goes for
+};
 // the five plasma weapons (GAME.md's order), those made ready; the one in hand is kept between visits (state.js)
 export const WEAPONS = [
   { id: 'thread', label: 'thread', ready: true }, { id: 'bow', label: 'bow', ready: true }, { id: 'ring', label: 'ring', ready: true },
-  { id: 'bell', label: 'bell', ready: true }, { id: 'torch', label: 'torch', ready: false },
+  { id: 'bell', label: 'bell', ready: true }, { id: 'torch', label: 'torch', ready: true },
 ];
 export const cleanWeapon = (w) => (WEAPONS.some((x) => x.id === w && x.ready) ? w : 'ring');
 export const nextWeapon = (w) => { const R = WEAPONS.filter((x) => x.ready).map((x) => x.id), i = R.indexOf(w); return R[(i + 1) % R.length]; };
@@ -236,6 +268,7 @@ export function createCombat({ seed = 7 } = {}) {
     weapon: 'ring', bow: { mode: 'held', held: 0, draw: 0, cool: 0 }, bell: { mode: 'held', held: 0, power: 0, cool: 0, peal: 0, pealT: 0, rang: 0 }, tones: [],
     thread: { mode: 'held', held: 0, power: 0, cool: 0, t: 0, dir: [0, 0, 1], reach: 0, damage: 0, knock: 0, snaring: false, struck: new Set(), tip: null,
       snare: null, snareT: 0, burnT: 0, anchor: null, yaw0: 0, prevAng: null, turns: new Map() },
+    torch: { mode: 'held', held: 0, cool: 0, wallCool: 0, fuel: TORCH.jet.time, from: null, dir: [0, 0, 1], reach: 0 }, fires: [], flared: 0,
     bots: [], bolts: [], level: 1, broken: 0, turned: 0, ids: 1, rand: rng(seed), events: [],
     player: { hp: PLAYER.hp, hurt: 99, mercy: 0, down: 0 },
   };
@@ -251,6 +284,7 @@ export function spawnBot(c, body, yaw, level = c.level, ahead = 12) {
     p: [body.p[0] + f[0] * ahead + r[0] * side, -0.8, body.p[2] + f[2] * ahead + r[2] * side], v: [0, 0, 0],
     alt: 1.5 + c.rand() * 1.1, phase: c.rand() * 6.283, fire: 1.2 + c.rand() * L.every, burst: 0, burstT: 0,
     strafe: c.rand() < 0.5 ? -1 : 1, strafeT: 1.5 + c.rand() * 2.5, dodgeT: 0, dodgeDir: [0, 0, 0], armed: false, hitT: 0,
+    heat: 0, burn: 0, burnT: 0,
   };
   c.bots.push(b);
   c.events.push({ type: 'spawn', at: [b.p[0], 0, b.p[2]], level: b.level, id: b.id });
@@ -260,7 +294,7 @@ export function clearBots(c) { for (const b of c.bots) if (b.mode !== 'broken') 
 
 function hit(c, b, damage, from, kind, knock = 4) {
   if (b.mode === 'broken') return;
-  b.hp -= damage; b.hitT = 0.16;
+  b.hp -= damage; b.hitT = kind === 'torch' ? Math.max(b.hitT, 0.05) : 0.16;   // burning, it only flickers
   const d = unit([b.p[0] - from[0], 0.25, b.p[2] - from[2]]);
   b.v[0] += d[0] * knock; b.v[1] += d[1] * knock * 0.5; b.v[2] += d[2] * knock;
   c.events.push({ type: 'hit', at: [...b.p], damage, kind, level: b.level, id: b.id });
@@ -337,7 +371,7 @@ export function chooseWeapon(c, id) {
   if (R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   if (R.mode === 'charging' || R.mode === 'whirl') { R.mode = 'held'; R.charge = 0; }
   c.queue = null; c.bow.mode = 'held'; c.bow.held = 0; c.bow.draw = 0; c.bell.mode = 'held'; c.bell.held = 0; c.bell.power = 0; c.bell.peal = 0;
-  letThreadGo(c);
+  letThreadGo(c); c.torch.mode = 'held'; c.torch.held = 0;
   c.weapon = w; c.events.push({ type: 'weapon', id: w });
   return true;
 }
@@ -426,11 +460,7 @@ function lash(c, hand, aim, power) {
 function lineOut(c, body, aim, world) {
   const Th = c.thread, L = THREAD.line, hand = handOf(body), from = aim.from, d0 = len(sub(hand, from));
   const at = (s) => [from[0] + aim.dir[0] * s, from[1] + aim.dir[1] * s, from[2] + aim.dir[2] * s];
-  let caught = null;
-  for (let s = d0 + 0.5; s <= d0 + L.reach; s += 0.25) {
-    const p = at(s);
-    if ((world?.solid && world.solid(p)) || p[1] <= floorUnder(world, p[0], p[2])) { caught = at(s - 0.3); break; }
-  }
+  const s = rayMeets(world, from, aim.dir, d0 + 0.5, d0 + L.reach), caught = s == null ? null : at(s - 0.3);
   if (!caught) {
     Th.mode = 'out'; Th.t = 0; Th.struck = new Set(); Th.reach = L.reach * 0.6; Th.damage = 0; Th.knock = 0; Th.snaring = false; Th.power = 0;
     Th.dir = unit(sub(at(d0 + L.reach), hand));
@@ -440,6 +470,87 @@ function lineOut(c, body, aim, world) {
   Th.mode = 'line'; Th.anchor = caught; Th.t = 0;
   if (body.wallrun) { body.lastWall = body.wallrun.n; body.wallrun = null; }      // off the wall it was running along
   c.events.push({ type: 'line', at: [...hand], anchor: [...caught] });
+}
+// how far along a line from `from` it first meets what stands (a wall, the land) or the water, looked at every quarter
+// metre from s0 to s1; null if it meets nothing
+function rayMeets(world, from, dir, s0, s1) {
+  for (let s = s0; s <= s1; s += 0.25) {
+    const p = [from[0] + dir[0] * s, from[1] + dir[1] * s, from[2] + dir[2] * s];
+    if ((world?.solid && world.solid(p)) || p[1] <= floorUnder(world, p[0], p[2])) return s;
+  }
+  return null;
+}
+
+// ---- the torch
+// an ember: thrown in an arc at the bot near the eye's line (where it will be), else where the eye's line meets the land
+// or the water, else as far as it is thrown
+function ember(c, hand, aim, world) {
+  const E = TORCH.ember;
+  let best = null, ba = TORCH.assist;
+  for (const b of c.bots) {
+    if (b.mode === 'broken' || b.mode === 'rise') continue;
+    const to = sub(b.p, aim.from), d = len(to);
+    if (d < 0.5 || d > E.reach) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, dot(to, aim.dir) / d)));
+    if (a < ba) { ba = a; best = b; }
+  }
+  let P;
+  if (best) { const t = len(sub(best.p, hand)) / E.speed; P = [best.p[0] + best.v[0] * t, best.p[1] + best.v[1] * t, best.p[2] + best.v[2] * t]; }
+  else {
+    const d0 = len(sub(hand, aim.from)), s = rayMeets(world, aim.from, aim.dir, d0 + 0.5, d0 + E.reach) ?? d0 + E.reach;
+    P = [aim.from[0] + aim.dir[0] * s, aim.from[1] + aim.dir[1] * s, aim.from[2] + aim.dir[2] * s];
+  }
+  // at its speed along the straight way, lifted by as much as it will fall on the way: it comes down there
+  const to = sub(P, hand), u = unit(to), t = len(to) / E.speed;
+  c.bolts.push({ p: [...hand], v: [u[0] * E.speed, u[1] * E.speed + (E.fall * t) / 2, u[2] * E.speed], owner: 'player', kind: 'ember', damage: E.damage, life: E.life, fall: E.fall });
+  c.face = 0.3; c.faceYaw = Math.atan2(aim.dir[0], aim.dir[2]);
+  c.events.push({ type: 'throw', at: [...hand], dir: u });
+}
+// an ember bursts: what is near is struck (less toward the edge) and heated; near the land or the water, it burns there
+function emberBurst(c, at, world) {
+  const E = TORCH.ember, F = TORCH.fire, fl = floorUnder(world, at[0], at[2]), from = [at[0], Math.max(at[1], fl + 0.3), at[2]];
+  c.events.push({ type: 'ember', at: [...at], radius: E.radius });
+  for (const b of c.bots) {
+    if (b.mode === 'broken' || b.mode === 'rise') continue;
+    const d = len(sub(b.p, at));
+    if (d > E.radius + b.r || (world?.solid && walled(world, from, b.p))) continue;
+    hit(c, b, Math.round(E.damage * (1 - 0.35 * Math.min(1, d / E.radius))), at, 'ember', E.knock);
+    b.heat += E.heat;
+  }
+  if (at[1] - fl < F.height) {
+    c.fires.push({ kind: 'patch', at: [at[0], fl, at[2]], r: F.r, t: 0, life: F.life });
+    while (c.fires.length > TORCH.fires) c.fires.shift();
+    c.events.push({ type: 'fire', at: [at[0], fl, at[2]], r: F.r });
+  }
+}
+// the flame, this frame: from the torch's head where the eye looks, as far as it reaches or to the first thing it meets
+function aimFlame(c, hand, aim, world) {
+  const To = c.torch, far = len(sub(hand, aim.from)) + TORCH.flame.reach;
+  To.dir = unit(sub([aim.from[0] + aim.dir[0] * far, aim.from[1] + aim.dir[1] * far, aim.from[2] + aim.dir[2] * far], hand));
+  To.from = [hand[0] + To.dir[0] * 0.3, hand[1] + To.dir[1] * 0.3, hand[2] + To.dir[2] * 0.3];
+  To.reach = rayMeets(world, To.from, To.dir, 0.25, TORCH.flame.reach) ?? TORCH.flame.reach;
+}
+// a wall of fire laid across the eye's way, a few steps out, on the land or the water there
+function fireWall(c, body, aim, world) {
+  const W = TORCH.wall, m = Math.hypot(aim.dir[0], aim.dir[2]), f = m > 0.1 ? [aim.dir[0] / m, 0, aim.dir[2] / m] : forwardOf(body.yaw), left = [f[2], 0, -f[0]];
+  const x = body.p[0] + f[0] * W.at, z = body.p[2] + f[2] * W.at, y = floorUnder(world, x, z);
+  c.fires.push({ kind: 'wall', at: [x, y, z], a: [x - left[0] * W.half, y, z - left[2] * W.half], b: [x + left[0] * W.half, y, z + left[2] * W.half], t: 0, life: W.life });
+  while (c.fires.length > TORCH.fires) c.fires.shift();
+  c.face = 0.3; c.faceYaw = Math.atan2(f[0], f[2]);
+  c.events.push({ type: 'wall', at: [x, y, z], a: [...c.fires[c.fires.length - 1].a], b: [...c.fires[c.fires.length - 1].b] });
+}
+// heated all the way, a machine flares: its core bursts; it is struck hard, and what is near it struck and heated more
+function flare(c, b, world) {
+  const F = TORCH.flare;
+  b.heat = F.after; c.flared++;
+  c.events.push({ type: 'flare', at: [...b.p], id: b.id, level: b.level, radius: F.radius });
+  hit(c, b, F.damage, b.p, 'flare', 0);
+  for (const o of c.bots) {
+    if (o === b || o.mode === 'broken' || o.mode === 'rise') continue;
+    if (len(sub(o.p, b.p)) > F.radius + o.r || (world?.solid && walled(world, b.p, o.p))) continue;
+    hit(c, o, F.splash, b.p, 'flare', F.knock);
+    o.heat += F.heat;
+  }
 }
 
 function cast(c, hand, aim, power) {
@@ -480,6 +591,9 @@ export function stepCombat(c, dt, ctx) {
   Bl.cool = Math.max(0, Bl.cool - dt);
   const Th = c.thread;
   Th.cool = Math.max(0, Th.cool - dt);
+  const To = c.torch;
+  To.cool = Math.max(0, To.cool - dt); To.wallCool = Math.max(0, To.wallCool - dt);
+  if (body.grounded || body.climbing || body.flying) To.fuel = TORCH.jet.time;      // its jet is whole again once the body stands
   if (able && c.weapon === 'bell') {
     // ---- the bell: pressed, its tone builds; let go, it is struck (a tap) or tolled; the whirl's key, a peal; in the air,
     // it rings out from below
@@ -516,6 +630,28 @@ export function stepCombat(c, dt, ctx) {
       c.face = 0.3; c.faceYaw = aimYaw;
       c.events.push({ type: 'circle', at: [...body.p] });
     }
+    if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
+  } else if (able && c.weapon === 'torch') {
+    // ---- the torch: pressed, it is lit; let go at once, it throws an ember; held, its flame streams; the whirl's key,
+    // a wall of fire; in the air (while its jet lasts), held, it bears the body up
+    if (hands.attackPressed && To.mode === 'held') {
+      if (airborne && To.fuel > 0) {
+        To.mode = 'jet';
+        if (body.wallrun) { body.lastWall = body.wallrun.n; body.wallrun = null; }      // off the wall it was running along
+        c.events.push({ type: 'jet', at: [...body.p] });
+      } else if (To.cool <= 0) { To.mode = 'lit'; To.held = 0; }
+    }
+    if (To.mode === 'lit') {
+      To.held += dt;
+      if (!hands.attack) { ember(c, hand, aim, world); To.mode = 'held'; To.cool = TORCH.rest; }
+      else if (To.held > TORCH.tap) { To.mode = 'flame'; c.events.push({ type: 'flame', at: [...hand] }); }
+    }
+    if (To.mode === 'flame') {
+      if (!hands.attack) { To.mode = 'held'; To.from = null; c.events.push({ type: 'flame-off', at: [...hand] }); }
+      else { aimFlame(c, hand, aim, world); c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
+    }
+    if (To.mode === 'jet' && (!hands.attack || To.fuel <= 0 || body.grounded || body.flying || body.climbing)) { To.mode = 'held'; c.events.push({ type: 'jet-off', at: [...body.p] }); }
+    if (hands.sweep && (To.mode === 'held' || To.mode === 'lit') && To.wallCool <= 0) { fireWall(c, body, aim, world); To.mode = 'held'; To.wallCool = TORCH.wall.cool; }
     if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   } else if (able && c.weapon === 'bow') {
     // ---- the bow: pressed, it is drawn; let go, it looses (a tap, a plain arrow; held, a harder one); the whirl's key, a volley
@@ -564,6 +700,7 @@ export function stepCombat(c, dt, ctx) {
   if (!able || c.weapon !== 'bow') { W.mode = 'held'; W.held = 0; W.draw = 0; }
   if (!able || c.weapon !== 'bell') { Bl.mode = 'held'; Bl.held = 0; Bl.power = 0; Bl.peal = 0; }
   if ((!able || c.weapon !== 'thread') && (Th.mode !== 'held' || Th.snare != null)) letThreadGo(c);
+  if (!able || c.weapon !== 'torch') { To.mode = 'held'; To.held = 0; To.from = null; }
   // a peal: its rings one after another
   if (Bl.peal > 0) { Bl.pealT -= dt; if (Bl.pealT <= 0) { ring(c, [body.p[0], body.p[1] + 1.1, body.p[2]], BELL.peal); Bl.peal--; Bl.pealT = BELL.peal.gap; } }
   // ---- the binding: pressed, it takes what the eye looks at; held, it holds it; let go, it throws it
@@ -595,7 +732,7 @@ export function stepCombat(c, dt, ctx) {
   if (guardUp && !c.guard.up) { c.guard.t = 0; c.events.push({ type: 'guard', at: [...hand] }); }
   c.guard.up = guardUp; c.guard.t += dt;
   if (guardUp || Bn.mode === 'hold') { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
-  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bl.mode === 'ringing' || Th.mode === 'spinning' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
+  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bl.mode === 'ringing' || Th.mode === 'spinning' || To.mode === 'flame' || Bn.mode === 'hold';      // the body walks while it holds, draws, spins up or streams a flame
 
   // ---- in steps
   const n = Math.max(1, Math.ceil(dt / STEP - 1e-9)), h = dt / n;
@@ -851,6 +988,45 @@ function step(c, h, body, aim, aimYaw, world, creative) {
     }
   }
 
+  // ---- the torch: its jet bears the body up; its flame, its jet and the fires it has laid burn what they touch and heat
+  // it (out of the fire, it cools); what burns is struck every quarter second with what it burned; heated all the way, flares
+  const To = c.torch;
+  if (To.mode === 'jet') { To.fuel -= h; if (body.v[1] < TORCH.jet.rise) body.v[1] = TORCH.jet.rise; body.rising = false; }
+  for (const F of c.fires) F.t += h;
+  if (c.fires.length && c.fires[0].t >= c.fires[0].life) c.fires = c.fires.filter((F) => F.t < F.life);
+  const flaming = To.mode === 'flame' && To.from, J = TORCH.jet, Fl = TORCH.flame;
+  for (const b of c.bots) {
+    if (b.mode === 'broken' || b.mode === 'rise') continue;
+    let dmg = 0, heat = 0;
+    if (flaming) {
+      const v = sub(b.p, To.from), along = dot(v, To.dir);
+      if (along > -b.r && along < To.reach + b.r) {
+        const off = len([v[0] - To.dir[0] * along, v[1] - To.dir[1] * along, v[2] - To.dir[2] * along]);
+        if (off < b.r + 0.3 + Math.max(0, along) * Fl.spread && !(world?.solid && walled(world, To.from, b.p))) {
+          const k = 1 - 0.5 * Math.min(1, Math.max(0, along) / Fl.reach);
+          dmg += Fl.dps * k * h; heat += Fl.heat * k * h;
+        }
+      }
+    }
+    if (To.mode === 'jet') {
+      const depth = body.p[1] - b.p[1], flat = Math.hypot(b.p[0] - body.p[0], b.p[2] - body.p[2]);
+      if (depth > -0.4 && depth < J.reach + b.r && flat < b.r + 0.5 + Math.max(0, depth) * 0.3) {
+        const k = 1 - 0.5 * Math.min(1, Math.max(0, depth) / J.reach);
+        dmg += J.dps * k * h; heat += J.heat * k * h;
+      }
+    }
+    for (const F of c.fires) {
+      const S = F.kind === 'wall' ? TORCH.wall : TORCH.fire, base = F.kind === 'wall' ? floorUnder(world, b.p[0], b.p[2]) : F.at[1];
+      if (b.p[1] < base - 0.5 || b.p[1] - base > S.height) continue;
+      const d = F.kind === 'wall' ? segPoint([F.a[0], b.p[1], F.a[2]], [F.b[0], b.p[1], F.b[2]], b.p) : Math.hypot(b.p[0] - F.at[0], b.p[2] - F.at[2]);
+      if (d < (F.kind === 'wall' ? S.band : S.r) + b.r) { dmg += S.dps * h; heat += S.heat * h; }
+    }
+    b.heat = heat > 0 ? b.heat + heat : Math.max(0, b.heat - TORCH.cool * h);
+    b.burn += dmg; b.burnT += h;
+    if (b.burnT >= TORCH.every) { b.burnT -= TORCH.every; const d = Math.floor(b.burn); if (d >= 1) { b.burn -= d; hit(c, b, d, b.p, 'torch', 0); } }
+    if (b.heat >= 1 && b.mode !== 'broken') flare(c, b, world);
+  }
+
   // ---- the bolts
   const top = [body.p[0], body.p[1] + 1.55, body.p[2]], foot = [body.p[0], body.p[1] + 0.3, body.p[2]];
   const keep = [];
@@ -858,6 +1034,13 @@ function step(c, h, body, aim, aimYaw, world, creative) {
     const was = [...x.p];
     if (x.fall) x.v[1] -= x.fall * h;   // an arrow falls a little as it flies
     x.p = [x.p[0] + x.v[0] * h, x.p[1] + x.v[1] * h, x.p[2] + x.v[2] * h]; x.life -= h;
+    if (x.kind === 'ember') {
+      // an ember bursts on the first bot it meets, on the land or the water, against a wall, or at the end of its flight
+      const fl = floorUnder(world, x.p[0], x.p[2]), met = c.bots.find((b) => b.mode !== 'broken' && b.mode !== 'rise' && segPoint(was, x.p, b.p) < b.r + 0.15);
+      if (met || x.p[1] <= fl || world?.solid?.(x.p) || x.life <= 0) emberBurst(c, met || x.life <= 0 ? [...x.p] : x.p[1] <= fl ? [x.p[0], fl, x.p[2]] : was, world);
+      else keep.push(x);
+      continue;
+    }
     let gone = false;
     if (x.owner === 'bot' && segSeg(was, x.p, foot, top) < PLAYER.r + 0.08 && P.down <= 0) {
       const g = c.guard, toward = unit([-x.v[0], 0, -x.v[2]]), facing = [Math.sin(aimYaw), 0, Math.cos(aimYaw)];
@@ -910,4 +1093,6 @@ export function shiftCombat(c, dx, dz) {
   const m = (p) => { p[0] -= dx; p[2] -= dz; };
   m(c.ring.p); for (const b of c.bots) m(b.p); for (const x of c.bolts) m(x.p); for (const T of c.tones) m(T.at);
   if (c.thread.anchor) m(c.thread.anchor); if (c.thread.tip) m(c.thread.tip);
+  for (const F of c.fires) { m(F.at); if (F.a) { m(F.a); m(F.b); } }
+  if (c.torch.from) m(c.torch.from);
 }
