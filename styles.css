@@ -6156,6 +6156,14 @@ body.in-void:not(.airden) .chat-air { visibility: hidden; }
 body.in-void.airden .game-hint { translate: -50% -66px; }
 .game-root.locked .game-canvas { cursor: none; }
 .game-bar .game-mode { color: #eceef2; }
+/* a first visitor is pointed to the body sheet: its button breathes a pale light until the sheet has been opened once
+   (view.js beckon, state.js bodyMet); held still where less motion is asked for */
+.game-bar .login-alt.beckon { color: #eceef2; border-radius: 10px; animation: beckon 2.6s ease-in-out infinite; }
+@keyframes beckon {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(176, 212, 255, 0); background: rgba(176, 212, 255, 0); }
+  50% { box-shadow: 0 0 0 2px rgba(196, 224, 255, 0.6), 0 0 20px 5px rgba(176, 212, 255, 0.5); background: rgba(176, 212, 255, 0.2); }
+}
+@media (prefers-reduced-motion: reduce) { .game-bar .login-alt.beckon { animation: none; box-shadow: 0 0 0 2px rgba(176, 212, 255, 0.45); } }
 /* the build list: a second row of the bar, the five buildings, those not made yet greyed */
 .game-build { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 2px 0 1px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .game-build[hidden] { display: none; }

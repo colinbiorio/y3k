@@ -11,12 +11,13 @@ export const MODES = ['survival', 'creative'];
 export const ZOOM = { min: 2, max: 12, start: 5.5 };
 
 // mode, light and zoom; which of the five kinds of body the person is, and how each kind was last made to look;
-// the building last chosen; the level of bot last called (1..5); the weapon in hand
+// the building last chosen; the level of bot last called (1..5); the weapon in hand; whether the body sheet has been
+// found (until it has, its button beckons: view.js)
 export const cleanLevel = (n) => (Number.isInteger(n) && n >= 1 && n <= 5 ? n : 1);
 // where the body is: the void, or the first place of the map, Lord Howe Island (the map tab, menu.js)
 export const PLACES = ['void', 'island'];
 export const cleanPlace = (p) => (PLACES.includes(p) ? p : 'void');
-export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter', level: 1, place: 'void', weapon: 'ring' });
+export const freshState = () => ({ mode: 'survival', light: 'pale', zoom: ZOOM.start, kind: FIRST_KIND, looks: cleanLooks(null), building: 'shelter', level: 1, place: 'void', weapon: 'ring', bodyMet: false });
 
 export function loadState(storage) {
   const s = freshState();
@@ -32,10 +33,12 @@ export function loadState(storage) {
   s.level = cleanLevel(kept.level);
   s.place = cleanPlace(kept.place);
   s.weapon = cleanWeapon(kept.weapon);
+  // found: said so, or (kept from before this was kept) a body of another kind than the first was chosen
+  s.bodyMet = kept.bodyMet === true || (typeof kept.kind === 'string' && cleanKind(kept.kind) !== FIRST_KIND);
   return s;
 }
 export function saveState(storage, s) {
-  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building), level: cleanLevel(s.level), place: cleanPlace(s.place), weapon: cleanWeapon(s.weapon) })); return true; } catch { return false; }
+  try { storage?.setItem?.(STATE_KEY, JSON.stringify({ mode: s.mode, light: s.light, zoom: Math.round(s.zoom * 100) / 100, kind: cleanKind(s.kind), looks: cleanLooks(s.looks), building: cleanBuilding(s.building), level: cleanLevel(s.level), place: cleanPlace(s.place), weapon: cleanWeapon(s.weapon), bodyMet: !!s.bodyMet })); return true; } catch { return false; }
 }
 
 // The world tab holds two worlds for now: the void (the game, new) and the

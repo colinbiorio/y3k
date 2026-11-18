@@ -1224,12 +1224,29 @@ ok('while the sheet is open the body poses: the hands are not read, it is made a
 
 console.log('the void: what is kept, and the door');
 
+// GAME.md, owed from stage 2: "something that points a first visitor to the body button"
+ok('a first visitor is pointed to the body button: it beckons, and a line says what it is for, until the body sheet has been opened once; that is kept, and junk is not believed', () => {
+  assert.equal(S.freshState().bodyMet, false);
+  const st = store();
+  assert.equal(S.loadState(st).bodyMet, false, 'a first visit');
+  S.saveState(st, { ...S.freshState(), bodyMet: true });
+  assert.equal(S.loadState(st).bodyMet, true, 'kept once found');
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"kind":"human"}' })).bodyMet, false, 'kept from before, the first kind: not known to be found');
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"kind":"mantis"}' })).bodyMet, true, 'kept from before, another kind chosen: found');
+  assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"bodyMet":"yes"}' })).bodyMet, false, 'junk');
+  const view = read('src/game/view.js');
+  for (const line of ["classList.toggle('beckon', !st.bodyMet)", 'if (!st.bodyMet) { st.bodyMet = true; save(); beckon(); }', 'say(BECKON, 7)', 'beckonAt = st.bodyMet ? 0 : performance.now() + 6000']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  const css = read('styles.css');
+  assert.ok(css.includes('.game-bar .login-alt.beckon {') && css.includes('@keyframes beckon'), 'the button does not beckon');
+  assert.ok(/prefers-reduced-motion: reduce\) \{ \.game-bar \.login-alt\.beckon \{ animation: none;/.test(css), 'held still where less motion is asked for');
+});
+
 ok('what the void keeps between visits, and junk is not believed', () => {
   const st = store();
-  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1, place: 'void', weapon: 'ring' });
+  assert.deepEqual(S.loadState(st), { mode: 'survival', light: 'pale', zoom: 5.5, kind: 'human', looks: K.cleanLooks(null), building: 'shelter', level: 1, place: 'void', weapon: 'ring', bodyMet: false });
   const looks = K.cleanLooks(null); looks.octopus.skin = 'ink'; looks.human.hair = 'braid';
   S.saveState(st, { mode: 'creative', light: 'night', zoom: 7.123456, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
-  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow' });
+  assert.deepEqual(S.loadState(st), { mode: 'creative', light: 'night', zoom: 7.12, kind: 'octopus', looks, building: 'house', level: 3, place: 'island', weapon: 'bow', bodyMet: true });
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"blade"}' })).weapon, 'ring', 'a weapon that is not one of the five is the ring');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"weapon":"torch"}' })).weapon, 'torch', 'the torch, made, is kept');
   assert.equal(S.loadState(store({ [S.STATE_KEY]: '{"place":"mars"}' })).place, 'void', 'a place not on the map is the void');

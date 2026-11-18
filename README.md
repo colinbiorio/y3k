@@ -263,6 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (late afternoon) — **The body button beckons a first visitor**
+  (`src/game/state.js` bodyMet, `src/game/view.js` beckon, `styles.css`
+  "beckon"; `test/game.test.mjs`). Owed since stage 2 (GAME.md): "something
+  that points a first visitor to the body button". Until the body sheet has
+  been opened once, its button on the world bar breathes a pale light (held
+  still, a plain ring, where less motion is asked for), and six seconds in,
+  when nothing else is being said, one line: "five kinds of body, and this is
+  one · the body button makes it yours". Opening the sheet stops both for good
+  (kept with the void's state); a save from before this, with another kind
+  than the first chosen, counts as found. Looked at in a fresh browser: the
+  button beckoning, the line at 6 s, both gone once the sheet was opened.
+
 - **2026-11-18** (late afternoon) — **The torch, the fifth weapon: all five made**
   (`src/game/combat.js` TORCH, `src/game/fight.js` the torch and its flames,
   `src/game/view.js` its words; `test/game.test.mjs`, `scripts/void-smoke.mjs`
