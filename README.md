@@ -263,6 +263,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-18** (afternoon) — **The thread, the fourth weapon** (`src/game/combat.js`
+  THREAD, `src/game/fight.js` the spindle and the filament, `src/game/view.js`
+  its words; `test/game.test.mjs`, `scripts/void-smoke.mjs` fight; GAME.md "The
+  thread"). A spindle of bronze wound with a filament of plasma, held by the
+  binding: a **lash** out along the eye's line that strikes everything it
+  touches, not only the first; held, a **snare** that reaches 15 m and, spun all
+  the way, winds round the bot it meets (held, burned, drawn in); a **circle**
+  swung overhead three times, widening to 7.5 m, once a turn; and **in the air, a
+  line** that catches on a wall, the land or the water ahead and draws the body
+  to it while held. T now goes round the ring, the bell, the thread and the bow.
+  Two bugs found by the tests on the way: the circle counted a turn where its
+  step ended, not where it crossed a bot (one just behind the start lost its
+  third strike), and the bot-rises line had no words for it (it said the
+  ring's). In the browser on the M2: T from the bell to the thread, the spin up,
+  the lash striking, a warden snared, T on round, seven bots at a 16.7 ms
+  median, 30 of 30. With `--shots`, this smoke's bow check fails (a screenshot
+  between the draw and the release stalls the frame on the GPU); without, it
+  passes on this branch as on main.
 - **2026-11-18** (afternoon) — **Words you can take: messages select and copy**
   (`styles.css` "WORDS YOU CAN TAKE", `src/history.js` the double-click;
   `scripts/code-smoke.mjs`). Colin: "i notice i can't highlight/ copy paste

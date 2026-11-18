@@ -56,6 +56,24 @@
 //     under the body.
 //   The guard is the ring's.
 //
+// THE THREAD, the fourth of the five (stage 5): a spindle of bronze wound with a
+// filament of plasma, held by the binding. The filament pays out from it as a
+// lash, a line of light drawn out along the eye's way and drawn back in: what it
+// touches as it goes out is struck once, all of it, not only the first. Four ways:
+//
+//   · LASH (the attack, a tap): out to THREAD.lash.reach where the eye looks (at
+//     the bot nearest that line, if one is near it) and back, in a third of a second.
+//   · SNARE (the attack held, then let go): held, the spindle spins up; let go, the
+//     lash goes further and strikes harder, and spun all the way it winds round the
+//     first bot it meets: snared, the bot neither moves of itself nor shoots, the
+//     thread burns it, and it is drawn in toward the body.
+//   · CIRCLE (the whirl's key): swung round overhead three times, paid out as it
+//     goes, a widening circle: each turn strikes once what is in its sweep.
+//   · LINE (the attack, in the air): out ahead where the eye looks, it catches on
+//     whatever is there (a wall, the land, the water) and draws the body to it, for
+//     as long as the attack is held.
+//   The guard is the ring's.
+//
 // THE BINDING (stage 5): the force. GAME.md: "The force is the binding. It
 // comes from Colin's own theory, love as what binds: it pulls, holds, joins and
 // lets go." Held (its own key), it reaches out along the eye's line to the bot
@@ -117,9 +135,21 @@ export const BELL = {
   band: 0.5,                                // m: how thick the ring of its tone is, beside what it meets
   height: 3.5,                              // m: it strikes what hovers within this of where it rings
 };
+export const THREAD = {
+  lash: { reach: 9, out: 0.13, back: 0.17, damage: 26, knock: 6 },
+  snared: { reach: 15, damage: 52, knock: 2 },   // spun all the way: further, harder, and it winds round the first it meets
+  spin: 0.8,                                // s held to spin it up all the way
+  tap: 0.16,                                // s: held less than this, it is a plain lash
+  cool: 0.35,                               // s before it goes out again
+  width: 0.24,                              // m: how near the line a bot is struck, beside its own size
+  snare: { time: 2.2, burn: 14, every: 0.25, pull: 5, near: 4 },   // s it holds; damage a second, dealt each quarter; m/s drawn in, to 4 m off
+  circle: { turns: 3, time: 0.8, r0: 2.2, r1: 7.5, damage: 16, knock: 7, height: 3, cool: 1.2 },
+  line: { reach: 22, speed: 17, time: 1.4, near: 1.6, cool: 0.5 },   // m it reaches; m/s it draws the body; s at most; m from where it caught
+  assist: 0.22,                             // rad: a bot this near the eye's line is what a lash goes for
+};
 // the five plasma weapons (GAME.md's order), those made ready; the one in hand is kept between visits (state.js)
 export const WEAPONS = [
-  { id: 'thread', label: 'thread', ready: false }, { id: 'bow', label: 'bow', ready: true }, { id: 'ring', label: 'ring', ready: true },
+  { id: 'thread', label: 'thread', ready: true }, { id: 'bow', label: 'bow', ready: true }, { id: 'ring', label: 'ring', ready: true },
   { id: 'bell', label: 'bell', ready: true }, { id: 'torch', label: 'torch', ready: false },
 ];
 export const cleanWeapon = (w) => (WEAPONS.some((x) => x.id === w && x.ready) ? w : 'ring');
@@ -204,6 +234,8 @@ export function createCombat({ seed = 7 } = {}) {
     queue: null,                            // an attack pressed while the ring was away: it waits for the ring's return (briefly)
     bind: { mode: 'idle', target: null, t: 0, rest: 0, miss: 0, missDir: [0, 0, 1], joined: 0 },
     weapon: 'ring', bow: { mode: 'held', held: 0, draw: 0, cool: 0 }, bell: { mode: 'held', held: 0, power: 0, cool: 0, peal: 0, pealT: 0, rang: 0 }, tones: [],
+    thread: { mode: 'held', held: 0, power: 0, cool: 0, t: 0, dir: [0, 0, 1], reach: 0, damage: 0, knock: 0, snaring: false, struck: new Set(), tip: null,
+      snare: null, snareT: 0, burnT: 0, anchor: null, yaw0: 0, prevAng: null, turns: new Map() },
     bots: [], bolts: [], level: 1, broken: 0, turned: 0, ids: 1, rand: rng(seed), events: [],
     player: { hp: PLAYER.hp, hurt: 99, mercy: 0, down: 0 },
   };
@@ -305,6 +337,7 @@ export function chooseWeapon(c, id) {
   if (R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   if (R.mode === 'charging' || R.mode === 'whirl') { R.mode = 'held'; R.charge = 0; }
   c.queue = null; c.bow.mode = 'held'; c.bow.held = 0; c.bow.draw = 0; c.bell.mode = 'held'; c.bell.held = 0; c.bell.power = 0; c.bell.peal = 0;
+  letThreadGo(c);
   c.weapon = w; c.events.push({ type: 'weapon', id: w });
   return true;
 }
@@ -359,6 +392,56 @@ function ring(c, at, T, power = 0, stun = 0) {
   c.events.push({ type: 'toll', at: [...at], radius: T.radius, power });
 }
 
+// the thread let go of, whatever it was doing: a snared bot is freed a moment later
+function letThreadGo(c) {
+  const Th = c.thread;
+  if (Th.snare != null) {
+    const b = c.bots.find((x) => x.id === Th.snare);
+    if (b && b.mode !== 'broken') b.stunT = Math.min(b.stunT || 0, 0.3);
+    c.events.push({ type: 'unsnare', id: Th.snare });
+  }
+  Th.snare = null; Th.mode = 'held'; Th.held = 0; Th.power = 0; Th.anchor = null; Th.tip = null; Th.prevAng = null;
+}
+// the lash: out where the eye looks (at the bot very near that line, if one is), a line from the hand to its tip
+function lash(c, hand, aim, power) {
+  const Th = c.thread, A = THREAD.lash, B = THREAD.snared;
+  Th.mode = 'out'; Th.t = 0; Th.struck = new Set(); Th.held = 0; Th.power = power;
+  Th.reach = lerp(A.reach, B.reach, power); Th.damage = Math.round(lerp(A.damage, B.damage, power)); Th.knock = lerp(A.knock, B.knock, power);
+  Th.snaring = power >= 0.99;
+  let best = null, ba = THREAD.assist;
+  for (const b of c.bots) {
+    if (b.mode === 'broken' || b.mode === 'rise') continue;
+    const to = sub(b.p, aim.from), d = len(to);
+    if (d < 0.5 || len(sub(b.p, hand)) > Th.reach + b.r) continue;
+    const a = Math.acos(Math.max(-1, Math.min(1, dot(to, aim.dir) / d)));
+    if (a < ba) { ba = a; best = b; }
+  }
+  const far = len(sub(hand, aim.from)) + Th.reach;
+  Th.dir = best ? unit(sub(best.p, hand)) : unit(sub([aim.from[0] + aim.dir[0] * far, aim.from[1] + aim.dir[1] * far, aim.from[2] + aim.dir[2] * far], hand));
+  c.face = 0.3; c.faceYaw = Math.atan2(aim.dir[0], aim.dir[2]);
+  c.events.push({ type: 'lash', at: [...hand], dir: [...Th.dir], power, reach: Th.reach });
+}
+// the line: out ahead where the eye looks, it catches on what is there (a wall, the land, the water); nothing in
+// reach, it goes out and falls back, striking nothing
+function lineOut(c, body, aim, world) {
+  const Th = c.thread, L = THREAD.line, hand = handOf(body), from = aim.from, d0 = len(sub(hand, from));
+  const at = (s) => [from[0] + aim.dir[0] * s, from[1] + aim.dir[1] * s, from[2] + aim.dir[2] * s];
+  let caught = null;
+  for (let s = d0 + 0.5; s <= d0 + L.reach; s += 0.25) {
+    const p = at(s);
+    if ((world?.solid && world.solid(p)) || p[1] <= floorUnder(world, p[0], p[2])) { caught = at(s - 0.3); break; }
+  }
+  if (!caught) {
+    Th.mode = 'out'; Th.t = 0; Th.struck = new Set(); Th.reach = L.reach * 0.6; Th.damage = 0; Th.knock = 0; Th.snaring = false; Th.power = 0;
+    Th.dir = unit(sub(at(d0 + L.reach), hand));
+    c.events.push({ type: 'line-miss', at: [...hand], dir: [...Th.dir] });
+    return;
+  }
+  Th.mode = 'line'; Th.anchor = caught; Th.t = 0;
+  if (body.wallrun) { body.lastWall = body.wallrun.n; body.wallrun = null; }      // off the wall it was running along
+  c.events.push({ type: 'line', at: [...hand], anchor: [...caught] });
+}
+
 function cast(c, hand, aim, power) {
   const R = c.ring, A = RING.cast, B = RING.charged;
   R.mode = 'out'; R.p = [...hand]; R.went = 0; R.struck = new Set(); R.charge = 0;
@@ -395,6 +478,8 @@ export function stepCombat(c, dt, ctx) {
   W.cool = Math.max(0, W.cool - dt);
   const Bl = c.bell;
   Bl.cool = Math.max(0, Bl.cool - dt);
+  const Th = c.thread;
+  Th.cool = Math.max(0, Th.cool - dt);
   if (able && c.weapon === 'bell') {
     // ---- the bell: pressed, its tone builds; let go, it is struck (a tap) or tolled; the whirl's key, a peal; in the air,
     // it rings out from below
@@ -411,6 +496,26 @@ export function stepCombat(c, dt, ctx) {
       }
     }
     if (hands.sweep && Bl.mode === 'held' && Bl.cool <= 0 && Bl.peal <= 0) { Bl.peal = BELL.peal.n; Bl.pealT = 0; Bl.cool = BELL.peal.cool; }
+    if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
+  } else if (able && c.weapon === 'thread') {
+    // ---- the thread: pressed, the spindle spins up; let go, it lashes out (a tap) or further, snaring (spun all the
+    // way); the whirl's key, a circle overhead; in the air, a line that catches and draws the body in while held
+    if (hands.attackPressed && Th.mode === 'held' && Th.cool <= 0) {
+      if (airborne) lineOut(c, body, aim, world);
+      else { Th.mode = 'spinning'; Th.held = 0; Th.power = 0; }
+    }
+    if (Th.mode === 'spinning') {
+      Th.held += dt;
+      if (Th.held > THREAD.tap) Th.power = Math.min(1, (Th.held - THREAD.tap) / THREAD.spin);
+      c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw;
+      if (!hands.attack) lash(c, hand, aim, Th.held > THREAD.tap ? Th.power : 0);
+    }
+    if (Th.mode === 'line' && !hands.attack) { Th.mode = 'held'; Th.anchor = null; Th.cool = THREAD.line.cool; c.events.push({ type: 'line-off', at: [...body.p] }); }
+    if (hands.sweep && (Th.mode === 'held' || Th.mode === 'spinning') && Th.cool <= 0) {
+      Th.mode = 'circle'; Th.t = 0; Th.yaw0 = aimYaw; Th.prevAng = null; Th.turns = new Map(); Th.power = 0;
+      c.face = 0.3; c.faceYaw = aimYaw;
+      c.events.push({ type: 'circle', at: [...body.p] });
+    }
     if (hands.guardPressed && R.mode === 'out') { R.mode = 'back'; c.events.push({ type: 'recall', at: [...R.p] }); }
   } else if (able && c.weapon === 'bow') {
     // ---- the bow: pressed, it is drawn; let go, it looses (a tap, a plain arrow; held, a harder one); the whirl's key, a volley
@@ -458,6 +563,7 @@ export function stepCombat(c, dt, ctx) {
   } else if (R.mode === 'charging' || R.mode === 'whirl' || R.mode === 'slam') R.mode = 'held';
   if (!able || c.weapon !== 'bow') { W.mode = 'held'; W.held = 0; W.draw = 0; }
   if (!able || c.weapon !== 'bell') { Bl.mode = 'held'; Bl.held = 0; Bl.power = 0; Bl.peal = 0; }
+  if ((!able || c.weapon !== 'thread') && (Th.mode !== 'held' || Th.snare != null)) letThreadGo(c);
   // a peal: its rings one after another
   if (Bl.peal > 0) { Bl.pealT -= dt; if (Bl.pealT <= 0) { ring(c, [body.p[0], body.p[1] + 1.1, body.p[2]], BELL.peal); Bl.peal--; Bl.pealT = BELL.peal.gap; } }
   // ---- the binding: pressed, it takes what the eye looks at; held, it holds it; let go, it throws it
@@ -489,7 +595,7 @@ export function stepCombat(c, dt, ctx) {
   if (guardUp && !c.guard.up) { c.guard.t = 0; c.events.push({ type: 'guard', at: [...hand] }); }
   c.guard.up = guardUp; c.guard.t += dt;
   if (guardUp || Bn.mode === 'hold') { c.face = Math.max(c.face, 0.1); c.faceYaw = aimYaw; }
-  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bl.mode === 'ringing' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
+  c.slow = guardUp || R.mode === 'charging' || W.mode === 'drawing' || Bl.mode === 'ringing' || Th.mode === 'spinning' || Bn.mode === 'hold';      // the body walks while it holds, draws or spins up
 
   // ---- in steps
   const n = Math.max(1, Math.ceil(dt / STEP - 1e-9)), h = dt / n;
@@ -677,6 +783,74 @@ function step(c, h, body, aim, aimYaw, world, creative) {
   }
   c.tones = c.tones.filter((T) => T.r < T.R);
 
+  // ---- the thread: the lash going out and back, the circle overhead, the line drawing the body in, a snared bot
+  const Th = c.thread;
+  if (Th.mode === 'out') {
+    const A = THREAD.lash;
+    Th.t += h;
+    const e = Th.t < A.out ? Th.t / A.out : Math.max(0, 1 - (Th.t - A.out) / A.back);
+    const from = handOf(body), tip = [from[0] + Th.dir[0] * Th.reach * e, from[1] + Th.dir[1] * Th.reach * e, from[2] + Th.dir[2] * Th.reach * e];
+    Th.tip = tip;
+    // it strikes as it goes out, all along it, each bot once
+    if (Th.damage > 0 && Th.t - h < A.out) {
+      for (const b of c.bots) {
+        if (b.mode === 'broken' || b.mode === 'rise' || Th.struck.has(b.id)) continue;
+        if (segPoint(from, tip, b.p) > b.r + THREAD.width) continue;
+        Th.struck.add(b.id);
+        if (world?.solid && walled(world, from, b.p)) continue;
+        hit(c, b, Th.damage, from, 'thread', Th.knock);
+        if (Th.snaring && Th.snare == null && b.mode !== 'broken') {
+          Th.snare = b.id; Th.snareT = THREAD.snare.time; Th.burnT = 0; b.stunT = THREAD.snare.time; b.burst = 0;
+          c.events.push({ type: 'snare', at: [...b.p], id: b.id });
+        }
+      }
+    }
+    if (Th.t >= A.out + A.back) { Th.mode = 'held'; Th.cool = THREAD.cool; Th.tip = null; }
+  } else if (Th.mode === 'circle') {
+    const C = THREAD.circle;
+    Th.t += h;
+    const u = Math.min(1, Th.t / C.time), ang = Th.yaw0 + Math.PI * 2 * C.turns * u, r = lerp(C.r0, C.r1, u);
+    const prev = Th.prevAng ?? Th.yaw0;
+    Th.prevAng = ang;
+    const top = [body.p[0], body.p[1] + 1.8, body.p[2]];
+    for (const b of c.bots) {
+      if (b.mode === 'broken' || b.mode === 'rise') continue;
+      const dx = b.p[0] - body.p[0], dz = b.p[2] - body.p[2], d = Math.hypot(dx, dz);
+      if (d > r + b.r + 0.4 || Math.abs(b.p[1] - top[1]) > C.height) continue;
+      let k = (Math.atan2(dx, dz) - prev) % (Math.PI * 2); if (k < 0) k += Math.PI * 2;
+      if (k > ang - prev) continue;                      // not swept past its bearing this step
+      // which turn it is struck in: counted where the sweep crosses it, not where the step ends
+      const turn = Math.min(C.turns - 1, Math.floor((prev + k - Th.yaw0) / (Math.PI * 2) + 1e-9));
+      if ((Th.turns.get(b.id) ?? -1) >= turn) continue;  // once a turn
+      Th.turns.set(b.id, turn);
+      if (world?.solid && walled(world, top, b.p)) continue;
+      hit(c, b, C.damage, top, 'thread', C.knock);
+    }
+    Th.tip = [body.p[0] + Math.sin(ang) * r, body.p[1] + 2.1, body.p[2] + Math.cos(ang) * r];
+    if (Th.t >= C.time) { Th.mode = 'held'; Th.cool = C.cool; Th.tip = null; Th.prevAng = null; }
+  } else if (Th.mode === 'line') {
+    const L = THREAD.line;
+    Th.t += h;
+    const to = sub(Th.anchor, [body.p[0], body.p[1] + 1.0, body.p[2]]), d = len(to);
+    if (d < L.near || Th.t > L.time || body.grounded || body.flying || body.climbing) {
+      Th.mode = 'held'; Th.anchor = null; Th.cool = L.cool; c.events.push({ type: 'line-off', at: [...body.p] });
+    } else { const v = unit(to); body.v = [v[0] * L.speed, v[1] * L.speed, v[2] * L.speed]; body.rising = false; }
+  }
+  // a snared bot: held where the thread holds it, burned each quarter second, drawn in toward the body
+  if (Th.snare != null) {
+    const b = c.bots.find((x) => x.id === Th.snare), S = THREAD.snare;
+    if (!b || b.mode === 'broken' || (Th.snareT -= h) <= 0) {
+      if (b && b.mode !== 'broken') b.stunT = Math.min(b.stunT || 0, 0.3);
+      c.events.push({ type: 'unsnare', id: Th.snare }); Th.snare = null;
+    } else {
+      b.stunT = Math.max(b.stunT || 0, h * 2); b.burst = 0;
+      const dx = body.p[0] - b.p[0], dz = body.p[2] - b.p[2], d = Math.hypot(dx, dz);
+      if (d > S.near) { const m = Math.min(S.pull * h, d - S.near) / d; b.p[0] += dx * m; b.p[2] += dz * m; }
+      Th.burnT += h;
+      if (Th.burnT >= S.every) { Th.burnT -= S.every; hit(c, b, Math.round(S.burn * S.every), body.p, 'thread', 0); }
+    }
+  }
+
   // ---- the bolts
   const top = [body.p[0], body.p[1] + 1.55, body.p[2]], foot = [body.p[0], body.p[1] + 0.3, body.p[2]];
   const keep = [];
@@ -735,4 +909,5 @@ export function guardAt(body, yaw) { return [body.p[0] + Math.sin(yaw) * 0.75, b
 export function shiftCombat(c, dx, dz) {
   const m = (p) => { p[0] -= dx; p[2] -= dz; };
   m(c.ring.p); for (const b of c.bots) m(b.p); for (const x of c.bolts) m(x.p); for (const T of c.tones) m(T.at);
+  if (c.thread.anchor) m(c.thread.anchor); if (c.thread.tip) m(c.thread.tip);
 }

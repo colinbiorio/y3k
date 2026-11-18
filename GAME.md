@@ -97,7 +97,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "options for both controller and keyboard/mouse, with a dedicated 'controls' menu option from inside 'world' tab" | **done.** Every action has two keys and a controller button, and each can be changed. A phone gets a thumb stick and buttons. |
 | "Optimize for web, but also offer a download option" | the web: so far, yes (measured below). A download: stage 6; the desktop window in `desktop/` already exists. |
 | "run this smoothly on my mac" | **measured** on an M2 MacBook Air: 16.7 ms a frame. |
-| "make up 5 different plasma weapons" | **three of five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air); **the bell**, four (strike, toll that stuns, peal, rung from below). T, or the bar's **weapons** list, changes the one in hand. The thread and the torch to come. |
+| "make up 5 different plasma weapons" | **four of five** (17-18 Nov): **the ring**, five ways to use it (cast, charged cast, whirl, slam, guard and parry); **the bow**, four (loose, drawn through three, a volley, drawn in the air); **the bell**, four (strike, toll that stuns, peal, rung from below); **the thread**, four (lash, snare, circle, a line in the air). T, or the bar's **weapons** list, changes the one in hand. The torch to come. |
 | "a plasma weapon generated with several ways to attack with it" (17 Nov) | **done**: the ring, above. |
 | "a bot enemy that we can spawn in at varying difficulty" (17 Nov) | **done**: five levels (drifter, scout, sentinel, hunter, warden), called from the bar's **bots** list or N. |
 | "wall run" (17 Nov) | **done**: along any wall that stands (the house's, for now); the island's cliffs next. |
@@ -359,6 +359,34 @@ cymatic rings made a weapon: what hovers in its way as it passes is struck once
   builds; struck, it swings; its rings go out over the water, wider and
   fainter, the water ringing under them as they pass. On a phone the buttons
   read **strike** and **peal**.
+
+### The thread, the fourth weapon (18 November 2026)
+
+A spindle of bronze wound with a filament of plasma, held by the binding
+(`combat.js` THREAD). The filament pays out from it as a lash, a line of light
+drawn out along the eye's way and drawn back in: what it touches as it goes out
+is struck once, all of it, not only the first.
+
+- **Lash** (the attack, a tap): out to 9 m where the eye looks (at the bot
+  nearest that line, if one is near it) and back in a third of a second, 26 to
+  each it touches.
+- **Snare** (held, then let go): as the spindle spins up for up to a second the
+  body walks; let go, the lash reaches 15 m and strikes 52, and spun all the way
+  it winds round the first bot it meets: snared for 2.2 s, it neither moves of
+  itself nor shoots, the thread burns it (14 a second), and it is drawn in
+  toward the body, to 4 m off. Another weapon taken lets it go.
+- **Circle** (the whirl's key): swung round overhead three times in 0.8 s,
+  paid out from 2.2 to 7.5 m as it goes: each turn strikes once (16) each bot in
+  its sweep, before the body and behind it.
+- **A line in the air** (the attack, in the air): out ahead where the eye looks
+  to 22 m, it catches on whatever is there (a wall, the land, the water) and
+  draws the body to it at 17 m/s while the attack is held, holding it up; let
+  go, the body falls. With nothing in reach it goes out and falls back.
+- Drawn: the spindle sits at the right shoulder, turning as it spins up and as
+  it pays out, its wound filament glowing; the filament is a fine ribbon of
+  plasma from the hand to the lash's tip, round overhead in the circle, taut to
+  where the line caught, wound round a snared bot. On a phone the buttons read
+  **lash** and **circle**.
 
 ### Stage 4: the ships (begun 17 November 2026)
 
@@ -931,8 +959,8 @@ of Earth from the same tiles.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people. **The binding is
-   begun** (above: pulls, holds, lets go, joins, on the bots); the ring and the
-   bow and the bell are made; the thread and the torch next.
+   begun** (above: pulls, holds, lets go, joins, on the bots); the ring, the
+   bow, the bell and the thread are made; the torch next.
 6. **What survival is for**: things to find, make and keep. Full screen. A
    download.
 7. **The physical universe.** Earth from NASA's data, clean, with only what

@@ -23,7 +23,7 @@
 //   fight  the ring and the bots (combat.js, fight.js): the bar's list of five levels, a drifter come up out of
 //          the water, the eye turned to it, a cast striking it, the ring spun up and let go breaking it; a
 //          sentinel from the list and another with the key at the level chosen, the guard turning their bolts
-//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; the bell tolled; seven bots and more up and the frames; the list clearing them
+//          aside, the whirl, a slam from a jump; the binding holding one and throwing it; the bow drawn and a volley; the bell tolled; the thread lashed and a bot snared; seven bots and more up and the frames; the list clearing them
 //   wall   the wall run: a house from the list, walked round to its back wall, run along (faster than a run, held
 //          up, the body leaning into it) to its corner; run again and leapt off, out and up
 //   island the first place of the map (src/game/island/): the controls sheet's map tab offering the void and Lord
@@ -422,6 +422,25 @@ try {
     r = await until((r) => worth(r) < w1, 3000);
     check('and strikes what it passes', worth(r) < w1, { w1, w: worth(r), bots: r.fight.bots });
     await sleep(150); await shot('12-toll');
+    // the thread: T from the bell; held, its spindle spins up; let go, it lashes out at the bot looked at and, spun all
+    // the way, snares it; T goes on round, to the bow and the ring
+    await key.press('KeyT'); await sleep(150); r = await until((r) => r.fight.tones === 0, 3000);
+    check('T goes on round: from the bell to the thread', r.fight.weapon === 'thread', r.fight.weapon);
+    // a fresh warden to lash: one the lash does not break outright, so there is something left to snare
+    const ids0 = new Set(r.fight.bots.map((b) => b.id));
+    await pick(5); await key.press('KeyN');
+    r = await until((r) => r.fight.bots.some((b) => !ids0.has(b.id) && b.mode === 'fight'), 6000);
+    const warden = r.fight.bots.find((b) => !ids0.has(b.id)) || r.fight.bots[0];
+    const aimWarden = async () => { const r2 = await read(), b = r2.fight.bots.find((x) => x.id === warden?.id) || r2.fight.bots[0]; if (b) await faceYaw(Math.atan2(-(b.p[0] - r2.p[0]), -(b.p[2] - r2.p[2]))); };
+    const w2 = worth(r);
+    await aimWarden(); await key.down('KeyJ'); await sleep(1100); r = await read();
+    check('held, the thread\'s spindle spins up', r.fight.thread === 'spinning' && r.fight.spin > 0.9, r.fight);
+    await aimWarden(); await key.up('KeyJ'); await sleep(40); await shot('12b-lash');
+    r = await until((r) => worth(r) < w2, 3000);
+    check('let go, it lashes out and strikes', worth(r) < w2, { w2, w: worth(r), bots: r.fight.bots });
+    r = await until((r) => r.fight.snare != null, 600);
+    check('spun all the way, it snares the bot it meets', r.fight.snare != null, r.fight);
+    await sleep(350); await shot('12c-snared');
     await key.press('KeyT'); await sleep(150); const after1 = (await read()).fight.weapon; await key.press('KeyT'); await sleep(150); r = await read();
     check('T goes on round: the bow, then the ring', after1 === 'bow' && r.fight.weapon === 'ring', { after1, now: r.fight.weapon });
     const n0 = (await read()).fight.bots.length, more = Math.max(5, 7 - n0);   // as many as are left, and enough more for seven

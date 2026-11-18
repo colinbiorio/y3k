@@ -2763,10 +2763,98 @@ ok('the bell\'s peal: three rings one after another, each striking once; struck 
   assert.ok(by.includes(front.id) && !by.includes(behind.id), 'the wall stops the tone: ' + by);
 });
 
-ok('the weapons: the five listed, the ring, the bow and the bell made; the next is the other made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
+// ---- the thread (combat.js THREAD; stage 5): the fourth weapon
+ok('the thread: a tap lashes it out along the eye\'s line to 9 m and back in a third of a second, striking once everything along it, not only the first; one beyond it or off the line is untouched', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'thread');
+  // two on the line from the hand, one past its reach, one off to the side
+  const a = standBot(c, body, [0.42, 1.55, -3], 5), b = standBot(c, body, [0.34, 1.92, -7], 5), far = standBot(c, body, [0.3, 2.3, -12]), side = standBot(c, body, [4, 1.6, -5]);
+  still(a, b, far, side);
+  let evs = fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true });
+  assert.equal(c.thread.mode, 'spinning'); assert.equal(c.ring.mode, 'held', 'the ring is not cast');
+  evs = evs.concat(fightFor(c, body, aim, FRAME, {}));
+  const l = kinds(evs, 'lash'); assert.equal(l.length, 1); assert.equal(l[0].power, 0, 'a tap is a plain lash'); assert.equal(l[0].reach, CB.THREAD.lash.reach);
+  evs = evs.concat(fightFor(c, body, aim, 0.4));
+  const hits = kinds(evs, 'hit').filter((e) => e.kind === 'thread');
+  assert.deepEqual(hits.map((e) => e.id).sort(), [a.id, b.id].sort(), 'both on the line struck, once each: ' + hits.map((e) => e.id));
+  assert.ok(hits.every((e) => e.damage === CB.THREAD.lash.damage));
+  assert.equal(far.hp, far.max, 'past its reach'); assert.equal(side.hp, side.max, 'off the line');
+  assert.equal(c.thread.mode, 'held', 'drawn back in'); assert.equal(c.thread.tip, null);
+});
+
+ok('the thread spun all the way: held, the lash reaches 15 m, strikes harder, and snares the first it meets: it neither moves nor shoots, is burned, and is drawn in toward the body; then let go', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'thread');
+  const b = standBot(c, body, [0.4, 1.6, -12], 5); still(b);   // a warden: it outlasts the snare; kept where it is until snared
+  fightFor(c, body, aim, 1.05, (t) => ({ attack: true, attackPressed: t < FRAME / 2 }));
+  assert.ok(c.thread.power > 0.99 && c.slow, 'spun all the way, the body walking: ' + c.thread.power);
+  let evs = fightFor(c, body, aim, FRAME, {});
+  assert.equal(kinds(evs, 'lash')[0].reach, CB.THREAD.snared.reach);
+  evs = evs.concat(fightFor(c, body, aim, 0.3));
+  assert.equal(kinds(evs, 'snare').length, 1); assert.equal(c.thread.snare, b.id);
+  assert.equal(kinds(evs, 'hit').find((e) => e.id === b.id).damage, CB.THREAD.snared.damage);
+  b.fire = 0; b.L = { ...b.L, speed: 6 };   // free, it would shoot at once and go about
+  const d0 = Math.hypot(b.p[0], b.p[2]), hp0 = b.hp;
+  evs = fightFor(c, body, aim, 1.2);
+  assert.equal(kinds(evs, 'bolt').length, 0, 'snared, it does not shoot');
+  const d1 = Math.hypot(b.p[0], b.p[2]);
+  assert.ok(d1 < d0 - 3 && d1 >= CB.THREAD.snare.near - 0.01, 'drawn in, to no nearer than 4 m: ' + d0.toFixed(1) + ' to ' + d1.toFixed(1));
+  assert.ok(b.hp < hp0 - 10, 'burned while it holds: ' + (hp0 - b.hp));
+  evs = fightFor(c, body, aim, 1.2);
+  assert.equal(kinds(evs, 'unsnare').length, 1); assert.equal(c.thread.snare, null, 'let go after its time');
+  evs = fightFor(c, body, aim, 1.6); assert.ok(kinds(evs, 'bolt').length > 0, 'and then it shoots again');
+  // another weapon taken lets a snare go at once
+  const g = arena(); CB.chooseWeapon(g.c, 'thread');
+  const w = standBot(g.c, g.body, [0.4, 1.6, -8], 5); still(w);
+  fightFor(g.c, g.body, g.aim, 1.05, (t) => ({ attack: true, attackPressed: t < FRAME / 2 })); fightFor(g.c, g.body, g.aim, 0.3, {});
+  assert.equal(g.c.thread.snare, w.id);
+  CB.chooseWeapon(g.c, 'ring');
+  assert.equal(g.c.thread.snare, null); assert.ok(w.stunT <= 0.3, 'freed a moment later');
+});
+
+ok('the thread\'s circle: swung round overhead three times, widening to 7.5 m, it strikes each bot in its sweep once a turn, before the body and behind it; one beyond it is untouched', () => {
+  const { c, body, aim } = arena(); CB.chooseWeapon(c, 'thread');
+  const front = standBot(c, body, [0.5, 1.6, -3], 5), back = standBot(c, body, [-0.5, 1.8, 2.6], 5), far = standBot(c, body, [0, 1.6, -11]);
+  still(front, back, far);
+  let evs = fightFor(c, body, aim, FRAME, { sweep: true }); evs = evs.concat(fightFor(c, body, aim, 1));
+  assert.equal(kinds(evs, 'circle').length, 1);
+  const by = (id) => kinds(evs, 'hit').filter((e) => e.id === id && e.kind === 'thread').length;
+  assert.equal(by(front.id), CB.THREAD.circle.turns, 'three turns, three strikes');
+  assert.equal(by(back.id), CB.THREAD.circle.turns, 'behind as before');
+  assert.equal(far.hp, far.max, 'beyond it');
+  assert.equal(c.thread.mode, 'held'); assert.ok(c.thread.cool > 0);
+});
+
+ok('the thread in the air: a line out where the eye looks catches on a wall and draws the body to it, held up; let go, it falls; with nothing in reach it goes out and falls back', () => {
+  const wall = { solid: (p) => p[2] < -10 && p[2] > -11 && p[1] < 12 };
+  const up = (holdFor, seconds, dir = [0, 0, -1]) => {
+    const g = arena(); CB.chooseWeapon(g.c, 'thread');
+    g.body.p = [0, 6, 0]; g.body.grounded = false; g.body.v = [0, 0, 0]; g.aim.from = [0.3, 7.9, 5.5]; g.aim.dir = dir;
+    const evs = [];
+    for (let t = 0; t < seconds; t += FRAME) {
+      B.advance(g.body, { move: [0, 0], yaw: Math.PI }, FRAME);
+      CB.stepCombat(g.c, FRAME, { body: g.body, aim: g.aim, hands: t < holdFor ? { attack: true, attackPressed: t < FRAME / 2 } : {}, world: wall });
+      evs.push(...g.c.events.splice(0));
+    }
+    return { g, evs };
+  };
+  let { g, evs } = up(2, 0.45);
+  const line = kinds(evs, 'line'); assert.equal(line.length, 1, 'caught');
+  assert.ok(Math.abs(line[0].anchor[2] + 10) < 0.6, 'on the wall: ' + line[0].anchor.map((x) => x.toFixed(2)));
+  assert.ok(g.body.p[2] < -5, 'drawn toward it: ' + g.body.p[2].toFixed(2));
+  assert.ok(g.body.p[1] > 5, 'held up, not falling: ' + g.body.p[1].toFixed(2));
+  // let go early: the line goes, and the body falls
+  ({ g, evs } = up(0.15, 0.6));
+  assert.equal(kinds(evs, 'line-off').length, 1);
+  assert.ok(g.body.v[1] < -2, 'falling: ' + g.body.v[1].toFixed(2));
+  // nothing within its reach (the eye looks up into the sky): it goes out and falls back, striking nothing
+  ({ g, evs } = up(0.15, 0.6, [0, 0.98, -0.2]));
+  assert.equal(kinds(evs, 'line').length, 0); assert.equal(kinds(evs, 'line-miss').length, 1);
+  assert.equal(g.c.thread.mode, 'held');
+});
+
+ok('the weapons: the five listed, the ring, the bow, the bell and the thread made; the next is the next made; choosing the bow calls the ring home if it is out; T, the list on the bar, kept between visits', () => {
   assert.deepEqual(CB.WEAPONS.map((w) => w.id), ['thread', 'bow', 'ring', 'bell', 'torch']);
-  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['bow', 'ring', 'bell']);
-  assert.equal(CB.nextWeapon('ring'), 'bell'); assert.equal(CB.nextWeapon('bell'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
+  assert.deepEqual(CB.WEAPONS.filter((w) => w.ready).map((w) => w.id), ['thread', 'bow', 'ring', 'bell']);
+  assert.equal(CB.nextWeapon('ring'), 'bell'); assert.equal(CB.nextWeapon('bell'), 'thread'); assert.equal(CB.nextWeapon('thread'), 'bow'); assert.equal(CB.nextWeapon('bow'), 'ring');
   const { c, body, aim } = arena(), b = standBot(c, body, [0.4, 1.6, -14]); still(b);
   fightFor(c, body, aim, FRAME, { attack: true, attackPressed: true }); fightFor(c, body, aim, FRAME, {});
   assert.equal(c.ring.mode, 'out');
@@ -2776,6 +2864,10 @@ ok('the weapons: the five listed, the ring, the bow and the bell made; the next 
   const view = read('src/game/view.js');
   for (const line of ['id="game-weapons"', 'id="game-weapon-list"', 'takeWeapon(nextWeapon(K.combat.weapon))', 'chooseWeapon(K.combat, st.weapon)', "C.bow.mode === 'drawing' ? C.bow.draw"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/fight.js').includes('const bow = add(new THREE.Group())'), 'the bow is not drawn');
+  // every made weapon has its words in all three places: the line when it is taken, a phone's buttons, the line when a bot rises
+  for (const line of ["if (w === 'thread') return `the thread ·", "thread: ['lash', 'Lash the thread', 'circle', 'A circle overhead']", "thread: ['lashes the thread, held it snares', 'a circle overhead']"]) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  const fight = read('src/game/fight.js');
+  assert.ok(fight.includes('const spindle = add(new THREE.Group())') && fight.includes('const filament = add(new THREE.Mesh(filGeo'), 'the thread is not drawn');
 });
 
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {

@@ -28,13 +28,17 @@
 // the body ripples in rings; struck, it swings, and a ring of its tone goes out
 // over the water, wider and fainter, the water ringing under it as it passes.
 //
+// The thread: a spindle of bronze at the right shoulder, its filament wound on it
+// glowing; paid out, the filament is a fine ribbon of plasma from the hand to the
+// lash's tip, round overhead in the circle, taut to where the line caught, and
+// wound round a snared bot.
 // The binding: a thread of warm gold light from the left hand to what it holds,
 // waving a little, its pulses running in toward the hand; a halo round the bot
 // it holds, which struggles in it; with nothing to take, the thread goes out
 // along the eye's line and comes back. A bot it throws spins as it flies; two it
 // joins go up in a flash of gold.
 import * as THREE from 'three';
-import { LEVELS, RING, BOW, BELL, BINDING, leftHandOf } from './combat.js';
+import { LEVELS, RING, BOW, BELL, BINDING, THREAD, leftHandOf } from './combat.js';
 import { WATER } from './body.js';
 
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
@@ -168,6 +172,27 @@ export function createFightArt(scene, { lite = false } = {}) {
   thread.frustumCulled = false; thread.visible = false;
   const haloMat = mat(new THREE.SpriteMaterial({ map: tex, color: GOLD.clone().multiplyScalar(0.7), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
   const bindHalo = add(new THREE.Sprite(haloMat)); bindHalo.visible = false;
+  // ---- the thread: a spindle (an axle between two cheeks, the filament wound between them) and the filament paid out
+  const spindle = add(new THREE.Group()); spindle.visible = false;
+  spindle.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.03, 0.03, 0.17, 12)), metal));
+  for (const y of [-0.075, 0.075]) { const ch = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.078, 0.078, 0.014, 22)), metal); ch.position.y = y; spindle.add(ch); }
+  const woundMat = mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone().multiplyScalar(1.25) }));
+  spindle.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.056, 0.056, 0.13, 20)), woundMat));
+  const spinGlowMat = mat(new THREE.SpriteMaterial({ map: tex, color: PLASMA.clone().multiplyScalar(0.55), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  const spinGlow = new THREE.Sprite(spinGlowMat); spinGlow.scale.setScalar(0.3); spindle.add(spinGlow);
+  const TN = 40, filPos = new Float32Array(TN * 2 * 3), filA = new Float32Array(TN * 2);
+  const filGeo = geo(new THREE.BufferGeometry());
+  filGeo.setAttribute('position', new THREE.BufferAttribute(filPos, 3).setUsage(THREE.DynamicDrawUsage));
+  filGeo.setAttribute('aA', new THREE.BufferAttribute(filA, 1).setUsage(THREE.DynamicDrawUsage));
+  { const idx = []; for (let i = 0; i < TN - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } filGeo.setIndex(idx); }
+  const filament = add(new THREE.Mesh(filGeo, mat(new THREE.ShaderMaterial({
+    uniforms: { uCol: { value: PLASMA.clone() } }, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: 'attribute float aA; varying float vA; void main() { vA = aA; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    // the plasma's own blue at its rim, white where it is brightest; laid over the sky, not added to it (white by day)
+    fragmentShader: 'varying float vA; uniform vec3 uCol; void main() { gl_FragColor = vec4(mix(uCol * 0.9, vec3(1.0), vA * 0.55), 0.45 + 0.55 * vA);\n#include <colorspace_fragment>\n}',
+  }))));
+  filament.frustumCulled = false; filament.visible = false;
+  let spun = 0;
 
   // ---- bolts: two instanced streaks, a core and a halo, in their sender's colour
   const NB = 64, M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), V3 = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, 1);
@@ -294,6 +319,9 @@ export function createFightArt(scene, { lite = false } = {}) {
         else if (ev.type === 'bind') burst(at, GOLD, 18, 4, 1);
         else if (ev.type === 'toll') { swingV += 9 + 9 * (ev.power || 0); burst([at[0], at[1], at[2]], PLASMA, 8 + 20 * (ev.power || 0), 3, 1); }
         else if (ev.type === 'stun') burst(at, PLASMA, 10, 2, 1);
+        else if (ev.type === 'snare') burst(at, PLASMA, 22, 4, 1);
+        else if (ev.type === 'line') burst(ev.anchor, PLASMA, 14, 3, 1);
+        else if (ev.type === 'lash' && ev.power >= 0.99) burst(at, PLASMA, 10, 3, 1);
         else if (ev.type === 'fling') burst(at, GOLD, 14, 5, 1);
         else if (ev.type === 'join') { burst(at, GOLD, 46, 10, 3); burst(at, new THREE.Color(1, 0.97, 0.9), 20, 6, 2); }
         else if (ev.type === 'bind-miss') burst(at, GOLD, 6, 2, 0.5);
@@ -352,7 +380,7 @@ export function createFightArt(scene, { lite = false } = {}) {
       }
       // ---- the bow, when it is in hand (the ring comes back for the guard, and while it is still coming home)
       const bowIn = c.weapon === 'bow', W = c.bow;
-      ring.visible = glow.visible = (!bowIn && !bellIn) || flying || guardAmt > 0.02;
+      ring.visible = glow.visible = (!bowIn && !bellIn && c.weapon !== 'thread') || flying || guardAmt > 0.02;
       bow.visible = bowIn && guardAmt < 0.5 && !fallen;
       if (bow.visible) {
         const hand = R.p, drawing = W.mode === 'drawing';
@@ -399,6 +427,47 @@ export function createFightArt(scene, { lite = false } = {}) {
       }
       trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.aA.needsUpdate = true;
       trail.visible = trailPts.length > 1;
+      // ---- the thread, when it is in hand: the spindle at the shoulder, turning as it spins up and as it pays out;
+      // the filament from the hand to the lash's tip, round overhead, taut to where the line caught, or round a snared bot
+      const Th = c.thread, threadIn = c.weapon === 'thread';
+      spindle.visible = threadIn && guardAmt < 0.5 && !fallen;
+      const busy = Th.mode === 'spinning' ? 0.3 + Th.power : Th.mode !== 'held' || Th.snare != null ? 1.3 : 0.12;
+      if (spindle.visible) {
+        spun += dt * busy * 18;
+        spindle.position.set(R.p[0], R.p[1] + 0.02, R.p[2]);
+        q.setFromAxisAngle(up, body.yaw); spindle.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2 + 0.35));
+        spindle.children[3].rotation.y = spun;
+        spinGlowMat.opacity = 0.3 + 0.6 * Math.min(1, busy); spinGlow.scale.setScalar(0.22 + 0.22 * Math.min(1, busy));
+      }
+      const snared = Th.snare != null ? c.bots.find((b) => b.id === Th.snare && b.mode !== 'broken') : null;
+      const fTo = snared ? snared.p : Th.mode === 'line' ? Th.anchor : (Th.mode === 'out' || Th.mode === 'circle') ? Th.tip : null;
+      filament.visible = !!fTo && threadIn && !fallen;
+      if (filament.visible) {
+        const from = [R.p[0], R.p[1], R.p[2]], T = time.value, taut = Th.mode === 'line' || !!snared;
+        const L = Math.hypot(fTo[0] - from[0], fTo[1] - from[1], fTo[2] - from[2]);
+        const pt = (u) => {
+          // the last third of it wound round a snared bot
+          if (snared && u > 0.72) {
+            const w = (u - 0.72) / 0.28, a = w * Math.PI * 7 + T * 5, rr = snared.r * 1.05 + 0.05;
+            return [snared.p[0] + Math.cos(a) * rr, snared.p[1] - snared.r * 0.55 + w * snared.r * 1.1, snared.p[2] + Math.sin(a) * rr];
+          }
+          const uu = snared ? u / 0.72 : u, amp = taut ? 0.015 : Math.min(0.28, L * 0.025);
+          const wave = Math.sin(Math.PI * uu) * amp * Math.sin(uu * 11 - T * 16), sag = Th.mode === 'circle' ? Math.sin(Math.PI * uu) * 0.35 : 0;
+          return [from[0] + (fTo[0] - from[0]) * uu, from[1] + (fTo[1] - from[1]) * uu + wave + sag, from[2] + (fTo[2] - from[2]) * uu];
+        };
+        const du = 1 / (TN - 1);
+        for (let i = 0; i < TN; i++) {
+          // the ribbon's width turned across the eye's line, along the filament's own way (a central difference)
+          const u = i * du, p = pt(u), a0 = pt(Math.max(0, u - du * 0.5)), b0 = pt(Math.min(1, u + du * 0.5));
+          const tx = b0[0] - a0[0], ty = b0[1] - a0[1], tz = b0[2] - a0[2];
+          const vx = camPos.x - p[0], vy = camPos.y - p[1], vz = camPos.z - p[2];
+          let wx = ty * vz - tz * vy, wy = tz * vx - tx * vz, wz = tx * vy - ty * vx; const wm = Math.hypot(wx, wy, wz) || 1, w = 0.019 + 0.012 * Math.sin(Math.PI * Math.min(1, u * 1.2));
+          wx *= w / wm; wy *= w / wm; wz *= w / wm;
+          filPos.set([p[0] + wx, p[1] + wy, p[2] + wz, p[0] - wx, p[1] - wy, p[2] - wz], i * 6);
+          const a = 0.55 + 0.45 * Math.max(0, Math.sin(u * 22 - T * 18)); filA[i * 2] = filA[i * 2 + 1] = a;
+        }
+        filGeo.attributes.position.needsUpdate = true; filGeo.attributes.aA.needsUpdate = true;
+      }
       // ---- the binding's thread: to the bot it holds, or out along the eye's line and back when there was nothing to take
       const Bd = c.bind, holdBot = Bd.mode === 'hold' ? c.bots.find((b) => b.id === Bd.target) : null;
       let to = null;
