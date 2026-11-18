@@ -55,7 +55,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -561,6 +561,35 @@ try {
     await key.press('KeyB'); r = await until((r) => !hall(r), 8000);
     check('the key inside it takes the hall down', !hall(r), r.world);
     check('the hall\'s frames keep up', out.frames.hall.median < 20, out.frames.hall);
+  }
+
+  if (scene === 'ship') {
+    // the skiff (stage 4): called down from the bar's ships list, boarded with R, driven, lifted, let be, stepped off
+    out.frames ||= {};
+    await page.locator('#game-ships').click(); await sleep(250);
+    const listed = await page.locator('#game-ship-list button').evaluateAll((els) => els.map((e) => [e.dataset.ship, e.disabled]));
+    out.shipsListed = listed;
+    check('the ships list offers the five, the skiff made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'skiff', listed);
+    await page.locator('#game-ship-list [data-ship="skiff"]').click(); await sleep(500);
+    let r = await read();
+    check('a skiff comes down in front of the body', r.world.ships.length === 1 && r.world.ships[0].kind === 'skiff' && Math.hypot(r.world.ships[0].p[0] - r.p[0], r.world.ships[0].p[2] - r.p[2]) < 4, r.world.ships);
+    await shot('01-skiff');
+    await key.press('KeyR'); await sleep(400); r = await read();
+    check('R boards it: the body sits in it', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard, seated: r.world.seated });
+    out.shipHint = await hintText();
+    await key.down('KeyW'); await sleep(1800 * slow); r = await read();
+    check('W drives it at its speed', r.world.ships[0].speed > 20, r.world.ships[0]);
+    out.frames.flying = await frames(2000);
+    await shot('02-flying'); await key.up('KeyW');
+    await key.down('Space'); await sleep(800); await key.up('Space'); r = await read();
+    check('jump lifts it', r.world.ships[0].p[1] > 4, r.world.ships[0]);
+    r = await until((r) => r.world.ships[0].speed < 0.5, 5000);
+    check('let be, it slows to a hover where it is', r.world.ships[0].speed < 0.5 && r.world.ships[0].p[1] > 4, r.world.ships[0]);
+    await shot('03-hover');
+    await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 4000);
+    check('R again steps off: beside it, down to the water', !r.world.aboard && !r.world.seated && Math.abs(r.p[1]) < 0.05, { p: r.p, aboard: r.world.aboard, seated: r.world.seated });
+    await shot('04-off');
+    check('its frames keep up, flying', out.frames.flying.median < 20, out.frames.flying);
   }
 
   if (scene === 'pad') {

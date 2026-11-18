@@ -37,6 +37,7 @@ import * as HO from '../src/game/house.js';
 import * as WO from '../src/game/workshop.js';
 import * as TO from '../src/game/tower.js';
 import * as HA from '../src/game/hall.js';
+import * as SP from '../src/game/ships.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
@@ -2146,6 +2147,63 @@ ok('the hall goes up in eight and a half seconds, the terraces, the walls and co
   b.down = -1;
   const r = HA.wall(b, [-(W.terraces[0].hx + 0.3), 0, 0]); assert.ok(r && Math.abs(r.d - 0.3) < 1e-9 && r.n[0] < -0.99, 'the lowest terrace\'s side');
   const r2 = HA.wall(b, [HA.IN - 0.3, HA.P, -7.5]); assert.ok(r2 && r2.n[0] < -0.99, 'the hall\'s wall from inside');
+});
+
+// ---- the ships (ships.js): the skiff, put, boarded, flown and stepped off
+ok('a skiff is put in front of the body, pointing its way, at its hover over the water; its seat is in reach at once; the five are offered, the skiff made', () => {
+  const body = B.createBody({ yaw: 0.6 }); body.p = [3, 0, -2];
+  const s = SP.placeShip(body);
+  near(s.yaw, 0.6, 1e-12); near(s.p[1], SP.SKIFF.hover, 1e-12);
+  near(Math.hypot(s.p[0] - 3, s.p[2] + 2), SP.SKIFF.put, 1e-9, 'a few steps in front');
+  assert.ok(SP.ahead(s)[0] * (s.p[0] - 3) + SP.ahead(s)[2] * (s.p[2] + 2) > 0, 'ahead of the body');
+  assert.equal(SP.nearShip([s], body.p), s, 'its seat in reach from where the body called it');
+  body.p = [3 - 8 * Math.sin(0.6), 0, -2 - 8 * Math.cos(0.6)]; assert.equal(SP.nearShip([s], body.p), null, 'not from further off');
+  assert.deepEqual(SP.SHIPS.map((x) => x.kind), ['skiff', 'dart', 'dhow', 'ark', 'carrier']);
+  assert.deepEqual(SP.SHIPS.filter((x) => x.ready).map((x) => x.kind), ['skiff']);
+  near(SP.SKIFF.length, 5, 1e-9, 'about five metres long');
+});
+
+ok('aboard, the skiff turns toward where the eye looks, drives along its heading at its speed (faster opened up), climbs as the eye looks up, rises and sinks, never below its keel over the water; let be, it slows to a hover; a building stops it; stepping off puts the body beside it, falling', () => {
+  const body = B.createBody({ yaw: 0 }), s = SP.placeShip(body), step = (inp, sec) => { for (let t = 0; t < sec; t += 1 / 60) { SP.stepShip(s, { pitch: 0, ...inp }, 1 / 60); SP.carry(s, body); } };
+  SP.board(s, body); assert.equal(body.seated, s); near(body.p[1], SP.seatAt(s)[1], 1e-12, 'in its seat');
+  step({ move: [0, 1], yaw: Math.PI }, 2);
+  near(Math.hypot(...s.v), SP.SKIFF.speed, 1e-9, 'at its speed'); assert.ok(s.p[2] > 30 && Math.abs(s.p[0]) < 1e-6, 'along its heading: ' + s.p.map((v) => v.toFixed(2)));
+  near(body.p[2], SP.seatAt(s)[2], 1e-12, 'the body carried with it');
+  step({ move: [0, 1], yaw: Math.PI, sprint: true }, 2); near(Math.hypot(...s.v), SP.SKIFF.boost, 1e-9, 'opened up');
+  step({ move: [0, 1], yaw: Math.PI / 2 }, 0.25);
+  const turned = s.yaw; assert.ok(turned < -1e-3 && turned > -SP.SKIFF.turn * (0.25 + 2 / 60) - 1e-6, 'turning toward the eye at its rate: ' + turned.toFixed(3));
+  step({ move: [0, 1], yaw: Math.PI / 2 }, 2); near(s.yaw, -Math.PI / 2, 1e-9, 'pointing where the eye looks');
+  const y0 = s.p[1]; step({ move: [0, 1], yaw: Math.PI / 2, pitch: 0.5 }, 1); assert.ok(s.p[1] > y0 + 5, 'looking up as it goes, it climbs');
+  step({ move: [0, 0], yaw: Math.PI / 2 }, 3); near(Math.hypot(...s.v), 0, 1e-9, 'let be, it slows to a hover');
+  const y1 = s.p[1]; step({ move: [0, 0], yaw: Math.PI / 2, up: true }, 1); assert.ok(s.p[1] > y1 + 4, 'rises');
+  step({ move: [0, 0], yaw: Math.PI / 2, down: true }, 8); near(s.p[1], SP.SKIFF.keel, 1e-9, 'and sinks to its keel over the water, no lower');
+  // a building in its way: a house a few metres ahead stops it
+  const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
+  const s2 = SP.placeShip({ p: [0, 0, -8], yaw: 0 }); s2.p[1] = 2; let stopped = false;
+  for (let t = 0; t < 3; t += 1 / 60) { SP.stepShip(s2, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60, { solid: (q) => w.solid(q) }); if (w.solid(s2.p)) stopped = 'inside'; }
+  const hz = w.buildings[0].z; assert.ok(stopped !== 'inside' && s2.p[2] < hz, 'held short of the house: ' + s2.p[2].toFixed(2) + ' < ' + hz.toFixed(2));
+  // stepping off
+  SP.leave(s, body); assert.equal(body.seated, null); assert.equal(body.grounded, false);
+  near(Math.hypot(body.p[0] - SP.seatAt(s)[0], body.p[2] - SP.seatAt(s)[2]), 1.3, 1e-9, 'beside it');
+});
+
+ok('seated in a ship, a body on two legs sits: its hips low over the seat, its thighs forward and its knees bent, its hands out on the controls', () => {
+  const g = Gt.createGait(), body = B.createBody({ yaw: 0 }); body.seated = {};
+  assert.equal(Gt.stateOf(body), 'seat');
+  let pose = null; for (let i = 0; i < 90; i++) pose = Gt.stepGait(g, body, 1 / 60);
+  assert.ok(pose.pelvis < 0.2, 'the hips over the seat: ' + pose.pelvis.toFixed(3));
+  assert.ok(pose.legL.z > 0.3 && pose.legR.z > 0.3, 'the feet forward');
+  const ik = Gt.legIK(pose.legL.z, pose.legL.y); assert.ok(ik.knee > 0.8, 'the knee bent: ' + ik.knee.toFixed(2));
+  assert.ok(pose.armL.swing > 0.4 && pose.armR.swing > 0.4, 'the hands out ahead');
+  body.seated = null; for (let i = 0; i < 90; i++) pose = Gt.stepGait(g, body, 1 / 60); assert.ok(pose.pelvis > 0.7, 'and up again off it');
+});
+
+ok('the board key: R, and the pad\'s left on the cross; the view wires the ships: the list, the key, the ship flown instead of the body', () => {
+  const b = I.defaults(); assert.deepEqual(b.keys.board, ['KeyR', '']); assert.equal(b.pad.board, 14);
+  assert.ok(I.ACTIONS.find((a) => a.id === 'board')?.note);
+  const view = read('src/game/view.js');
+  for (const line of ['id="game-ship-list"', 'if (inp.board) boardOrLeave();', 'stepShip(K.aboard,', 'carry(K.aboard, body);', 'hands: down || K.aboard ? {}']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  assert.ok(read('src/game/ships/skiff.js').includes("from '../ships.js'"), 'the skiff drawn is not the numbers\' skiff');
 });
 
 ok('one of each kind stands, and never one on another: a second house takes the first down; a house that would stand on the shelter is not built; the key near either takes that one down', () => {

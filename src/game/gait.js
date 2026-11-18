@@ -75,7 +75,7 @@ export function stride(v, B = BUILD) {
 export const cadence = (v, B = BUILD) => stride(v, B).cadence;
 
 export function createGait(build = BUILD) {
-  return { build: { ...BUILD, ...build }, phase: 0, speed: 0, vy: 0, w: { ground: 1, air: 0, dash: 0, fly: 0 }, crouch: 0, bank: 0, yaw: null, t: 0 };
+  return { build: { ...BUILD, ...build }, phase: 0, speed: 0, vy: 0, w: { ground: 1, air: 0, dash: 0, fly: 0, seat: 0 }, crouch: 0, bank: 0, yaw: null, t: 0 };
 }
 
 // One leg on the ground at psi of its stride (0 as it comes down): the ankle over the floor.
@@ -147,6 +147,17 @@ function flyPose(g, h, vy) {
     step: 0, track: B.hip,
   };
 }
+// seated (a ship's pilot): the hips just over the seat, the thighs level and the feet forward and down, the hands out
+// on the controls
+function seatPose(B) {
+  const s = (B.thigh + B.shin) / REF;
+  return {
+    pelvis: 0.1, sway: 0, roll: 0, hipYaw: 0, tilt: 0, lean: -0.06, twist: 0, head: 0.06,
+    armL: { swing: 0.7, out: 0.16, elbow: 0.95 }, armR: { swing: 0.7, out: 0.16, elbow: 0.95 },
+    legL: { x: B.hip, z: 0.6 * s, y: -0.34 * s, foot: 0.25 }, legR: { x: -B.hip, z: 0.6 * s, y: -0.34 * s, foot: 0.25 },
+    step: 0, track: B.hip,
+  };
+}
 const ONE = ['pelvis', 'sway', 'roll', 'hipYaw', 'tilt', 'lean', 'twist', 'head', 'step', 'track'];
 const PARTS = ['armL', 'armR', 'legL', 'legR'];
 function blend(poses, w) {
@@ -156,8 +167,8 @@ function blend(poses, w) {
   return out;
 }
 
-// What the body is doing, of the four.
-export const stateOf = (body) => (body.flying ? 'fly' : body.dashT > 0 ? 'dash' : !body.grounded ? 'air' : 'ground');
+// What the body is doing, of the five.
+export const stateOf = (body) => (body.seated ? 'seat' : body.flying ? 'fly' : body.dashT > 0 ? 'dash' : !body.grounded ? 'air' : 'ground');
 
 // A landing at `speed` m/s: the knees take it.
 export function land(g, speed) { g.crouch = Math.min(0.3, Math.max(g.crouch, 0.04 * speed)); }
@@ -189,7 +200,7 @@ export function stepGait(g, body, dt) {
     if (g.phase < was) footfalls.push(1); else if (was < 0.5 && g.phase >= 0.5) footfalls.push(-1);   // the left as the stride turns over, the right at its half
   }
   const B = g.build;
-  const pose = blend([groundPose(g, g.speed), airPose(B, g.vy), dashPose(B), flyPose(g, h, body.v[1])], [g.w.ground, g.w.air, g.w.dash, g.w.fly]);
+  const pose = blend([groundPose(g, g.speed), airPose(B, g.vy), dashPose(B), flyPose(g, h, body.v[1]), seatPose(B)], [g.w.ground, g.w.air, g.w.dash, g.w.fly, g.w.seat]);
   g.crouch *= Math.exp(-8 * dt);
   pose.lean += 0.6 * g.crouch;
   pose.bank = g.bank * (1 - g.w.fly); pose.bankAll = 1.5 * g.bank * g.w.fly;      // on its feet the chest leans; flying, all of it rolls

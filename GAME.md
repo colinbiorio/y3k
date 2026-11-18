@@ -89,7 +89,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | asked | where it stands |
 |---|---|
 | "traverse the entire planet of Earth" | stage 7. Its first place is on the map now: Lord Howe Island (17 Nov), from elevation data. |
-| "at least 5 different types of spaceships of varying size and design" | stage 4, flown in the void first. |
+| "at least 5 different types of spaceships of varying size and design" | stage 4, **begun** (17 November): the skiff, called down from the bar's **ships** list, boarded with R, flown in the void and over the island. The dart, the dhow, the ark and the carrier are next. |
 | "the entire solar system ... as accurately modeled to reality as possible" | stage 7. |
 | "5 different types of buildings that can be constructed ... entered and explored, inside furnished minimally" | stage 3, **done** (17 November): the shelter, the house, the workshop, the tower and the hall, built from the bar's list (or the key), entered and explored, furnished; the house's loft reached by its ladder, the workshop's wall of glass sliding open as you come, the tower's stair climbed round its wall to a glass dome, the hall's terraces climbed to its door, with a hangar under them. |
 | "5 different types of customizable characters ... 5 different types of customization, with 5 subset levels" | **done** (stage 2). Human, robot, mantis, octopus, light: five choices each, five options a choice, chosen in the **body** sheet. |
@@ -280,6 +280,42 @@ are machines, never a presence's people.
   bots that walk or fly differently from these; a bot that knows the
   buildings are there (they go round nothing yet); the bar wraps onto two
   lines on a phone.
+
+### Stage 4: the ships (begun 17 November 2026)
+
+**The skiff**, the first of the five, from its brief: "a one-seat open craft
+about five metres long, shaped like a slim reed canoe: a white glazed ceramic
+hull with bronze ribs, an open seat behind a low glass windscreen, two small
+outrigger fins on thin struts, one glowing plasma ring engine at the stern."
+
+- **Called down** from the bar's **ships** list (the five; the four not yet
+  made greyed): it comes down a few steps in front of you, pointing your way,
+  hovering a metre over the water. One is put at a time; the list sends it
+  away.
+- **Boarded** with R (the pad's d-pad left; on a phone, the list's line):
+  within three metres of its seat, the body takes the seat and sits, its hips
+  low, its knees bent, its hands out on the levers (`gait.js`'s fifth state, so
+  every body on two legs sits; the light and the octopus ride as they are).
+  R again steps off, to its left side, and the body falls from there to
+  whatever is under it.
+- **Flown** (`ships.js`): it turns toward where you look, at 2.6 radians a
+  second; W drives it along its heading at 24 m/s (shift opens it up to 46),
+  and looking up or down as it goes climbs or dives it (the eye's resting tilt
+  flies it level); S brakes and backs it; A and D slide it; space lifts it and
+  C lowers it. Let be, it slows to a hover where it is. It rides no lower than
+  its keel over the water or the ground, and a building or a hill stops it
+  (its middle, bow, stern and outrigger tips are tested). It banks into its
+  turns and tips as it climbs. The eye stands back further aboard.
+- **Drawn** (`ships/skiff.js`): the hull one glazed shell rising to a point
+  at bow and stern; seven bronze ribs round it and a bronze rail along each
+  gunwale; inside, a deck, the seat, two bronze levers, a ceramic dial and one
+  pane of soft light under the raked windscreen; the outriggers' struts and
+  fins; at the stern, on a pylon, the bronze ring holding a swirl of plasma
+  that brightens and quickens as it is driven, with its glow and a streak of
+  light behind. Low and quick over the water, it drags a wake of rings.
+- Not yet: the dart, the dhow, the ark and the carrier; a ship kept between
+  visits; landing it in the hall's hangar (it fits the mouth); a phone's own
+  button to board (the list does it).
 
 ### Stage 3: the buildings (begun 17 November 2026)
 
@@ -531,6 +567,7 @@ The controls as they begin:
 | walk | V | the stick, part way |
 | fly (creative) | F, or jump again in the air | Y |
 | sink, and land | C | R3 |
+| board a ship; aboard, step off | R | d-pad ← |
 | survival or creative | G | view |
 | the eye nearer, farther | = and −, or the wheel | d-pad ↑ ↓ |
 | controls | M, or Esc | menu |
@@ -704,7 +741,7 @@ of Earth from the same tiles.
    five are built** (above).
 4. **The five ships**: a skiff, a dart, a dhow, an ark, a carrier. From one
    seat to a carrier. Boarded and flown in the void, so they are ready when
-   there is somewhere to go.
+   there is somewhere to go. **The skiff is built** (above); the dart next.
 5. **The binding and the five plasma weapons** (a thread, a bow, a ring, a
    bell, a torch: none of them a blade), with things for them to act on:
    machines, hazards, the land. Never a presence's people.
@@ -728,9 +765,11 @@ suite runs them; those that draw are read as text and looked at.
 | file | what it is |
 |---|---|
 | `body.js` | how a body moves: the jump, the dash, flight, the fixed step |
-| `input.js` | the hands: keys, mouse, controller, touch, as nineteen actions; the bindings and their keeping (an action added later gives way to a key already kept for another) |
+| `input.js` | the hands: keys, mouse, controller, touch, as twenty actions; the bindings and their keeping (an action added later gives way to a key already kept for another) |
 | `rings.js` | a ring on the water as a function; the pool of drops; the floor's lattice and the rebase |
-| `gait.js` | how a body on two legs carries itself: the stride with its feet planted, the two-bone leg, landings; told a build (the mantis's long legs, the robot's stiffness) |
+| `gait.js` | how a body on two legs carries itself: the stride with its feet planted, the two-bone leg, landings, sitting in a ship; told a build (the mantis's long legs, the robot's stiffness) |
+| `ships.js` | the ships as numbers: the five offered, the skiff put, flown under the hands, boarded and stepped off |
+| `ships/` | `skiff.js`: the skiff drawn (draws) |
 | `crawl.js` | how a body on many arms carries itself: six tips, three always on the floor |
 | `kinds.js` | the five kinds: their choices, options and colours; a look made fresh, cleaned, or drawn by chance |
 | `chooser.js` | the body sheet: its rows, its keys, and where the body stands beside it |
