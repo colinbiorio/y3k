@@ -76,6 +76,9 @@ const CSS = `
 .y3k-travel-button { position: fixed; z-index: 2147482999; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom));
   width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(10, 10, 16, 0.6);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.y3k-travel-button.yt-bl { right: auto; left: max(14px, env(safe-area-inset-left)); }
+.y3k-travel-button.yt-tl { right: auto; bottom: auto; left: max(14px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top)); }
+.y3k-travel-button.yt-tr { bottom: auto; top: max(14px, env(safe-area-inset-top)); }
 .y3k-travel-button:hover, .y3k-travel-button:focus-visible { border-color: rgba(255, 255, 255, 0.45); outline: none; }
 .y3k-travel-button i { display: block; width: 5px; height: 5px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px 1px rgba(200, 220, 255, 0.9); }
 .y3k-travel-button span { display: flex; gap: 5px; transform: rotate(-18deg); }
@@ -150,11 +153,11 @@ export function closeTravel() {
 }
 export const travelOpen = () => !!root && !root.hidden;
 
-// a door for a site that has none: three small stars at a corner
-export function mountTravelButton({ doc = globalThis.document } = {}) {
+// a door for a site that has none: three small stars at a corner (br, bl, tr or tl: clear of the site's own)
+export function mountTravelButton({ doc = globalThis.document, corner = 'br' } = {}) {
   if (!doc?.body || doc.querySelector('.y3k-travel-button')) return null;
   styles(doc);
-  const b = el(doc, 'button', 'y3k-travel-button');
+  const b = el(doc, 'button', 'y3k-travel-button' + (/^(bl|tl|tr)$/.test(corner) ? ' yt-' + corner : ''));
   b.type = 'button';
   b.title = 'Travel: airden, yearthreethousand, univispira';
   b.setAttribute('aria-label', b.title);
@@ -166,14 +169,14 @@ export function mountTravelButton({ doc = globalThis.document } = {}) {
   return b;
 }
 
-// Loaded as a page's own script with ?button=1, it puts its door in; any link to
-// #travel on the page opens it too.
+// Loaded as a page's own script with ?button=1 (and &corner=bl, tl or tr), it puts
+// its door in; with ?links=1 or ?button=1, any link to #travel on the page opens it too.
 try {
   const q = new URL(import.meta.url).searchParams;
   const doc = globalThis.document;
   if (doc && (q.get('button') === '1' || q.get('links') === '1')) {
     const go = () => {
-      if (q.get('button') === '1') mountTravelButton({ doc });
+      if (q.get('button') === '1') mountTravelButton({ doc, corner: q.get('corner') || 'br' });
       doc.addEventListener('click', (e) => {
         const a = e.target?.closest?.('a[href="#travel"]');
         if (a) { e.preventDefault(); openTravel({ doc }); }
