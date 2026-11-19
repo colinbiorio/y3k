@@ -36,7 +36,7 @@ import * as THREE from 'three';
 import { createVoid } from './void.js';
 import { createFigure } from './figure.js';
 import { createBody, advance, shown, shift, setMode, WATER, SPRINT, lightLine } from './body.js';
-import { createInput, wireInput, loadBindings, keyLabel, padLabel } from './input.js';
+import { createInput, wireInput, loadBindings, keyLabel, padLabel, DOES } from './input.js';
 import { rebase } from './rings.js';
 import { LIGHTS } from './lights.js';
 import { loadState, saveState, ZOOM } from './state.js';
@@ -361,6 +361,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // the platforms and the blueprint live in the scene: they go with it
   function dropGround() { for (const a of (K.plinths || new Map()).values()) a.dispose(); K.plinths?.clear(); K.blue?.dispose(); K.blue = null; planEnd(); }
   // the bar's build list: the five, those not made yet greyed; near a building, the first line takes it down
+  // the key that does a list's item at once (input.js SHORT), shown on its button where there are keys
+  const capOf = (id) => { const c = !touch && input?.bindings.keys[id]?.find(Boolean); return c ? `<kbd class="game-cap">${keyLabel(c)}</kbd>` : ''; };
   function listBuilds(show) {
     const el = $('#game-build-list'), btn = $('#game-build'); if (!el || !btn) return;
     const open = show ?? el.hidden;
@@ -368,7 +370,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       listBots(false); listShips(false);
       const near = K.world.near(K.body.p);
       el.innerHTML = (near ? `<button type="button" class="login-alt game-build-down" data-build="down">take down the ${near.kind}</button>` : '')
-        + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? '' : '<small>to come</small>'}</button>`).join('');
+        + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? capOf('build_' + b.kind) : '<small>to come</small>'}</button>`).join('');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
@@ -431,7 +433,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const open = show ?? el.hidden;
     if (open) {
       listBuilds(false); listBots(false); listShips(false);
-      el.innerHTML = WEAPONS.map((w) => `<button type="button" class="login-alt${w.id === K.combat.weapon ? ' on' : ''}" data-weapon="${w.id}"${w.ready ? '' : ' disabled aria-disabled="true"'}>${w.label}${w.ready ? '' : '<small>to come</small>'}</button>`).join('');
+      el.innerHTML = WEAPONS.map((w) => `<button type="button" class="login-alt${w.id === K.combat.weapon ? ' on' : ''}" data-weapon="${w.id}"${w.ready ? '' : ' disabled aria-disabled="true"'}>${w.label}${w.ready ? capOf('take_' + w.id) : '<small>to come</small>'}</button>`).join('');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
   }
@@ -468,7 +470,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       const near = !K.aboard && nearShip(K.world.ships, K.body.p), any = K.world.ships[0];
       el.innerHTML = (K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="leave">step off the ${K.aboard.kind}</button>` : '')
         + (near ? `<button type="button" class="login-alt game-build-down" data-ship="board">board the ${near.kind}</button>` : '')
-        + SHIPS.map((sh) => `<button type="button" class="login-alt" data-ship="${sh.kind}"${sh.ready ? '' : ' disabled aria-disabled="true"'}>${sh.label}${sh.ready ? '' : '<small>to come</small>'}</button>`).join('')
+        + SHIPS.map((sh) => `<button type="button" class="login-alt" data-ship="${sh.kind}"${sh.ready ? '' : ' disabled aria-disabled="true"'}>${sh.label}${sh.ready ? capOf('call_' + sh.kind) : '<small>to come</small>'}</button>`).join('')
         + (any && !K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="away">send the ${any.kind} away</button>` : '');
     }
     el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
@@ -637,6 +639,9 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.spawn) callBot();
       if (inp.weapon) takeWeapon(nextWeapon(K.combat.weapon));
       if (inp.board) boardOrLeave();
+      // one key each: a weapon in hand, a building's blueprint, a ship called down (input.js SHORT), as the bar's lists do;
+      // while a blueprint is shown only a building's key acts (that building is shown instead: 1 and 2 are the blueprint's)
+      if (!body.light) for (const id of inp.shortcuts || []) { const [what, kind] = DOES[id]; if (plan && what !== 'build') continue; if (what === 'weapon') takeWeapon(kind); else if (what === 'build') buildHere(kind); else putShip(kind); }
       if (inp.menu) openMenu();
       K.world.update(dt);
       if (plan) planStep();

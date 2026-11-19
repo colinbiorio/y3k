@@ -16,6 +16,22 @@
 //     the state. Keys are heard by where they sit (event.code), so W A S D are
 //     the same four keys on every layout.
 
+// ONE KEY EACH (Colin, 19 Nov 2026: "keyboard shortcuts for building, ships, and weapons"): a row of the keyboard for
+// each, in the order the bar's lists give them: the five weapons on 1 to 5, the five buildings on 6 to 0, the five
+// ships, smallest first, on Y U I O P. `does` is what the view does with one; `group` is its card in the controls sheet
+// (glyphs.js GROUPS). Changed in the sheet like any other.
+export const SHORT = {
+  weapon: { group: 'fight', keys: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'], kinds: ['thread', 'bow', 'ring', 'bell', 'torch'] },
+  build: { group: 'build', keys: ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'], kinds: ['shelter', 'house', 'workshop', 'tower', 'hall'] },
+  ship: { group: 'ships', keys: ['KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP'], kinds: ['skiff', 'dart', 'dhow', 'ark', 'carrier'] },
+};
+const shortId = (what, kind) => ({ weapon: 'take_', build: 'build_', ship: 'call_' })[what] + kind;
+function SHORTCUTS() {
+  const words = { weapon: (k) => `the ${k}`, build: (k) => `a ${k}`, ship: (k) => `${k === 'ark' ? 'an' : 'a'} ${k}` };
+  const notes = { weapon: 'in hand at once', build: 'its blueprint where it would go, as the build list gives it (and while one is shown, that one instead)', ship: 'called down near you, as the ships list does' };
+  return Object.entries(SHORT).flatMap(([what, S]) => S.kinds.map((kind, i) => ({ id: shortId(what, kind), label: words[what](kind), group: S.group, does: [what, kind], ...(i ? {} : { note: notes[what] }) })));
+}
+export const DOES = Object.fromEntries(Object.entries(SHORT).flatMap(([what, S]) => S.kinds.map((kind) => [shortId(what, kind), [what, kind]])));
 export const ACTIONS = [
   { id: 'forward', label: 'forward', stick: 'left stick' },
   { id: 'back', label: 'back', stick: 'left stick' },
@@ -39,8 +55,9 @@ export const ACTIONS = [
   { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },
   { id: 'zoomOut', label: 'further' },
   { id: 'menu', label: 'controls' },
+  ...SHORTCUTS(),
 ];
-const IDS = ACTIONS.map((a) => a.id);
+const IDS = ACTIONS.map((a) => a.id), SHORT_IDS = Object.keys(DOES);
 
 export const STORE_KEY = 'y3k.game.controls';
 export const DEADZONE = 0.15;
@@ -57,9 +74,11 @@ export function defaults() {
       fly: ['KeyF', ''], down: ['KeyC', ''], mode: ['KeyG', ''], build: ['KeyB', ''],
       attack: ['Mouse0', 'KeyJ'], whirl: ['KeyE', 'KeyK'], guard: ['Mouse2', 'KeyL'], bind: ['KeyX', 'KeyH'], weapon: ['KeyT', ''], spawn: ['KeyN', ''], board: ['KeyR', ''],
       zoomIn: ['Equal', ''], zoomOut: ['Minus', ''], menu: ['KeyM', 'Escape'],
+      ...Object.fromEntries(Object.entries(SHORT).flatMap(([what, S]) => S.kinds.map((kind, i) => [shortId(what, kind), [S.keys[i], '']]))),
     },
     // the standard pad: 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT · 8 view · 9 menu · 10 L3 · 11 R3 · 12–15 the d-pad
-    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, attack: 7, whirl: 5, guard: 6, bind: 4, weapon: -1, spawn: 15, board: 14, zoomIn: 12, zoomOut: 13, menu: 9 },
+    pad: { forward: -1, back: -1, left: -1, right: -1, jump: 0, dash: 1, sprint: 10, walk: -1, fly: 3, down: 11, mode: 8, build: 2, attack: 7, whirl: 5, guard: 6, bind: 4, weapon: -1, spawn: 15, board: 14, zoomIn: 12, zoomOut: 13, menu: 9,
+      ...Object.fromEntries(Object.keys(DOES).map((id) => [id, -1])) },
     look: { mouse: 1, stick: 1, invertY: false },
   };
 }
@@ -203,7 +222,7 @@ export function createInput(bindings = defaults()) {
         jump: on('jump'), jumpPressed: pressed.has('jump'), dash: pressed.has('dash'), flyToggle: pressed.has('fly'),
         sprint: on('sprint') || sprintLatch, walk: on('walk'), up: on('jump'), down: on('down'),
         modeToggle: pressed.has('mode'), build: pressed.has('build'), menu: pressed.has('menu'), device,
-        attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), bind: on('bind'), bindPressed: pressed.has('bind'), weapon: pressed.has('weapon'), spawn: pressed.has('spawn'), board: pressed.has('board'),
+        attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), bind: on('bind'), bindPressed: pressed.has('bind'), weapon: pressed.has('weapon'), spawn: pressed.has('spawn'), board: pressed.has('board'), shortcuts: SHORT_IDS.filter((id) => pressed.has(id)),
       };
       pressed.clear(); lookX = lookY = wheel = 0;
       return out;

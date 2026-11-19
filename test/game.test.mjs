@@ -437,7 +437,7 @@ ok('a press is one press: handed over once, however long the key is held', () =>
   assert.equal(inp.frame().jumpPressed, false, 'a repeat is not a press');
   inp.up('Space');
   assert.equal(inp.frame().jump, false);
-  assert.equal(inp.down('KeyP'), null, 'a key that is nobody\'s');
+  assert.equal(inp.down('KeyZ'), null, 'a key that is nobody\'s');
 });
 
 ok('the keys: W A S D and the arrows move, the mouse turns the eye right when it goes right', () => {
@@ -569,7 +569,7 @@ ok('the page\'s keys: the game hears them, except while typing, on a focused but
   doc.hidden = true; doc.fire('visibilitychange');
   assert.deepEqual(inp.frame().move, [0, 0], 'a tab put away lets go: its keyups may never come');
   doc.hidden = false;
-  assert.equal(win.fire('keydown', { code: 'KeyP' }).defaultPrevented, false, 'a key the game has no use for is the page\'s');
+  assert.equal(win.fire('keydown', { code: 'KeyZ' }).defaultPrevented, false, 'a key the game has no use for is the page\'s');
   const b = inp.bindings; I.bindKey(b, 'jump', 0, 'KeyJ'); inp.setBindings(b);
   e = win.fire('keydown', { code: 'Space' });
   assert.equal(e.defaultPrevented, true, 'Space given no work still does not scroll the page under the game'); assert.equal(inp.frame().jumpPressed, false);
@@ -1467,6 +1467,25 @@ ok('the controls sheet is a sheet like the others, and its close is drawn', () =
   assert.match(read('src/mercury-mount.js'), /\['game-menu-close', [\d.]+\]/, 'the liquid X is mounted (an unmounted one is an empty button)');
   const menu = read('src/game/menu.js');
   for (const piece of ['role="table"', 'aria-pressed=', 'aria-label="${esc(', 'press a key…', 'press a button…', 'back to the defaults']) assert.ok(menu.includes(piece), 'menu.js: ' + piece);
+});
+
+ok('one key each (Colin, 19 Nov 2026: "keyboard shortcuts for building, ships, and weapons"): the weapons on 1 to 5, the buildings on 6 to 0, the ships on Y U I O P, each in the order of the bar\'s list, each in its card of the sheet; pressed, the view does what the list would', () => {
+  const d = I.defaults(), row = (what) => I.SHORT[what].kinds.map((k) => Object.keys(I.DOES).find((id) => I.DOES[id][0] === what && I.DOES[id][1] === k));
+  assert.deepEqual(I.SHORT.weapon.kinds, CB.WEAPONS.map((w) => w.id), 'the weapons list\'s order');
+  assert.deepEqual(I.SHORT.build.kinds, BUILDINGS.map((b) => b.kind), 'the build list\'s order');
+  assert.deepEqual(I.SHORT.ship.kinds, SP.SHIPS.map((s) => s.kind), 'the ships list\'s order, smallest first');
+  assert.deepEqual(row('weapon').map((id) => d.keys[id][0]), ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5']);
+  assert.deepEqual(row('build').map((id) => d.keys[id][0]), ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0']);
+  assert.deepEqual(row('ship').map((id) => d.keys[id][0]), ['KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP']);
+  for (const [what, card] of [['weapon', 'fight'], ['build', 'build'], ['ship', 'ships']]) for (const id of row(what)) {
+    const a = I.ACTIONS.find((x) => x.id === id); assert.equal(groupOf(a), card, id + ' in its card'); assert.ok(GLYPHS[id], id + ' drawn as itself');
+  }
+  const inp = I.createInput(); inp.down('Digit3'); inp.down('KeyO'); inp.down('Digit0');
+  assert.deepEqual(inp.frame().shortcuts.sort(), ['build_hall', 'call_ark', 'take_ring'], 'pressed, they are handed to the view');
+  assert.deepEqual(inp.frame().shortcuts, [], 'once');
+  const view = read('src/game/view.js');
+  assert.match(view, /if \(what === 'weapon'\) takeWeapon\(kind\); else if \(what === 'build'\) buildHere\(kind\); else putShip\(kind\);/, 'what the lists do');
+  for (const id of ["'take_' + w.id", "'build_' + b.kind", "'call_' + sh.kind"]) assert.ok(view.includes('capOf(' + id + ')'), 'its key on its list\'s button: ' + id);
 });
 
 ok('every control has its own glyph, in a group of the sheet (Colin, 19 Nov 2026: "dedicated unimat icons for each")', () => {
