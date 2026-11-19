@@ -263,6 +263,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (later) — **A ship comes from anywhere, and is boarded by
+  nearness; Space goes up and Shift goes faster** (`src/game/ships.js` placeShip,
+  shipGap, nearShip; `src/game/body.js`; `src/game/view.js`; `src/game/input.js`).
+  Colin, having played the last round: "remove necessity to be on the ground to
+  call a ship ... it should always just be about proximity to the ship ...
+  character flying spacebar means go up, shift means go faster." Called in the
+  air, a ship comes to the body's height; near any part of it, the board key
+  takes its seat; on foot a held jump no longer gathers the light (lightspeed is
+  the ship's, next). GAME.md "Flight, done right".
 - **2026-11-19** (afternoon) — **One key each: the weapons on 1 to 5, the
   buildings on 6 to 0, the ships on Y U I O P** (`src/game/input.js` SHORT,
   DOES; `src/game/view.js`; `src/game/glyphs.js`; `styles.css` .game-cap;

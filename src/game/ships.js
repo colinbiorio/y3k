@@ -45,7 +45,7 @@ export const SKIFF = {
   speed: 24, boost: 46, back: 0.4, slide: 8, climb: 9,
   accel: 24, turn: 2.6,             // m/s/s toward the speed asked; rad/s toward the eye's way at most
   spin: 22,                         // rad/s/s: how quickly its turning comes on and goes off (HANDLING, below)
-  board: 3.2,                       // m: within this of its seat, the board key takes it (it comes down in reach)
+  board: 3.2,                       // m: within this of any part of it, the board key takes its seat (it comes down in reach)
   put: [0, 3.4],                    // m: where it is put from the body: to its left, and ahead
   edges: [[1.3, -0.18, -0.95], [-1.3, -0.18, -0.95]],   // what else of it meets what is solid (its outriggers' tips)
   view: 8.5,                        // m: the eye stands at least this far back aboard
@@ -76,7 +76,7 @@ export const DHOW = {
   seat: [0, 4.75, -8.2],            // the helm: on the stern cabin's roof, at its front, looking over the deck and the sails
   speed: 30, boost: 64, back: 0.3, slide: 6, climb: 8,
   accel: 19, turn: 1.35, spin: 4.5, // heavy: longer to come up to speed and into a turn than the small ones, never sluggish
-  board: 9, reach: 8.5, put: [8.5, 8], // beside the body, its stern alongside; boarded from the water, up to the helm
+  board: 6, reach: 8.5, put: [8.5, 8], // beside the body, its stern alongside; boarded from beside it, up to the helm
   edges: [[3.4, 0.5, 0], [-3.4, 0.5, 0], [0, 15.5, 3], [0, 10.5, -4.5], [0, 2.8, 13.6], [0, 3, -13.8]],   // its sides, mastheads, prow, stern
   view: 34,
 };
@@ -94,8 +94,8 @@ export const ARK = {
   speed: 46, boost: 110, back: 0.3, slide: 8, climb: 10,
   accel: 23, turn: 0.95, spin: 2.4, // heavier: longer still to come up to speed and into a turn
   // put ahead of the body, pointing its way, far enough off to be seen whole (its ring's top inside the eye's view); boarded
-  // from the water near its stern, from where it was called: the board key lifts the body up into the dome
-  door: [0, 0, -40], board: 32, reach: 22, put: [0, 68],
+  // from anywhere near it (from where it was called too): the board key lifts the body up into the dome
+  door: [0, 0, -40], board: 36, reach: 22, put: [0, 68],
   edges: [
     ...[0, 1, 2, 3, 4, 5, 6, 7].map((k) => [ARK_RIM * Math.cos((k * Math.PI) / 4), ARK_RIM * Math.sin((k * Math.PI) / 4), ARK_RING.z]),
     [0, ARK_DOME.at[1] + ARK_DOME.r, ARK_DOME.at[2]],
@@ -120,8 +120,8 @@ export const CARRIER = {
   speed: 72, boost: 170, back: 0.3, slide: 12, climb: 14,
   accel: 29, turn: 0.7, spin: 1.4,  // the weightiest, a temple under way: the longest to its speed and into a turn, and quick enough for its size
   // put far ahead of the body, pointing its way, so the eye sees it whole (its sails' tops inside the view); boarded from
-  // anywhere within a few hundred metres of its stern: the board key lifts the body up to its helm
-  door: [0, 0, -212], board: 280, reach: 140, put: [0, 450],
+  // anywhere within a few hundred metres of it (from where it was called too): the board key lifts the body up to its helm
+  door: [0, 0, -212], board: 260, reach: 140, put: [0, 450],
   edges: [
     ...[-200, -145, -90, -35, 20, 75, 130].flatMap((z) => [[60, -20, z], [-60, -20, z]]), [15, -20, 200], [-15, -20, 200],
     ...CARRIER_MASTS.flatMap((m) => [[0, m.top, m.z], [m.wide, m.yard, m.z], [-m.wide, m.yard, m.z]]),
@@ -153,11 +153,13 @@ export function shipPoint(s, [x, y, z]) { const c = Math.cos(s.yaw), n = Math.si
 export const seatAt = (s) => shipPoint(s, kindOf(s).seat);
 export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   // where it is boarded from: its seat, or (the ark) its door
 
-// put by the body (its seat in reach), pointing the way it faces, riding at its hover over what is under it
+// put by the body (near enough to board), pointing the way it faces, riding at its hover over what is under it; called
+// from the air (Colin, 19 Nov 2026: "remove necessity to be on the ground to call a ship"), it comes to the body's height
+// instead (its seat about level with the body's feet), and waits there
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
-  const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side;
-  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0 };
+  const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side, low = floorAt(x, z) + S.hover;
+  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0 };
 }
 
 // One step of a ship under the hands (inp: move [right, forward], yaw and pitch of the eye, up, down, sprint), over a
@@ -263,12 +265,24 @@ export function carryOn(s, body, was, wasYaw, wasBob = 0) {
   return body;
 }
 
-// the nearest ship whose seat (or door) a body is near enough to take (on its way to it, not far below or above it)
+// BOARDING IS NEARNESS (Colin, 19 Nov 2026: "there shouldn't be any prevention 'walk to the ship's stern to board it' --
+// it should always just be about proximity to the ship"): how far a point is from the nearest part of a ship (its solid
+// boxes, below), and the nearest ship a body is within `board` metres of, from any side, over it, under it or on it
+export function shipGap(s, p) {
+  const q = toShip(s, p);
+  let best = Infinity;
+  for (const b of shipBoxes(s.kind)) {
+    const dx = Math.max(b.x0 - q[0], 0, q[0] - b.x1), dy = Math.max(b.y0 - q[1], 0, q[1] - b.y1), dz = Math.max(b.z0 - q[2], 0, q[2] - b.z1);
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
 export function nearShip(ships, p) {
   let best = null, bd = Infinity;
   for (const s of ships) {
-    const q = doorAt(s), d = Math.hypot(q[0] - p[0], q[2] - p[2]);
-    if (d < kindOf(s).board && d < bd && Math.abs(q[1] - p[1]) < kindOf(s).reach) { bd = d; best = s; }
+    const d = shipGap(s, p);
+    if (d <= kindOf(s).board && d < bd) { bd = d; best = s; }
   }
   return best;
 }
