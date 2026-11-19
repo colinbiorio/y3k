@@ -83,7 +83,8 @@ ok('a tap rises 1.5 m', () => {
 
 ok('held, it rises 3.0 m: gravity defied by two, and no more', () => {
   const s = B.createBody();
-  const { top } = run(s, pressThen({ jumpPressed: true }, { jump: true }), landed);
+  // (held to just past its top, 1.2 s: held on longer, from 1.25 s, the light gathers: see lightspeed, below)
+  const { top } = run(s, (n) => ({ ...IDLE, jump: n * STEP < 1.2, jumpPressed: n === 0 }), landed);
   near(top, 3.0, 2e-3);
   assert.ok(top <= 3.0 + 1e-9, 'never over twice the tap');
 });
@@ -94,7 +95,7 @@ ok('held, it is still pulled: it comes down, and at the full pull', () => {
   const v0 = s.v[1];
   for (let i = 0; i < 12; i++) B.stepBody(s, { ...IDLE, jump: true });
   near(s.v[1] - v0, -B.G * 12 * STEP, 1e-9, 'the fall');
-  const land = run(s, { ...IDLE, jump: true }, (b) => b.grounded);
+  const land = run(s, { ...IDLE }, (b) => b.grounded);     // (let go now: held on, the light would gather at 1.25 s)
   assert.ok(land.n > 0 && s.p[1] === 0);
 });
 
@@ -165,6 +166,73 @@ ok('a dash is not a second dash until it has rested', () => {
   let dashes = 1;
   for (let i = 0; i < 200; i++) { const before = s.events.length; B.stepBody(s, { ...IDLE, move: [0, 1], dash: true }); if (s.events.length > before && s.events.at(-1).type === 'dash') { dashes += 1; near(i * STEP, B.DASH_COOLDOWN, 2 * STEP, 'when'); break; } }
   assert.equal(dashes, 2);
+});
+
+// ---- lightspeed and the double tap (Colin, 19 Nov 2026: "when holding spacebar, the speed should get exponentially
+// faster until you reach the speed of light ... once you release spacebar you'll just end up back at the island";
+// "double spacebar to drop down from flying would be nice")
+const holdFor = (s, sec, extra = {}) => { for (let n = 0, t = 0; t < sec - 1e-9; t += STEP, n++) B.stepBody(s, { ...IDLE, ...extra, jump: true, jumpPressed: n === 0 }, STEP); };
+ok('held on past the top of a held jump the light gathers (let go then, and it only hung a moment); held on, the body goes where the eye looks, its speed doubling until, seven seconds in, it is the speed of light; it is never further than its reach from where it set out; let go, it is brought home there, and lands', () => {
+  const L = B.LIGHT, s = B.createBody();
+  holdFor(s, L.hold - 0.01); assert.equal(s.light, undefined, 'not before ' + L.hold + ' s');
+  holdFor(s, 0.03); assert.equal(s.light?.phase, 'gather', 'then the light gathers');
+  near(s.p[1], 2.95, 0.06, 'just past the top of the held jump');
+  const hung = [...s.p]; B.stepBody(s, { ...IDLE }, STEP); assert.equal(s.light, null, 'let go while it gathers: nothing comes of it');
+  for (let i = 0; i < 400 && !s.grounded; i++) B.stepBody(s, { ...IDLE }, STEP);
+  assert.ok(s.grounded && Math.hypot(s.p[0] - hung[0], s.p[2] - hung[2]) < 1e-9, 'it falls where it hung');
+  // again, held on: the eye turned a quarter round, a little up
+  const b = B.createBody(), yaw = -Math.PI / 2, look = { yaw, pitch: 0.4 };
+  holdFor(b, L.hold + L.gather + 0.02, look); assert.equal(b.light.phase, 'go'); const from = [...b.light.from];
+  const want = [-Math.sin(yaw) * Math.cos(0.4 - L.dead), Math.sin(0.4 - L.dead), -Math.cos(yaw) * Math.cos(0.4 - L.dead)];
+  holdFor(b, 1, look); near(b.light.dir[0] * want[0] + b.light.dir[1] * want[1] + b.light.dir[2] * want[2], 1, 1e-9, 'the way the eye looks');
+  const v1 = b.light.v; holdFor(b, 1, look); assert.ok(b.light.v > v1 * 8 && b.light.v < v1 * 11, 'growing tenfold a second: ' + (b.light.v / v1).toFixed(2));
+  holdFor(b, L.rise - 2 + 0.05, look); near(b.light.v, L.c, 1e-6, 'the speed of light'); holdFor(b, 3, look); near(b.light.v, L.c, 1e-6, 'and no faster');
+  assert.ok(b.light.dist > 3 * L.c, 'more than three light-seconds out: ' + B.lightFar(b.light.dist));
+  const far = Math.hypot(...b.p.map((v, i) => v - from[i])); assert.ok(far <= L.reach + 1e-6 && far > L.reach - 1, 'the body itself no further than its reach: ' + far.toFixed(1));
+  assert.ok(b.p.every(Number.isFinite) && b.light.veil > 0.99 && b.light.frac === 1, 'whole numbers, the veil drawn');
+  B.stepBody(b, { ...IDLE, ...look }, STEP); assert.equal(b.light.phase, 'home', 'let go: home');
+  let t = STEP; while (b.light && t < 5) { B.stepBody(b, { ...IDLE, ...look }, STEP); t += STEP; }
+  near(t, L.home, 0.02, 'in ' + L.home + ' s'); for (let i = 0; i < 3; i++) near(b.p[i], from[i], 1e-9, 'where it set out');
+  assert.ok(b.events.some((e) => e.type === 'light' && e.home), 'and it says so');
+  for (let i = 0; i < 400 && !b.grounded; i++) B.stepBody(b, { ...IDLE }, STEP); assert.ok(b.grounded && b.p[1] === 0, 'then it lands');
+  // on the island: lifted clear of the ground on the way out, and home along a line kept off it
+  const height = (x, z) => 40 - 0.02 * Math.hypot(x, z), w = { ground: { height }, solve: (q) => Math.max(0, height(q.p[0], q.p[2])) }; const c = B.createBody({ world: w, p: [0, 40, 0] }); c.was = [...c.p];
+  holdFor(c, L.hold + L.gather + 0.5, { yaw, pitch: -1.2 }); assert.ok(c.light.phase === 'go' && c.p[1] > w.ground.height(c.p[0], c.p[2]) + 1.9, 'steered down, it stays over the ground');
+  // and a shifted origin moves where it set out with it
+  const d = B.createBody(); holdFor(d, L.hold + L.gather + 0.5); const f0 = [...d.light.from]; B.shift(d, 100, -50); near(d.light.from[0], f0[0] - 100, 1e-12); near(d.light.from[2], f0[2] + 50, 1e-12);
+});
+
+ok('flying, a second tap of the jump soon after the first lets go of the air and the body falls; two taps slower do not; the tap that took off is not the first of a pair; held, it climbs, then gathers the light', () => {
+  const fly = () => { const s = B.createBody({ mode: 'creative', flying: true, grounded: false, p: [0, 10, 0] }); s.was = [...s.p]; return s; };
+  const taps = (s, gap) => { const n2 = Math.round(gap / STEP); for (let n = 0; n <= n2 + 3; n++) B.stepBody(s, { ...IDLE, jumpPressed: n === 0 || n === n2, jump: n < 3 || (n >= n2 && n < n2 + 3) }, STEP); };
+  let s = fly(); taps(s, 0.2); assert.equal(s.flying, false, 'two quick taps let go');
+  assert.ok(s.events.some((e) => e.type === 'fly' && e.on === false && e.tapped), 'and say so');
+  for (let i = 0; i < 600 && !s.grounded; i++) B.stepBody(s, { ...IDLE }, STEP); assert.ok(s.grounded && s.p[1] === 0, 'it falls and lands');
+  s = fly(); taps(s, B.TAP_TWICE + 0.1); assert.equal(s.flying, true, 'two slower taps keep it flying');
+  s = B.createBody({ mode: 'creative' });                              // a jump, and a second in the air: it takes off
+  B.stepBody(s, { ...IDLE, jumpPressed: true, jump: true }, STEP); for (let i = 0; i < 24; i++) B.stepBody(s, { ...IDLE }, STEP);
+  B.stepBody(s, { ...IDLE, jumpPressed: true, jump: true }, STEP); assert.equal(s.flying, true, 'taken off');
+  for (let i = 0; i < 12; i++) B.stepBody(s, { ...IDLE }, STEP);
+  B.stepBody(s, { ...IDLE, jumpPressed: true, jump: true }, STEP); assert.equal(s.flying, true, 'the next tap soon after is the first of a pair, not the second');
+  s = fly(); const y0 = s.p[1]; holdFor(s, B.LIGHT.flyHold - 0.02, { up: true });
+  assert.ok(!s.light && s.p[1] > y0 + 8, 'held, it climbs: ' + (s.p[1] - y0).toFixed(2)); holdFor(s, 0.05, { up: true }); assert.equal(s.light?.phase, 'gather', 'then the light gathers');
+});
+
+ok('the light\'s line: its speed (m/s, km/s, a share of c, the speed of light), how far out (m, km, light-seconds to light-years), and the farthest of our things it has come as far as', () => {
+  const L = B.LIGHT, line = (v, dist, phase = 'go') => B.lightLine({ phase, v, dist });
+  assert.equal(line(383, 120), 'lightspeed · 383 m/s · 120 m out');
+  assert.equal(line(3.7e4, 2.2e6), 'lightspeed · 37 km/s · 2,200 km out');
+  assert.equal(line(0.42 * L.c, 9e7), 'lightspeed · 0.42 c · 90,000 km out');
+  assert.equal(line(L.c, 1.3 * L.c), 'lightspeed · the speed of light · 1.3 light-seconds out · past the Moon');
+  assert.equal(line(L.c, 520 * L.c), 'lightspeed · the speed of light · 8.7 light-minutes out · as far as the Sun');
+  assert.equal(B.lightFar(4.3 * 31557600 * L.c), '4.3 light-years');
+  assert.equal(B.lightLine({ phase: 'gather' }), 'the light gathers · let go to stay');
+  assert.match(B.lightLine({ phase: 'home', dist: 2 * L.c }), /^coming home · 2 light-seconds$/);
+  assert.equal(B.lightLine(null), '');
+  const view = read('src/game/view.js');
+  assert.match(view, /createLightArt\(V\.scene, \{ lite: K\.lite \}\)/, 'the view draws it, in whichever place it is');
+  assert.match(view, /<div class="game-light" role="status" hidden><\/div>/, 'its line has a place of its own');
+  assert.match(view, /else if \(body\.light && body\.light\.phase !== 'gather'\) eye\.at\.set\(tx, ty, tz\);/, 'and the eye keeps up with it');
 });
 
 ok('one dash in the air, given back by the ground', () => {
@@ -248,9 +316,10 @@ ok('on foot: a walk, a run, a sprint, and a stick pushed past its rim is no fast
 ok('the same arc at any frame rate, and a press on a frame too short to hold a step is kept', () => {
   const lands = [1 / 60, 1 / 144, 1 / 30, 1 / 240, 'uneven'].map((dt) => {
     const s = B.createBody();
-    let i = 0, seed = 7;
+    let i = 0, seed = 7, t = 0;
     const next = () => { if (dt !== 'uneven') return dt; seed = (seed * 1103515245 + 12345) % 2147483648; return 0.002 + 0.03 * (seed / 2147483648); };
-    while (!s.events.some((e) => e.type === 'land') && i < 5000) { B.advance(s, { move: [0, 1], yaw: 0, pitch: 0, jump: true, jumpPressed: i === 0 }, next()); i += 1; }
+    // held until just past its top (after 1.1 s, before the light's 1.25 s: letting go there changes nothing of the arc)
+    while (!s.events.some((e) => e.type === 'land') && i < 5000) { const d = next(); B.advance(s, { move: [0, 1], yaw: 0, pitch: 0, jump: t < 1.15, jumpPressed: i === 0 }, d); t += d; i += 1; }
     const j = s.events.find((e) => e.type === 'jump'), l = s.events.find((e) => e.type === 'land');
     assert.ok(j && l, 'it jumped and landed at ' + dt);
     return l.at[2];
@@ -2395,7 +2464,7 @@ ok('the board key: R, and the pad\'s left on the cross; the view wires the ships
   const b = I.defaults(); assert.deepEqual(b.keys.board, ['KeyR', '']); assert.equal(b.pad.board, 14);
   assert.ok(I.ACTIONS.find((a) => a.id === 'board')?.note);
   const view = read('src/game/view.js');
-  for (const line of ['id="game-ship-list"', 'if (inp.board) boardOrLeave();', 'stepShip(K.aboard,', 'carry(K.aboard, body);', 'hands: down || K.aboard ? {}']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ['id="game-ship-list"', 'if (inp.board) boardOrLeave();', 'stepShip(K.aboard,', 'carry(K.aboard, body);', 'hands: down || K.aboard || body.light ? {}']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/ships/skiff.js').includes("from '../ships.js'"), 'the skiff drawn is not the numbers\' skiff');
   assert.ok(read('src/game/ships/dart.js').includes("from '../ships.js'"), 'the dart drawn is not the numbers\' dart');
   assert.ok(read('src/game/ships/dhow.js').includes("from '../ships.js'"), 'the dhow drawn is not the numbers\' dhow');

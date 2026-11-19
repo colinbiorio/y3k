@@ -55,7 +55,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship', 'light'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -632,6 +632,38 @@ try {
     await key.press('KeyB'); r = await until((r) => !hall(r), 8000);
     check('the key inside it takes the hall down', !hall(r), r.world);
     check('the hall\'s frames keep up', out.frames.hall.median < 20, out.frames.hall);
+  }
+
+  if (scene === 'light') {
+    // lightspeed (Colin, 19 Nov 2026): the jump held on past its top gathers the light; held on, the body goes where the
+    // eye looks, faster and faster to the speed of light; let go, it comes home. Flying, two taps of the jump drop it.
+    out.frames ||= {};
+    let r = await read(); const start = [r.p[0] + r.world.origin[0], r.p[1], r.p[2] + r.world.origin[1]];
+    await key.down('Space');
+    r = await until((r) => r.lightspeed?.phase === 'gather', 4000);
+    check('the jump held on past its top gathers the light', r?.lightspeed?.phase === 'gather' && r.p[1] > 2.5, { light: r?.lightspeed, p: r?.p });
+    r = await until((r) => r.lightspeed?.phase === 'go', 3000);
+    check('held on, it goes', r?.lightspeed?.phase === 'go', r?.lightspeed);
+    out.frames.light = await frames(2500);
+    r = await until((r) => r.lightspeed?.v >= 299792458 && /the speed of light/.test(r.lightspeed.line), 12000 * slow);
+    check('faster and faster, until it is the speed of light', r?.lightspeed?.v >= 299792458 && /the speed of light/.test(r.lightspeed.line) && r.lightspeed.veil > 0.99, r?.lightspeed);
+    await shot('01-lightspeed');
+    await key.up('Space');
+    r = await until((r) => r.lightspeed?.phase === 'home' && /^coming home/.test(r.lightspeed.line), 2000);
+    check('let go, it comes home', r?.lightspeed?.phase === 'home' && /^coming home/.test(r.lightspeed.line), r?.lightspeed);
+    r = await until((r) => !r.lightspeed && r.grounded, 8000);
+    check('back where it set out, on the water', !!r && Math.hypot(r.p[0] + r.world.origin[0] - start[0], r.p[2] + r.world.origin[1] - start[2]) < 0.5 && Math.abs(r.p[1]) < 0.05, { p: r?.p, origin: r?.world.origin, start });
+    check('its frames keep up in the light', out.frames.light.median < 20, out.frames.light);
+    await key.down('Space'); r = await until((r) => r.lightspeed?.phase === 'gather', 4000); await key.up('Space');
+    r = await until((r) => !r.lightspeed && r.grounded, 4000);
+    check('let go while it gathers, nothing comes of it', !!r && Math.hypot(r.p[0] + r.world.origin[0] - start[0], r.p[2] + r.world.origin[1] - start[2]) < 0.5, r?.p);
+    await key.press('KeyG'); await sleep(300); await key.press('KeyF'); await sleep(200);
+    await key.down('Space'); await sleep(500); await key.up('Space'); await sleep(200);
+    r = await read(); check('creative flies, and space held a moment climbs', r.flying === true && r.p[1] > 2, { flying: r.flying, p: r.p });
+    await key.press('Space'); await sleep(110); await key.press('Space');
+    r = await until((r) => r.grounded, 6000);
+    check('two taps of space drop it out of the air', !!r && r.flying === false && r.grounded, { flying: r?.flying, p: r?.p });
+    await key.press('KeyG'); await sleep(200);
   }
 
   if (scene === 'ship') {

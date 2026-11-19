@@ -106,7 +106,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
 | "omnidirectional dash options" | **done.** 6.24 m any way the hands point; once more in the air. |
-| "a light speed fast travel option and simulate the actual speed of light" | stage 7, with the frozen universe and the glow. |
+| "a light speed fast travel option and simulate the actual speed of light" | **a handy way, for now** (19 Nov): Space held on past a jump's top goes to the speed of light where you look; let go, and you are brought home. The true journey at c: stage 7, with the frozen universe and the glow. |
 | "rendered with a combination of Higgsfield plugin and whatever 3d rendering system works best" | three.js draws everything. Higgsfield made the pictures the five bodies were drawn from and the surfaces they wear (see Higgsfield, below). |
 
 ## Where it stands
@@ -168,6 +168,27 @@ The rest of what he said that day:
   blotches); that was not made again here (Chromium on Metal, on Apple's
   OpenGL and in software, at the arrival beach's shallows at dusk, standing
   and in the torch's jet). If it shows again: which browser, and where.
+- **Lightspeed** (done). Space still jumps, and held rises twice as high
+  (3.0 m). Held on past the top (1.25 s from the press), the light gathers
+  round the body for 0.4 s; let go then and nothing comes of it (it only hung
+  a moment). Held on, the body goes the way the eye looks, steered by it (2.4
+  rad/s; the eye's rest, a little down, flies it level), its speed from 40 m/s
+  doubling every 0.31 s until seven seconds in it is the speed of light, and
+  no faster. Deep space closes round the eye just beyond the body, the stars
+  stream past in prismatic lines, and a line at the top says how fast (m/s,
+  km/s, a share of c, the speed of light) and how far out (to light-years:
+  past the Moon at 1.3 light-seconds, as far as the Sun at 8.3 light-minutes,
+  Proxima Centauri at 4.24 light-years). Let go: home in 1.7 s along a line to
+  where it set out, the streaks running back, the veil lifting. Flying, Space
+  held climbs, and held on 0.8 s gathers the light too. The body itself goes
+  no further than 2.4 km from where it set out (lifted 140 m as it goes, kept
+  off the ground), so nothing is ever at a huge number; the rest is counted
+  and drawn. Under a roof it does not gather. This is the handy way he asked
+  for "for now"; the true light-speed journey (stage 7) waits for the solar
+  system.
+- **Two taps out of the air** (done). Flying, a second tap of Space within
+  0.32 s of the first lets go of the air, and the body falls; slower taps keep
+  it flying, and the tap that took off is never the first of a pair.
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
