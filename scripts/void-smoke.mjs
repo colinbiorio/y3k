@@ -176,7 +176,8 @@ try {
     await key.down('Space'); await sleep(50); await key.up('Space'); const tap = await peak(1300);
     check('a tap jumps a little over 1.5 m', tap >= 1.49 && tap < 1.8, tap);
     await until((r) => r.grounded);
-    await key.down('Space'); const held = await peak(1900); await key.up('Space');
+    // held to just past its top (1.1 s) and let go before 1.25 s, when held on it would gather the light (lightspeed)
+    await key.down('Space'); const heldPeak = peak(1900); await sleep(1150); await key.up('Space'); const held = await heldPeak;
     check('a held jump rises 3 m', Math.abs(held - 3) < 0.08, held);
     await until((r) => r.grounded);
     await key.down('KeyW'); await until((r) => speed(r) > 5.2); await sleep(700 * slow); await shot('02-run');
@@ -288,7 +289,8 @@ try {
     // up and out over the deep sea, east of the island, and let down into it
     await key.press('KeyG'); await sleep(150); await key.press('KeyF'); await sleep(200);
     await page.evaluate(() => { const g = window.Y3K.game; return g && g.read(); });
-    await key.down('Space'); await sleep(1800); await key.up('Space');
+    // two climbs, each let go before 0.8 s (held on, flying, the light would gather) and a second apart (not two taps)
+    for (let k = 0; k < 2; k++) { await key.down('Space'); await sleep(750); await key.up('Space'); await sleep(250); }
     // east: the island is narrow here and the sea off its east side is deep close in
     await faceYaw(-Math.PI / 2); await key.down('ShiftLeft'); await key.down('KeyW'); r = await until((r) => r.world.ground < -14, 40000); await key.up('KeyW'); await key.up('ShiftLeft');
     await key.down('KeyC'); r = await until((r) => !r.flying, 15000); await key.up('KeyC'); await sleep(700);
@@ -732,7 +734,10 @@ try {
     await shot('08-dhow-sailing'); await key.up('KeyW');
     await until((r) => r.world.ships[0].speed < 0.5, 9000);
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 5000);
-    check('and off it again, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('and off it again, onto its cabin\'s roof by the helm (it is solid: 19 Nov)', !r.world.aboard && r.world.on === 'dhow' && r.p[1] > r.world.ships[0].p[1] + 4, { aboard: r.world.aboard, on: r.world.on, p: r.p });
+    await key.down('KeyW'); await sleep(900); await key.up('KeyW'); r = await until((r) => r.grounded && r.p[1] < r.world.ships[0].p[1] + 2, 5000);
+    check('walked off the roof, down onto its deck, and standing there', !!r && r.world.on === 'dhow' && Math.abs(r.p[1] - (r.world.ships[0].p[1] + 0.72)) < 0.4, { on: r?.world.on, p: r?.p, ship: r?.world.ships[0] });
+    await shot('08b-dhow-deck');
     check('its frames keep up, sailing the dhow', out.frames.dhow.median < 20, out.frames.dhow);
     // the ark: put beside, the body lifted from the water up into its dome, flown, stepped off
     await page.locator('#game-ships').click(); await sleep(250);
@@ -749,7 +754,7 @@ try {
     await shot('10-ark-flying'); await key.up('KeyW');
     await until((r) => r.world.ships[0].speed < 0.5, 12000);
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 8000);
-    check('and off the ark, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('and off the ark, onto the floor of its dome', !r.world.aboard && r.world.on === 'ark' && r.p[1] > r.world.ships[0].p[1] + 2, { aboard: r.world.aboard, on: r.world.on, p: r.p });
     check('its frames keep up, flying the ark', out.frames.ark.median < 20, out.frames.ark);
     // the carrier: put far ahead, the body lifted from the water up to its helm on the top terrace, flown, stepped off
     await page.locator('#game-ships').click(); await sleep(250);
@@ -766,7 +771,7 @@ try {
     await shot('12-carrier-under-way'); await key.up('KeyW');
     await until((r) => r.world.ships[0].speed < 0.5, 15000);
     await key.press('KeyR'); r = await until((r) => !r.world.aboard && r.grounded, 12000);
-    check('and off the carrier, down to the water', !r.world.aboard && Math.abs(r.p[1]) < 0.05, { aboard: r.world.aboard, p: r.p });
+    check('and off the carrier, onto its top terrace', !r.world.aboard && r.world.on === 'carrier' && r.p[1] > r.world.ships[0].p[1] + 25, { aboard: r.world.aboard, on: r.world.on, p: r.p });
     check('its frames keep up, flying the carrier', out.frames.carrier.median < 20, out.frames.carrier);
   }
 
@@ -783,7 +788,7 @@ try {
     await shot('01-run');
     await setPad([0, -0.45, 0, 0]); await sleep(900); const walk = await read(); check('the stick part way walks', speed(walk) > 1 && speed(walk) < 3.2, speed(walk));
     await setPad([0, 0, 0, 0]); await until((r) => speed(r) < 0.1, 4000);
-    await setPad([0, 0, 0, 0], [0]); const held = await peak(1900); await setPad([0, 0, 0, 0]);
+    await setPad([0, 0, 0, 0], [0]); const heldPeak = peak(1900); await sleep(1150); await setPad([0, 0, 0, 0]); const held = await heldPeak;   // (let go past the top: held on, the light)
     check('A held rises 3 m', Math.abs(held - 3) < 0.08, held);
     await until((r) => r.grounded);
     const y0 = (await read()).yaw; await setPad([0, 0, 1, 0]); await sleep(500); await setPad([0, 0, 0, 0]); const y1 = (await read()).yaw;

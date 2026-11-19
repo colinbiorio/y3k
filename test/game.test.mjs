@@ -2450,6 +2450,41 @@ ok('every size handles (Colin, 19 Nov: "the larger the ship gets, the harder it 
   assert.ok(Math.abs(c.spin) > 0.1 && Math.abs(c.spin) < SP.CARRIER.turn * 0.5, 'swinging into it: ' + c.spin.toFixed(3));
 });
 
+ok('ships are solid (Colin, 19 Nov: "ships are able to be flown through and not stood on"): a body comes down on a deck and stands there; walks the dhow\'s deck and is stopped by its cabin; lands on the cabin\'s roof and the carrier\'s top terrace; flown at a hull it is stopped, flown up under the carrier its head meets it; a ship that moves carries the body on it; stepping off the helm is stepping onto the roof; the eye is kept out of a hull', () => {
+  const w = createWorld(), sh = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dhow'); sh.p = [0, SP.DHOW.hover, 0]; w.ships.push(sh);
+  const H = SP.DHOW_HULL, L = SP.DHOW.length, zAt = (u) => -L / 2 + u * L, base = sh.p[1];
+  const step = (b, inp) => { b.was = [...b.p]; B.stepBody(b, { ...IDLE, ...inp }, B.STEP); };      // (as advance does: where it was, a step ago)
+  const fall = (b, sec = 4) => { for (let t = 0; t < sec && !b.grounded; t += B.STEP) step(b, {}); return b; };
+  const at = (p, over = {}) => { const b = B.createBody({ world: w, p, grounded: false, ...over }); b.was = [...p]; return b; };
+  let b = fall(at([1, base + 6, zAt(0.45)]));                                                   // (beside the masts)
+  assert.ok(b.grounded && b.on === sh, 'it comes down on the deck'); near(b.p[1], base + H.deck(0.45), 0.02, 'and stands on it');
+  for (let t = 0; t < 3; t += B.STEP) step(b, { move: [0, 1], yaw: 0 });       // aft, toward the cabin
+  const cabin = SP.shipBoxes('dhow')[40];
+  assert.ok(b.p[2] > cabin.z1 + 0.29 && b.p[2] < cabin.z1 + 0.5 && b.grounded && b.on === sh, 'walking aft it is stopped at the cabin: ' + b.p[2].toFixed(2));
+  b = fall(at([0, base + 9, SP.DHOW.seat[2]])); near(b.p[1], base + cabin.y1, 1e-9, 'on the cabin\'s roof, by the helm');
+  // flown at its side, it is stopped at the hull; it does not go through
+  const f = at([-9, base + 0.2, zAt(0.45)], { mode: 'creative', flying: true });
+  for (let t = 0; t < 1.5; t += B.STEP) step(f, { move: [1, 0], yaw: 0 });
+  assert.ok(f.p[0] < -H.halfW(0.45) * 0.97 - 0.29 && f.p[0] > -H.halfW(0.45) - 0.6, 'flown at the hull it is stopped there: ' + f.p[0].toFixed(2));
+  // the carrier: down on its top terrace; flown up under it, the head meets its lowest
+  const w2 = createWorld(), c = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'carrier'); c.p = [0, SP.CARRIER.hover, 0]; w2.ships.push(c);
+  const top = B.createBody({ world: w2, p: [0, c.p[1] + 45, 0], grounded: false }); top.was = [...top.p]; fall(top, 6);
+  near(top.p[1], c.p[1] + SP.CARRIER.terraces[4].y1, 1e-9, 'on the carrier\'s top terrace'); assert.equal(top.on, c);
+  const up = B.createBody({ world: w2, p: [0, 2, 0], mode: 'creative', flying: true, grounded: false }); up.was = [...up.p];
+  for (let t = 0; t < 2; t += B.STEP) step(up, { up: true });
+  near(up.p[1] + BODY.tall, c.p[1] + SP.CARRIER.terraces[0].y0, 1e-6, 'flown up under it, the head meets it');
+  // the dhow moves and turns: the body on its deck goes with it, at the same place on the deck
+  b = fall(at([1, base + 5, zAt(0.4)])); const local = SP.toShip(sh, b.p), was = [...sh.p], wasYaw = sh.yaw;
+  sh.p = [sh.p[0] + 3, sh.p[1] + 0.5, sh.p[2] - 2]; sh.yaw += 0.3; SP.carryOn(sh, b, was, wasYaw);
+  SP.toShip(sh, b.p).forEach((v, i) => near(v, local[i], 1e-9, 'the same place on the deck'));
+  // stepped off the helm: onto the cabin's roof (no longer to the water below)
+  const pilot = B.createBody({ world: w }); SP.board(sh, pilot); SP.leave(sh, pilot); fall(pilot);
+  assert.ok(pilot.grounded && pilot.on === sh, 'stepping off the helm, onto its roof'); near(pilot.p[1], sh.p[1] + cabin.y1, 1e-9);
+  // the eye from the deck does not go through the hull; aboard, the eye stands back through its own ship as it did
+  const head = SP.fromShip(sh, [0, H.deck(0.45) + 1.6, 0.4 * L - L / 2]), under = SP.fromShip(sh, [0, H.sheer(0.45) - H.depth(0.45) - 3, 0.4 * L - L / 2 - 6]);
+  assert.ok(w.eye(head, under) < 0.5, 'not down through the deck: ' + w.eye(head, under).toFixed(3)); near(w.eye(head, under, sh), 1, 1e-12, 'the eye of its own pilot is not held');
+});
+
 ok('seated in a ship, a body on two legs sits: its hips low over the seat, its thighs forward and its knees bent, its hands out on the controls', () => {
   const g = Gt.createGait(), body = B.createBody({ yaw: 0 }); body.seated = {};
   assert.equal(Gt.stateOf(body), 'seat');

@@ -100,7 +100,7 @@ export function createSkiffArt({ lite = false } = {}) {
   return {
     group,
     update(s, { t = 0 } = {}) {
-      group.position.set(s.p[0], s.p[1] + 0.03 * Math.sin(t * 1.6) * (1 - Math.min(1, s.thrust)), s.p[2]);
+      group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
       const on = Math.min(1.4, s.thrust);

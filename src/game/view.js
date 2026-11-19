@@ -53,7 +53,7 @@ import { glyphSvg } from './glyphs.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
-import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, leave } from './ships.js';
+import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, leave, carryOn } from './ships.js';
 import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
@@ -493,13 +493,21 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // the ships drawn, and those let be coasting to a stop
   const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt, ark: createArkArt, carrier: createCarrierArt };
   let shipWake = 0, nearSaid = null;
+  // the ships no one flies: they slow to a hover and ride it (ships.js), and a body standing on one goes with it
+  function drift(dt) {
+    for (const sh of K.world.ships) {
+      if (sh === K.aboard) continue;
+      const was = [...sh.p], wasYaw = sh.yaw, wasBob = sh.bob || 0;
+      stepShip(sh, { move: [0, 0], yaw: sh.yaw - Math.PI, pitch: 0 }, dt, { floorAt, solid: (q) => K.world.solid(q) });
+      if (K.body.on === sh && !K.body.light && K.body.p[1] - (K.body.floorY ?? 0) < 4) carryOn(sh, K.body, was, wasYaw, wasBob);
+    }
+  }
   function ships(dt) {
     const V = K.void, seen = new Set();
     for (const sh of K.world.ships) {
       let art = K.shipArts.get(sh);
       if (!art) { art = (SHIP_ARTS[sh.kind] || createSkiffArt)({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
       seen.add(sh);
-      if (sh !== K.aboard) stepShip(sh, { move: [0, 0], yaw: sh.yaw - Math.PI, pitch: 0 }, dt, { floorAt, solid: (q) => K.world.solid(q) });
       art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard, night: LIGHTS[V.light].stars });
       // low and quick over the water, it drags a wake from its stern
       const v = Math.hypot(sh.v[0], sh.v[2]), lowOver = sh.p[1] - floorAt(sh.p[0], sh.p[2]);
@@ -634,6 +642,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (plan) planStep();
       // struck down, the body does nothing; spinning the ring up or guarding, it walks
       const C = K.combat, down = C.player.down > 0;
+      drift(dt);
       if (K.aboard) {
         // aboard: the ship flies under the hands, and the body sits in it
         stepShip(K.aboard, { move: inp.move, yaw: eye.yaw, pitch: eye.pitch, up: inp.up, down: inp.down, sprint: inp.sprint }, dt, { floorAt, solid: (q) => K.world.solid(q) });
@@ -705,10 +714,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     eye.wall = (eye.wall || 0) + ((onWall ? 1 : 0) - (eye.wall || 0)) * ease(onWall ? 9 : 2.5, dt);     // and steps a metre out from it
     // a building in the way: the eye comes in rather than go into a wall or a dome; where that would leave it too near
     // the body (its back to a wall), the eye rises instead and looks down over it
-    const from = [eye.at.x, eye.at.y, eye.at.z], walls = (K.world.buildings.length || K.world.ground) && !stand;
+    const from = [eye.at.x, eye.at.y, eye.at.z], walls = (K.world.buildings.length || K.world.ground || K.world.ships.length) && !stand;
     // the lowest the eye goes: over the water, or inside a building over the floor the body stands on
     const indoors = walls && K.world.inside(body.p), lowest = indoors ? Math.max(WATER, body.floorY ?? 0) : WATER;
-    const room = (p, dd) => { const f = along(p), s0 = eye.side * (SHOULDER * Math.min(1, dd / 4) + eye.wall); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(lowest + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0]); };
+    const room = (p, dd) => { const f = along(p), s0 = eye.side * (SHOULDER * Math.min(1, dd / 4) + eye.wall); return dd * K.world.eye(from, [from[0] - f[0] * dd + cy * s0, Math.max(lowest + 0.1, from[1] - f[1] * dd), from[2] - f[2] * dd - sy * s0], K.aboard); };
     let lift = 0;
     if (walls) {
       let best = room(pitch0, d);
@@ -906,7 +915,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, base: b.base || null,
         flat: b.flat ? { level: Math.round(b.flat.level * 100) / 100, k: Math.round(b.flat.k * 100) / 100, blend: Math.round(b.flat.blend * 10) / 10 } : null,
         plinth: b.plinth ? { top: Math.round(b.plinth.top * 100) / 100, foot: Math.round(b.plinth.foot * 100) / 100, steps: b.plinth.steps, rose: Math.round(b.plinth.rose * 100) / 100 } : null, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
-        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated,
+        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated, on: K.body.on?.kind || null,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fist: K.body.grip ? K.body.grip.map((v) => Math.round(v * 1000) / 1000) : null, held: K.fight.held?.() || null, hold: { carry: Math.round(HOLD.carry * 100) / 100, reach: Math.round(HOLD.reach * 100) / 100, closed: HOLD.closed },

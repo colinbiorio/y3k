@@ -12,19 +12,17 @@
 // Its frame is the ship's: its middle at the origin, +Z ahead (the prow), +X
 // its left. It is drawn turned and tipped as the numbers say.
 import * as THREE from 'three';
-import { DHOW as S } from '../ships.js';
+import { DHOW as S, DHOW_HULL } from '../ships.js';
 import { glowTexture } from '../fight.js';
 
 const L = S.length, U0 = -L / 2;
 // the hull at u (0 the stern, 1 the prow): half its width, its sheer (the deck's edge), its depth, the prow's rake
-const halfW = (u) => 3.5 * Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * u)), 0.7);
-const sheer = (u) => 0.9 + 2.1 * Math.max(0, (u - 0.6) / 0.4) ** 2 + 1.5 * Math.max(0, (0.25 - u) / 0.25) ** 2;
-const depth = (u) => 2.6 * Math.pow(Math.sin(Math.PI * (0.05 + 0.9 * u)), 0.5);
+const { halfW, sheer, depth } = DHOW_HULL;                       // (ships.js: what a body stands on is the same hull)
 const rake = (u) => 3.2 * Math.max(0, (u - 0.7) / 0.3) ** 2;
 const pw = (v, e) => Math.sign(v) * Math.abs(v) ** e;
 const hullAt = (u, th, out = 0) => [(halfW(u) + out) * pw(Math.sin(th), 0.8), sheer(u) - (depth(u) + out) * Math.abs(Math.cos(th)) ** 0.8, U0 + u * L - rake(u) * Math.cos(th) ** 2];
 const uAt = (z) => (z - U0) / L;
-const DECK = (u) => sheer(u) - 0.18;
+const DECK = DHOW_HULL.deck;
 
 class Path extends THREE.Curve { constructor(fn) { super(); this.fn = fn; } getPoint(t, o = new THREE.Vector3()) { const [x, y, z] = this.fn(t); return o.set(x, y, z); } }
 const rod = (a, b, r0, r1 = r0, n = 8) => {
@@ -178,7 +176,7 @@ export function createDhowArt({ lite = false } = {}) {
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
-      group.position.set(s.p[0], s.p[1] + 0.06 * Math.sin(t * 0.9) * (1 - Math.min(1, s.thrust)), s.p[2]);
+      group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt * 0.6, s.yaw, s.bank * 0.6);
       // the sails spread when someone takes the helm, and fold up along their yards when it is let be
       const want = aboard ? 1 : 0.12;
