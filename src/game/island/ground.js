@@ -13,6 +13,8 @@
 // it); ground that rises past a body's middle within a hand's breadth of its
 // side is a cliff it can run along (body.js's wall run). In water deeper than
 // SWIM it swims: it floats with its head out (its feet SWIM down).
+import { levelled } from '../plinth.js';
+
 export const HEAD = 48;
 export const SEA_FLOOR = -48;              // m: the shelf beyond the grids
 export const STEEP = Math.tan((50 * Math.PI) / 180);   // the steepest ground a body walks up (50 degrees)
@@ -60,12 +62,20 @@ export function createGround(head, hts) {
   const S = head.spacing;
   const g = {
     head, hts,
-    // the ground's height (the sea floor where it is under the sea); the shelf off both grids
-    height(x, z) {
+    // ground levelled for a building (../plinth.js levelFor): each eases the ground under its pad to its level
+    flats: [],
+    // the ground as the tiles have it, before anything was levelled
+    base(x, z) {
       const a = onGrid(hts.main, head.w, head.h, head.x0, head.z0, S, x, z);
       if (a !== null) return a;
       const b = onGrid(hts.pyramid, head.pw, head.ph, head.px0, head.pz0, S, x, z);
       return b !== null ? b : SEA_FLOOR;
+    },
+    // the ground's height (the sea floor where it is under the sea; the shelf off both grids), levelled where it was
+    height(x, z) {
+      let h = g.base(x, z);
+      for (const f of g.flats) h = levelled(f, x, z, h);
+      return h;
     },
     // which way it rises, and how steeply (rise over run, along x and along z)
     slope(x, z, e = 0.5) { return [(g.height(x + e, z) - g.height(x - e, z)) / (2 * e), (g.height(x, z + e) - g.height(x, z - e)) / (2 * e)]; },

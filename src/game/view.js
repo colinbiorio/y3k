@@ -47,6 +47,9 @@ import { ratios, createWatch, watch, rest, chosen } from './fine.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from './world.js';
 import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
+import { createPlinthArt } from './buildings/plinth.js';
+import { createBlueprint } from './blueprint.js';
+import { glyphSvg } from './glyphs.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
@@ -158,7 +161,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // thumbs' buttons where they are under it). Asked again whenever it says something, and twice a second while it shows.
   let seatAt = 0;
   function seatHint() {
-    const el = $('.game-hint'); if (!el || el.hidden || !root) return;
+    const hintEl = $('.game-hint'), panel = $('.game-plan'), el = panel && !panel.hidden ? panel : hintEl;
+    if (!el || el.hidden || !root) return;
     seatAt = performance.now();
     const shown = (e) => { if (!e) return null; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? r : null; };
     const me = el.getBoundingClientRect(), across = (r) => r.left < me.right && me.left < r.right;
@@ -180,6 +184,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // (the controls button and its key stay), until the page is opened again
   function hint() {
     if (chooser?.isOpen()) return '';                 // the body is what is looked at: nothing is said over its feet
+    if (plan) return '';                              // the blueprint's own panel says what may be done
     const b = input.bindings, k = (id) => keyLabel(b.keys[id][0] || b.keys[id][1]) || '—';
     // in the light: how to come home (its speed and distance are on the line at the top)
     const L = K.body.light;
@@ -244,7 +249,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
     K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
-    K.arts.clear();
+    K.arts.clear(); dropGround();
     for (const art of K.shipArts.values()) art.dispose();
     K.shipArts.clear();
     v.scene.add(made.group, K.hearth); made.setEnv(LIGHTS[v.light].env);
@@ -258,16 +263,80 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   const ARRIVE = { shelter: 'walk in through its door', house: 'up the steps and in; its ladder climbs to the loft', workshop: 'its glass wall slides open as you come; the kiln is at the back', tower: 'in at its door; the stair climbs the wall to the dome', hall: 'up its stairs to the door on top; the hangar is under them' };
   function said(r) {
     const key = keyLabel(input.bindings.keys.build[0] || input.bindings.keys.build[1]) || 'build';
-    if (r.did === 'up') say(`a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
+    if (r.did === 'up') say(`${r.base === 'level' ? 'the ground is levelled, and ' : r.base === 'platform' ? 'a platform rises, and on it ' : ''}a ${r.b.kind} goes up · ${ARRIVE[r.b.kind]} · ${touch ? 'build' : key} again near it takes it down`, 6);
     else if (r.did === 'down') say(`the ${r.b.kind} comes down`, 3);
     else if (r.did === 'blocked') say(`too near the ${r.b.kind}: step away from it and build`, 4);
     else if (r.did === 'steep') say(r.rises ? `the ground rises ${r.fall.toFixed(1)} m behind it here: face downhill, or find flatter ground` : `the ground falls ${r.fall.toFixed(1)} m under it here: find flatter ground to build`, 4);
   }
   function buildHere(kind = null) {
+    if (plan && !kind) { planEnd(); return; }                                     // the build key again puts the blueprint away
     if (K.aboard || K.body.flying || !K.body.grounded || K.body.climbing) { say(K.aboard ? 'step off the ship to build' : 'stand on the ground to build'); return; }
-    if (kind) { st.building = kind; save(); said(K.world.build(K.body, kind)); }
-    else said(K.world.toggle(K.body, st.building));
+    if (!kind) { const near = K.world.near(K.body.p); if (near) { planEnd(); said(K.world.toggle(K.body, st.building)); return; } }
+    planStart(kind || st.building);
   }
+  // THE BLUEPRINT (blueprint.js; Colin, 19 Nov 2026: "preview a blueprint/holograph of where the item will be placed with
+  // an option to confirm placement", and on uneven ground "an option to level the ground around it or build a flat
+  // platform"). Chosen, a building is shown as light where it would go: out along the eye's way from the body, nearest
+  // with the eye at rest and further as it looks up, its door to the body, turned by the turn key a quarter of a quarter
+  // at a time. Its colour says whether it may go up there; the panel says why not, and on uneven ground offers the two
+  // ways. It is put there with a click, the place key (Enter) or the panel; the build key again, or the menu key, leaves it.
+  let plan = null;                 // { kind, turn, choice: 'level' | 'platform', at, r } while a blueprint is shown
+  const PLAN = { reach: 26, lift: 0.55, rest: -0.1, turn: Math.PI / 4 };
+  function planStart(kind) {
+    st.building = kind; save(); listBuilds(false);
+    plan = { kind, turn: 0, choice: 'level', at: null, r: null, said: '' };
+    say('', 0); planPanel(true); planStep();
+  }
+  function planEnd() { if (!plan) return; plan = null; K.blue?.hide(); planPanel(false); }
+  // where it would go, from the body and the eye, and what may be done there
+  function planStep() {
+    if (!plan) return;
+    const k = KINDS[plan.kind], b0 = k.place(K.body), near = Math.hypot(b0.x - K.body.p[0], b0.z - K.body.p[2]);
+    const out = clamp((K.eye.pitch - PLAN.rest) / PLAN.lift, 0, 1), d = near + PLAN.reach * out * out;
+    const fx = -Math.sin(K.eye.yaw), fz = -Math.cos(K.eye.yaw);
+    plan.at = { x: K.body.p[0] + fx * d, z: K.body.p[2] + fz * d, yaw: Math.atan2(-fx, -fz) + plan.turn * PLAN.turn };
+    const r = K.world.site(K.body, plan.kind, plan.at); plan.r = r;
+    const b = r.did === 'blocked' ? r.at : { ...r.b };
+    if (r.did === 'steep' && plan.choice === 'platform' && r.platform) b.y = r.platform.top;      // shown on the platform it would have
+    if (!K.blue) K.blue = createBlueprint(K.void.scene, { arts: ARTS, lite: K.lite });
+    K.blue.show(plan.kind, b, r.did, K.world.ground ? (x, z) => K.world.ground.height(x, z) : null);
+    planPanel(true);
+  }
+  // put it there, as the panel and the keys say
+  function planPlace(choice = null) {
+    if (!plan || !plan.r) return;
+    if (choice) plan.choice = choice;
+    const r = plan.r;
+    if (r.did === 'blocked') { planSay(`too near the ${r.b.kind}: turn it, or look further off`); return; }
+    if (r.did === 'steep' && !r[plan.choice]) { planSay(plan.choice === 'level' ? 'too steep to level here: a platform, or flatter ground' : 'too steep for a platform here: level it, or find flatter ground'); return; }
+    const res = K.world.build(K.body, plan.kind, { at: plan.at, base: r.did === 'steep' ? plan.choice : null });
+    planEnd(); said(res);
+  }
+  function planSay(text) { if (!plan) return; plan.said = text; plan.saidAt = performance.now(); planPanel(true); }
+  // the panel: what it is and what may be done, the keys for it; on uneven ground, the two ways
+  function planPanel(show) {
+    const el = $('.game-plan'); if (!el) return;
+    if (!show || !plan) { el.hidden = true; return; }
+    const b = input.bindings, k = (id, i = 0) => keyLabel(b.keys[id][i] || b.keys[id][1 - i]) || '';
+    const r = plan.r, did = r ? r.did : 'up', steep = did === 'steep';
+    if (plan.said && performance.now() - plan.saidAt > 3500) plan.said = '';
+    const line = plan.said || (did === 'blocked' ? `too near the ${r.b.kind} · turn it, or look further off`
+      : steep ? `the ground ${r.rises ? 'rises' : 'falls'} ${r.fall.toFixed(1)} m across it · level it, or raise it on a platform`
+        : `the ${plan.kind} · look up to put it further off · it goes up where it shows`);
+    const key = `${plan.kind}|${did}|${plan.choice}|${line}|${!!r?.level}|${!!r?.platform}|${touch}`;
+    el.hidden = false; el.dataset.did = did;
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    const kb = (t) => (t && !touch ? `<kbd>${esc(t)}</kbd>` : '');
+    const btn = (act, text, keys, extra = '') => `<button type="button" class="game-plan-btn${extra}" data-plan="${act}">${glyphSvg(act, 18)}<span>${esc(text)}</span>${kb(keys)}</button>`;
+    el.innerHTML = `<p class="game-plan-say" role="status">${esc(line)}</p>
+      ${steep ? `<div class="game-plan-row">${btn('level', 'level the ground', '1', `${plan.choice === 'level' ? ' on' : ''}${r.level ? '' : ' off'}`)}${btn('platform', 'build a platform', '2', `${plan.choice === 'platform' ? ' on' : ''}${r.platform ? '' : ' off'}`)}</div>` : ''}
+      <div class="game-plan-row">${btn('turn', 'turn', k('board'))}${btn('place', steep ? (plan.choice === 'level' ? 'level and build' : 'raise and build') : 'build here', 'enter', ` main${did === 'blocked' || (steep && !r[plan.choice]) ? ' off' : ''}`)}${btn('cancel', 'cancel', k('menu', 1) || k('menu'))}</div>`;
+    seatHint();
+  }
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // the platforms and the blueprint live in the scene: they go with it
+  function dropGround() { for (const a of (K.plinths || new Map()).values()) a.dispose(); K.plinths?.clear(); K.blue?.dispose(); K.blue = null; planEnd(); }
   // the bar's build list: the five, those not made yet greyed; near a building, the first line takes it down
   function listBuilds(show) {
     const el = $('#game-build-list'), btn = $('#game-build'); if (!el || !btn) return;
@@ -302,7 +371,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       for (const art of K.shipArts.values()) art.dispose();
       K.shipArts.clear();
       for (const art of K.arts.values()) art.dispose();
-      K.arts.clear(); K.fight.dispose(); clearBots(K.combat); K.combat.bolts = []; K.combat.events.length = 0;
+      K.arts.clear(); dropGround(); K.fight.dispose(); clearBots(K.combat); K.combat.bolts = []; K.combat.events.length = 0;
       K.void.dispose();
       K.void = made; K.place = name; K.world = K.worlds[name]; K.body.world = K.world;
       made.scene.add(K.figure.group, K.hearth);
@@ -474,6 +543,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (r.flame > 0 && d < best) { best = d; flame = r.flame; flameAt = at; fireCol = art.fireCol || hearthCol; }
     }
     for (const [b, art] of K.arts) if (!seen.has(b)) { V.scene.remove(art.group); art.dispose(); K.arts.delete(b); }
+    // the platforms under buildings (buildings/plinth.js), risen as far as each is
+    K.plinths ||= new Map();
+    for (const b of K.world.buildings) if (b.plinth) { let a = K.plinths.get(b); if (!a) { a = createPlinthArt({ lite: K.lite }); K.plinths.set(b, a); V.scene.add(a.group); } a.update(b); }
+    for (const [b, a] of K.plinths) if (!seen.has(b)) { V.scene.remove(a.group); a.dispose(); K.plinths.delete(b); }
     // the fire's light; and inside, the body seen by what gets in (the sun's own patch, or the shade)
     K.hearth.intensity = 2.2 * flame;
     if (flameAt) { K.hearth.position.copy(flameAt); K.hearth.color.copy(fireCol); }
@@ -522,11 +595,20 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.zoom) { st.zoom = clamp(st.zoom * Math.exp(inp.zoom), ZOOM.min, ZOOM.max); saveT = now + 600; }
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
       if (inp.build) buildHere();
+      if (plan) {
+        // the blueprint takes the hands that would cast, turn a ship's seat and open the controls: place, turn, leave
+        if (inp.board) { plan.turn = (plan.turn + 1) % 8; inp.board = false; }
+        if (inp.menu) { planEnd(); inp.menu = false; }
+        if (plan && inp.whirl && plan.r?.did === 'steep') { plan.choice = plan.choice === 'level' ? 'platform' : 'level'; inp.whirl = false; }
+        if (plan && inp.attackPressed) planPlace();
+        inp.attack = inp.attackPressed = inp.whirl = false;
+      }
       if (inp.spawn) callBot();
       if (inp.weapon) takeWeapon(nextWeapon(K.combat.weapon));
       if (inp.board) boardOrLeave();
       if (inp.menu) openMenu();
       K.world.update(dt);
+      if (plan) planStep();
       // struck down, the body does nothing; spinning the ring up or guarding, it walks
       const C = K.combat, down = C.player.down > 0;
       if (K.aboard) {
@@ -638,6 +720,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       K.lightArt.update(body.light, { camera, at: [pos[0], pos[1] + figure.look * 0.8, pos[2]], dt: paused ? 0 : dt, eyeD: eye.d });
     }
     if (now > lightT) { lightT = now + 120; const line = lightLine(body.light); if (line !== lightSaid) { lightSaid = line; const el = $('.game-light'); if (el) { el.textContent = line; el.hidden = !line; } } }
+    K.blue?.update(paused ? 0 : dt);
     hud(dt);
     V.setScale(camera);
     // the bodies' shades on the water: this one's, and the nearest bots' (four in all)
@@ -690,6 +773,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="game-light" role="status" hidden></div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
+      <div class="game-plan" role="group" aria-label="where the building goes" hidden></div>
       <div class="game-touch"${touch ? '' : ' hidden'}>
         <button type="button" id="game-t-sink" class="game-tbtn" aria-label="Sink" hidden>sink</button>
         <div class="game-tfight"><button type="button" id="game-t-guard" class="game-tbtn" aria-label="Guard">guard</button><button type="button" id="game-t-whirl" class="game-tbtn" aria-label="Whirl">whirl</button><button type="button" id="game-t-bind" class="game-tbtn" aria-label="The binding">bind</button><button type="button" id="game-t-cast" class="game-tbtn" aria-label="Cast the ring">cast</button></div>
@@ -718,12 +802,27 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     press('#game-controls', openMenu);
     press('#game-body-open', openBody);
     press('#game-build', () => { if (!menu.isOpen() && !chooser.isOpen()) listBuilds(); });
+    // the blueprint's panel, and its keys: Enter puts it there, 1 and 2 choose how uneven ground is made fit
+    { const el = $('.game-plan');
+      on(el, 'click', (e) => {
+        const btn = e.target.closest?.('[data-plan]'); if (!btn || !plan) return;
+        if (e.detail > 0) focusCanvas();
+        const a = btn.dataset.plan;
+        if (a === 'place') planPlace(); else if (a === 'cancel') planEnd(); else if (a === 'turn') { plan.turn = (plan.turn + 1) % 8; planStep(); }
+        else if (a === 'level' || a === 'platform') { plan.choice = a; planStep(); }
+      });
+      on(window, 'keydown', (e) => {
+        if (!plan || !root || root.inert || menu.isOpen() || e.repeat || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable) return;
+        if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); planPlace(); }
+        else if ((e.code === 'Digit1' || e.code === 'Numpad1') && plan.r?.did === 'steep') { plan.choice = 'level'; planStep(); }
+        else if ((e.code === 'Digit2' || e.code === 'Numpad2') && plan.r?.did === 'steep') { plan.choice = 'platform'; planStep(); }
+      }); }
     { const el = $('#game-build-list');
       on(el, 'click', (e) => {
         const btn = e.target.closest?.('[data-build]'); if (!btn || btn.disabled) return;
         if (e.detail > 0) focusCanvas();
         const k = btn.dataset.build; listBuilds(false);
-        if (k === 'down') said(K.world.toggle(K.body, st.building)); else buildHere(k);
+        if (k === 'down') { planEnd(); said(K.world.toggle(K.body, st.building)); } else buildHere(k);
       });
       on(el, 'keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); listBuilds(false); $('#game-build')?.focus(); } });
       on(holder, 'pointerdown', () => { listBuilds(false); listBots(false); listShips(false); listWeapons(false); }); }
@@ -772,7 +871,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       dashing: K.body.dashT > 0, lightspeed: K.body.light ? { phase: K.body.light.phase, v: K.body.light.v, dist: K.body.light.dist, frac: Math.round(K.body.light.frac * 1000) / 1000, veil: Math.round(K.body.light.veil * 1000) / 1000, line: $('.game-light')?.textContent || '' } : null, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
-      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
+      plan: plan ? { kind: plan.kind, did: plan.r?.did, choice: plan.choice, turn: plan.turn, at: plan.at && { x: Math.round(plan.at.x * 100) / 100, z: Math.round(plan.at.z * 100) / 100, yaw: Math.round(plan.at.yaw * 1000) / 1000 },
+        y: plan.r?.b ? Math.round((plan.r.b.y || 0) * 100) / 100 : 0, level: !!plan.r?.level, platform: !!plan.r?.platform, shown: K.blue?.shown || null, panel: !$('.game-plan')?.hidden } : null,
+      world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, base: b.base || null,
+        flat: b.flat ? { level: Math.round(b.flat.level * 100) / 100, k: Math.round(b.flat.k * 100) / 100, blend: Math.round(b.flat.blend * 10) / 10 } : null,
+        plinth: b.plinth ? { top: Math.round(b.plinth.top * 100) / 100, foot: Math.round(b.plinth.foot * 100) / 100, steps: b.plinth.steps, rose: Math.round(b.plinth.rose * 100) / 100 } : null, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },

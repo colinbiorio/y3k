@@ -142,6 +142,36 @@ and the hint pill over the bottom bar.
 - **The hint** (done, 19 Nov): measured, not guessed (`view.js` seatHint): 8 px
   clear of the chat bar, the grips, the air mark and the thumbs' buttons, or
   under the bar's rows on a phone.
+- **The blueprint** (done, 19 Nov): `blueprint.js` draws the kind's own
+  drawing as light (one shader: a half-metre grid in the building's own frame,
+  bright edges, a band climbing it) with its pad on the ground, where `view.js`
+  plan puts it: out along the eye's way from the body (`PLAN`: nearest, as
+  before, with the eye at rest; up to 26 m further as it looks up), its door to
+  the body, turned an eighth at a time. `world.site` says what it would be:
+  'up' (blue), 'steep' (amber, with what levelling and a platform would make
+  of it), 'blocked' (red). Its hands are others': the cast places it, the
+  board key turns it, the menu key leaves it, the whirl changes the choice;
+  Enter, 1 and 2 too; the panel for a finger.
+- **Uneven ground** (done, 19 Nov): `plinth.js` (pure): each kind's PAD; a
+  levelling (`levelFor`, `levelled`: the pad brought to the door's level, eased
+  back to the ground over at most 0.55 rise to a metre of run, at most 12 m of
+  earth moved) lives in `ground.flats`, so all that stands on the ground stands
+  on it; a platform (`platformFor`, `platformBoxes`: a slab 0.12 m over the
+  highest ground under the pad, its foot 0.4 m past the lowest, steps of about
+  0.2 m down to the ground before the door, at most 12 m tall) is solid to the
+  body, the eye and what flies, and dry. Either grows over GROW (1.4 s) before
+  the building is begun (its clock starts that far back) and goes back as it
+  comes down. Drawn: `island.js` lets the land's own triangles go where they
+  stand above levelled ground (FLATS_CUT) and draws a mesh of its own over the
+  pad and its edge; `buildings/plinth.js` the dressed stone in courses and
+  flags.
+  Rough, known: palms in a footprint show through the blueprint until it is
+  built (they are cleared then, as before); two levellings whose eased edges
+  overlap are each drawn from the tiles' ground, so where they meet the
+  drawing is near, not exact; the sea's colour does not know of ground filled
+  over shallow water; with the pointer held, the first Escape is the
+  browser's (it lets the pointer go) and the second leaves the blueprint (the
+  build key leaves it at once).
 
 ### The same round: ships, light speed, solid decks, keys
 
@@ -1104,6 +1134,9 @@ suite runs them; those that draw are read as text and looked at.
 | `lights.js` | pale, dusk, night |
 | `shelter.js` | the shelter as numbers: its shell, what of it is solid, where a body may go and stand, where the eye may stand, where the sun gets in, how it goes up |
 | `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
+| `plinth.js` | ground made fit to build on, as numbers: each kind's pad, a levelling (the ground eased to a level round it) and a platform (a slab and its steps), how each grows and goes |
+| `blueprint.js` | a building before it is built: its own drawing as gridded light where it would go, its pad on the ground, coloured by what may be done (draws) |
+| `glyphs.js` | a drawing for every control (poured in unimat on the controls sheet), and the sheet's groups |
 | `house.js` | the house as numbers: its solids, the room's and the porch's air, the ladder, the eye, the sun through its window and door, how it goes up |
 | `workshop.js` | the workshop as numbers: its vaults, solids and airs, the glass that opens as a body comes, standing on the vaults, the eye, the sun through the glass, how it goes up and comes down |
 | `tower.js` | the tower as numbers: worked round its axis; the stair's ramp, its turns and rails, the landings, the gallery and the ledge, the dome, the eye, the sun through its windows and dome, how it goes up and comes down |
@@ -1117,7 +1150,7 @@ suite runs them; those that draw are read as text and looked at.
 | `island/life.js` | what grows and lives there as numbers: the palms by cell, the terns and tropicbirds by time, the woodhens and turtles stepped |
 | `island/creatures.js` | the palms, terns, tropicbirds, woodhens and turtles drawn, one instanced shape each (draws) |
 | `island/lordhowe.bin`, `lordhowe-shape.js` | made by `scripts/island/lordhowe-build.mjs` from the elevation tiles: the heights (300 KB), the coast, shallows, peaks, arrival |
-| `buildings/` | `shelter.js`, `house.js`, `workshop.js`, `tower.js`, `hall.js`: the five drawn; `parts.js`, the shapes they are put together from (draws) |
+| `buildings/` | `shelter.js`, `house.js`, `workshop.js`, `tower.js`, `hall.js`: the five drawn; `plinth.js`, a platform under one; `parts.js`, the shapes they are put together from (draws) |
 | `menu.js` | the controls sheet |
 | `void.js` | the sky, the water, the mirror, the motes (draws) |
 | `shape.js` | what the bodies are made with: a skin through sections, a tube on a moving line, cloth, the kit that gathers them; the surfaces (draws) |
