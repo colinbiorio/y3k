@@ -2347,6 +2347,32 @@ ok('boarding is nearness (Colin, 19 Nov 2026: "as long as the character is close
   }
 });
 
+ok('climb and dive, and the bank (Colin, 19 Nov 2026: "ships should be able to go straight up ... and when they turn, the ship should rotate with it like a plane would"): the nose comes to straight up or down, the ship goes where it points, its pilot carried round; a turn under way banks it and it levels out', () => {
+  const dt = 1 / 60;
+  for (const k of ['skiff', 'carrier']) {
+    const S = SP.KIND[k], s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, k); s.p[1] = 400;
+    for (let t = 0; t < 6; t += dt) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 1.2 }, dt);
+    near(s.tilt, -Math.PI / 2, 1e-9, k + ': the eye as far up as it goes, its nose straight up');
+    assert.ok(s.v[1] > S.speed * 0.99 && Math.hypot(s.v[0], s.v[2]) < S.speed * 0.02, k + ': and it climbs straight up: ' + s.v.map((v) => v.toFixed(2)));
+    const seat = SP.seatAt(s); assert.ok(seat[1] - s.p[1] > S.seat[2] * 0.95 - 1, k + ': its helm carried up with its nose: ' + (seat[1] - s.p[1]).toFixed(2));
+    for (let t = 0; t < 8; t += dt) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: -1.25 }, dt);
+    near(s.tilt, Math.PI / 2, 1e-9, k + ': as far down, straight down'); assert.ok(s.v[1] < -S.speed * 0.99, k + ': diving');
+    for (let t = 0; t < 6; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: -1.25 }, dt);
+    near(s.tilt, 0, 1e-9, k + ': let be, it comes level');
+  }
+  const s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dart'); s.p[1] = 100;
+  for (let t = 0; t < 2; t += dt) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, dt);
+  let most = 0; for (let t = 0; t < 0.8; t += dt) { SP.stepShip(s, { move: [0, 1], yaw: Math.PI / 2, pitch: 0 }, dt); most = Math.max(most, s.bank); }
+  // (a turn to its right: its left side, +X, comes up, as a bank of + turns it about its length)
+  assert.ok(most > 0.9 && SP.posePoint(s, [1, 0, 0])[1] > s.p[1] + (s.bob || 0), 'turning under way, it banks into the turn as a plane does (the inside side down): ' + most.toFixed(2));
+  for (let t = 0; t < 3; t += dt) SP.stepShip(s, { move: [0, 1], yaw: Math.PI / 2, pitch: 0 }, dt);
+  assert.ok(Math.abs(s.bank) < 0.02, 'and levels out on its new way: ' + s.bank.toFixed(3));
+  const w = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'carrier'); let low = 0;
+  for (let t = 0; t < 3; t += dt) SP.stepShip(w, { move: [0, 1], yaw: Math.PI, pitch: 0 }, dt);
+  for (let t = 0; t < 2; t += dt) { SP.stepShip(w, { move: [0, 1], yaw: Math.PI / 2, pitch: 0 }, dt); low = Math.max(low, (SP.CARRIER.beam / 2) * Math.sin(Math.abs(w.bank)) - (w.p[1] - 0)); }
+  assert.ok(low <= 1e-6, 'low over the water, it banks no further than its side clears it');
+});
+
 ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {
   const D = SP.DHOW, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
   near(D.length, 28, 1e-9, 'about twenty-eight metres long');
@@ -3170,7 +3196,7 @@ ok('the weapons: all five listed and made; the next is the next; choosing the bo
 
 ok('the fight is wired to the page: stepped after the body, drawn, moved with the origin, called from the bar and the key', () => {
   const view = read('src/game/view.js');
-  for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen, K.lean)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
+  for (const line of ['stepCombat(C, dt, {', 'K.fight.update(K.combat', 'shiftCombat(K.combat, far[0], far[1])', 'id="game-bot-list"', 'if (inp.spawn) callBot();', 'tip(figure, pos, body.yaw, K.fallen, K.lean, K.aboard)', 'class="game-hud"']) assert.ok(view.includes(line), 'view.js lacks ' + line);
   assert.ok(read('src/game/fight.js').includes("from './combat.js'"), "the ring drawn is not the numbers' ring");
 });
 

@@ -263,6 +263,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (later still) — **Ships climb and dive straight up and down,
+  and bank into their turns like planes** (`src/game/ships.js` PITCH_GAIN, BANK,
+  posePoint; `src/game/view.js` tip; `src/game/ships/*.js`). Colin: "ships should
+  be able to go straight up ... and when they turn, the ship should rotate with it
+  like a plane would." The nose follows the eye up or down to vertical, the ship
+  goes where it points, its pilot carried round with it. GAME.md "Flight, done right".
 - **2026-11-19** (later) — **A ship comes from anywhere, and is boarded by
   nearness; Space goes up and Shift goes faster** (`src/game/ships.js` placeShip,
   shipGap, nearShip; `src/game/body.js`; `src/game/view.js`; `src/game/input.js`).

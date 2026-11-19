@@ -177,7 +177,7 @@ export function createDhowArt({ lite = false } = {}) {
     group,
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
-      body.rotation.set(s.tilt * 0.6, s.yaw, s.bank * 0.6);
+      body.rotation.set(s.tilt, s.yaw, s.bank);
       // the sails spread when someone takes the helm, and fold up along their yards when it is let be
       const want = aboard ? 1 : 0.12;
       if (Math.abs(want - open) > 0.002 || aboard) { open += (want - open) * (1 - Math.exp(-1.5 * dt)); setSails(open, t); }

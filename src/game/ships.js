@@ -150,8 +150,28 @@ export const cleanShip = (k) => (SHIPS.some((s) => s.kind === k && s.ready) ? k 
 export const ahead = (s) => [Math.sin(s.yaw), 0, Math.cos(s.yaw)];
 export const leftOf = (s) => [Math.cos(s.yaw), 0, -Math.sin(s.yaw)];
 export function shipPoint(s, [x, y, z]) { const c = Math.cos(s.yaw), n = Math.sin(s.yaw); return [s.p[0] + c * x + n * z, s.p[1] + y, s.p[2] - n * x + c * z]; }
-export const seatAt = (s) => shipPoint(s, kindOf(s).seat);
+// …and turned as it is turned: its bank (about its length), its tilt (nose down is +: three's x), its heading: three's
+// 'YXZ', as the drawings turn it (ships/*.js), riding on its bob. Where its pilot sits is this (a ship pointing straight
+// up carries its helm straight up with it)
+export function posePoint(s, [x, y, z]) {
+  const cb = Math.cos(s.bank || 0), sb = Math.sin(s.bank || 0), ct = Math.cos(s.tilt || 0), st = Math.sin(s.tilt || 0), c = Math.cos(s.yaw), n = Math.sin(s.yaw);
+  const x1 = x * cb - y * sb, y1 = x * sb + y * cb, y2 = y1 * ct - z * st, z2 = y1 * st + z * ct;
+  return [s.p[0] + c * x1 + n * z2, s.p[1] + (s.bob || 0) + y2, s.p[2] - n * x1 + c * z2];
+}
+// the way its nose points
+export const noseOf = (s) => { const cp = Math.cos(s.tilt || 0); return [Math.sin(s.yaw) * cp, -Math.sin(s.tilt || 0), Math.cos(s.yaw) * cp]; };
+export const seatAt = (s) => posePoint(s, kindOf(s).seat);
 export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   // where it is boarded from: its seat, or (the ark) its door
+
+// CLIMB AND DIVE, AND THE BANK (Colin, 19 Nov 2026: "ships should be able to go straight up -- the angle of
+// incline/decline seems quite limited, but it would be better if they could actually go up and down. and when they
+// turn, the ship should rotate with it like a plane would"). Driven, a ship's nose comes up or down toward where the eye
+// looks (past a little either way), PITCH_GAIN times as steep, so the eye's furthest up or down is straight up or down;
+// it comes round at its turn a second at most, and let be, it comes level. It goes the way its nose points. Turning under
+// way it banks as a plane does (the tangent of its bank is its speed times its turn over g), up to its own BANK (the
+// small ones steeper than the big), never so far that its side would touch the water, and it levels out of it.
+export const PITCH_GAIN = 1.5;
+export const BANK = { skiff: 1.1, dart: 1.3, dhow: 0.75, ark: 0.7, carrier: 0.55 };
 
 // put by the body (near enough to board), pointing the way it faces, riding at its hover over what is under it; called
 // from the air (Colin, 19 Nov 2026: "remove necessity to be on the ground to call a ship"), it comes to the body's height
@@ -176,29 +196,33 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   if (Math.abs(err) <= Math.abs(s.spin * dt) + 1e-9 && s.spin * err >= 0) { s.yaw = want; s.spin = 0; }
   else s.yaw = wrap(s.yaw + s.spin * dt);
   const f = ahead(s), l = leftOf(s), mx = inp.move?.[0] || 0, mz0 = inp.move?.[1] || 0, mz = mz0 < 0 ? mz0 * S.back : mz0;
-  // (the eye's pitch climbs it only past a little either way: the eye's own rest, a little down, flies it level)
-  const pitch = Math.sign(inp.pitch || 0) * Math.max(0, Math.abs(inp.pitch || 0) - 0.15);
-  const top = inp.sprint ? S.boost : S.speed, cp = Math.cos(pitch), sp = Math.sin(pitch);
+  // its nose: toward the eye's pitch (past the eye's own rest, a little down, which flies it level) while it is driven
+  // ahead, level when it is not; it goes the way its nose points (backing, level)
+  const p0 = inp.pitch || 0, aim = Math.sign(p0) * Math.min(Math.PI / 2, Math.max(0, Math.abs(p0) - 0.15) * PITCH_GAIN);
+  s.tilt = -toward(-(s.tilt || 0), mz > 0 ? aim * Math.min(1, mz) : 0, S.turn * dt);
+  const nose = noseOf(s), top = inp.sprint ? S.boost : S.speed;
   const lift = ((inp.up ? 1 : 0) - (inp.down ? 1 : 0)) * S.climb;
-  const target = [f[0] * cp * mz * top - l[0] * mx * S.slide, sp * mz * top + lift, f[2] * cp * mz * top - l[2] * mx * S.slide];
+  const go = mz > 0 ? nose : f;
+  const target = [go[0] * mz * top - l[0] * mx * S.slide, go[1] * mz * top + lift, go[2] * mz * top - l[2] * mx * S.slide];
   const a = S.accel * dt * (inp.sprint ? 1.6 : 1);
   for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], (Math.abs(target[i]) < Math.abs(s.v[i]) || target[i] * s.v[i] < 0 ? BRAKE : 1) * a);
-  // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), looked at every fifth of a
-  // metre of its way, so a quick ship does not pass through a thin wall between two steps
+  // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), turned as it is turned,
+  // looked at every fifth of a metre of its way, so a quick ship does not pass through a thin wall between two steps
   const h = S.length * 0.48, pts = [[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], ...S.edges];
   const n = Math.max(1, Math.ceil((Math.hypot(s.v[0], s.v[1], s.v[2]) * dt) / 0.2)), from = [...s.p];
   for (let i = 1; i <= n; i++) {
-    const at = { p: [from[0] + (s.v[0] * dt * i) / n, from[1] + (s.v[1] * dt * i) / n, from[2] + (s.v[2] * dt * i) / n], yaw: s.yaw };
-    if (pts.some((q) => solid(shipPoint(at, q)))) { for (let k = 0; k < 3; k++) s.v[k] *= -0.2; break; }
+    const at = { p: [from[0] + (s.v[0] * dt * i) / n, from[1] + (s.v[1] * dt * i) / n, from[2] + (s.v[2] * dt * i) / n], yaw: s.yaw, tilt: s.tilt, bank: s.bank };
+    if (pts.some((q) => solid(posePoint(at, q)))) { for (let k = 0; k < 3; k++) s.v[k] *= -0.2; break; }
     s.p = at.p;
   }
-  // never lower than its keel over the water or the ground
-  const low = floorAt(s.p[0], s.p[2]) + S.keel;
+  // never lower than its keel over the water or the ground; nose up or down, its stern or its bow is what is lowest
+  const floor = floorAt(s.p[0], s.p[2]), low = floor + Math.max(S.keel * Math.abs(Math.cos(s.tilt)), h * Math.abs(Math.sin(s.tilt)));
   if (s.p[1] < low) { s.p[1] = low; if (s.v[1] < 0) s.v[1] = 0; }
-  // how it looks doing it: banked into a turn, tipped as it climbs or drops, its engine as bright as it is driven
+  // banked into a turn as a plane is, and out of it; its engine as bright as it is driven
   const turnRate = dt > 0 ? wrap(s.yaw - was) / dt : 0, k = (r) => 1 - Math.exp(-r * dt);
-  s.bank += (Math.max(-0.55, Math.min(0.55, -turnRate * 0.22 * Math.min(1, Math.hypot(s.v[0], s.v[2]) / 6) - mx * 0.12)) - s.bank) * k(5);
-  s.tilt += (Math.max(-0.35, Math.min(0.35, -s.v[1] * 0.035)) - s.tilt) * k(5);
+  const room = Math.asin(Math.min(1, Math.max(0, (s.p[1] - floor) / (S.beam / 2)))), most = Math.min(BANK[s.kind] || 1, room);
+  const bank = -Math.atan((Math.hypot(s.v[0], s.v[2]) * turnRate) / 9.8) - mx * 0.12;
+  s.bank += (Math.max(-most, Math.min(most, bank)) - s.bank) * k(Math.max(1.2, Math.min(5, S.spin * 0.8)));
   s.thrust += (Math.min(1.4, Math.abs(mz) * (inp.sprint ? 1.4 : 1) + 0.25 * Math.abs(lift) / S.climb + 0.1 * Math.abs(mx)) - s.thrust) * k(4);
   const [amp, rate] = BOB[s.kind] || BOB.skiff; s.bob = amp * Math.sin(s.t * rate) * (1 - Math.min(1, s.thrust));
   return s;
