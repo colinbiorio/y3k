@@ -35,7 +35,7 @@
 import * as THREE from 'three';
 import { createVoid } from './void.js';
 import { createFigure } from './figure.js';
-import { createBody, advance, shown, shift, setMode, WATER, SPRINT } from './body.js';
+import { createBody, advance, shown, shift, setMode, WATER, SPRINT, lightLine } from './body.js';
 import { createInput, wireInput, loadBindings, keyLabel, padLabel } from './input.js';
 import { rebase } from './rings.js';
 import { LIGHTS } from './lights.js';
@@ -58,6 +58,7 @@ import { createArkArt } from './ships/ark.js';
 import { createCarrierArt } from './ships/carrier.js';
 import { createCombat, stepCombat, spawnBot, clearBots, shiftCombat, chooseWeapon, nextWeapon, LEVELS, PLAYER, WEAPONS } from './combat.js';
 import { createFightArt } from './fight.js';
+import { createLightArt } from './light.js';
 import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
 import { trunksNear } from './island/life.js';
@@ -180,6 +181,9 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function hint() {
     if (chooser?.isOpen()) return '';                 // the body is what is looked at: nothing is said over its feet
     const b = input.bindings, k = (id) => keyLabel(b.keys[id][0] || b.keys[id][1]) || '—';
+    // in the light: how to come home (its speed and distance are on the line at the top)
+    const L = K.body.light;
+    if (L) return L.phase === 'gather' ? `keep holding ${input.device === 'pad' ? padLabel(b.pad.jump) || '—' : k('jump')} for lightspeed · let go to stay` : L.phase === 'go' ? `steer where you look · let go of ${input.device === 'pad' ? padLabel(b.pad.jump) || '—' : k('jump')} to come home` : '';
     // aboard a ship, its own short line, as long as the body is in its seat
     if (K.aboard && !touch) return input.device === 'pad' ? `left stick drives · ${padLabel(b.pad.jump) || '—'} rises · ${padLabel(b.pad.down) || '—'} sinks · ${padLabel(b.pad.board) || '—'} steps off`
       : `${k('forward')} drives · it turns where you look · ${k('jump')} rises · ${k('down')} sinks · ${k('sprint')} faster · ${k('board')} steps off`;
@@ -307,7 +311,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (back) { K.body.p = [...back.p]; K.body.yaw = back.yaw; }
       else if (name === 'island') { K.body.p = [a.x, K.island.ground.floor(a.x, a.z), a.z]; K.body.yaw = a.facing; }
       else { K.body.p = [0, 0, 0]; K.body.yaw = Math.PI; }
-      K.body.v = [0, 0, 0]; K.body.was = [...K.body.p]; K.body.grounded = true; K.body.rising = false; K.body.wallrun = null; K.body.climbing = false;
+      K.body.v = [0, 0, 0]; K.body.was = [...K.body.p]; K.body.light = null; K.body.grounded = true; K.body.rising = false; K.body.wallrun = null; K.body.climbing = false;
       K.eye.yaw = K.body.yaw + Math.PI; K.eye.has = false;
       K.camera.far = FAR[name]; K.camera.updateProjectionMatrix();
       K.figure.setEnv(LIGHTS[st.light].env); root.dataset.place = name;
@@ -387,6 +391,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     say(`${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} comes down ${where} you · ${actKey('board')} ${up}`, 5);
   }
   function boardOrLeave() {
+    if (K.body.light) return;                          // in the light there is no ship to step into
     if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
     const s = nearShip(K.world.ships, K.body.p);
     if (!s) { const k = K.world.ships[0]?.kind; if (k) say(`walk to the ${k}'s ${SHIP_KIND[k].door ? 'stern' : 'seat'} to board it`, 3); return; }
@@ -425,7 +430,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const w = K.combat.weapon, does = { bow: ['looses an arrow, held it draws harder', 'a volley'], bell: ['strikes the bell, held it tolls', 'a peal'], thread: ['lashes the thread, held it snares', 'a circle overhead'], torch: ['throws an ember, held it streams a flame', 'a wall of fire'] }[w] || ['casts the ring, held it spins up', 'whirls'];
     say(`a ${b.L.name} rises (level ${b.level}) · ${actKey('attack')} ${does[0]} · ${actKey('whirl')} ${does[1]} · ${actKey('guard')} guards · ${actKey('bind')} held binds it`, 6);
   }
-  let hurtT = 0, foes = '', hpShown = -1;
+  let hurtT = 0, foes = '', hpShown = -1, lightT = 0, lightSaid = '';
   function fought(e) {
     if (e.type === 'hurt') hurtT = Math.min(1, hurtT + 0.35 + e.damage / 30);
     else if (e.type === 'down') say('struck down · you stand again in a moment', PLAYER.down);
@@ -444,7 +449,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     hurtT = Math.max(0, hurtT - dt * 1.6);
     hudEl.style.setProperty('--hurt', hurtT.toFixed(3));
     hudEl.classList.toggle('down', C.player.down > 0);
-    const line = live || C.broken ? `${live ? `${live} bot${live > 1 ? 's' : ''}` : 'no bots'} · ${C.broken} broken` : '';
+    const line = K.body.light ? '' : live || C.broken ? `${live ? `${live} bot${live > 1 ? 's' : ''}` : 'no bots'} · ${C.broken} broken` : '';
     if (line !== foes) { foes = line; const el = $('.game-foes'); if (el) { el.textContent = line; el.hidden = !line; } }
   }
 
@@ -536,12 +541,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         if (e.type === 'jump') { if (wet) V.drop(at[0], at[2], 0.2); }
         else if (e.type === 'land') { figure.land(e.speed); if (wet) { V.drop(at[0], at[2], clamp(0.12 + 0.045 * e.speed, 0.12, 0.6)); if (e.speed > 5) V.drop(at[0] + 0.05, at[2] - 0.03, 0.25); } }
         else if (e.type === 'dash') wake = 0;
-        else if (e.type === 'fly') showMode();
+        else if (e.type === 'fly') { showMode(); if (e.tapped) say('you let go of the air', 2); }
+        else if (e.type === 'light' && (e.on === 'go' || e.home) && K.world.wet(at[0], at[2]) && at[1] < 8) V.drop(at[0], at[2], e.home ? 0.45 : 0.6);   // the water rings under where it sets out and where it comes home
       }
       // the fight: the ring and the bots, once the body has moved (aimed along the eye's line as it was drawn last)
       camera.getWorldDirection(AIM);
       stepCombat(C, dt, { body, aim: { from: [camera.position.x, camera.position.y, camera.position.z], dir: [AIM.x, AIM.y, AIM.z] },
-        hands: down || K.aboard ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl, bind: inp.bind, bindPressed: inp.bindPressed },
+        hands: down || K.aboard || body.light ? {} : { attack: inp.attack, attackPressed: inp.attackPressed, guard: inp.guard, guardPressed: inp.guardPressed, sweep: inp.whirl, bind: inp.bind, bindPressed: inp.bindPressed },
         creative: body.mode === 'creative', world: K.world });
       const evs = C.events.splice(0);
       K.fight.events(evs);
@@ -566,7 +572,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     tip(figure, pos, body.yaw, K.fallen, K.lean);
     // far from where the numbers began, they begin again under the body
     const far = K.place === 'island' ? null : rebase(body.p[0], body.p[2]);
-    if (far) { shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen, K.lean || 0); }
+    if (far) { K.origin = [(K.origin?.[0] || 0) + far[0], (K.origin?.[1] || 0) + far[1]]; shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen, K.lean || 0); }
 
     // the eye. While the body sheet is open it stands back far enough for the whole body, level with its middle,
     // and the body is put in what the sheet leaves of the room
@@ -581,6 +587,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const u = stand ? pose : 0, pitch0 = eye.pitch + (POSE.pitch - eye.pitch) * u;
     const tx = pos[0], ty = pos[1] + figure.look + ((K.size ? K.size.tall / 2 : figure.look) - figure.look) * u, tz = pos[2];
     if (!eye.has) { eye.at.set(tx, ty, tz); eye.has = true; eye.d = st.zoom; }
+    else if (body.light && body.light.phase !== 'gather') eye.at.set(tx, ty, tz);     // in the light the eye keeps up at once
     else { const kh = ease(16, dt), kv = ease(10, dt); eye.at.x += (tx - eye.at.x) * kh; eye.at.z += (tz - eye.at.z) * kh; eye.at.y += (ty - eye.at.y) * kv; }
     const sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
     const along = (p) => { const c = Math.cos(p); return [-sy * c, Math.sin(p), -cy * c]; };
@@ -615,7 +622,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const side = eye.side * (SHOULDER * Math.min(1, eye.d / 4) + eye.wall) * (1 - u);
     camera.position.set(eye.at.x - fx * eye.d + cy * side, Math.max(lowest + 0.1, eye.at.y - fy * eye.d), eye.at.z - fz * eye.d - sy * side);
     camera.rotation.set(pitch, eye.yaw, 0, 'YXZ');
-    const fov = FOV + 12 * smooth(SPRINT + 1, 46, Math.hypot(body.v[0], body.v[2]));    // the view opens a little at speed
+    const fov = FOV + 12 * smooth(SPRINT + 1, 46, Math.hypot(body.v[0], body.v[2])) + 20 * (body.light ? body.light.frac : 0);    // the view opens a little at speed, and more toward light
     eye.fov += (fov - eye.fov) * ease(6, dt);
     if (Math.abs(camera.fov - eye.fov) > 0.02) { camera.fov = eye.fov; camera.updateProjectionMatrix(); }
     // the picture is slid so the body stands in what the sheet leaves (the mirror's eye takes the same slide: void.js copies this one's projection)
@@ -626,6 +633,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     ships(paused ? 0 : dt);
     if (V.live && !paused) V.live(dt, K.clock, body, K.world);   // the island's palms, birds, woodhens and turtles
     K.fight.update(K.combat, paused ? 0 : dt, camera, body);
+    if (body.light || K.lightArt) {
+      if (K.lightArt?.scene !== V.scene) { K.lightArt?.dispose(); K.lightArt = createLightArt(V.scene, { lite: K.lite }); }
+      K.lightArt.update(body.light, { camera, at: [pos[0], pos[1] + figure.look * 0.8, pos[2]], dt: paused ? 0 : dt, eyeD: eye.d });
+    }
+    if (now > lightT) { lightT = now + 120; const line = lightLine(body.light); if (line !== lightSaid) { lightSaid = line; const el = $('.game-light'); if (el) { el.textContent = line; el.hidden = !line; } } }
     hud(dt);
     V.setScale(camera);
     // the bodies' shades on the water: this one's, and the nearest bots' (four in all)
@@ -675,6 +687,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       </div>
       <div class="game-hud" aria-hidden="true"><i class="game-reticle"></i><div class="game-hp"><i></i></div><i class="game-hurt"></i></div>
       <div class="game-foes" role="status" hidden></div>
+      <div class="game-light" role="status" hidden></div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
       <div class="game-touch"${touch ? '' : ' hidden'}>
@@ -756,11 +769,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     // read only, for whoever is checking the game from outside it (a test's browser, the console). `seen` is where the body's middle is on the canvas, in px
     const seen = () => { const cv = K.renderer.domElement, v = new THREE.Vector3(pos[0], pos[1] + (K.size ? K.size.tall / 2 : K.figure.look), pos[2]).project(K.camera); return [Math.round(((v.x + 1) / 2) * cv.clientWidth), Math.round(((1 - v.y) / 2) * cv.clientHeight)]; };
     (globalThis.Y3K ||= {}).game = { read: () => (K ? { p: [...K.body.p], v: [...K.body.v], mode: K.body.mode, flying: K.body.flying, grounded: K.body.grounded,
-      dashing: K.body.dashT > 0, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
+      dashing: K.body.dashT > 0, lightspeed: K.body.light ? { phase: K.body.light.phase, v: K.body.light.v, dist: K.body.light.dist, frac: Math.round(K.body.light.frac * 1000) / 1000, veil: Math.round(K.body.light.veil * 1000) / 1000, line: $('.game-light')?.textContent || '' } : null, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
-        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, aboard: !!K.aboard, seated: !!K.body.seated,
+        climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,

@@ -6207,6 +6207,11 @@ body.in-void:not(.airden) .chat-air { visibility: hidden; }
 .game-foes { position: absolute; left: 50%; translate: -50% 0; top: calc(var(--hole-t, 0px) + 60px); z-index: 2; padding: 4px 12px; border-radius: 12px;
   font-size: 0.74rem; color: #dfe3ea; pointer-events: none; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal; backdrop-filter: blur(14px); }
 .game-foes[hidden] { display: none; }
+/* lightspeed's line (src/game/light.js, body.js lightLine): how fast, how far out; small, at the top, a prism at its edge */
+.game-light { position: absolute; left: 50%; translate: -50% 0; top: calc(var(--hole-t, 0px) + 60px); z-index: 2; padding: 4px 14px; border-radius: 12px;
+  font-size: 0.74rem; letter-spacing: 0.04em; color: #eef1ff; pointer-events: none; white-space: nowrap; background: rgba(8, 10, 28, 0.42); backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px rgba(180, 200, 255, 0.18), 0 0 18px rgba(140, 160, 255, 0.22); text-shadow: 0 0 8px rgba(170, 190, 255, 0.55); }
+.game-light[hidden] { display: none; }
 .game-tbtn:active { background: rgba(255, 255, 255, 0.28); }
 /* the world's settings in two tabs (menu.js): the controls, and the map */
 .game-tabs { display: flex; gap: 4px; width: fit-content; margin: 0 0 14px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); }

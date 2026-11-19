@@ -60,6 +60,22 @@ export const WALL = {
   off: [6.0, 6.4],                      // a jump off: m/s out from the wall, and up
   same: 0.5,                            // a wall facing within 60 degrees of the last one run is the same wall: the ground first
 };
+// LIGHTSPEED (Colin, 19 Nov 2026: "when holding spacebar, the speed should get exponentially faster until you reach
+// the speed of light. obviously not really gonna work in our tiny simulated environment, but just give us a handy way
+// to enter lightspeed travel for now -- like you can go as far as you want in any direction but once you release
+// spacebar you'll just end up back at the island"). The jump held on past the top of a held jump (HOLD seconds from
+// the press, still in the air: a held jump tops out at 1.1 s), or held FLY_HOLD while flying, gathers the light (GATHER seconds: let go then and nothing comes of it, the body only
+// hung a moment). Then the body goes the way the eye looks, steered by it (TURN), its speed doubling every 0.31 s from
+// V0 until, RISE seconds in, it is the speed of light. Let go, and it is brought home: back along a line to where it
+// set out, in HOME seconds. The world is small, so the body itself goes no further than REACH from where it set out
+// (lifted LIFT clear of the ground as it goes); the rest of the way is counted (s.light.dist) and drawn (light.js),
+// not travelled. The eye's own rest, a little down, steers it level: its pitch counts only past DEAD either way.
+// Under a roof (inside a building) the light does not gather: a held jump there is only a jump.
+export const LIGHT = { c: 299792458, v0: 40, rise: 7, gather: 0.4, hold: 1.25, flyHold: 0.8, reach: 2400, lift: 140, turn: 2.4, home: 1.7, dead: 0.15 };
+const LIGHT_K = Math.log(LIGHT.c / LIGHT.v0) / LIGHT.rise;
+// Flying, a second tap of the jump this soon after the first lets go of the air (Colin, 19 Nov: "double spacebar to
+// drop down from flying would be nice"): the body falls from there.
+export const TAP_TWICE = 0.32;
 const COYOTE = 0.1, JUMP_BUFFER = 0.12; // a jump pressed just after the edge, or just before the ground
 const STEP_UP = 0.35;                   // a step taken without a jump; a floor further down than this is fallen to
 // the world's say in this step: the body pushed out of what is solid, and the floor under it (0: the water's floor)
@@ -105,6 +121,10 @@ const turnToward = (a, b, max) => {
 // jumpPressed, dash, flyToggle (the three edges), sprint, walk, up, down }.
 export function stepBody(s, inp, dt = STEP) {
   const ev = s.events, creative = s.mode === 'creative';
+  // the jump held: how long, and whether it is still the hold that began this jump
+  s.heldT = inp.jump ? (s.heldT || 0) + dt : 0;
+  if (!inp.jump) s.hold = false;
+  if (s.light) { stepLight(s, inp, dt, ev); return s; }    // gathering, going or coming home, the body is the light's
   if (!creative && s.flying) s.flying = false;             // flight is creative's alone
   if (inp.flyToggle && creative) {
     s.flying = !s.flying;
@@ -140,7 +160,15 @@ export function stepBody(s, inp, dt = STEP) {
     return s;
   }
 
-  // ---- flying (creative)
+  // ---- flying (creative): a second tap soon after the first lets go of the air; the jump held on gathers the light
+  if (s.flying) {
+    if (s.tapT > 0) s.tapT -= dt;
+    if (inp.jumpPressed) {
+      if (s.tapT > 0) { s.flying = false; s.tapT = 0; s.buffer = 0; s.rising = false; s.grounded = false; s.coyote = 0; ev.push({ type: 'fly', on: false, tapped: true }); }
+      else s.tapT = TAP_TWICE;
+    }
+    if (s.flying && inp.jump && s.heldT >= LIGHT.flyHold && !s.world?.inside?.(s.p)) { beginLight(s, ev); return s; }
+  }
   if (s.flying) {
     const top = inp.sprint ? FLY_SPRINT : FLY, a = FLY_ACCEL * dt;
     s.v[0] = toward(s.v[0], w[0] * top, a); s.v[1] = toward(s.v[1], w[1] * top, a); s.v[2] = toward(s.v[2], w[2] * top, a);
@@ -191,16 +219,19 @@ export function stepBody(s, inp, dt = STEP) {
     s.buffer -= dt;
     if (s.coyote > 0) {
       s.v[1] = JUMP_V0 * (s.swim ? SWIM.jump : 1); s.grounded = false; s.rising = !s.swim; s.coyote = 0; s.buffer = 0;
+      s.hold = !!inp.jump && !s.swim;
       ev.push({ type: 'jump', at: [s.p[0], s.p[1], s.p[2]] });
     } else if (creative && inp.jumpPressed) {
-      // a second jump in the air: creative takes off
-      s.flying = true; s.rising = false; s.buffer = 0; s.v[1] = Math.max(s.v[1], 0);
+      // a second jump in the air: creative takes off (the tap that did it is not the first of a double tap)
+      s.flying = true; s.rising = false; s.buffer = 0; s.v[1] = Math.max(s.v[1], 0); s.tapT = 0; s.hold = false;
       ev.push({ type: 'fly', on: true });
       return s;
     }
   }
   if (!s.grounded) {
     if (s.rising && (!inp.jump || s.v[1] <= 0)) s.rising = false;
+    // still held past the top of the jump it began: the light gathers
+    if (s.hold && s.heldT >= LIGHT.hold && !s.world?.inside?.(s.p)) { beginLight(s, ev); return s; }
     const g = G * (s.rising ? HOLD_GRAVITY : 1);
     s.p[1] += s.v[1] * dt - 0.5 * g * dt * dt;
     s.v[1] -= g * dt;
@@ -209,7 +240,7 @@ export function stepBody(s, inp, dt = STEP) {
   const f = settle(s);
   if (!s.grounded && s.p[1] <= f && s.v[1] <= 0) {
     ev.push({ type: 'land', speed: -s.v[1], at: [s.p[0], f, s.p[2]] });
-    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES; s.lastWall = null;
+    s.p[1] = f; s.v[1] = 0; s.grounded = true; s.rising = false; s.airDash = AIR_DASHES; s.lastWall = null; s.hold = false;
   } else if (s.grounded) {
     // walking: up a step or down one; further down than a step, it falls
     if (s.p[1] - f <= STEP_UP) s.p[1] = f;
@@ -291,8 +322,102 @@ export function shown(s, out = [0, 0, 0]) {
   return out;
 }
 
-// The origin moved by (dx, dz) under the body (rings.js, rebase): the same place, in new numbers.
-export function shift(s, dx, dz) { s.p[0] -= dx; s.p[2] -= dz; s.was[0] -= dx; s.was[2] -= dz; return s; }
+// The origin moved by (dx, dz) under the body (rings.js, rebase): the same place, in new numbers (and the light's
+// places with it: where it set out from, and where it was let go).
+export function shift(s, dx, dz) {
+  s.p[0] -= dx; s.p[2] -= dz; s.was[0] -= dx; s.was[2] -= dz;
+  for (const q of [s.light?.from, s.light?.back]) if (q) { q[0] -= dx; q[2] -= dz; }
+  return s;
+}
+
+// ---- lightspeed (LIGHT, above)
+// the way the eye looks, as a direction (its pitch past DEAD either way)
+function eyeWay(inp) {
+  const p0 = inp.pitch || 0, pt = Math.sign(p0) * Math.max(0, Math.abs(p0) - LIGHT.dead), c = Math.cos(pt), y = inp.yaw || 0;
+  return [-Math.sin(y) * c, Math.sin(pt), -Math.cos(y) * c];
+}
+// a way swung toward another by at most `max` radians
+function swing(a, b, max) {
+  const d = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])), ang = Math.acos(d);
+  if (ang <= max) return [b[0], b[1], b[2]];
+  const k = max / ang, m = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k], n = Math.hypot(m[0], m[1], m[2]) || 1;
+  return [m[0] / n, m[1] / n, m[2] / n];
+}
+const ease = (u) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, u)));
+const smooth01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// what is under a point to the light: the island's ground (or the sea's level over it), or the void's water
+const lightFloor = (s, x, z) => (s.world?.ground ? Math.max(0, s.world.ground.height(x, z)) : 0);
+function beginLight(s, ev) {
+  s.light = { phase: 'gather', t: 0, gatherT: LIGHT.gather, v: 0, dist: 0, dir: [Math.sin(s.yaw), 0, Math.cos(s.yaw)], from: null, back: null, wasFlying: s.flying, frac: 0, veil: 0, u: 0 };
+  s.v = [0, 0, 0]; s.dashT = 0; s.rising = false; s.hold = false; s.wallrun = null; s.climbing = false;
+  ev.push({ type: 'light', on: 'gather', at: [s.p[0], s.p[1], s.p[2]] });
+}
+function stepLight(s, inp, dt, ev) {
+  const L = s.light, want = eyeWay(inp);
+  L.t += dt; s.grounded = false; s.coyote = 0; s.buffer = 0;
+  if (L.phase === 'gather') {
+    s.v[0] = s.v[1] = s.v[2] = 0;                       // the fall waits while the light gathers
+    if (!inp.jump) { s.light = null; s.flying = L.wasFlying && s.mode === 'creative'; ev.push({ type: 'light', on: false, at: [s.p[0], s.p[1], s.p[2]] }); return; }
+    if (L.t >= L.gatherT) {
+      L.phase = 'go'; L.t = 0; L.from = [s.p[0], s.p[1], s.p[2]]; L.dir = want; L.v = LIGHT.v0; s.flying = true;
+      ev.push({ type: 'light', on: 'go', at: [...L.from] });
+    }
+    return;
+  }
+  if (L.phase === 'go') {
+    if (!inp.jump) {
+      L.phase = 'home'; L.t = 0; L.back = [s.p[0], s.p[1], s.p[2]]; L.out = L.dist; L.vOut = L.v; L.fracOut = L.frac; L.veilOut = L.veil;
+      ev.push({ type: 'light', on: 'home', dist: L.dist, at: [s.p[0], s.p[1], s.p[2]] });
+      return;
+    }
+    L.dir = swing(L.dir, want, LIGHT.turn * dt);
+    L.v = Math.min(LIGHT.c, LIGHT.v0 * Math.exp(LIGHT_K * L.t));
+    L.dist += L.v * dt;
+    L.frac = Math.log(L.v / LIGHT.v0) / Math.log(LIGHT.c / LIGHT.v0);
+    L.veil = smooth01(0.06, 0.32, L.frac);
+    // the body itself: along the way and up, clear of what is under it, no further than REACH from where it set out
+    const go = Math.min(L.v, 1500) * dt, o = [s.p[0] - L.from[0] + L.dir[0] * go, s.p[1] - L.from[1] + L.dir[1] * go, s.p[2] - L.from[2] + L.dir[2] * go];
+    const r = Math.hypot(o[0], o[1], o[2]);
+    if (r > LIGHT.reach) for (let i = 0; i < 3; i++) o[i] *= LIGHT.reach / r;
+    s.p = [L.from[0] + o[0], L.from[1] + o[1], L.from[2] + o[2]];
+    s.p[1] = Math.max(s.p[1], L.from[1] + LIGHT.lift * smooth01(0, 1.4, L.t), lightFloor(s, s.p[0], s.p[2]) + 2);
+    const k = Math.min(L.v, FLY_SPRINT); s.v = [L.dir[0] * k, L.dir[1] * k, L.dir[2] * k];
+    if (Math.hypot(L.dir[0], L.dir[2]) > 0.05) s.yaw = Math.atan2(L.dir[0], L.dir[2]);
+    return;
+  }
+  // coming home: back along a line to where it set out, its speed, its distance and the veil all falling away
+  const u = Math.min(1, L.t / LIGHT.home), e = ease(u);
+  L.u = u; L.dist = L.out * (1 - e); L.v = L.vOut * (1 - e); L.frac = L.fracOut * (1 - smooth01(0, 0.8, u)); L.veil = L.veilOut * (1 - smooth01(0.1, 0.7, u));
+  s.p = [L.back[0] + (L.from[0] - L.back[0]) * e, L.back[1] + (L.from[1] - L.back[1]) * e, L.back[2] + (L.from[2] - L.back[2]) * e];
+  s.p[1] = Math.max(s.p[1], lightFloor(s, s.p[0], s.p[2]) + 2 * (1 - smooth01(0.7, 1, u)));
+  s.v = [0, 0, 0];
+  if (u >= 1) {
+    s.p = [...L.from]; s.light = null; s.flying = L.wasFlying && s.mode === 'creative'; s.rising = false; s.airDash = AIR_DASHES; s.hold = false; s.heldT = 0;
+    ev.push({ type: 'light', on: false, home: true, at: [s.p[0], s.p[1], s.p[2]] });
+  }
+}
+
+// what the light says, in a line: how fast, how far out, and the farthest thing of ours it has come as far as
+const MARKS = [[4.017e16, 'as far as Proxima Centauri'], [4.5e12, 'past Neptune\'s orbit'], [7.78e11, 'as far as Jupiter\'s orbit'], [1.496e11, 'as far as the Sun'], [3.844e8, 'past the Moon']];
+const num = (x, f = 1) => x.toLocaleString('en-US', { maximumFractionDigits: x < 10 ? f : 0 });
+export function lightFar(d) {
+  const ls = d / LIGHT.c;
+  if (d < 1000) return `${Math.round(d)} m`;
+  if (ls < 1) return `${num(d / 1000)} km`;
+  if (ls < 60) return `${num(ls)} light-second${ls < 1.05 ? '' : 's'}`;
+  if (ls < 3600) return `${num(ls / 60)} light-minute${ls < 63 ? '' : 's'}`;
+  if (ls < 86400) return `${num(ls / 3600)} light-hour${ls < 3780 ? '' : 's'}`;
+  if (ls < 31557600) return `${num(ls / 86400)} light-day${ls < 90720 ? '' : 's'}`;
+  return `${num(ls / 31557600, 2)} light-years`;
+}
+export function lightLine(L) {
+  if (!L) return '';
+  if (L.phase === 'gather') return 'the light gathers · let go to stay';
+  if (L.phase === 'home') return `coming home · ${lightFar(L.dist)}`;
+  const v = L.v, speed = v >= LIGHT.c ? 'the speed of light' : v >= LIGHT.c * 0.01 ? `${(v / LIGHT.c).toFixed(v >= LIGHT.c * 0.1 ? 2 : 3)} c` : v >= 1000 ? `${num(v / 1000)} km/s` : `${Math.round(v)} m/s`;
+  const mark = MARKS.find(([m]) => L.dist >= m);
+  return `lightspeed · ${speed} · ${lightFar(L.dist)} out${mark ? ' · ' + mark[1] : ''}`;
+}
 
 // The mode's switch. Survival takes flight away where the body is: it falls.
 export function setMode(s, mode) {

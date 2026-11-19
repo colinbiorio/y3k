@@ -263,6 +263,27 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (midday) — **Lightspeed, and two taps out of the air**
+  (`src/game/body.js` LIGHT, stepLight, lightLine, TAP_TWICE;
+  `src/game/light.js`; `src/game/view.js`; `styles.css` .game-light;
+  `scripts/void-smoke.mjs light`; `test/game.test.mjs`). Colin, 19 Nov:
+  "when holding spacebar, the speed should get exponentially faster until you
+  reach the speed of light ... once you release spacebar you'll just end up
+  back at the island", and "double spacebar to drop down from flying would be
+  nice". Space still jumps, and held rises twice as high; held on past the
+  top (1.25 s), the light gathers round the body for 0.4 s (let go then and
+  nothing comes of it); then the body goes where the eye looks, steered by it,
+  its speed doubling every 0.31 s until, seven seconds in, it is the speed of
+  light: deep space closes round it, the stars stream past in prismatic lines,
+  and a small line at the top says how fast and how far out (light-seconds to
+  light-years; past the Moon, as far as the Sun). Let go, and it is brought
+  home in 1.7 s, the streaks running back, to where it set out. Flying, Space
+  held climbs and, held on 0.8 s, gathers the light too; two taps within a
+  third of a second let go of the air. The body itself goes no further than
+  2.4 km (the rest is counted and drawn), so the numbers stay small, and under
+  a roof the light does not gather. The smoke's new `light` scene: 11 checks,
+  16.7 ms a frame in the light.
+
 - **2026-11-19** (morning) — **Every ship handles, and the island's water is
   drawn right** (`src/game/ships.js`, `src/game/island/island.js` and
   `ground.js` seaSheet; `test/game.test.mjs`). Colin, 19 Nov: "the larger
