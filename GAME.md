@@ -132,17 +132,31 @@ option to level the ground around it or build a flat platform to place the
 building on top of." With two pictures: the torch floating beside the hand,
 and the hint pill over the bottom bar.
 
-- **The controls sheet** (done, 19 Nov): the controls in cards (moving,
+- **The weapon in the hand** (done, 19 Nov, #162): each body has a fist
+  (`bodies/common.js` bodyOf `grip`, a node in the right hand's own frame:
+  fingers -y, thumb +z, palm +x; the octopus's is the tip of its right arm,
+  pinned where a hand would be, `shape.js` pin) and takes a `hold` from the
+  view (`view.js` holding: carry, reach along an aim, lift, closed; eased at
+  12/s), laid over the stride's arm by `holdArm` (CARRY: the shoulder 0.42
+  forward and 0.16 out, the elbow 1.08). `fight.js` IN_HAND says each weapon's
+  axes in the fist's and the point of it that is held (checked right-handed by
+  the suite); `combat.js` handOf answers the fist once the view has said it
+  (`body.grip`), so arrows, embers, the flame, the lash and the ring's throw
+  leave from it. The human's closed hand is `kin.js` HAND_GRIP
+  (`mh_build.py` GRIP curls; the rest of kin.js regenerates byte for byte).
+  Looked at: all five kinds with all five weapons, standing, walking and in
+  use (the in-fist point within a millimetre of the fist every frame).
+- **The controls sheet** (done, 19 Nov, #157): the controls in cards (moving,
   flying, building, ships, weapons, the eye and the sheet: `glyphs.js`
   GROUPS; an action added to `input.js`'s ACTIONS later may name its `group`,
   else it goes under "more", drawn as a key), each with its own glyph
   (`glyphs.js` GLYPHS, 24-unit drawings) poured in unimat by
   `mercury-buttons.js`'s `mount` when the sheet opens, kept across its
   redraws and let go when it closes. On a phone a control is two lines.
-- **The hint** (done, 19 Nov): measured, not guessed (`view.js` seatHint): 8 px
+- **The hint** (done, 19 Nov, #157): measured, not guessed (`view.js` seatHint): 8 px
   clear of the chat bar, the grips, the air mark and the thumbs' buttons, or
   under the bar's rows on a phone.
-- **The blueprint** (done, 19 Nov): `blueprint.js` draws the kind's own
+- **The blueprint** (done, 19 Nov, #160): `blueprint.js` draws the kind's own
   drawing as light (one shader: a half-metre grid in the building's own frame,
   bright edges, a band climbing it) with its pad on the ground, where `view.js`
   plan puts it: out along the eye's way from the body (`PLAN`: nearest, as
@@ -152,7 +166,7 @@ and the hint pill over the bottom bar.
   of it), 'blocked' (red). Its hands are others': the cast places it, the
   board key turns it, the menu key leaves it, the whirl changes the choice;
   Enter, 1 and 2 too; the panel for a finger.
-- **Uneven ground** (done, 19 Nov): `plinth.js` (pure): each kind's PAD; a
+- **Uneven ground** (done, 19 Nov, #160): `plinth.js` (pure): each kind's PAD; a
   levelling (`levelFor`, `levelled`: the pad brought to the door's level, eased
   back to the ground over at most 0.55 rise to a metre of run, at most 12 m of
   earth moved) lives in `ground.flats`, so all that stands on the ground stands

@@ -316,9 +316,27 @@ export function createOctopus(look, { lite = false } = {}) {
   held.world.push({ shift(dx, dy, dz) { shiftCrawl(C, dx, dz); } });
 
   K.build();
+  // what it holds, it holds in the tip of the arm that hangs at its right: that arm reaches up and its tip is held where
+  // a hand would be (out to the side and ahead of where it hangs from; put out along the aim when the fight asks), its
+  // frame a hand's (fingers ahead, thumb up). Holding nothing (struck down), the arm hangs free again.
+  const tip = new THREE.Group(); group.add(tip);
+  const tf = new THREE.Vector3(), tu = new THREE.Vector3(), tx = new THREE.Vector3(), tm = new THREE.Matrix4(), ta = new THREE.Vector3();
   const fig = bodyOf(self, K, {
-    eye: H + 0.21, cloths,
-    frame() { for (const a of hang) a.t.set(a.c.points, [-a.sd * Math.cos(yaw), 0, a.sd * Math.sin(yaw)]); },          // their suckers face the body
+    eye: H + 0.21, cloths, at: tip,
+    frame() {
+      const c = hang[1].c, P = c.points, last = P.length / 3 - 1, h = self.hold, held = h && (h.carry > 0.05 || h.reach > 0.05);
+      tf.set(Math.sin(yaw), 0, Math.cos(yaw));
+      if (h && h.reach > 0 && h.aim) tf.lerp(tu.set(h.aim[0], h.aim[1], h.aim[2]).normalize(), h.reach).normalize();
+      if (held) {
+        // from where the arm hangs: 0.22 m out to the right, 0.3 ahead (or along the aim) and 0.28 down
+        ta.set(P[0] - Math.cos(yaw) * 0.22 + tf.x * 0.3, P[1] - 0.28 + tf.y * 0.3, P[2] + Math.sin(yaw) * 0.22 + tf.z * 0.3);
+        c.pin(last, ta.x, ta.y, ta.z);
+      } else ta.set(P[last * 3], P[last * 3 + 1], P[last * 3 + 2]);
+      for (const a of hang) a.t.set(a.c.points, [-a.sd * Math.cos(yaw), 0, a.sd * Math.sin(yaw)]);          // their suckers face the body
+      tip.position.copy(ta);
+      tu.set(0, 1, 0).addScaledVector(tf, -tf.y).normalize(); tx.crossVectors(tf.negate(), tu); tf.negate();
+      tm.makeBasis(tx, tf.clone().negate(), tu); tip.quaternion.setFromRotationMatrix(tm);
+    },
   });
   const end = fig.dispose;
   fig.dispose = () => { end(); rings.dispose(); };

@@ -176,5 +176,5 @@ export function createMantis(look, { lite = false } = {}) {
   };
 
   K.build();
-  return bodyOf(rig, K, { eye: 1.62, cloths });
+  return bodyOf(rig, K, { eye: 1.62, cloths, grip: [0.012, -0.16, 0] });                        // held in the claw, which closes by itself
 }

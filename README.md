@@ -263,6 +263,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (midday) — **The weapon in the hand** (`src/game/fight.js`
+  IN_HAND, `src/game/bodies/common.js` holdArm and bodyOf's grip,
+  `biped.js`, `human.js`, `robot.js`, `mantis.js`, `light.js`, `octopus.js`,
+  `src/game/shape.js` pin, `src/game/combat.js` handOf, `src/game/view.js`
+  holding; `src/game/bodies/kin.js` HAND_GRIP by `scripts/kin/mh_build.py`;
+  `test/game.test.mjs`). Colin, with a picture of the torch floating beside
+  the hand: "it'd be nice if the character actually held the weapon in its
+  hand instead of just rendering it close to their hand." Each weapon is now
+  drawn in the right fist, from the body's own bones, and follows the hand
+  through every motion: the ring by its rim (a shield on the arm when it
+  guards), the bow by its grip, the bell by its loop, the spindle by a new
+  handle, the torch by its wrap. The arm does what the weapon asks, eased:
+  carried with the forearm forward and the fist upright, put out along the
+  eye's line to draw the bow, send the flame, lash the thread or guard,
+  raised to ring the bell or spin the ring up, open while the ring is away.
+  The human's right hand closes on it (MakeHuman's same hand, its fingers
+  curled round a haft by its own bones; 22 KB, its map and triangles shared),
+  the robot's fingers close, the mantis holds it in its claw, the light body
+  at its forearm's end, and the octopus's right arm reaches up and holds it in
+  its tip. What is thrown, loosed, lashed or streamed leaves from that fist.
 - **2026-11-19** (late morning) — **The blueprint: a building shown as light
   before it goes up; uneven ground levelled or raised on a platform**
   (`src/game/blueprint.js`, `src/game/plinth.js`, `src/game/buildings/plinth.js`,

@@ -326,6 +326,8 @@ export function cloth({ anchor, cols, rows, top, dir, len, closed = false, hem =
     geo, points: P, cols, rows,
     settle,
     // the origin was moved under the body: everything goes with it
+    // a point held where it is put (its last place too, so it carries no speed into the next step): an arm's tip on what it holds
+    pin(i, x, y, z) { P[i * 3] = Q[i * 3] = x; P[i * 3 + 1] = Q[i * 3 + 1] = y; P[i * 3 + 2] = Q[i * 3 + 2] = z; },
     shift(dx, dy, dz) { for (let i = 0; i < N; i++) { P[i * 3] += dx; P[i * 3 + 1] += dy; P[i * 3 + 2] += dz; Q[i * 3] += dx; Q[i * 3 + 1] += dy; Q[i * 3 + 2] += dz; } for (let c = 0; c < cols; c++) { A0[c * 3] += dx; A0[c * 3 + 1] += dy; A0[c * 3 + 2] += dz; } },
     step(dt, shapes = [], floor = 0, k = stiff) {
       if (!ready) { settle(); write(); return; }

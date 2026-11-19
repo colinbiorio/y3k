@@ -249,8 +249,11 @@ export function segSeg(p1, q1, p2, q2) {
 // a body's forward and right, from its yaw (body.js: forward is (sin yaw, 0, cos yaw))
 export const forwardOf = (yaw) => [Math.sin(yaw), 0, Math.cos(yaw)];
 export const rightOf = (yaw) => [-Math.cos(yaw), 0, Math.sin(yaw)];
-// where the ring is held: beside the body's right shoulder, a little in front
+// where the ring is held: beside the body's right shoulder, a little in front; or, where the body is drawn and its
+// fist is known (body.grip, set by the view from the body's own bones each frame), in the fist: what is thrown, loosed,
+// lashed or streamed leaves from the hand that holds it
 export function handOf(body) {
+  if (body.grip) return [body.grip[0], body.grip[1], body.grip[2]];
   const f = forwardOf(body.yaw), r = rightOf(body.yaw);
   return [body.p[0] + r[0] * 0.48 + f[0] * 0.12, body.p[1] + 1.28, body.p[2] + r[2] * 0.48 + f[2] * 0.12];
 }

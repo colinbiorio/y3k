@@ -21,7 +21,7 @@ import { AURA } from '../kinds.js';
 import { WATER } from '../body.js';
 import { stateOf } from '../gait.js';
 import { loft, limb, ball, hoop, placed, kit, tube, pipe, on, cloth, stuff, shade } from '../shape.js';
-import { bodyOf, node, capsules, carried } from './common.js';
+import { bodyOf, node, capsules, carried, holdArm } from './common.js';
 
 const PI = Math.PI, TAU = 2 * PI, sat = (x) => Math.min(1, Math.max(0, x)), smooth = (a, b, x) => { const t = sat((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 // how high its hips hang (its toes a hand's width over the water), and its lengths
@@ -238,13 +238,15 @@ export function createLight(look, { lite = false } = {}) {
       a.sh.rotation.set(mood.fwd - 0.3 * hand + back, 0, a.sd * out);
       a.el.rotation.set(-(mood.bend + 1.15 * hand) * (1 - 0.5 * fl), 0, -a.sd * mood.inw);
     }
+    // a weapon in the right hand (./common.js holdArm)
+    if (self.hold) { form.getWorldQuaternion(tq); holdArm(arms[1].sh, arms[1].el, -1, self.hold, tq); }
     for (const l of legs) {
       const fore = l.sd > 0 ? 1 - fl : 0;                              // at rest one knee is a little ahead of the other
       l.hip.rotation.x = 0.18 * fl - 0.07 * fore; l.knee.rotation.x = 0.07 + 0.12 * fore + 0.3 * fl + 0.25 * fall;
     }
     head.rotation.set(mood.head[0] - 0.55 * lf, 0, mood.head[1]);
   }
-  const pose = { falls: [], speed: 0, state: 'ground' };
+  const pose = { falls: [], speed: 0, state: 'ground' }, tq = new THREE.Quaternion();
   let lean = 0, bank = 0, dip = 0, flow = 0, was = null, beat = 0, gone = 0, fw = 1, sw = 0;
   const self = {
     group, scale: 1, shade: 0.3, world: held.world, capsule: felt.capsule, shapes: felt.shapes,
@@ -286,7 +288,7 @@ export function createLight(look, { lite = false } = {}) {
   carry(0, 0, 0);
   K.build();
   if (wake === 'echo') echo = echoes();
-  const fig = bodyOf(self, K, { eye: 1.56, cloths });
+  const fig = bodyOf(self, K, { eye: 1.56, cloths, hand: arms[1].el, grip: [0, -(FORE + 0.045), 0.006] });          // held at the forearm's end, where its light gathers
   const end = fig.dispose;
   fig.dispose = () => { end(); for (const x of mine) x.dispose(); };
   return fig;

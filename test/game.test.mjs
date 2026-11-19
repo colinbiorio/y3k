@@ -3428,6 +3428,42 @@ ok('uneven ground is offered levelling or a platform instead of a refusal (Colin
   } finally { islandGround.flats.length = 0; }
 });
 
+ok('a weapon is held in the hand, not beside it (Colin, 19 Nov 2026: "it\'d be nice if the character actually held the weapon in its hand instead of just rendering it close to their hand")', () => {
+  // what is thrown, loosed, lashed or streamed leaves from the fist once the body is drawn and its fist known; before, beside the shoulder as it was
+  const body = B.createBody({ yaw: 0.7 }); body.p = [3, 0, -2];
+  const was = CB.handOf(body); assert.ok(Math.abs(was[1] - 1.28) < 1e-9, 'beside the shoulder, without a fist');
+  body.grip = [3.2, 1.05, -1.6]; assert.deepEqual(CB.handOf(body), [3.2, 1.05, -1.6], 'in the fist'); body.grip[0] = 9; assert.notEqual(CB.handOf(body)[0], 3.2, 'read fresh each time');
+  // each weapon's own axes in the fist's: unit, square to each other, and right-handed (a mirrored basis would turn the model inside out)
+  const fight = read('src/game/fight.js'), bases = [...fight.matchAll(/(\w+): \{ q: handBasis\((\[[^\]]*\]), (\[[^\]]*\]), (\[[^\]]*\])\), at: (\[[^\]]*\]|\[0, -RING\.r, 0\])/g)];
+  const names = bases.map((m) => m[1]);
+  for (const n of ['ring', 'shield', 'bow', 'bowRest', 'bell', 'spindle', 'torch', 'flame', 'jet']) assert.ok(names.includes(n), 'a way to hold: ' + n);
+  for (const m of bases) {
+    const [x, y, z] = [m[2], m[3], m[4]].map((t) => JSON.parse(t));
+    const cr = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    assert.deepEqual(cr.map((v) => v + 0), z, m[1] + ': x × y = z');
+    for (const v of [x, y, z]) near(Math.hypot(...v), 1, 1e-12, m[1]);
+  }
+  for (const [w, sel] of [['ring', 'put(ring, IN_HAND.ring)'], ['bell', 'put(bell, IN_HAND.bell)'], ['bow', 'put(bow, {'], ['thread', 'put(spindle, IN_HAND.spindle)'], ['torch', 'put(torch, how)']]) assert.ok(fight.includes(sel), w + ' drawn in the fist');
+  // the human's right hand closes: the same hand, its fingers curled further by its own bones (./bodies/kin.js HAND_GRIP)
+  assert.equal(Kin.HAND_GRIP.n, Kin.HAND.n); assert.equal(Kin.HAND_GRIP.idx, Kin.HAND.idx, 'the same mesh, posed'); assert.equal(Kin.HAND_GRIP.uv, Kin.HAND.uv);
+  assert.match(read('src/game/bodies/kin.js'), /export const HAND_GRIP = \{ n: \d+, pos: '[^']+', nrm: '[^']+', uv: HAND\.uv, idx: HAND\.idx \};/, 'its map and triangles the open one\'s, not again');
+  const ys = (part) => { const b = Buffer.from(part.pos, 'base64'), a = new Int16Array(b.buffer, b.byteOffset, b.length / 2); let lo = Infinity; for (let i = 1; i < a.length; i += 3) lo = Math.min(lo, a[i] * 1e-5); return lo; };
+  assert.ok(ys(Kin.HAND_GRIP) > ys(Kin.HAND) + 0.03, 'its fingertips curled up into the palm: ' + ys(Kin.HAND_GRIP).toFixed(3) + ' over ' + ys(Kin.HAND).toFixed(3));
+  // every body holds: the four on bones by the right hand, the octopus in the tip of its right arm; the human and the robot close their fingers
+  const common = read('src/game/bodies/common.js');
+  assert.match(common, /at \|\|= hand \? node\(hand, grip\) : node\(rig\.group\);/); assert.match(common, /hold\(h\) \{ rig\.hold = h;/);
+  assert.match(read('src/game/bodies/biped.js'), /if \(self\.hold\) \{ tq\.copy\(rig\.quaternion\)[^}]*holdArm\(arms\[1\]\.shoulder, arms\[1\]\.elbow, -1, self\.hold, tq\); \}/);
+  assert.match(read('src/game/bodies/light.js'), /holdArm\(arms\[1\]\.sh, arms\[1\]\.el, -1, self\.hold, tq\)/);
+  assert.match(read('src/game/bodies/octopus.js'), /at: tip,/); assert.match(read('src/game/bodies/octopus.js'), /if \(held\) \{[\s\S]*?c\.pin\(last, ta\.x, ta\.y, ta\.z\);/, 'its arm reaches up to hold it');
+  assert.match(read('src/game/shape.js'), /pin\(i, x, y, z\) \{ P\[i \* 3\] = Q\[i \* 3\] = x;/, 'a pinned point carries no speed');
+  assert.match(read('src/game/bodies/human.js'), /fist: \(on\) => \{ bare\.visible = !on; fist\.visible = on; \}/);
+  assert.match(read('src/game/bodies/robot.js'), /fist: \(on\) => \{ open\.visible = !on; fist\.visible = on; \}/);
+  // the view: the arm as the weapon asks, eased; the fist read back from the bones and given to the fight and the numbers
+  const view = read('src/game/view.js');
+  for (const piece of ['if (!paused && figure.hold) figure.hold(holding(dt));', 'figure.grip.getWorldPosition(GRIP.p); figure.grip.getWorldQuaternion(GRIP.q);', 'body.grip = [GRIP.p.x, GRIP.p.y, GRIP.p.z];',
+    'K.fight.update(K.combat, paused ? 0 : dt, camera, body, fist);', "if (C.bow.mode === 'drawing') t = { carry: 0, reach: 1,", "if (To.mode === 'flame') t = { carry: 0, reach: 1,"]) assert.ok(view.includes(piece), 'view.js: ' + piece);
+});
+
 ok('the blueprint shows a building where it would go and waits to be put there (Colin, 19 Nov 2026: "preview a blueprint/holograph ... with an option to confirm placement")', () => {
   const view = read('src/game/view.js'), blue = read('src/game/blueprint.js'), island = read('src/game/island/island.js'), menu = read('src/game/menu.js');
   assert.match(view, /function buildHere\(kind = null\) \{\n    if \(plan && !kind\) \{ planEnd\(\); return; \}/, 'the build key again puts it away');

@@ -52,6 +52,19 @@ import { WATER } from './body.js';
 const BRONZE = new THREE.Color(0.66, 0.44, 0.21), GLAZE = new THREE.Color(0.075, 0.085, 0.105);
 const PLASMA = new THREE.Color(0.55, 0.85, 1.0), GOLD = new THREE.Color(1.0, 0.8, 0.42);
 const levelCol = (l) => new THREE.Color(...LEVELS[Math.max(1, Math.min(5, l)) - 1].colour);
+// IN THE HAND (Colin, 19 Nov 2026: "it'd be nice if the character actually held the weapon in its hand instead of just
+// rendering it close to their hand"). Each weapon's own axes, said in the fist's (the body's right hand, ./bodies/common.js:
+// its fingers -y, its thumb +z, its palm +x), and the point of it that is in the fist: the ring by its rim, standing out
+// to the side, its face to the eye behind; as a shield by its middle, its face along the arm; the bow by its grip, its
+// limbs along the thumb, its curve to the side at rest and its belly along the arm as it is drawn; the bell by its loop, hanging; the spindle by its handle; the torch by its wrapped grip, upright, along the arm
+// when it streams, head down for the jet.
+const handBasis = (x, y, z) => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z)));
+export const IN_HAND = {
+  ring: { q: handBasis([0, 0, 1], [-1, 0, 0], [0, -1, 0]), at: [0, -RING.r, 0] }, shield: { q: handBasis([1, 0, 0], [0, 0, 1], [0, -1, 0]), at: [0, 0, -0.12] },
+  bow: { q: handBasis([0, -1, 0], [0, 0, 1], [-1, 0, 0]), at: [0, 0, 0] }, bowRest: { q: handBasis([-1, 0, 0], [0, 0, 1], [0, 1, 0]), at: [0, 0, 0] }, bell: { q: handBasis([1, 0, 0], [0, 0, 1], [0, -1, 0]), at: [0, 0.24, 0] },
+  spindle: { q: handBasis([1, 0, 0], [0, 0, 1], [0, -1, 0]), at: [0, -0.15, 0] }, torch: { q: handBasis([1, 0, 0], [0, 0, 1], [0, -1, 0]), at: [0, -0.1, 0] },
+  flame: { q: handBasis([1, 0, 0], [0, -1, 0], [0, 0, -1]), at: [0, -0.1, 0] }, jet: { q: handBasis([1, 0, 0], [0, 0, -1], [0, 1, 0]), at: [0, -0.1, 0] },
+};
 // the torch's fire: white at the root, the plasma's blue, violet at its edge; a machine's own fire, white, orange, red
 const F_CORE = new THREE.Color(0.95, 0.98, 1.0), F_BODY = new THREE.Color(0.2, 0.5, 1.0), F_EDGE = new THREE.Color(0.4, 0.15, 0.85);
 const W_CORE = new THREE.Color(1.0, 0.95, 0.8), W_BODY = new THREE.Color(1.0, 0.55, 0.15), W_EDGE = new THREE.Color(0.55, 0.12, 0.05);
@@ -105,6 +118,7 @@ export function createFightArt(scene, { lite = false } = {}) {
 
   // ---- the ring
   const ring = add(new THREE.Group());
+  let heldNow = null, heldAt = [0, 0, 0];   // what was drawn in the fist this frame, and its own point that is in the fist
   const metal = mat(new THREE.MeshStandardMaterial({ color: BRONZE, metalness: 1, roughness: 0.3, envMapIntensity: 1.2 }));
   ring.add(new THREE.Mesh(geo(new THREE.TorusGeometry(RING.r, 0.034, lite ? 8 : 12, lite ? 40 : 72)), metal));
   const plasmaU = { uTime: time, uGlow: { value: 1 }, uCol: { value: PLASMA.clone() } };
@@ -197,6 +211,7 @@ export function createFightArt(scene, { lite = false } = {}) {
   const spindle = add(new THREE.Group()); spindle.visible = false;
   spindle.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.03, 0.03, 0.17, 12)), metal));
   for (const y of [-0.075, 0.075]) { const ch = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.078, 0.078, 0.014, 22)), metal); ch.position.y = y; spindle.add(ch); }
+  { const h = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.02, 0.024, 0.13, 10)), metal); h.position.y = -0.147; spindle.add(h); }          // its handle, to be held by
   const woundMat = mat(new THREE.MeshBasicMaterial({ color: PLASMA.clone().multiplyScalar(1.25) }));
   spindle.add(new THREE.Mesh(geo(new THREE.CylinderGeometry(0.056, 0.056, 0.13, 20)), woundMat));
   const spinGlowMat = mat(new THREE.SpriteMaterial({ map: tex, color: PLASMA.clone().multiplyScalar(0.55), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
@@ -406,9 +421,19 @@ export function createFightArt(scene, { lite = false } = {}) {
         else if (ev.type === 'broken' || ev.type === 'gone') { const d = drawn.get(ev.id); if (d) { drawn.delete(ev.id); if (ev.type === 'broken') breakBot(d, at, ev.v || [0, 0, 0], ev.r || 0.5); else { burst(at, d.col, 12, 3); unmake(d); } } }
       }
     },
-    update(c, dt, camera, body) {
+    // what is drawn in the fist this frame, and where its part in the fist is (for whoever checks: view.js read)
+    held() { if (!heldNow || !heldNow.visible) return null; const n = [['ring', ring], ['bow', bow], ['bell', bell], ['thread', spindle], ['torch', torch]].find(([, o]) => o === heldNow); return n ? { weapon: n[0], at: new THREE.Vector3(...heldAt).applyQuaternion(heldNow.quaternion).add(heldNow.position).toArray().map((v) => Math.round(v * 1000) / 1000) } : null; },
+    // `hand`: the fist's place and turn in the world ({ p, q }, from the body's own bones), and how far the arm reaches
+    // (`reach`, 0..1): what is in hand is drawn in it. Without one, beside the shoulder as before.
+    update(c, dt, camera, body, hand = null) {
       time.value += dt;
       const R = c.ring;
+      const put = (obj, how, extra = null) => {
+        obj.quaternion.copy(hand.q).multiply(how.q); if (extra) obj.quaternion.multiply(extra);
+        obj.position.set(-how.at[0], -how.at[1], -how.at[2]).applyQuaternion(obj.quaternion).add(hand.p);
+        heldNow = obj; heldAt = how.at;
+      };
+      heldNow = null;
       // ---- the ring, and how it is turned
       ring.position.set(R.p[0], R.p[1], R.p[2]);
       const flying = R.mode === 'out' || R.mode === 'back' || R.mode === 'whirl' || R.mode === 'slam', fallen = c.player.down > 0;
@@ -419,6 +444,8 @@ export function createFightArt(scene, { lite = false } = {}) {
         ring.position.set(body.p[0] + Math.sin(body.yaw + 1.2) * 0.8, body.p[1] + 0.05, body.p[2] + Math.cos(body.yaw + 1.2) * 0.8);
         e.set(-Math.PI / 2, 0, R.spin * 0.2); ring.quaternion.setFromEuler(e);
       } else if (flying) { e.set(-Math.PI / 2, 0, R.spin * 1.4); ring.quaternion.setFromEuler(e); }
+      else if (hand && guardAmt > 0.02) put(ring, IN_HAND.shield, new THREE.Quaternion().setFromAxisAngle(Z, R.spin));     // a shield on the arm, put out where the eye looks
+      else if (hand) put(ring, IN_HAND.ring);                                                                          // in the fist by its rim
       else if (guardAmt > 0.02) {
         // the shield faces where the eye looks
         q.setFromUnitVectors(Z, V3.set(Math.sin(c.faceYaw), 0, Math.cos(c.faceYaw))); ring.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(Z, R.spin));
@@ -433,8 +460,8 @@ export function createFightArt(scene, { lite = false } = {}) {
         const ringing = Bl.mode === 'ringing';
         swingV += -swing * 60 * dt - swingV * 5 * dt; swing += swingV * dt;
         shiver += ((ringing ? 0.2 + 0.8 * Bl.power : 0) - shiver) * (1 - Math.exp(-12 * dt));
-        bell.position.set(R.p[0], R.p[1] + 0.05, R.p[2]);
-        q.setFromAxisAngle(up, body.yaw); bell.quaternion.copy(q);
+        if (hand) put(bell, IN_HAND.bell);
+        else { bell.position.set(R.p[0], R.p[1] + 0.05, R.p[2]); q.setFromAxisAngle(up, body.yaw); bell.quaternion.copy(q); }
         bellBody.rotation.set(swing * 0.35 + Math.sin(time.value * 61) * 0.05 * shiver, 0, Math.sin(time.value * 47) * 0.05 * shiver);
         clapper.position.z = Math.sin(swing) * 0.05;
         bellGlowMat.opacity = 0.3 + 0.7 * shiver; bellGlow.scale.setScalar(0.25 + 0.5 * shiver);
@@ -464,7 +491,8 @@ export function createFightArt(scene, { lite = false } = {}) {
         drawAmt += ((drawing ? 0.15 + 0.85 * W.draw : 0) - drawAmt) * (1 - Math.exp(-14 * dt));
         string(drawAmt); nocked.visible = drawing; bowGlowMat.opacity = drawing ? 0.35 + 0.6 * W.draw : 0;
         bowGlow.scale.setScalar(0.25 + 0.5 * W.draw);
-        if (drawing) {
+        if (hand) put(bow, { q: IN_HAND.bowRest.q.clone().slerp(IN_HAND.bow.q, Math.min(1, hand.reach || 0)), at: IN_HAND.bow.at }, new THREE.Quaternion().setFromAxisAngle(X1.set(1, 0, 0), -0.6 * drawAmt));   // in the fist; drawn, put out along the eye's line, canted
+        else if (drawing) {
           // turned to where the eye looks, its forward along the eye's line, its limbs canted a little to the right across
           // it (as many archers hold it; upright, from behind, it is only a line)
           const f = camera.getWorldDirection(V3), up0 = new THREE.Vector3(0, 1, 0).addScaledVector(f, -f.y).normalize();
@@ -511,8 +539,8 @@ export function createFightArt(scene, { lite = false } = {}) {
       const busy = Th.mode === 'spinning' ? 0.3 + Th.power : Th.mode !== 'held' || Th.snare != null ? 1.3 : 0.12;
       if (spindle.visible) {
         spun += dt * busy * 18;
-        spindle.position.set(R.p[0], R.p[1] + 0.02, R.p[2]);
-        q.setFromAxisAngle(up, body.yaw); spindle.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2 + 0.35));
+        if (hand) put(spindle, IN_HAND.spindle);
+        else { spindle.position.set(R.p[0], R.p[1] + 0.02, R.p[2]); q.setFromAxisAngle(up, body.yaw); spindle.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2 + 0.35)); }
         spindle.children[3].rotation.y = spun;
         spinGlowMat.opacity = 0.3 + 0.6 * Math.min(1, busy); spinGlow.scale.setScalar(0.22 + 0.22 * Math.min(1, busy));
       }
@@ -520,7 +548,7 @@ export function createFightArt(scene, { lite = false } = {}) {
       const fTo = snared ? snared.p : Th.mode === 'line' ? Th.anchor : (Th.mode === 'out' || Th.mode === 'circle') ? Th.tip : null;
       filament.visible = !!fTo && threadIn && !fallen;
       if (filament.visible) {
-        const from = [R.p[0], R.p[1], R.p[2]], T = time.value, taut = Th.mode === 'line' || !!snared;
+        const from = hand && spindle.visible ? [spindle.position.x, spindle.position.y, spindle.position.z] : [R.p[0], R.p[1], R.p[2]], T = time.value, taut = Th.mode === 'line' || !!snared;
         const L = Math.hypot(fTo[0] - from[0], fTo[1] - from[1], fTo[2] - from[2]);
         const pt = (u) => {
           // the last third of it wound round a snared bot
@@ -576,8 +604,12 @@ export function createFightArt(scene, { lite = false } = {}) {
       const To = c.torch;
       torch.visible = c.weapon === 'torch' && guardAmt < 0.5 && !fallen;
       if (torch.visible) {
-        torch.position.set(R.p[0], R.p[1] - 0.04, R.p[2]);
-        if (To.mode === 'flame' && To.from) torch.quaternion.setFromUnitVectors(up, V3.set(To.dir[0], To.dir[1], To.dir[2]));
+        if (hand) {
+          // in the fist: upright; streaming, along the arm as it reaches; for the jet, head down
+          const how = To.mode === 'jet' ? IN_HAND.jet : IN_HAND.torch;
+          if (To.mode === 'flame') { const k = Math.min(1, hand.reach || 0); put(torch, { q: how.q.clone().slerp(IN_HAND.flame.q, k), at: how.at }); } else put(torch, how);
+        } else torch.position.set(R.p[0], R.p[1] - 0.04, R.p[2]);
+        if (hand) { /* placed */ } else if (To.mode === 'flame' && To.from) torch.quaternion.setFromUnitVectors(up, V3.set(To.dir[0], To.dir[1], To.dir[2]));
         else if (To.mode === 'jet') torch.quaternion.setFromUnitVectors(up, V3.set(0, -1, 0));
         else { q.setFromAxisAngle(up, body.yaw); torch.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(X1.set(1, 0, 0), 0.22)); }
         const head = HEAD.set(0, 0.37, 0).applyQuaternion(torch.quaternion).add(torch.position), hp = [head.x, head.y, head.z];
