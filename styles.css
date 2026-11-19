@@ -6346,7 +6346,8 @@ body:has(#game-body:not([hidden])) .game-touch { display: none; }
   .game-fixed { padding: 0 6px; font-size: 0.72rem; text-align: center; }
   /* on a phone the foot is the thumbs': what the void says is said under the bar */
   .game-hint { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 16px); }
-  .game-plan { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - 20px); padding: 8px; }
+  /* inside the frame's hole, as the hint is: the rails' glyphs stay clear of it (its buttons wrap to a second row) */
+  .game-plan { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 12px); padding: 8px; }
   /* …and the hole is a slot there: the buttons stand one over the other at its right edge, jump lowest */
   .game-touch { flex-direction: column-reverse; align-items: center; gap: 10px; }
   .game-tfight { align-self: flex-end; }
