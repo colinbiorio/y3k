@@ -43,7 +43,8 @@ export const SKIFF = {
   hover: 1.0,                       // m: its middle over the water where it is put
   seat: [0, 0.02, -0.55],           // where the pilot's feet are reckoned from (its hips sit a little over), in its frame
   speed: 24, boost: 46, back: 0.4, slide: 8, climb: 9,
-  accel: 18, turn: 2.6,             // m/s/s toward the speed asked; rad/s toward the eye's way
+  accel: 24, turn: 2.6,             // m/s/s toward the speed asked; rad/s toward the eye's way at most
+  spin: 22,                         // rad/s/s: how quickly its turning comes on and goes off (HANDLING, below)
   board: 3.2,                       // m: within this of its seat, the board key takes it (it comes down in reach)
   put: [0, 3.4],                    // m: where it is put from the body: to its left, and ahead
   edges: [[1.3, -0.18, -0.95], [-1.3, -0.18, -0.95]],   // what else of it meets what is solid (its outriggers' tips)
@@ -56,7 +57,7 @@ export const DART = {
   seat: [0, -0.25, 1.7],            // the front seat of the two (the pilot's), low under the canopy; the other behind it
   rear: [0, -0.25, 0.35],
   speed: 42, boost: 96, back: 0.3, slide: 10, climb: 14,
-  accel: 30, turn: 2.0,
+  accel: 35, turn: 2.2, spin: 12,
   board: 3.6, put: [2.6, -1.3],     // beside the body, its cockpit at the body's shoulder
   edges: [[2.95, 0.08, -3.7], [-2.95, 0.08, -3.7]],   // its wingtips
   view: 13, reach: 2.5,
@@ -65,8 +66,8 @@ export const DHOW = {
   length: 28, beam: 7,
   keel: 1.8, hover: 3.0,
   seat: [0, 4.75, -8.2],            // the helm: on the stern cabin's roof, at its front, looking over the deck and the sails
-  speed: 20, boost: 38, back: 0.25, slide: 3, climb: 4,
-  accel: 6, turn: 0.8,              // heavy: slow to come up to speed, slow to turn
+  speed: 30, boost: 64, back: 0.3, slide: 6, climb: 8,
+  accel: 19, turn: 1.35, spin: 4.5, // heavy: longer to come up to speed and into a turn than the small ones, never sluggish
   board: 9, reach: 8.5, put: [8.5, 8], // beside the body, its stern alongside; boarded from the water, up to the helm
   edges: [[3.4, 0.5, 0], [-3.4, 0.5, 0], [0, 15.5, 3], [0, 10.5, -4.5], [0, 2.8, 13.6], [0, 3, -13.8]],   // its sides, mastheads, prow, stern
   view: 34,
@@ -82,8 +83,8 @@ export const ARK = {
   dome: ARK_DOME, engines: ARK_ENGINES,
   keel: ARK_RIM + 0.4, hover: 16,       // its ring's foot rides clear of the water
   seat: [0, 3.65, 29.4],            // the helm: inside the dome, looking out ahead over the prow
-  speed: 28, boost: 70, back: 0.2, slide: 2.5, climb: 5,
-  accel: 4, turn: 0.5,              // the heaviest yet: the slowest to come up to speed and to turn
+  speed: 46, boost: 110, back: 0.3, slide: 8, climb: 10,
+  accel: 23, turn: 0.95, spin: 2.4, // heavier: longer still to come up to speed and into a turn
   // put ahead of the body, pointing its way, far enough off to be seen whole (its ring's top inside the eye's view); boarded
   // from the water near its stern, from where it was called: the board key lifts the body up into the dome
   door: [0, 0, -40], board: 32, reach: 22, put: [0, 68],
@@ -108,8 +109,8 @@ export const CARRIER = {
   terraces: CARRIER_TERRACES, masts: CARRIER_MASTS, towers: CARRIER_TOWERS, engines: CARRIER_ENGINES,
   keel: 21, hover: 30,              // its lowest terrace's underside rides clear of the water
   seat: [0, 30.6, 108],             // the helm: in a pavilion at the front of the top terrace, looking out over the prow
-  speed: 18, boost: 45, back: 0.15, slide: 1.5, climb: 3,
-  accel: 1.8, turn: 0.2,            // the slowest of all, a temple under way
+  speed: 72, boost: 170, back: 0.3, slide: 12, climb: 14,
+  accel: 29, turn: 0.7, spin: 1.4,  // the weightiest, a temple under way: the longest to its speed and into a turn, and quick enough for its size
   // put far ahead of the body, pointing its way, so the eye sees it whole (its sails' tops inside the view); boarded from
   // anywhere within a few hundred metres of its stern: the board key lifts the body up to its helm
   door: [0, 0, -212], board: 280, reach: 140, put: [0, 450],
@@ -122,6 +123,13 @@ export const CARRIER = {
   view: 540,
 };
 export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW, ark: ARK, carrier: CARRIER };
+// HOW EACH SIZE HANDLES (Colin, 19 Nov 2026: "the larger the ship gets, the harder it is to move"). A bigger ship is
+// weightier, never sluggish: faster across the ground (it has its own length to cover: the carrier crosses its 400 m in
+// under six seconds), longer to come up to its speed (a second for the skiff, two and a half for the carrier) and
+// longer into a turn, its turning coming on and going off at its `spin` (so it swings into a turn and out of it onto
+// the way the eye looks, never past it: a quarter turn takes the skiff 0.7 s, the carrier 2.7 s). It slows harder than
+// it speeds up (BRAKE): let go at its speed, every one of them is still within two seconds.
+export const BRAKE = 1.6;
 const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -138,7 +146,7 @@ export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   /
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
   const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side;
-  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, bank: 0, tilt: 0, thrust: 0, t: 0 };
+  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0 };
 }
 
 // One step of a ship under the hands (inp: move [right, forward], yaw and pitch of the eye, up, down, sprint), over a
@@ -147,9 +155,13 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const S = kindOf(s);
   s.t += dt;
   const was = s.yaw;
-  // its heading turns toward where the eye looks (the eye looks along −Z at its yaw 0: the way a body faces is that plus π)
-  const want = wrap(inp.yaw + Math.PI);
-  s.yaw = wrap(s.yaw + toward(0, wrap(want - s.yaw), S.turn * dt));
+  // its heading turns toward where the eye looks (the eye looks along −Z at its yaw 0: the way a body faces is that plus
+  // π): as fast as its turn, but never faster than lets its spin stop it on that way, and the turning comes on and goes
+  // off at its spin
+  const want = wrap(inp.yaw + Math.PI), err = wrap(want - s.yaw), spin = S.spin || S.turn * 10;
+  s.spin = toward(s.spin || 0, Math.sign(err) * Math.min(S.turn, Math.sqrt(2 * spin * Math.abs(err))), spin * dt);
+  if (Math.abs(err) <= Math.abs(s.spin * dt) + 1e-9 && s.spin * err >= 0) { s.yaw = want; s.spin = 0; }
+  else s.yaw = wrap(s.yaw + s.spin * dt);
   const f = ahead(s), l = leftOf(s), mx = inp.move?.[0] || 0, mz0 = inp.move?.[1] || 0, mz = mz0 < 0 ? mz0 * S.back : mz0;
   // (the eye's pitch climbs it only past a little either way: the eye's own rest, a little down, flies it level)
   const pitch = Math.sign(inp.pitch || 0) * Math.max(0, Math.abs(inp.pitch || 0) - 0.15);
@@ -157,7 +169,7 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const lift = ((inp.up ? 1 : 0) - (inp.down ? 1 : 0)) * S.climb;
   const target = [f[0] * cp * mz * top - l[0] * mx * S.slide, sp * mz * top + lift, f[2] * cp * mz * top - l[2] * mx * S.slide];
   const a = S.accel * dt * (inp.sprint ? 1.6 : 1);
-  for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], a);
+  for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], (Math.abs(target[i]) < Math.abs(s.v[i]) || target[i] * s.v[i] < 0 ? BRAKE : 1) * a);
   // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), looked at every fifth of a
   // metre of its way, so a quick ship does not pass through a thin wall between two steps
   const h = S.length * 0.48, pts = [[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], ...S.edges];

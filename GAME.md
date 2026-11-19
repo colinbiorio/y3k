@@ -143,6 +143,32 @@ and the hint pill over the bottom bar.
   clear of the chat bar, the grips, the air mark and the thumbs' buttons, or
   under the bar's rows on a phone.
 
+### The same round: ships, light speed, solid decks, keys
+
+The rest of what he said that day:
+
+> let's work on the world -- one thing i definitely noticed was that the larger the ship gets, the harder it is to move. i also have this idea that when holding spacebar, the speed should get exponentially faster until you reach the speed of light. obviously not really gonna work in our tiny simulated environment, but just give us a handy way to enter lightspeed travel for now -- like you can go as far as you want in any direction but once you release spacebar you'll just end up back at the island. also, the water levels definitely have a visual glitch. ships are able to be flown through and not stood on. ... double spacebar to drop down from flying would be nice. ... keyboard shortcuts for building, ships, and weapons. ... always prioritize the intersection of visual appeal and usability.
+
+- **Every ship handles** (done). A bigger ship is weightier, never sluggish:
+  faster across the water (it has its own length to cover), longer to its
+  speed (1.0 s the skiff, 1.2 the dart, 1.6 the dhow, 2.0 the ark, 2.5 the
+  carrier; the carrier took 10 s before), longer into a quarter turn (0.7 s
+  to 2.7 s; it was 0.6 to 7.9), its turning coming on and going off at its
+  `spin`, so it swings onto the way the eye looks and never past it; it slows
+  harder than it speeds up, and let go at its speed every one is still within
+  two seconds (1.6 s the carrier; it was 10). Speeds: skiff 24, dart 42, dhow
+  30, ark 46, carrier 72 m/s (opened up 46, 96, 64, 110, 170).
+- **The island's water** (done, with one thing not found). The sea was the
+  last see-through thing drawn, so a flame, a glow or a pane of glass over the
+  water was drawn under it (the torch's jet looked sunk); it is now the first.
+  Its sheet was two triangles 120 km across; it is rings round the eye now
+  (`ground.js` seaSheet: 96 round, 52 out, each 1.25 times the last, to 70 km;
+  near the eye no triangle is wider than ten metres). His picture showed the
+  lagoon's floor with no water over it at all (its coral heads, the dark
+  blotches); that was not made again here (Chromium on Metal, on Apple's
+  OpenGL and in software, at the arrival beach's shallows at dusk, standing
+  and in the torch's jet). If it shows again: which browser, and where.
+
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
 Colin: "let's pick a random small island on earth, generate the entire

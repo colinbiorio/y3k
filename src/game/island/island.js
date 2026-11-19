@@ -14,7 +14,7 @@
 // Three lights, as the void's are named: pale (a clear day), dusk, night.
 import * as THREE from 'three';
 import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
-import { SEA_FLOOR } from './ground.js';
+import { SEA_FLOOR, seaSheet } from './ground.js';
 import { vnoise } from './life.js';
 import { createLife } from './creatures.js';
 
@@ -57,6 +57,14 @@ function groundColour(h, s, n, out) {
   }
   // to the light's own units (the drawing works in linear light)
   out[0] = r ** 2.2 * 2.2; out[1] = g ** 2.2 * 2.2; out[2] = b ** 2.2 * 2.2;
+}
+
+// The sea's sheet (ground.js seaSheet: rings round the eye, all at y = 0, facing up), as a mesh.
+function seaRings() {
+  const { pos, idx } = seaSheet(), g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
 }
 
 // One grid as a mesh: the cells any corner of which is above `deepest`, as the two triangles ground.js stands on
@@ -219,8 +227,12 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       }`,
   });
   Object.assign(seaMat.uniforms, seaU); mats.push(seaMat);
-  const seaGeo = new THREE.PlaneGeometry(120000, 120000, 1, 1).rotateX(-Math.PI / 2); geos.push(seaGeo);
-  const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = 2; sea.frustumCulled = false;
+  // the sheet is rings round the eye, fine near it and coarse far off (it was two triangles 120 km across, whose
+  // depth and places a browser may draw only roughly where they are near the eye), and it moves with the eye (its
+  // colour is the world's: nothing in it is the mesh's own). It is the first see-through thing drawn, so what stands
+  // over the water (a flame, a glow, a canopy of glass) is drawn over it and not under it.
+  const seaGeo = seaRings(); geos.push(seaGeo);
+  const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = -1; sea.frustumCulled = false;
   scene.add(sea);
 
   // ---- what grows and lives there (creatures.js, from life.js)
@@ -260,6 +272,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     update(t, camera) {
       time.value = t;
       dome.position.copy(camera.position);
+      sea.position.set(camera.position.x, 0, camera.position.z);
       key.target.position.set(camera.position.x, 0, camera.position.z);
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
     },
