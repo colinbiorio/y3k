@@ -55,7 +55,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship', 'light'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship', 'light', 'keys'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -643,6 +643,33 @@ try {
     await key.press('KeyB'); r = await until((r) => !hall(r), 8000);
     check('the key inside it takes the hall down', !hall(r), r.world);
     check('the hall\'s frames keep up', out.frames.hall.median < 20, out.frames.hall);
+  }
+
+  if (scene === 'keys') {
+    // one key each (Colin, 19 Nov 2026: "keyboard shortcuts for building, ships, and weapons"): the weapons on 1 to 5, the
+    // buildings on 6 to 0 (each shown as its blueprint), the ships on Y U I O P
+    await key.press('Digit2'); await sleep(300); let r = await read();
+    check('2 takes the bow in hand', r.fight.weapon === 'bow', r.fight.weapon);
+    await key.press('Digit5'); await sleep(300); r = await read();
+    check('5 the torch', r.fight.weapon === 'torch', r.fight.weapon);
+    await page.locator('#game-weapons').click(); await sleep(250);
+    const caps = await page.locator('#game-weapon-list .game-cap').allTextContents();
+    check('the weapons list shows each one\'s key', caps.join() === '1,2,3,4,5', caps);
+    await shot('01-weapons-keys'); await page.locator('#game-weapons').click(); await sleep(250);
+    await key.press('Digit7'); r = await until((r) => r.plan?.kind === 'house', 3000);
+    check('7 shows the house\'s blueprint', !!r, r?.plan);
+    await key.press('Digit8'); r = await until((r) => r.plan?.kind === 'workshop', 3000);
+    check('8 while it is shown shows the workshop\'s instead', !!r, r?.plan);
+    await key.press('Digit3'); await sleep(250); r = await read();
+    check('and a weapon\'s key waits while a blueprint is shown', r.fight.weapon === 'torch' && r.plan?.kind === 'workshop', { weapon: r.fight.weapon, plan: r.plan });
+    await key.press('Enter'); r = await until((r) => r.world.buildings.some((b) => b.kind === 'workshop'), 3000);
+    check('Enter puts it up', !!r && !r.plan, r?.world.buildings);
+    await key.press('KeyU'); r = await until((r) => r.world.ships[0]?.kind === 'dart', 3000);
+    check('U calls the dart down', !!r, r?.world.ships);
+    await key.press('KeyM'); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
+    const rows = await page.evaluate(() => ['take_ring', 'build_hall', 'call_carrier'].map((id) => document.querySelector(`#game-menu .game-key[data-act="${id}"][data-slot="0"]`)?.textContent?.trim() || ''));
+    check('the controls sheet lists them, with their keys', rows.join() === '3,0,P', rows);
+    await shot('02-controls-keys'); await key.press('Escape'); await sleep(300);
   }
 
   if (scene === 'light') {

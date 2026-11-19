@@ -49,6 +49,22 @@ export const GLYPHS = {
   level: '<path d="M2 15.5c2.6 0 3.4-4 6-4h8c2.6 0 3.4 4 6 4M2 20h20"/><path d="M8 7.5h8" />',
   platform: '<path d="M3 10.5h18v3.5H3z"/><path d="M5.5 14v6.5M18.5 14v6.5M12 14v6.5"/>',
   key: '<rect x="2.8" y="6" width="18.4" height="12" rx="3"/><path d="M7 10.2h1M11.5 10.2h1M16 10.2h1M8 14h8"/>',
+  // one key each (input.js SHORT): the five weapons, the five buildings, the five ships, each drawn as itself
+  take_thread: '<rect x="8.5" y="4" width="7" height="12" rx="1.6"/><path d="M8.5 7.5h7M8.5 12.5h7M15.5 14c3.5 1.5 4.5 4 3 6.5"/>',
+  take_bow: '<path d="M8 3c6.5 4 6.5 14 0 18M8 3v18"/><path d="M3.5 12h15M15.5 9l3 3-3 3"/>',
+  take_ring: '<circle cx="12" cy="12" r="7.6"/><circle cx="12" cy="12" r="3"/>',
+  take_bell: '<path d="M6 17v-5.5a6 6 0 0 1 12 0V17M4 17h16M10.5 20.2h3M12 3.2v2.2"/>',
+  take_torch: '<path d="M10.6 21h2.8l.9-9.5h-4.6z"/><path d="M12 3c2.8 2.6 3.2 4.8 1.8 6.7h-3.6C8.8 7.8 9.2 5.6 12 3z"/>',
+  build_shelter: '<path d="M3 19h18M5.2 19a6.8 6.8 0 0 1 13.6 0"/><path d="M10.4 19v-2.6a1.6 1.6 0 0 1 3.2 0V19"/>',
+  build_house: '<path d="M3.5 11.5L12 5l8.5 6.5M6 10.2V17h12v-6.8"/><path d="M7.5 17v3M16.5 17v3M10.6 17v-3.4h2.8V17"/>',
+  build_workshop: '<path d="M2.5 19h19M3.5 19v-5a2.8 2.8 0 0 1 5.6 0v5M9.2 19v-5a2.8 2.8 0 0 1 5.6 0v5M14.9 19v-5a2.8 2.8 0 0 1 5.6 0v5"/>',
+  build_tower: '<path d="M7 21h10M8.6 21V9.5h6.8V21"/><path d="M8.6 9.5a3.4 3.4 0 0 1 6.8 0"/><path d="M12 13v2.2"/>',
+  build_hall: '<path d="M2.5 20h19M4 20v-4h16v4M6.5 16v-4h11v4M9.2 12V8.6h5.6V12"/>',
+  call_skiff: '<path d="M2.5 13c3.2 4 15.8 4 19 0z"/><path d="M14.5 13v-3h3.5"/>',
+  call_dart: '<path d="M2.5 12l7.5-3h7.5l4 3-4 3H10z"/><path d="M10.5 9L8 4.8M10.5 15L8 19.2"/>',
+  call_dhow: '<path d="M3 15.5h18l-2.6 4H5.6z"/><path d="M11 15.5V4l7.2 9.5H11"/>',
+  call_ark: '<path d="M2.5 12h17"/><ellipse cx="10.5" cy="12" rx="2.6" ry="7.4"/><circle cx="19.6" cy="12" r="1.9"/>',
+  call_carrier: '<path d="M2 19.5h20l-2-3.2H4z"/><path d="M5.5 16.3L7 13h10l1.5 3.3M8.2 13l1-3h5.6l1 3"/>',
 };
 export const glyphOf = (id) => GLYPHS[id] || GLYPHS.key;
 // the drawing, as the page shows it (and the pour reads it)

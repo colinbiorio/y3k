@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (afternoon) — **One key each: the weapons on 1 to 5, the
+  buildings on 6 to 0, the ships on Y U I O P** (`src/game/input.js` SHORT,
+  DOES; `src/game/view.js`; `src/game/glyphs.js`; `styles.css` .game-cap;
+  `scripts/void-smoke.mjs keys`; `test/game.test.mjs`). Colin, 19 Nov:
+  "keyboard shortcuts for building, ships, and weapons." A row of the keyboard
+  for each, in the order the bar's lists give them: 1 the thread, 2 the bow, 3
+  the ring, 4 the bell, 5 the torch; 6 the shelter, 7 the house, 8 the
+  workshop, 9 the tower, 0 the hall (each shown as its blueprint, and while
+  one is shown, that one instead; Enter puts it up); Y the skiff, U the dart,
+  I the dhow, O the ark, P the carrier. They are fifteen more actions in the
+  one table the controls sheet reads, each in its card (weapons, building,
+  ships) with a glyph of its own, changeable like any other; each item of
+  the bar's lists shows its key. While a blueprint is shown its 1 and 2 are
+  its own (level or platform), so the weapons' keys wait.
+
 - **2026-11-19** (afternoon) — **The blueprint's panel inside the frame on a
   phone** (`styles.css`). Looked at on the live site at 390 x 844: its ends
   ran under the side rails' glyphs; it keeps to the frame's hole now, as the

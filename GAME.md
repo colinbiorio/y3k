@@ -251,6 +251,15 @@ The rest of what he said that day:
   Rough: the ark's ring is 16 boxes, so its rim is a little square to the
   feet; the hangar mouths are not yet ways in; arrows and the ring still pass
   through ships (only the body is kept out).
+- **One key each** (done). The weapons on 1 to 5 (thread, bow, ring, bell,
+  torch), the buildings on 6 to 0 (shelter, house, workshop, tower, hall:
+  each shows its blueprint, and while one is shown that one instead, Enter
+  puts it up), the ships on Y U I O P (skiff, dart, dhow, ark, carrier): the
+  order of the bar's lists, which now show each item's key. Fifteen actions
+  in `input.js`'s one table (`SHORT`; `DOES` says what each does), each in its
+  card of the controls sheet with its own glyph, changeable like any other.
+  While a blueprint is shown, only a building's key acts (its 1 and 2 are
+  the blueprint's: level or platform).
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
