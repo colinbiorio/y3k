@@ -6178,6 +6178,29 @@ body.in-void:not(.airden) .chat-air { visibility: hidden; }
   color: #dfe3ea; pointer-events: none; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
   backdrop-filter: blur(18px) saturate(1.3); }
 .game-hint[hidden], .game-touch[hidden], .game-tbtn[hidden] { display: none; }
+/* THE BLUEPRINT'S PANEL (view.js planPanel; Colin, 19 Nov 2026: "an option to confirm placement"): where the hint stands
+   (seatHint measures for it), what the building is and why it may not go up there, its keys; on uneven ground the two
+   ways to make it fit. Its edge in the blueprint's own colour: the plasma's blue, amber, red. */
+.game-plan { position: absolute; left: 50%; translate: -50% 0; z-index: 3; bottom: var(--hint-b, 150px); display: grid; gap: 8px; justify-items: center;
+  width: max-content; max-width: min(94vw, 640px); padding: 10px 12px; border-radius: 18px; color: #e6ebf2;
+  background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal; backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 0 0 1px rgba(140, 215, 255, 0.32), 0 0 22px rgba(110, 200, 255, 0.16); }
+.game-plan[hidden] { display: none; }
+.game-plan[data-did="steep"] { box-shadow: 0 0 0 1px rgba(255, 196, 110, 0.42), 0 0 22px rgba(255, 180, 90, 0.16); }
+.game-plan[data-did="blocked"] { box-shadow: 0 0 0 1px rgba(255, 118, 108, 0.45), 0 0 22px rgba(255, 100, 90, 0.16); }
+.game-plan-say { margin: 0; max-width: 560px; font-size: 0.8rem; line-height: 1.35; text-align: center; color: #dfe4eb; }
+.game-plan-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.game-plan-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 6px 12px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06); color: #e9eef4; font: inherit; font-size: 0.82rem; cursor: pointer; }
+.game-plan-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.game-plan-btn:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.85); outline-offset: 2px; }
+.game-plan-btn > svg { flex: none; filter: drop-shadow(0 1px 0.5px rgba(0, 0, 0, 0.4)); }
+.game-plan-btn.main { background: rgba(120, 210, 255, 0.2); border-color: rgba(150, 225, 255, 0.6); color: #f4fbff; }
+.game-plan[data-did="steep"] .game-plan-btn.main { background: rgba(255, 196, 110, 0.2); border-color: rgba(255, 205, 130, 0.62); }
+.game-plan-btn.on { border-color: rgba(255, 205, 130, 0.8); background: rgba(255, 196, 110, 0.16); color: #fff6e6; }
+.game-plan-btn.off { opacity: 0.42; }
+.game-plan-btn kbd { font: inherit; font-size: 0.68rem; padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); color: #c9d2dc; background: rgba(0, 0, 0, 0.2); }
+@media (pointer: coarse) { .game-plan-btn { min-height: 44px; } }
 /* the thumb's buttons stand inside the panel's hole (on a phone its edge and the rail's glyphs are 58px in) */
 .game-touch { position: absolute; right: calc(var(--hole-r, 0px) + 12px); bottom: calc(var(--hole-b, 0px) + 30px); z-index: 2;
   display: flex; align-items: flex-end; gap: 12px; }
@@ -6323,6 +6346,7 @@ body:has(#game-body:not([hidden])) .game-touch { display: none; }
   .game-fixed { padding: 0 6px; font-size: 0.72rem; text-align: center; }
   /* on a phone the foot is the thumbs': what the void says is said under the bar */
   .game-hint { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 16px); }
+  .game-plan { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - 20px); padding: 8px; }
   /* …and the hole is a slot there: the buttons stand one over the other at its right edge, jump lowest */
   .game-touch { flex-direction: column-reverse; align-items: center; gap: 10px; }
   .game-tfight { align-self: flex-end; }

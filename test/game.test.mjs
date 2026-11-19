@@ -34,6 +34,7 @@ import { MODE_LINES, cellText } from '../src/game/menu.js';
 import { GLYPHS, GROUPS, groupOf, glyphOf, glyphSvg } from '../src/game/glyphs.js';
 import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
+import * as PL from '../src/game/plinth.js';
 import * as HO from '../src/game/house.js';
 import * as WO from '../src/game/workshop.js';
 import * as TO from '../src/game/tower.js';
@@ -3367,6 +3368,79 @@ ok('on the island a house stands with its way in at the ground\'s height, is wal
   assert.equal(r2.did, 'steep'); assert.ok(r2.fall > 1.4);
   // and in the void, as before: at the water's height
   const v = createWorld(), vb = B.createBody({ world: v, yaw: 0 }); assert.equal(v.build(vb, 'house').b.y, 0);
+});
+
+ok('uneven ground is offered levelling or a platform instead of a refusal (Colin, 19 Nov 2026), and either lasts as long as its building', () => {
+  // the pad's rounded rectangle, and the eased edge of a levelling: the level on the pad, the ground as it was past its edge, nothing sudden between
+  const pad = PL.PADS.house;
+  assert.ok(PL.padDistance(pad, 0, 0) < 0 && PL.padDistance(pad, pad[1] + 2, 0) > 1.9 && Math.abs(PL.padDistance(pad, pad[1], 0)) < 1e-9);
+  const f = { x: 0, z: 0, yaw: 0.4, pad, level: 5, blend: 6, reach: 60, k: 1 };
+  near(PL.levelled(f, 0, 0, 9), 5, 1e-12, 'on the pad: the level');
+  const [ox, oz] = PL.toWorld(f, pad[1] + 6.01, 0); near(PL.levelled(f, ox, oz, 9), 9, 1e-12, 'past the edge: the ground as it was');
+  let worst = 0; for (let d = 0; d < 6; d += 0.05) { const [ax, az] = PL.toWorld(f, pad[1] + d, 0), [bx, bz] = PL.toWorld(f, pad[1] + d + 0.05, 0); worst = Math.max(worst, Math.abs(PL.levelled(f, bx, bz, 9) - PL.levelled(f, ax, az, 9)) / 0.05); }
+  assert.ok(worst < 1.05, 'eased: at most ' + worst.toFixed(2) + ' rise over run for 4 m over 6');
+  near(PL.levelled({ ...f, k: 0 }, 0, 0, 9), 9, 1e-12, 'not yet begun: as it was');
+  const w = createWorld(); w.ground = islandGround;
+  try {
+    const a = SHAPE.arrive;
+    // facing inland from the beach the ground rises behind: refused as before, and both ways offered
+    const up = B.createBody({ world: w, yaw: Math.PI / 2 }); up.p = [a.x + 30, islandGround.floor(a.x + 30, a.z), a.z];
+    const r0 = w.build(up, 'house'); assert.equal(r0.did, 'steep'); assert.equal(r0.rises, true); assert.equal(r0.level, true); assert.equal(r0.platform, true);
+    assert.equal(w.buildings.length, 0, 'refused: nothing put up');
+    // LEVELLED: the earth moved first (GROW seconds), then the house goes up on its level
+    const r = w.build(up, 'house', { base: 'level' });
+    assert.equal(r.did, 'up'); assert.equal(r.base, 'level');
+    const b = r.b, F = b.flat; assert.ok(F && islandGround.flats.includes(F), 'the ground keeps the levelling');
+    near(b.y, F.level, 1e-12, 'the house at its level'); near(b.t, -PL.GROW, 1e-12, 'its clock waits for the ground');
+    const [cx, cz] = PL.toWorld(b, 0, -3), before = islandGround.base(cx, cz);
+    assert.ok(before - F.level > 0.4, 'the ground under its back rose above the level: ' + (before - F.level).toFixed(2));
+    w.update(PL.GROW + 0.05);
+    near(F.k, 1, 1e-9, 'the earth all moved');
+    for (const [lx, lz] of [[0, 0], [-3, -4.5], [3, -4.5], [3, 4.5], [-3, 4.5], [0, 5.1], [0, -3]]) { const [x, z] = PL.toWorld(b, lx, lz); near(islandGround.height(x, z), F.level, 1e-9, `level at (${lx}, ${lz})`); }
+    const [fx, fz] = PL.toWorld(b, 0, pad[2] - F.blend - 0.5); near(islandGround.height(fx, fz), islandGround.base(fx, fz), 1e-9, 'past the eased edge: the ground as it was');
+    // what stands on it stands on the level: a body set down on its pad is on the level
+    const s = B.createBody({ world: w, yaw: 0 }); const [px, pz] = PL.toWorld(b, 2.5, -4.3); s.p = [px, F.level + 0.5, pz]; s.was = [...s.p];
+    for (let t = 0; t < 1; t += B.STEP) { s.was = [...s.p]; B.stepBody(s, { move: [0, 0], yaw: 0, pitch: 0 }, B.STEP); }
+    assert.ok(Math.abs(s.p[1] - F.level) < 0.02 || s.p[1] >= F.level, 'stood on the levelled ground: ' + s.p[1].toFixed(3) + ' over ' + F.level.toFixed(3));
+    // taken down, the ground goes back as it comes down, and the levelling with it
+    b.down = 0; w.update(0.75); assert.ok(F.k > 0 && F.k < 1, 'going back: ' + F.k);
+    for (let i = 0; i < 40 && w.buildings.length; i++) w.update(0.5);
+    assert.equal(w.buildings.length, 0); assert.ok(!islandGround.flats.includes(F), 'gone with it');
+    near(islandGround.height(cx, cz), before, 1e-9, 'the ground as it was');
+    // ON A PLATFORM where the ground falls away (Mount Lidgbird's flank): its top over the highest ground under it, its steps down
+    const lid = SHAPE.peaks.find((p) => p.name === 'Mount Lidgbird');
+    const st = B.createBody({ world: w, yaw: 0 }); st.p = [lid.x + 300, islandGround.height(lid.x + 300, lid.z), lid.z];
+    const q0 = w.build(st, 'shelter'); assert.equal(q0.did, 'steep'); assert.ok(q0.platform, 'a platform is offered');
+    const q = w.build(st, 'shelter', { base: 'platform' }); assert.equal(q.did, 'up'); assert.equal(q.base, 'platform');
+    const sb = q.b, P = sb.plinth, site = PL.padSite((x, z) => islandGround.height(x, z), sb);
+    near(sb.y, P.top, 1e-12, 'the shelter on the platform'); assert.ok(P.top >= site.hi && P.foot < site.lo, 'over the highest ground, its foot past the lowest');
+    w.update(PL.GROW + 0.05); near(P.rose, 1, 1e-9);
+    // stood on: a body let down over its slab comes to rest on its top; on its first step, a step lower; no water there; inside it, solid
+    const on = B.createBody({ world: w, yaw: 0 }); const [ux, uz] = PL.toWorld(sb, -2.2, -2.2); on.p = [ux, P.top + 1, uz]; on.was = [...on.p];
+    for (let t = 0; t < 1.5; t += B.STEP) { on.was = [...on.p]; B.stepBody(on, { move: [0, 0], yaw: 0, pitch: 0 }, B.STEP); }
+    near(on.p[1], P.top, 0.02, 'on the platform\'s top');
+    if (P.steps > 1) {
+      const step = PL.platformBoxes(sb)[1]; near(step.y1, P.top - P.rise, 1e-9, 'the first step a rise down');
+      const [sx, sz] = PL.toWorld(sb, 0, (step.z0 + step.z1) / 2); assert.equal(w.wet(sx, sz), false);
+    }
+    assert.equal(w.solid([ux, P.top - 0.3, uz]), true, 'the slab is solid');
+    const v = createWorld(), vb = B.createBody({ world: v, yaw: 0 }); assert.equal(v.build(vb, 'house', { base: 'platform' }).base, undefined, 'in the void: as before, on the water');
+  } finally { islandGround.flats.length = 0; }
+});
+
+ok('the blueprint shows a building where it would go and waits to be put there (Colin, 19 Nov 2026: "preview a blueprint/holograph ... with an option to confirm placement")', () => {
+  const view = read('src/game/view.js'), blue = read('src/game/blueprint.js'), island = read('src/game/island/island.js'), menu = read('src/game/menu.js');
+  assert.match(view, /function buildHere\(kind = null\) \{\n    if \(plan && !kind\) \{ planEnd\(\); return; \}/, 'the build key again puts it away');
+  assert.match(view, /if \(near\) \{ planEnd\(\); said\(K\.world\.toggle\(K\.body, st\.building\)\); return; \}/, 'near one, it still takes it down');
+  assert.match(view, /planStart\(kind \|\| st\.building\);/, 'else the blueprint first, of the kind chosen');
+  for (const piece of ['if (inp.board) { plan.turn = (plan.turn + 1) % 8;', 'if (inp.menu) { planEnd();', 'if (plan && inp.attackPressed) planPlace();', 'inp.attack = inp.attackPressed = inp.whirl = false;',
+    "e.code === 'Enter' || e.code === 'NumpadEnter'", "e.code === 'Digit1'", "e.code === 'Digit2'", 'K.world.site(K.body, plan.kind, plan.at)', "base: r.did === 'steep' ? plan.choice : null", 'class="game-plan"', 'if (plan) planStep();'])
+    assert.ok(view.includes(piece), 'view.js: ' + piece);
+  assert.match(blue, /up: \[0\.42, 0\.86, 1\.0\], steep: \[1\.0, 0\.72, 0\.28\], blocked: \[1\.0, 0\.36, 0\.32\]/, 'its colour says what may be done');
+  assert.match(blue, /fwidth\(q\)/, 'gridded, the lines kept fine at any distance');
+  assert.match(island, /#ifdef FLATS_CUT[\s\S]*discard;[\s\S]*#endif/, 'the land lets go where levelled ground stands under it');
+  assert.match(island, /flatMat\.onBeforeCompile = landMat\.onBeforeCompile;/, 'drawn as the land is');
+  for (const id of ['place', 'turn', 'cancel', 'level', 'platform']) assert.ok(GLYPHS[id] && menu.includes(`fix('${id}'`), 'the sheet says the blueprint\'s hands: ' + id);
 });
 
 ok('on the island a workshop stands where a house would, its plinth at the ground\'s height before its steps; walked up them and in at its opening, the body stands on its floor', () => {

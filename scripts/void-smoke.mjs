@@ -262,7 +262,7 @@ try {
     await shot('03-inland');
     // a house on the island: facing downhill (the beach, west), its way in at the ground's height, walked into
     await faceYaw(Math.PI / 2); await key.down('KeyW'); await sleep(350); await key.up('KeyW'); await until((r) => speed(r) < 0.1, 3000);   // a step that way turns the body to it
-    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     out.houseSaid = await hintText();
     r = await until((r) => r.world.buildings.some((b) => b.kind === 'house' && b.built), 15000);
     const hb = r.world.buildings.find((b) => b.kind === 'house');
@@ -317,7 +317,7 @@ try {
         await key.down('KeyW'); await sleep(Math.max(60, Math.min(700, (dist / 5.6) * 1000 * 0.8))); await key.up('KeyW'); await until((r) => speed(r) < 0.1, 3000);
       }
     };
-    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    await page.locator('#game-build').click(); await sleep(250); await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     let r = await until((r) => house(r)?.built, 15000);
     check('a house to run along', !!house(r)?.built, r.world);
     await goto(-5.2, 6.5); await goto(-5.2, -5.7); await goto(-2.7, -5.7);
@@ -472,8 +472,17 @@ try {
 
   if (scene === 'build') {
     out.frames ||= {};
+    let r0 = null;
     const W = (r) => r.world;
-    await key.press('KeyB'); await sleep(200);
+    await key.press('KeyB'); await sleep(300);
+    // the blueprint first (blueprint.js): shown where it would go, the panel saying so; Enter puts it there
+    r0 = await read();
+    check('the build key shows the blueprint, and builds nothing yet', r0.plan && r0.plan.kind === 'shelter' && r0.plan.shown === 'shelter' && r0.plan.panel && W(r0).buildings.length === 0, r0.plan);
+    await shot('02b-blueprint');
+    await key.press('KeyR'); await sleep(200); const turned = (await read()).plan; await key.press('KeyR'); await sleep(200);
+    for (let i = 0; i < 6; i++) { await key.press('KeyR'); await sleep(60); }
+    check('the turn key turns it an eighth at a time, and round again', turned?.turn === 1 && (await read()).plan.turn === 0, turned);
+    await key.press('Enter'); await sleep(250);
     let r = await read();
     const b = W(r).buildings[0];
     check('the build key puts a shelter up in front of the body, its door toward it', W(r).buildings.length === 1 && b.kind === 'shelter' && Math.hypot(b.x - r.p[0], b.z - r.p[2]) > 3 && Math.hypot(b.x - r.p[0], b.z - r.p[2]) < 4, { b, p: r.p });
@@ -522,7 +531,7 @@ try {
     const listed = await page.locator('#game-build-list button').evaluateAll((els) => els.map((e) => [e.dataset.build, e.disabled]));
     out.listed = listed;
     check('the build list offers the five, all of them made', listed.length === 5 && listed.filter(([, d]) => !d).map(([k]) => k).join() === 'shelter,house,workshop,tower,hall', listed);
-    await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300);
+    await page.locator('#game-build-list [data-build="house"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     r = await until((r) => house(r)?.built, 15000);
     check('the house goes up', !!house(r)?.built && r.world.choice === 'house', r.world);
     await faceYaw(Math.atan2(-(house(r).x - r.p[0]), -(house(r).z - r.p[2]))); await sleep(400 * slow);
@@ -553,7 +562,7 @@ try {
     const shop = (r) => r.world.buildings.find((b) => b.kind === 'workshop');
     const sLocal = (r) => { const b = shop(r), dx = r.p[0] - b.x, dz = r.p[2] - b.z, c = Math.cos(b.yaw), sn = Math.sin(b.yaw); return [c * dx - sn * dz, sn * dx + c * dz]; };
     await page.locator('#game-build').click(); await sleep(250);
-    await page.locator('#game-build-list [data-build="workshop"]').click(); await sleep(300);
+    await page.locator('#game-build-list [data-build="workshop"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     r = await until((r) => shop(r)?.built, 15000);
     check('the workshop goes up', !!shop(r)?.built && r.world.choice === 'workshop', r.world);
     await faceYaw(Math.atan2(-(shop(r).x - r.p[0]), -(shop(r).z - r.p[2]))); await sleep(300);
@@ -581,7 +590,7 @@ try {
     // and over the floor; the key inside takes it down
     const tower = (r) => r.world.buildings.find((b) => b.kind === 'tower');
     await page.locator('#game-build').click(); await sleep(250);
-    await page.locator('#game-build-list [data-build="tower"]').click(); await sleep(300);
+    await page.locator('#game-build-list [data-build="tower"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     r = await until((r) => tower(r)?.built, 15000);
     check('the tower goes up', !!tower(r)?.built && r.world.choice === 'tower', r.world);
     await faceYaw(Math.atan2(-(tower(r).x - r.p[0]), -(tower(r).z - r.p[2]))); await sleep(300);
@@ -612,7 +621,7 @@ try {
       }
     };
     await page.locator('#game-build').click(); await sleep(250);
-    await page.locator('#game-build-list [data-build="hall"]').click(); await sleep(300);
+    await page.locator('#game-build-list [data-build="hall"]').click(); await sleep(300); await key.press('Enter'); await sleep(250);
     r = await until((r) => hall(r)?.built, 20000);
     check('the hall goes up', !!hall(r)?.built && r.world.choice === 'hall', r.world);
     await faceYaw(Math.atan2(-(hall(r).x - r.p[0]), -(hall(r).z - r.p[2]))); await sleep(300);

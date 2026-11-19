@@ -27,6 +27,8 @@ import * as HO from './house.js';
 import * as WO from './workshop.js';
 import * as TO from './tower.js';
 import * as HA from './hall.js';
+import { levelFor, platformFor, platformBoxes, onPlatform, grown, toLocal as padLocal, toWorld as padWorld, GROW } from './plinth.js';
+import { solveBoxes, inBox, rayBox } from './solids.js';
 
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
@@ -67,22 +69,41 @@ export function createWorld() {
     ships: [],                          // the ships put here (ships.js), flown or let be
     ground: null,                       // the island's ground (island/ground.js), or none: the void's still water
     trunks: null,                       // the palms' trunks near a point (island/life.js), or none
-    // a building of a kind put up in front of the body: another of its kind comes down; one would stand on another: not built
-    build(body, kind = 'shelter') {
+    // Where a building of a kind would go (in front of the body, or `at` { x, z, yaw }: a blueprint's place), and whether
+    // it may: 'up'; 'blocked' by another (another of its own kind comes down instead); 'steep' where the ground would come
+    // up through it behind or fall away under it, with what may be done about it: the ground levelled (`level`), or a
+    // platform under it (`platform`) (plinth.js), each null where even that is too much.
+    site(body, kind = 'shelter', at = null) {
       const k = KINDS[cleanBuilding(kind)], b = k.place(body);
-      for (const o of w.buildings) if (o.down < 0 && o.kind !== b.kind && Math.hypot(o.x - b.x, o.z - b.z) < k.foot + K(o).foot) return { did: 'blocked', b: o };
+      if (at) { b.x = at.x; b.z = at.z; b.yaw = at.yaw; }
+      for (const o of w.buildings) if (o.down < 0 && o.kind !== b.kind && Math.hypot(o.x - b.x, o.z - b.z) < k.foot + K(o).foot) return { did: 'blocked', b: o, at: b };
       b.y = 0;
       if (w.ground) {
         // on the island: its way in at the ground's height (the sea's level over water); not where the ground would come up
         // through it behind, nor fall away under it further than its foundations reach
-        const site = siteOf(w.ground, b, k.foot), [ex, ez] = k.entry(b), at = Math.max(0, w.ground.height(ex, ez));
-        if (Math.max(0, site.hi) > at + k.rise) return { did: 'steep', b, fall: Math.max(0, site.hi) - at, rises: true };
-        if (at - Math.max(0, site.lo) > STEEP_SITE) return { did: 'steep', b, fall: at - Math.max(0, site.lo) };
-        b.y = at;
+        const G = w.ground, site = siteOf(G, b, k.foot), [ex, ez] = k.entry(b), door = Math.max(0, G.height(ex, ez));
+        b.y = door;
+        const ask = (r) => ({ ...r, b, door, level: levelFor((x, z) => G.height(x, z), b, door), platform: platformFor((x, z) => G.height(x, z), b, door) });
+        if (Math.max(0, site.hi) > door + k.rise) return ask({ did: 'steep', fall: Math.max(0, site.hi) - door, rises: true });
+        if (door - Math.max(0, site.lo) > STEEP_SITE) return ask({ did: 'steep', fall: door - Math.max(0, site.lo) });
+      }
+      return { did: 'up', b };
+    },
+    // a building of a kind put up (in front of the body, or `at`): another of its kind comes down; one would stand on another:
+    // not built; on ground too uneven, not built unless it is to be levelled or raised (`base`: 'level' or 'platform')
+    build(body, kind = 'shelter', { at = null, base = null } = {}) {
+      const r = w.site(body, kind, at);
+      if (r.did === 'blocked') return { did: 'blocked', b: r.b };
+      const b = r.b;
+      if (r.did === 'steep') {
+        if (base === 'level' && r.level) { b.flat = r.level; b.base = 'level'; w.ground.flats.push(b.flat); }
+        else if (base === 'platform' && r.platform) { b.plinth = r.platform; b.base = 'platform'; b.y = b.plinth.top; }
+        else return { did: 'steep', b, fall: r.fall, ...(r.rises ? { rises: true } : {}), level: !!r.level, platform: !!r.platform };
+        b.t = -GROW;                                          // the ground first, then the building on it
       }
       for (const o of w.buildings) if (o.down < 0 && o.kind === b.kind) o.down = 0;
       w.buildings.push(b);
-      return { did: 'up', b };
+      return { did: 'up', b, ...(b.base ? { base: b.base } : {}) };
     },
     // the build key: near a standing building's door it is taken down; else the kind chosen goes up
     toggle(body, kind = 'shelter') {
@@ -101,8 +122,15 @@ export function createWorld() {
     },
     // time passes: what is going up goes on up; what is coming down comes down and is gone
     update(dt) {
-      for (const b of w.buildings) { if (b.down >= 0) b.down += dt; else b.t += dt; }
-      w.buildings = w.buildings.filter((b) => !K(b).phase(b).gone);
+      for (const b of w.buildings) {
+        if (b.down >= 0) b.down += dt; else b.t += dt;
+        if (b.flat) b.flat.k = grown(b); else if (b.plinth) b.plinth.rose = grown(b);      // its ground comes with it, and goes
+      }
+      const gone = w.buildings.filter((b) => K(b).phase(b).gone);
+      if (gone.length) {
+        w.buildings = w.buildings.filter((b) => !gone.includes(b));
+        if (w.ground) w.ground.flats = w.ground.flats.filter((f) => !gone.some((b) => b.flat === f));
+      }
     },
     // the origin moved under the body (rings.js, rebase): the same places in new numbers
     shift(dx, dz) { for (const b of w.buildings) { b.x -= dx; b.z -= dz; } for (const s of w.ships) { s.p[0] -= dx; s.p[2] -= dz; } },
@@ -123,6 +151,13 @@ export function createWorld() {
           if (d < min && s.p[1] < t.y + t.h && d > 1e-6) { s.p[0] = t.x + (dx / d) * min; s.p[2] = t.z + (dz / d) * min; }
         }
       } else { s.depth = 0; s.swim = false; }
+      // a platform under a building (plinth.js): its slab and its steps, stood on and walked into
+      for (const b of w.buildings) {
+        if (!b.plinth) continue;
+        const [lx, lz] = padLocal(b, s.p[0], s.p[2]), r = solveBoxes(platformBoxes(b), lx, lz, s.p[1], (s.was || s.p)[1], BODY.rad, BODY.tall, STEP_UP);
+        [s.p[0], s.p[2]] = padWorld(b, r.lx, r.lz);
+        floor = Math.max(floor, r.floor);
+      }
       for (const b of w.buildings) {
         if (b.down >= 0) continue;
         const by = b.y || 0, r = K(b).solve(b, down(b, s.p), down(b, s.was || s.p), BODY.rad, BODY.tall, STEP_UP);
@@ -142,15 +177,32 @@ export function createWorld() {
     // whether a point is inside one building (its own height taken into account)
     within(b, p) { return K(b).inside(b, p[0], p[2], p[1] - (b.y || 0)); },
     // how far along from the body's head toward the eye the eye may stand
-    eye(from, to) { let t = w.ground ? w.ground.clear(from, to) : 1; for (const b of w.buildings) if (b.down < 0) t = Math.min(t, K(b).eyeRoom(b, down(b, from), down(b, to))); return t; },
+    eye(from, to) {
+      let t = w.ground ? w.ground.clear(from, to) : 1;
+      for (const b of w.buildings) {
+        if (b.plinth) {
+          const [fx, fz] = padLocal(b, from[0], from[2]), [tx, tz] = padLocal(b, to[0], to[2]), o = [fx, from[1], fz], d = [tx - fx, to[1] - from[1], tz - fz];
+          for (const x of platformBoxes(b)) if (!inBox(x, ...o)) { const hit = rayBox(x, o, d); if (hit < 1) t = Math.min(t, Math.max(0, hit - 0.05)); }
+        }
+        if (b.down < 0) t = Math.min(t, K(b).eyeRoom(b, down(b, from), down(b, to)));
+      }
+      return t;
+    },
     // whether the sun reaches a point (1) or the building it is in shades it (0); in the open, 1
     sunAt(p, sun, doorOpen = 1) { const b = w.inside(p); return b ? K(b).sunIn(b, p[0], p[1] - (b.y || 0), p[2], sun, doorOpen) : 1; },
     // the nearest wall a body at p could run along (body.js), of everything standing that has walls to run: { n, d } or null
     wall(p) { let best = w.ground ? w.ground.wall(p) : null; for (const b of w.buildings) { if (b.down >= 0 || !K(b).wall) continue; const r = K(b).wall(b, down(b, p)); if (r && (!best || r.d < best.d)) best = r; } return best; },
     // whether a point is in something standing (a wall, a roof, a thing): what flies stops there (combat.js)
-    solid(p) { if (w.ground && p[1] < w.ground.height(p[0], p[2])) return true; for (const b of w.buildings) if (b.down < 0 && K(b).solid(b, down(b, p), 0.02)) return true; return false; },
-    // the water a body treads on: none on a building's floor or its steps
-    wet(x, z) { if (w.ground && w.ground.height(x, z) >= 0) return false; for (const b of w.buildings) if (b.down < 0 && K(b).dry(b, x, z)) return false; return true; },
+    solid(p) {
+      if (w.ground && p[1] < w.ground.height(p[0], p[2])) return true;
+      for (const b of w.buildings) {
+        if (b.plinth) { const [lx, lz] = padLocal(b, p[0], p[2]); if (platformBoxes(b).some((x) => inBox(x, lx, p[1], lz, 0.02))) return true; }
+        if (b.down < 0 && K(b).solid(b, down(b, p), 0.02)) return true;
+      }
+      return false;
+    },
+    // the water a body treads on: none on a building's floor or its steps, nor on a platform
+    wet(x, z) { if (w.ground && w.ground.height(x, z) >= 0) return false; for (const b of w.buildings) if ((b.down < 0 && K(b).dry(b, x, z)) || onPlatform(b, x, z)) return false; return true; },
   };
   return w;
 }

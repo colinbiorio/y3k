@@ -263,6 +263,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (late morning) — **The blueprint: a building shown as light
+  before it goes up; uneven ground levelled or raised on a platform**
+  (`src/game/blueprint.js`, `src/game/plinth.js`, `src/game/buildings/plinth.js`,
+  `src/game/world.js` site/build, `src/game/island/ground.js` flats,
+  `src/game/island/island.js`, `src/game/view.js` plan, `styles.css`;
+  `test/game.test.mjs`, `scripts/void-smoke.mjs`). Colin: "when building,
+  preview a blueprint/holograph of where the item will be placed with an
+  option to confirm placement", and "if the ground is not flat, instead of
+  telling the user they can't build there, give them an option to level the
+  ground around it or build a flat platform". The build key or the bar's list
+  now shows the building as a gridded glass of light where it would go (out
+  along the eye's way, further as the eye looks up, its door to the body):
+  blue where it may go up, amber on uneven ground, red where another stands in
+  the way. A panel says why, with turn (R), build here (a click or Enter) and
+  cancel (Esc, or the build key again); on uneven ground, "level the ground"
+  (1) eases the ground under its pad to its level with a gentle edge, the land
+  cut or filled and drawn as packed earth, and "build a platform" (2) raises a
+  slab of dressed stone over the highest ground with steps down to the door.
+  Either comes first, as the building is begun, and lasts as long as it
+  stands; both kept when the island is left and come back to.
 - **2026-11-19** (midday) — **Lightspeed, and two taps out of the air**
   (`src/game/body.js` LIGHT, stepLight, lightLine, TAP_TWICE;
   `src/game/light.js`; `src/game/view.js`; `styles.css` .game-light;

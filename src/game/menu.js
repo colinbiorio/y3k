@@ -102,9 +102,17 @@ export function createMenu({ doc = globalThis.document, win = globalThis.window,
   function controlsPane() {
     const mode = getMode(), look = b().look;
     const rows = (g) => {
-      const fixed = g.id === 'move' ? `<div class="game-bind" role="row">${label('look', 'look')}<span class="game-fixed" role="cell">the mouse</span><span class="game-fixed" role="cell">a drag</span><span class="game-fixed" role="cell">right stick</span></div>` : '';
+      const fix = (id, text, note, cells) => `<div class="game-bind" role="row">${label(id, text, note)}${cells.map((c) => `<span class="game-fixed" role="cell">${esc(c)}</span>`).join('')}</div>`;
+      const fixed = g.id === 'move' ? fix('look', 'look', '', ['the mouse', 'a drag', 'right stick']) : '';
+      // the blueprint's hands are others' (view.js plan): they are said as those keys are now
+      const of = (id, slot) => { const t = cellText(b(), id, slot); return t === '—' ? '' : t; };
+      const after = g.id === 'build' ? fix('place', 'put it there', 'while the blueprint shows', [of('attack', 0) || 'click', 'enter', of('attack', 'pad')])
+        + fix('turn', 'turn it', 'an eighth of a turn', [of('board', 0), of('board', 1), of('board', 'pad')])
+        + fix('cancel', 'leave it', 'the build key again does too', [of('menu', 1) || of('menu', 0), of('build', 0), of('menu', 'pad')])
+        + fix('level', 'level the ground', 'where it is uneven; the whirl key changes the choice', ['1', '', ''])
+        + fix('platform', 'build a platform', 'where it is uneven', ['2', '', '']) : '';
       return fixed + ACTIONS.filter((a) => groupOf(a) === g.id).map((a) => `<div class="game-bind" role="row">${label(a.id, a.label, a.note)}${box(a.id, 0, a.label)}${box(a.id, 1, a.label)}${
-        a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`).join('');
+        a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`).join('') + after;
     };
     const groups = GROUPS.map((g) => ({ g, html: rows(g) })).filter((x) => x.html).map(({ g, html }) =>
       `<section class="game-group" aria-labelledby="game-g-${g.id}"><h4 class="game-group-name" id="game-g-${g.id}">${esc(g.name)}</h4>
