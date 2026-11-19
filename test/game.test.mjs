@@ -2272,10 +2272,10 @@ ok('the dhow: twenty-eight metres, put beside the body with its stern alongside;
   assert.equal(SP.nearShip([s], body.p), s, 'and taken from the water beside it');
   SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'up at the helm');
   for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
-  assert.ok(Math.hypot(...s.v) < 7, 'heavy: a second in, still slow: ' + Math.hypot(...s.v).toFixed(2));
+  assert.ok(Math.hypot(...s.v) < D.speed * 0.8, 'heavy: a second in, not yet at its speed: ' + Math.hypot(...s.v).toFixed(2));
   for (let t = 0; t < 4; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
   near(Math.hypot(...s.v), D.speed, 1e-9, 'then at its speed');
-  assert.ok(D.turn < SP.DART.turn / 2 && D.accel < SP.SKIFF.accel / 2, 'slower to turn and to come up to speed than the small ones');
+  assert.ok(D.turn < SP.DART.turn && D.spin < SP.DART.spin && D.speed / D.accel > SP.DART.speed / SP.DART.accel, 'slower to turn and to come up to speed than the small ones');
   // flown past a house with its middle clear but its side not: stopped short
   const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
   const h = w.buildings[0], s2 = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dhow'); s2.p = [h.x + 5.8, 2.5, h.z - 30];
@@ -2305,10 +2305,10 @@ ok('the ark: eighty metres, its ring round its middle riding clear of the water;
   body.p = [-40, 0, 0]; assert.equal(SP.nearShip([s], body.p), null, 'nor from far off'); body.p = [0, 0, 0];
   SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'lifted up into the dome'); near(body.p[2], helm[2], 1e-12, 'at the helm, on the prow');
   for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
-  assert.ok(Math.hypot(...s.v) < 5, 'the heaviest: a second in, still slow: ' + Math.hypot(...s.v).toFixed(2));
+  assert.ok(Math.hypot(...s.v) < A.speed * 0.6, 'heavier: a second in, still coming up to its speed: ' + Math.hypot(...s.v).toFixed(2));
   for (let t = 0; t < 8; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
   near(Math.hypot(...s.v), A.speed, 1e-9, 'then at its speed');
-  assert.ok(A.turn < SP.DHOW.turn && A.accel < SP.DHOW.accel, 'slower to turn and to come up to speed than the dhow');
+  assert.ok(A.turn < SP.DHOW.turn && A.spin < SP.DHOW.spin && A.speed / A.accel > SP.DHOW.speed / SP.DHOW.accel, 'slower to turn and to come up to speed than the dhow');
   for (let t = 0; t < 4; t += 1 / 60) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, 1 / 60);
   near(s.p[1], A.keel, 1e-9, 'sunk as low as it goes'); assert.ok(SP.shipPoint(s, [0, -rim, A.ring.z])[1] > 0.3, 'its ring\'s foot still over the water');
   // flown at a house with its middle passing over it but its ring's foot not: caught short of it
@@ -2341,10 +2341,10 @@ ok('the carrier: four hundred metres, five terraces each set in from the one bel
   body.p = [400, 0, 0]; assert.equal(SP.nearShip([s], body.p), null, 'not from far off to the side'); body.p = [0, 0, 0];
   SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'lifted up to its helm'); near(body.p[2], helm[2], 1e-12);
   for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
-  assert.ok(Math.hypot(...s.v) < 2.5, 'the slowest: a second in, barely moving: ' + Math.hypot(...s.v).toFixed(2));
+  assert.ok(Math.hypot(...s.v) < C.speed * 0.5, 'the weightiest: a second in, under half its speed: ' + Math.hypot(...s.v).toFixed(2));
   for (let t = 0; t < 11; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);
   near(Math.hypot(...s.v), C.speed, 1e-9, 'then at its speed');
-  assert.ok(C.turn < SP.ARK.turn && C.accel < SP.ARK.accel, 'slower to turn and to come up to speed than the ark');
+  assert.ok(C.turn < SP.ARK.turn && C.spin < SP.ARK.spin && C.speed / C.accel > SP.ARK.speed / SP.ARK.accel, 'slower to turn and to come up to speed than the ark');
   for (let t = 0; t < 12; t += 1 / 60) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, 1 / 60);
   near(s.p[1], C.keel, 1e-9, 'sunk as low as it goes'); assert.ok(SP.shipPoint(s, [T[0].hw, T[0].y0, 0])[1] > 0.5, 'its underside still over the water');
   // flown low at a house with its middle passing well clear but its side not: caught short of it
@@ -2356,6 +2356,28 @@ ok('the carrier: four hundred metres, five terraces each set in from the one bel
   for (let t = 0; t < 30; t += 1 / 60) SP.stepShip(s2, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60, { solid: (q) => w.solid(q) });
   const front = Math.max(...C.edges.filter(([x, y]) => x === T[0].hw && y === T[0].y0).map(([, , z]) => z)), side = SP.shipPoint(s2, [T[0].hw, T[0].y0, front]);
   assert.ok(!w.solid(side) && side[2] < line.z && side[2] > line.z - 2.5, 'its side caught at the house: ' + side.map((v) => v.toFixed(2)) + ' against ' + line.z.toFixed(2));
+});
+
+ok('every size handles (Colin, 19 Nov: "the larger the ship gets, the harder it is to move"): a bigger ship takes longer to its speed and into a quarter turn, but none more than 2.6 s to its speed or 3 s to a quarter turn; it swings onto the eye\'s way and not past it; let go, it is still within 2 s; each crosses its own length in under 6 s', () => {
+  const dt = 1 / 60, seen = [];
+  for (const k of ['skiff', 'dart', 'dhow', 'ark', 'carrier']) {
+    const S = SP.KIND[k], s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, k);
+    let t = 0; while (Math.hypot(...s.v) < S.speed - 1e-6 && t < 30) { SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, dt); t += dt; }
+    const rise = t; t = 0;
+    while (Math.hypot(...s.v) > 1e-6 && t < 30) { SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0 }, dt); t += dt; }
+    const stop = t; s.yaw = 0; s.spin = 0; t = 0; let past = 0;
+    while (Math.abs(s.yaw + Math.PI / 2) > 1e-9 && t < 30) { SP.stepShip(s, { move: [0, 0], yaw: Math.PI / 2, pitch: 0 }, dt); t += dt; past = Math.min(past, s.yaw + Math.PI / 2); }
+    const quarter = t;
+    assert.ok(rise <= 2.6 && quarter <= 3 && stop <= 2, `${k}: to its speed ${rise.toFixed(2)} s, a quarter turn ${quarter.toFixed(2)} s, still ${stop.toFixed(2)} s`);
+    near(past, 0, 1e-9, k + ' swings onto the way, not past it');
+    assert.ok(S.length / S.speed < 6, k + ' crosses its length in ' + (S.length / S.speed).toFixed(2) + ' s');
+    seen.push({ k, rise, quarter });
+  }
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i].rise > seen[i - 1].rise && seen[i].quarter > seen[i - 1].quarter, seen[i].k + ' is weightier than the ' + seen[i - 1].k);
+  // a turn comes on gradually: a fifth of a second in, the carrier has not yet reached its full rate
+  const c = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'carrier');
+  for (let t = 0; t < 0.2; t += dt) SP.stepShip(c, { move: [0, 0], yaw: Math.PI / 2, pitch: 0 }, dt);
+  assert.ok(Math.abs(c.spin) > 0.1 && Math.abs(c.spin) < SP.CARRIER.turn * 0.5, 'swinging into it: ' + c.spin.toFixed(3));
 });
 
 ok('seated in a ship, a body on two legs sits: its hips low over the seat, its thighs forward and its knees bent, its hands out on the controls', () => {
@@ -3298,6 +3320,26 @@ ok('on the island the hall stands in the lagoon\'s shallows by the beach, facing
   const w2 = createWorld(); w2.ground = islandGround;
   const at = B.createBody({ world: w2, yaw: -Math.PI / 2 }); at.p = [a.x + 40, islandGround.floor(a.x + 40, a.z), a.z];
   assert.equal(w2.build(at, 'hall').did, 'steep', 'where the house stands (the ground falls 5.6 m under the hall\'s terraces)');
+});
+
+ok('the island\'s sea (Colin, 19 Nov: "the water levels definitely have a visual glitch"): rings round the eye, every triangle facing up, out past the eye\'s furthest, none near the eye wider than ten metres; it follows the eye and is the first see-through thing drawn, so a flame or a glow over the water is drawn over it', () => {
+  const { pos, idx } = GR.seaSheet(), R = GR.SEA_RINGS;
+  let down = 0, wide = 0, far = 0;
+  for (let t = 0; t < idx.length; t += 3) {
+    const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]].map((k) => [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]]);
+    const u = [b[0] - a[0], b[2] - a[2]], v = [c[0] - a[0], c[2] - a[2]];
+    if (u[1] * v[0] - u[0] * v[1] <= 0) down++;
+    if (Math.hypot(a[0], a[2]) < 40) wide = Math.max(wide, Math.hypot(...u), Math.hypot(...v));
+    far = Math.max(far, Math.hypot(a[0], a[2]));
+  }
+  assert.equal(down, 0, 'every triangle faces up');
+  assert.ok(wide < 10, 'near the eye no triangle is wide: ' + wide.toFixed(2));
+  assert.ok(far > 45000 && R.rings * R.segs < 6000, 'out past 45 km, in a few thousand points: ' + Math.round(far));
+  assert.ok(pos.every((v, i) => i % 3 !== 1 || v === 0), 'all at the water\'s height');
+  const isl = read('src/game/island/island.js');
+  assert.match(isl, /sea\.renderOrder = -1;/, 'drawn before the other see-through things');
+  assert.match(isl, /sea\.position\.set\(camera\.position\.x, 0, camera\.position\.z\);/, 'and moved with the eye');
+  assert.ok(!/PlaneGeometry\(120000/.test(isl), 'not two triangles 120 km across');
 });
 
 ok('on the island a bot comes up out of the ground where it is called and hovers over whatever is under it, never inside a hill', () => {

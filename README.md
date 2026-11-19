@@ -263,6 +263,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (morning) — **Every ship handles, and the island's water is
+  drawn right** (`src/game/ships.js`, `src/game/island/island.js` and
+  `ground.js` seaSheet; `test/game.test.mjs`). Colin, 19 Nov: "the larger
+  the ship gets, the harder it is to move." A bigger ship is now weightier,
+  never sluggish: faster across the water (the carrier crosses its 400 m in
+  under six seconds), a second to its speed for the skiff and two and a half
+  for the carrier (it was ten), a quarter turn in 0.7 s to 2.7 s (it was
+  7.9 s), its turning easing on and off so it swings onto the way the eye
+  looks and never past it, and let go, every one is still within two seconds
+  (it was ten). And "the water levels definitely have a visual glitch": the
+  island's sea was drawn after every flame, glow and pane of glass over it, so
+  they looked as if under the water (the void's water is opaque and never
+  did this); it is now the first see-through thing drawn. Its sheet, two
+  triangles 120 km across, is now rings round the eye, a few metres wide near
+  it. His picture (the lagoon's floor showing with no water over it) was not
+  made again here, in Chromium on Metal, on OpenGL or in software, at the
+  same place and light: if it comes back, the browser and the spot will say why.
+
 - **2026-11-19** (morning) — **The world's controls sheet, in groups, a unimat
   glyph for each control; the hint clear of the bars** (`src/game/glyphs.js`,
   `src/game/menu.js`, `src/game/view.js` seatHint, `styles.css`;

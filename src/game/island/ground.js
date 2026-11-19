@@ -109,3 +109,18 @@ export function createGround(head, hts) {
   };
   return g;
 }
+
+// The sea's sheet, as numbers: a fan of SEGS round its middle, then RINGS each GROW times as wide as the one inside it,
+// out past the eye's furthest (45 km), all at y = 0 and facing up (its triangles wound counter-clockwise seen from
+// above). island.js moves it with the eye, so no triangle near the eye is more than a few metres across.
+export const SEA_RINGS = { segs: 96, rings: 52, first: 0.8, grow: 1.25 };
+export function seaSheet({ segs, rings, first, grow } = SEA_RINGS) {
+  const pos = [0, 0, 0], idx = [];
+  for (let k = 0, r = first; k < rings; k++, r *= grow) for (let i = 0; i < segs; i++) { const a = (i / segs) * 2 * Math.PI; pos.push(Math.cos(a) * r, 0, Math.sin(a) * r); }
+  for (let i = 0; i < segs; i++) idx.push(0, 1 + ((i + 1) % segs), 1 + i);
+  for (let k = 0; k < rings - 1; k++) for (let i = 0; i < segs; i++) {
+    const a = 1 + k * segs + i, b = 1 + k * segs + ((i + 1) % segs), c = a + segs, d = b + segs;
+    idx.push(a, b, c, b, d, c);
+  }
+  return { pos, idx };
+}
