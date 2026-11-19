@@ -233,6 +233,24 @@ The rest of what he said that day:
 - **Two taps out of the air** (done). Flying, a second tap of Space within
   0.32 s of the first lets go of the air, and the body falls; slower taps keep
   it flying, and the tap that took off is never the first of a pair.
+- **Ships are solid** (done). Each ship is boxes in its own frame
+  (`ships.js` shipBoxes): the skiff's and the dart's hulls (its canopy and
+  wings), the dhow's belly in 40 slices topped by its deck, its stern cabin
+  (its roof holds the helm) and masts, the ark's spine (a walk along its
+  crest), its dome's floor, its ring (a ring is the same turned, so it is
+  solid standing still) and engines, the carrier's terraces narrowing in four
+  steps to the prow, its masts, towers and engines. `world.js` solves a body
+  against them in the ship's frame (a deck holds it up; a hull keeps it out,
+  walking, falling or flying; the carrier's underside meets its head) and
+  marks the ship it stands on (`s.on`); the view lets unflown ships drift
+  before the body steps and carries one standing on a ship along, round and
+  up with it (`carryOn`). Stepping off the dhow's, ark's or carrier's helm puts
+  the body on its cabin roof, dome floor or top terrace. The eye keeps out of
+  hulls too, except the one being flown. A ship's bob as it waits is its own
+  (`s.bob`, `BOB`), so the drawn deck and the deck under the feet are one.
+  Rough: the ark's ring is 16 boxes, so its rim is a little square to the
+  feet; the hangar mouths are not yet ways in; arrows and the ring still pass
+  through ships (only the body is kept out).
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 

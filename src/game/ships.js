@@ -62,6 +62,14 @@ export const DART = {
   edges: [[2.95, 0.08, -3.7], [-2.95, 0.08, -3.7]],   // its wingtips
   view: 13, reach: 2.5,
 };
+// the dhow's hull at u (0 the stern, 1 the prow): half its width, its sheer (the deck's edge), its depth, its deck
+// (ships/dhow.js draws it from these; shipBoxes stands a body on it)
+export const DHOW_HULL = {
+  halfW: (u) => 3.5 * Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * u)), 0.7),
+  sheer: (u) => 0.9 + 2.1 * Math.max(0, (u - 0.6) / 0.4) ** 2 + 1.5 * Math.max(0, (0.25 - u) / 0.25) ** 2,
+  depth: (u) => 2.6 * Math.pow(Math.sin(Math.PI * (0.05 + 0.9 * u)), 0.5),
+};
+DHOW_HULL.deck = (u) => DHOW_HULL.sheer(u) - 0.18;
 export const DHOW = {
   length: 28, beam: 7,
   keel: 1.8, hover: 3.0,
@@ -130,6 +138,9 @@ export const KIND = { skiff: SKIFF, dart: DART, dhow: DHOW, ark: ARK, carrier: C
 // the way the eye looks, never past it: a quarter turn takes the skiff 0.7 s, the carrier 2.7 s). It slows harder than
 // it speeds up (BRAKE): let go at its speed, every one of them is still within two seconds.
 export const BRAKE = 1.6;
+// how much each rides up and down on its hover, and how quickly, as it waits (none under way). It is the ship's own
+// (s.bob), so its drawing and what of it a body stands on rise and fall together.
+export const BOB = { skiff: [0.03, 1.6], dart: [0.03, 1.4], dhow: [0.06, 0.9], ark: [0.15, 0.4], carrier: [0.4, 0.25] };
 const kindOf = (s) => KIND[s.kind] || SKIFF;
 const toward = (a, b, max) => (Math.abs(b - a) <= max ? b : a + Math.sign(b - a) * max);
 const wrap = (a) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
@@ -146,7 +157,7 @@ export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   /
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
   const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side;
-  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0 };
+  return { kind: k, p: [x, floorAt(x, z) + S.hover, z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0 };
 }
 
 // One step of a ship under the hands (inp: move [right, forward], yaw and pitch of the eye, up, down, sprint), over a
@@ -187,7 +198,69 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   s.bank += (Math.max(-0.55, Math.min(0.55, -turnRate * 0.22 * Math.min(1, Math.hypot(s.v[0], s.v[2]) / 6) - mx * 0.12)) - s.bank) * k(5);
   s.tilt += (Math.max(-0.35, Math.min(0.35, -s.v[1] * 0.035)) - s.tilt) * k(5);
   s.thrust += (Math.min(1.4, Math.abs(mz) * (inp.sprint ? 1.4 : 1) + 0.25 * Math.abs(lift) / S.climb + 0.1 * Math.abs(mx)) - s.thrust) * k(4);
+  const [amp, rate] = BOB[s.kind] || BOB.skiff; s.bob = amp * Math.sin(s.t * rate) * (1 - Math.min(1, s.thrust));
   return s;
+}
+
+// WHAT OF A SHIP IS SOLID (Colin, 19 Nov 2026: "ships are able to be flown through and not stood on"): boxes in its own
+// frame (x left, y up, z ahead; solids.js stands a body on them and keeps it out of them): its hull with its deck on
+// top, and what stands on the deck. A body stands on a deck and walks it, is carried as the ship moves (carryOn), and
+// walking, flying or falling, does not go through a hull. Bank and tilt are the drawing's: a ship is solid level.
+const box = (x0, x1, y0, y1, z0, z1) => ({ x0, x1, y0, y1, z0, z1 });
+const sym = (hx, y0, y1, z0, z1) => box(-hx, hx, y0, y1, z0, z1);
+const SOLID = {};
+function slices(n, z0, z1, at) { const out = []; for (let i = 0; i < n; i++) { const a = z0 + ((z1 - z0) * i) / n, b = z0 + ((z1 - z0) * (i + 1)) / n; out.push(at((i + 0.5) / n, a, b)); } return out; }
+export function shipBoxes(kind) {
+  if (SOLID[kind]) return SOLID[kind];
+  let B;
+  if (kind === 'dart') {
+    // its lozenge hull (half 0.65 wide, 0.42 high at most), the canopy over the cockpit, the two swept wings
+    const hw = (u) => (u >= 0.4 ? 0.65 * (1 - ((u - 0.4) / 0.6) ** 2) : 0.65 - 0.3 * ((0.4 - u) / 0.4) ** 2);
+    B = [...slices(8, -5.5, 5.5, (u, a, b) => sym(Math.max(0.12, hw(u)), -(0.62 * hw(u) + 0.02), 0.62 * hw(u) + 0.02, a, b)),
+      sym(0.42, 0.2, 0.62, -0.95, 2.95),
+      ...[1, -1].flatMap((sd) => [box(sd > 0 ? 0.5 : -1.7, sd > 0 ? 1.7 : -0.5, -0.04, 0.16, -3.8, -1.55), box(sd > 0 ? 1.7 : -2.95, sd > 0 ? 2.95 : -1.7, 0, 0.18, -4.15, -2.9)])];
+  } else if (kind === 'dhow') {
+    // its belly in slices along it, each as wide as the hull there and topped by the deck; the stern cabin, whose roof
+    // holds the helm; the two masts
+    const H = DHOW_HULL, L = DHOW.length, U0 = -L / 2;
+    B = [...slices(40, U0, U0 + L, (u, a, b) => sym(H.halfW(u) * 0.97, H.sheer(u) - H.depth(u), H.deck(u), a, b)),
+      sym(2.05, H.deck(0.05), DHOW.seat[1] - 0.04, U0 + 0.55, DHOW.seat[2] + 0.9),
+      sym(0.22, 0, 16, 2.78, 3.22), sym(0.22, 0, 11, -4.72, -4.28)];
+  } else if (kind === 'ark') {
+    // its spine (a walk along its crest, wider below), the floor of its dome on the prow, its ring all round (a ring is the
+    // same turned, so it is solid standing still), its four engines in a cross
+    const R = ARK.ring, E = ARK.engines, D = ARK.dome;
+    B = [sym(1.2, 1.0, ARK.spine - 0.1, -31, 32), sym(ARK.spine - 0.2, -ARK.spine + 0.2, 1.0, -31, 32),
+      sym(D.r - 0.4, 1.0, ARK.seat[1] - 0.2, D.at[2] - 2.5, D.at[2] + 2.5),
+      ...[...Array(16)].map((_, k) => { const a = (k * Math.PI) / 8, x = R.r * Math.cos(a), y = R.r * Math.sin(a); return box(x - 2.4, x + 2.4, y - 2.4, y + 2.4, R.z - R.tube, R.z + R.tube); }),
+      ...[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([x, y]) => box(x * E.off - E.r, x * E.off + E.r, y * E.off - E.r, y * E.off + E.r, E.z0, E.z1))];
+  } else if (kind === 'carrier') {
+    // its five terraces, each narrowing over its last BOW metres to its prow (in four steps), its masts, its towers, its engines
+    const C = CARRIER;
+    B = C.terraces.flatMap((t) => [sym(t.hw, t.y0, t.y1, t.z0, t.z1 - C.bow),
+      ...slices(4, t.z1 - C.bow, t.z1, (u, a, b) => sym(t.hw * (1 - (1 - C.bowNarrow) * u), t.y0, t.y1, a, b))]);
+    B.push(...C.masts.map((m) => box(-1.5, 1.5, m.foot, m.top, m.z - 1.5, m.z + 1.5)), ...C.towers.map((t) => box(t.x - 2.5, t.x + 2.5, t.y0, t.y1, t.z - 2.5, t.z + 2.5)),
+      ...C.engines.xs.map((x) => box(x - C.engines.r, x + C.engines.r, C.engines.y - C.engines.r, C.engines.y + C.engines.r, C.engines.z - 5, C.engines.z + 5)));
+  } else {
+    // the skiff: its open hull in slices, to its gunwale
+    const L = SKIFF.length, hw = (u) => (SKIFF.beam / 2) * Math.pow(Math.sin(Math.PI * u), 0.6), sh = (u) => 0.15 + 0.34 * Math.abs(2 * u - 1) ** 3;
+    B = slices(6, -L / 2, L / 2, (u, a, b) => sym(Math.max(0.1, hw(u)), -SKIFF.keel, sh(u), a, b));
+  }
+  return (SOLID[kind] = B);
+}
+// a world point in a ship's frame (its middle, riding on its bob), and back
+export function toShip(s, p) { const c = Math.cos(s.yaw), n = Math.sin(s.yaw), dx = p[0] - s.p[0], dz = p[2] - s.p[2]; return [c * dx - n * dz, p[1] - s.p[1] - (s.bob || 0), n * dx + c * dz]; }
+export function fromShip(s, [x, y, z]) { const c = Math.cos(s.yaw), n = Math.sin(s.yaw); return [s.p[0] + c * x + n * z, s.p[1] + (s.bob || 0) + y, s.p[2] - n * x + c * z]; }
+// a body standing on a ship that has moved (from `was` and `wasYaw` to where it is) goes with it: along, round and up
+export function carryOn(s, body, was, wasYaw, wasBob = 0) {
+  const turn = s.yaw - wasYaw, c = Math.cos(turn), n = Math.sin(turn);
+  for (const q of [body.p, body.was]) {
+    if (!q) continue;
+    const dx = q[0] - was[0], dz = q[2] - was[2];
+    q[0] = s.p[0] + c * dx + n * dz; q[2] = s.p[2] - n * dx + c * dz; q[1] += s.p[1] + (s.bob || 0) - was[1] - wasBob;
+  }
+  body.yaw += turn;
+  return body;
 }
 
 // the nearest ship whose seat (or door) a body is near enough to take (on its way to it, not far below or above it)

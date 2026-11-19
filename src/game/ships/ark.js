@@ -187,7 +187,7 @@ export function createArkArt({ lite = false } = {}) {
   return {
     group,
     update(s, { t = 0, aboard = false, night = 0 } = {}) {
-      group.position.set(s.p[0], s.p[1] + 0.15 * Math.sin(t * 0.4) * (1 - Math.min(1, s.thrust)), s.p[2]);
+      group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt * 0.5, s.yaw, s.bank * 0.5);
       ringG.rotation.z = (t * RG.turn) % TAU;   // the ring turns, once a minute, whoever is aboard
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);

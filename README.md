@@ -263,6 +263,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (afternoon) — **Ships are solid: their decks stood on, their
+  hulls not flown through** (`src/game/ships.js` shipBoxes, BOB, carryOn,
+  DHOW_HULL; `src/game/world.js` solve and eye; `src/game/view.js` drift;
+  `src/game/ships/*.js` ride their own bob; `scripts/void-smoke.mjs ship`;
+  `test/game.test.mjs`). Colin, 19 Nov: "ships are able to be flown through
+  and not stood on." Each ship is now a set of boxes in its own frame: the
+  skiff's and the dart's hulls (the dart's canopy and swept wings), the dhow's
+  belly in forty slices topped by its deck, its stern cabin (its roof holds the
+  helm) and two masts, the ark's spine, the floor of its dome, its ring all
+  round and its four engines, the carrier's five terraces each narrowing to its
+  prow, its masts, towers and engines. A body comes down on a deck and walks
+  it; walking, falling or flying, it does not pass through a hull; under the
+  carrier its head meets the lowest terrace; a ship that drifts carries whoever
+  stands on it; stepping off the dhow's, the ark's or the carrier's helm now
+  puts the body on its roof, its dome's floor or its top terrace, not in the
+  sea. The eye is kept out of a hull too (but not out of the one being flown).
+  A ship's rise and fall as it waits is its own now, so its drawn deck and the
+  deck under the feet move together.
 - **2026-11-19** (midday) — **The weapon in the hand** (`src/game/fight.js`
   IN_HAND, `src/game/bodies/common.js` holdArm and bodyOf's grip,
   `biped.js`, `human.js`, `robot.js`, `mantis.js`, `light.js`, `octopus.js`,

@@ -184,7 +184,7 @@ export function createCarrierArt({ lite = false } = {}) {
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
-      group.position.set(s.p[0], s.p[1] + 0.4 * Math.sin(t * 0.25) * (1 - Math.min(1, s.thrust)), s.p[2]);
+      group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt * 0.4, s.yaw, s.bank * 0.4);
       // the sails come down when someone takes the helm, and are furled up to their yards when it is let be
       const want = aboard ? 1 : 0;

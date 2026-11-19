@@ -29,6 +29,7 @@ import * as TO from './tower.js';
 import * as HA from './hall.js';
 import { levelFor, platformFor, platformBoxes, onPlatform, grown, toLocal as padLocal, toWorld as padWorld, GROW } from './plinth.js';
 import { solveBoxes, inBox, rayBox } from './solids.js';
+import { shipBoxes, toShip, fromShip, KIND as SHIP } from './ships.js';
 
 export const BODY = { rad: 0.3, tall: 1.7 };          // a body, to a wall: an upright cylinder
 export const STEP_UP = 0.35;                          // a step a body takes without jumping
@@ -166,6 +167,18 @@ export function createWorld() {
         floor = Math.max(floor, r.floor > 1e-6 || (!by && !w.ground) ? r.floor + by : -Infinity); ceiling = Math.min(ceiling, r.ceiling + by);
         if (r.climb) climb = by ? { ...r.climb, top: r.climb.top + by, base: r.climb.base + by } : r.climb;
       }
+      // the ships put here (ships.js shipBoxes, in each one's own frame): a hull keeps a body out, a deck holds it up.
+      // s.on: the ship whose deck is the floor under the body (the view carries it as the ship moves)
+      let on = null;
+      for (const sh of w.ships) {
+        if (s.seated === sh || Math.hypot(s.p[0] - sh.p[0], s.p[2] - sh.p[2]) > SHIP[sh.kind].length * 0.6 + SHIP[sh.kind].beam + 4) continue;
+        const [lx, ly, lz] = toShip(sh, s.p), wy = toShip(sh, s.was || s.p)[1], r = solveBoxes(shipBoxes(sh.kind), lx, lz, ly, wy, BODY.rad, BODY.tall, STEP_UP);
+        if (r.hit) { const q = fromShip(sh, [r.lx, ly, r.lz]); s.p[0] = q[0]; s.p[2] = q[2]; }
+        const base = sh.p[1] + (sh.bob || 0);
+        if (r.floor > -Infinity && r.floor + base > floor) { floor = r.floor + base; on = sh; }
+        ceiling = Math.min(ceiling, r.ceiling + base);
+      }
+      s.on = on;
       s.climb = climb;
       if (s.p[1] + BODY.tall > ceiling) { s.p[1] = Math.max(floor, ceiling - BODY.tall); if (s.v[1] > 0) s.v[1] = 0; s.rising = false; }
       return floor;
@@ -177,7 +190,7 @@ export function createWorld() {
     // whether a point is inside one building (its own height taken into account)
     within(b, p) { return K(b).inside(b, p[0], p[2], p[1] - (b.y || 0)); },
     // how far along from the body's head toward the eye the eye may stand
-    eye(from, to) {
+    eye(from, to, seated = null) {
       let t = w.ground ? w.ground.clear(from, to) : 1;
       for (const b of w.buildings) {
         if (b.plinth) {
@@ -185,6 +198,16 @@ export function createWorld() {
           for (const x of platformBoxes(b)) if (!inBox(x, ...o)) { const hit = rayBox(x, o, d); if (hit < 1) t = Math.min(t, Math.max(0, hit - 0.05)); }
         }
         if (b.down < 0) t = Math.min(t, K(b).eyeRoom(b, down(b, from), down(b, to)));
+      }
+      // and not into a ship's hull (but the one the body sits in: the eye stands back from that one on purpose)
+      const len = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) || 1;
+      for (const sh of w.ships) {
+        if (sh === seated) continue;
+        const o = toShip(sh, from), e = toShip(sh, to), d = [e[0] - o[0], e[1] - o[1], e[2] - o[2]];
+        for (const bx of shipBoxes(sh.kind)) {
+          if (o[0] > bx.x0 && o[0] < bx.x1 && o[1] > bx.y0 && o[1] < bx.y1 && o[2] > bx.z0 && o[2] < bx.z1) continue;   // the head in it: not this one
+          const h = rayBox(bx, o, d); if (h < t) t = Math.max(0, h - 0.15 / len);
+        }
       }
       return t;
     },

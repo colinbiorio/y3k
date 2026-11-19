@@ -116,7 +116,7 @@ export function createDartArt({ lite = false } = {}) {
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false } = {}) {
-      group.position.set(s.p[0], s.p[1] + 0.03 * Math.sin(t * 1.4) * (1 - Math.min(1, s.thrust)), s.p[2]);
+      group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
       // the canopy lifts while it waits for a pilot, and shuts over one
       open += ((aboard ? 0 : 1) - open) * (1 - Math.exp(-4 * dt));
