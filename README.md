@@ -263,6 +263,11 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (afternoon) — **The blueprint's panel inside the frame on a
+  phone** (`styles.css`). Looked at on the live site at 390 x 844: its ends
+  ran under the side rails' glyphs; it keeps to the frame's hole now, as the
+  hint does (its buttons wrap to a second row), every button still 44 px for
+  a finger.
 - **2026-11-19** (afternoon) — **Ships are solid: their decks stood on, their
   hulls not flown through** (`src/game/ships.js` shipBoxes, BOB, carryOn,
   DHOW_HULL; `src/game/world.js` solve and eye; `src/game/view.js` drift;
