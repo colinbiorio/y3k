@@ -274,6 +274,29 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (!kind) { const near = K.world.near(K.body.p); if (near) { planEnd(); said(K.world.toggle(K.body, st.building)); return; } }
     planStart(kind || st.building);
   }
+  // THE HAND THAT HOLDS (bodies/common.js holdArm; Colin, 19 Nov 2026: "it'd be nice if the character actually held the
+  // weapon in its hand instead of just rendering it close to their hand"): what the weapon in hand is doing says what
+  // the right arm does, eased so nothing snaps: carried (the forearm forward, the fist upright, the fingers closed on it),
+  // put out along the eye's line (a bow drawn, a flame sent, a lash, the shield), raised (a bell rung, a ring spun up);
+  // while the ring is away the hand is open and follows it a little.
+  const HOLD = { carry: 0, reach: 0, lift: 0, aim: [0, 0, 1], closed: false }, GRIP = { p: new THREE.Vector3(), q: new THREE.Quaternion(), reach: 0 };
+  function holding(dt) {
+    const C = K.combat, R = C.ring, w = C.weapon, aim = [AIM.x, AIM.y, AIM.z];
+    let t = { carry: 1, reach: 0, lift: 0, aim, closed: true };
+    if (C.player.down > 0 || K.aboard) t = { carry: 0, reach: 0, lift: 0, aim, closed: false };
+    else if (C.guard.up) t = { carry: 0, reach: 1, lift: 0, aim: [Math.sin(C.faceYaw), 0.05, Math.cos(C.faceYaw)], closed: true };
+    else if (w === 'ring') {
+      if (R.mode === 'out' || R.mode === 'back' || R.mode === 'whirl' || R.mode === 'slam') t = { carry: 0.2, reach: 0.55, lift: 0, aim, closed: false };
+      else if (R.mode === 'charging') t.lift = R.charge;
+    } else if (w === 'bow') { if (C.bow.mode === 'drawing') t = { carry: 0, reach: 1, lift: 0, aim, closed: true }; }
+    else if (w === 'bell') { if (C.bell.mode === 'ringing') t.lift = 0.3 + 0.7 * C.bell.power; }
+    else if (w === 'thread') { const Th = C.thread; if (Th.mode === 'spinning') t.lift = 0.4 + 0.6 * Th.power; else if (Th.mode !== 'held' || Th.snare != null) t = { carry: 0.3, reach: 0.8, lift: 0, aim, closed: true }; }
+    else if (w === 'torch') { const To = C.torch; if (To.mode === 'flame') t = { carry: 0, reach: 1, lift: 0, aim: To.dir || aim, closed: true }; }
+    const k = 1 - Math.exp(-12 * dt);
+    HOLD.carry += (t.carry - HOLD.carry) * k; HOLD.reach += (t.reach - HOLD.reach) * k; HOLD.lift += (t.lift - HOLD.lift) * k; HOLD.closed = t.closed;
+    for (let i = 0; i < 3; i++) HOLD.aim[i] += (t.aim[i] - HOLD.aim[i]) * Math.min(1, k * 1.6);
+    return HOLD;
+  }
   // THE BLUEPRINT (blueprint.js; Colin, 19 Nov 2026: "preview a blueprint/holograph of where the item will be placed with
   // an option to confirm placement", and on uneven ground "an option to level the ground around it or build a flat
   // platform"). Chosen, a building is shown as light where it would go: out along the eye's way from the body, nearest
@@ -645,6 +668,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     pose += ((posing ? 1 : 0) - pose) * ease(7, dt);
     if (posing) { let by = eye.yaw + turned - body.yaw; by -= 2 * Math.PI * Math.round(by / (2 * Math.PI)); body.yaw += by * ease(6, dt); }
     shown(body, pos);
+    if (!paused && figure.hold) figure.hold(holding(dt));
     for (const [x, z] of figure.update(body, paused ? 0 : dt, pos)) if (pos[1] < 0.05 && K.world.wet(x, z)) V.drop(x, z, 0.1 + 0.012 * Math.hypot(body.v[0], body.v[2]));
     // struck down: the body goes over backward where it stood, and comes up again
     K.fallen += ((K.combat.player.down > 0 ? 1 : 0) - K.fallen) * ease(K.combat.player.down > 0 ? 7 : 4, dt);
@@ -714,7 +738,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     builds(dt);
     ships(paused ? 0 : dt);
     if (V.live && !paused) V.live(dt, K.clock, body, K.world);   // the island's palms, birds, woodhens and turtles
-    K.fight.update(K.combat, paused ? 0 : dt, camera, body);
+    // the fist, from the body's own bones: what is in hand is drawn in it, and leaves from it (combat.js handOf)
+    let fist = null;
+    if (figure.grip && figure.group.visible && !K.aboard) {
+      figure.grip.getWorldPosition(GRIP.p); figure.grip.getWorldQuaternion(GRIP.q); GRIP.reach = HOLD.reach; fist = GRIP;
+      body.grip = [GRIP.p.x, GRIP.p.y, GRIP.p.z];
+    } else body.grip = null;
+    K.fight.update(K.combat, paused ? 0 : dt, camera, body, fist);
     if (body.light || K.lightArt) {
       if (K.lightArt?.scene !== V.scene) { K.lightArt?.dispose(); K.lightArt = createLightArt(V.scene, { lite: K.lite }); }
       K.lightArt.update(body.light, { camera, at: [pos[0], pos[1] + figure.look * 0.8, pos[2]], dt: paused ? 0 : dt, eyeD: eye.d });
@@ -879,6 +909,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated,
         ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
+      fist: K.body.grip ? K.body.grip.map((v) => Math.round(v * 1000) / 1000) : null, held: K.fight.held?.() || null, hold: { carry: Math.round(HOLD.carry * 100) / 100, reach: Math.round(HOLD.reach * 100) / 100, closed: HOLD.closed },
       fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,
         thread: K.combat.thread.mode, spin: Math.round(K.combat.thread.power * 100) / 100, snare: K.combat.thread.snare, torch: K.combat.torch.mode, reach: K.combat.torch.mode === 'flame' ? Math.round(K.combat.torch.reach * 10) / 10 : 0, fires: K.combat.fires.length, flared: K.combat.flared, embers: K.combat.bolts.filter((x) => x.kind === 'ember').length, power: Math.round(K.combat.bell.power * 100) / 100, tones: K.combat.tones.length, rang: K.combat.bell.rang, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, heat: Math.round(b.heat * 100) / 100, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };

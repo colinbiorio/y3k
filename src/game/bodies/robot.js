@@ -12,7 +12,7 @@ import { DoubleSide } from 'three';
 import { FINISH, GLOW } from '../kinds.js';
 import { loft, limb, along, ball, hoop, placed, kit, pipe, panel, on, cloth, stuff, TILE } from '../shape.js';
 import { createBiped } from './biped.js';
-import { bodyOf, wide, squared, sided, oval } from './common.js';
+import { bodyOf, wide, squared, sided, oval, node } from './common.js';
 
 const PI = Math.PI, T = 0.26;                                 // T: how big the metal's grain is
 // how a frame differs from the even one: its height, its width, its depth, how thick its limbs are
@@ -69,6 +69,7 @@ export function createRobot(look, { lite = false } = {}) {
   K.put(torso, M.halo, placed(hoop(0.018, 0.009, [1, 1], 18), chest(0.3, PI / 2, 0.009), [PI / 2, 0, 0]));
   K.put(torso, M.joint, loft([[0.44, 0.04, 0.04, -0.008], [0.55, 0.036, 0.038, -0.006]], { seg: 10, cap: [0, 0] }));
   for (const [y, r] of [[0.468, 0.054], [0.488, 0.047], [0.506, 0.043]]) K.put(torso, M.metal, placed(hoop(r, 0.011, [1, 1.04], 18), [0, y, -0.007]));
+  let open = null, fist = null;
   for (const a of arms) {
     const sd = a.side;
     K.put(a.shoulder, M.plate, placed(ball([0.056 * kl, 0.07 * kl, 0.064 * kl], 14), [sd * 0.008, -0.016, 0]));
@@ -79,11 +80,22 @@ export function createRobot(look, { lite = false } = {}) {
     K.put(a.elbow, M.plate, sided(sd, oncurve(along(0.26, fore), [-0.235, -0.04], -0.35, 1.05, { lift: 0.005 })));
     // a hand: a palm of metal, four fingers of two bones, a thumb
     K.put(a.hand, M.metal, sided(sd, limb(0.085, [[0, 0.015, 0.022], [0.4, 0.016, 0.036], [1, 0.014, 0.037]], { seg: 10 })));
-    for (const z of [-0.027, -0.009, 0.009, 0.027]) {
-      K.put(a.hand, M.plate, sided(sd, placed(limb(0.042, [[0, 0.0078], [1, 0.0068]], { seg: 6 }), [0, -0.086, z], [0, 0, -0.22])));
-      K.put(a.hand, M.plate, sided(sd, placed(limb(0.038, [[0, 0.0068], [1, 0.0052]], { seg: 6 }), [-0.0092, -0.127, z], [0, 0, -0.7])));
+    // the fingers as they hang; the right hand's are its own, so they can close on what it holds (curled through
+    // the same two joints: the first bone across the palm, the second back toward it)
+    const fingers = (put, [a1, a2, th]) => {
+      for (const z of [-0.027, -0.009, 0.009, 0.027]) {
+        const e = [0.042 * Math.sin(a1), -0.086 - 0.042 * Math.cos(a1)];             // where the first bone ends
+        put(sided(sd, placed(limb(0.042, [[0, 0.0078], [1, 0.0068]], { seg: 6 }), [0, -0.086, z], [0, 0, a1])));
+        put(sided(sd, placed(limb(0.038, [[0, 0.0068], [1, 0.0052]], { seg: 6 }), a1 === -0.22 ? [-0.0092, -0.127, z] : [e[0], e[1], z], [0, 0, a2])));
+      }
+      put(sided(sd, placed(limb(0.055, [[0, 0.009], [1, 0.0065]], { seg: 6 }), [0, -0.03, 0.036], th)));
+    };
+    if (sd > 0) fingers((g) => K.put(a.hand, M.plate, g), [-0.22, -0.7, [-0.55, 0, -0.2]]);
+    else {
+      open = node(a.hand); fist = node(a.hand); fist.visible = false;
+      fingers((g) => K.own(open, g, M.plate), [-0.22, -0.7, [-0.55, 0, -0.2]]);
+      fingers((g) => K.own(fist, g, M.plate), [-1.45, -2.75, [-1.05, 0.1, -0.75]]);
     }
-    K.put(a.hand, M.plate, sided(sd, placed(limb(0.055, [[0, 0.009], [1, 0.0065]], { seg: 6 }), [0, -0.03, 0.036], [-0.55, 0, -0.2])));
   }
 
   // ── the head
@@ -160,5 +172,5 @@ export function createRobot(look, { lite = false } = {}) {
   }
 
   K.build();
-  return bodyOf(rig, K, { eye: 1.5, cloths });
+  return bodyOf(rig, K, { eye: 1.5, cloths, grip: [0.026, -0.098, 0.004], fist: (on) => { open.visible = !on; fist.visible = on; } });
 }

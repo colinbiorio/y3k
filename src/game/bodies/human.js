@@ -20,7 +20,7 @@ import { SKIN, DYE } from '../kinds.js';
 import { loft, limb, along, ball, hoop, placed, kit, pipe, panel, on, cloth, tube, stuff, shade, surfaced, TILE } from '../shape.js';
 import { createBiped } from './biped.js';
 import { bodyOf, wide, squared, sided } from './common.js';
-import { HEAD as FACE, HAND, CROP as CROPPED, SHAVED as SHORN, EYES, HAIR_AT, CURLS } from './kin.js';
+import { HEAD as FACE, HAND, HAND_GRIP, CROP as CROPPED, SHAVED as SHORN, EYES, HAIR_AT, CURLS } from './kin.js';
 
 const PI = Math.PI;
 // two colours, k of the way from the first to the second
@@ -127,10 +127,13 @@ export function createHuman(look, { lite = false } = {}) {
   K.put(torso, M.top, loft(body, { seg: 24, tile: topTile }));
   // the neck, up into the face's own (./kin.js): its last ring is just inside where that one is cut, which leans forward
   K.put(torso, M.skin, loft([[0.42, 0.055, 0.055, -0.012], [0.458, 0.059, [0.057, 0.047], -0.004], [0.486, 0.0655, [0.07, 0.037], 0]], { seg: 16, cap: [0, 0] }));
+  let bare = null, fist = null;
   for (const a of arms) {
     K.put(a.shoulder, M.sleeve, limb(0.29, wide(UPPER, kl), { tile: armTile }));
     K.put(a.elbow, M.sleeve, limb(0.26, wide(FORE, kl), { tile: armTile }));
-    K.own(a.hand, sided(a.side, kin(HAND)), M.skin);                                // a hand of its own bones, relaxed (./kin.js)
+    const h = K.own(a.hand, sided(a.side, kin(HAND)), M.skin);                      // a hand of its own bones, relaxed (./kin.js)
+    // the right one closes on what it holds: the same hand, its fingers wrapped round a haft by the same bones
+    if (a.side < 0) { bare = h; fist = K.own(a.hand, sided(a.side, kin(HAND_GRIP)), M.skin); fist.visible = false; }
   }
 
   // ── the head: MakeHuman's face (./kin.js), its lips, brows and creases in its own tints, and eyes that look out of it
@@ -285,5 +288,5 @@ export function createHuman(look, { lite = false } = {}) {
 
   K.build();
   // the strands are laid on their points once those have moved; their flat side faces the way the head does
-  return bodyOf(rig, K, { eye: 1.45, cloths, frame: strands.length ? () => { const e = head.matrixWorld.elements; front[0] = e[8]; front[1] = e[9]; front[2] = e[10]; for (const lay of strands) lay(front); } : null });
+  return bodyOf(rig, K, { eye: 1.45, cloths, grip: [0.034, -0.062, 0.004], fist: (on) => { bare.visible = !on; fist.visible = on; }, frame: strands.length ? () => { const e = head.matrixWorld.elements; front[0] = e[8]; front[1] = e[9]; front[2] = e[10]; for (const lay of strands) lay(front); } : null });
 }

@@ -17,9 +17,9 @@
 // feet still stay where they are put.
 import * as THREE from 'three';
 import { createGait, stepGait, legIK, fromHip, land } from '../gait.js';
-import { node, capsules, carried } from './common.js';
+import { node, capsules, carried, holdArm } from './common.js';
 
-const X = new THREE.Vector3(1, 0, 0), q = new THREE.Quaternion(), qf = new THREE.Quaternion();
+const X = new THREE.Vector3(1, 0, 0), q = new THREE.Quaternion(), qf = new THREE.Quaternion(), tq = new THREE.Quaternion();
 export function createBiped({ build, scale = 1, waist = 0.07, shoulder = [0.186, 0.4, 0], upper = 0.29, fore = 0.26, neck = [0, 0.505, -0.005] } = {}) {
   const gait = createGait(build), B = gait.build, s = scale;
   const group = new THREE.Group(), rig = node(group); rig.scale.setScalar(s);
@@ -57,6 +57,8 @@ export function createBiped({ build, scale = 1, waist = 0.07, shoulder = [0.186,
       }
       for (const a of arms) { const m = a.side > 0 ? p.armL : p.armR; a.shoulder.rotation.set(-m.swing, 0, a.side * m.out); a.elbow.rotation.x = -m.elbow; }
       if (self.after) self.after(p, body, dt);
+      // a weapon in the right hand (./common.js holdArm): the arm as the fight asks, over the stride's
+      if (self.hold) { tq.copy(rig.quaternion).multiply(tilt.quaternion).multiply(hips.quaternion).multiply(torso.quaternion); holdArm(arms[1].shoulder, arms[1].elbow, -1, self.hold, tq); }
       rig.updateMatrixWorld(true);
       const sn = Math.sin(body.yaw), cs = Math.cos(body.yaw);
       p.falls = p.footfalls.map(([x, z]) => [at[0] + s * (x * cs + z * sn), at[2] + s * (-x * sn + z * cs)]);
@@ -64,6 +66,8 @@ export function createBiped({ build, scale = 1, waist = 0.07, shoulder = [0.186,
     },
     // what a body does with its own bones once the stride is on them (arms held up, wings opened): (pose, body, dt)
     after: null,
+    // what the fight asks of the right arm (./common.js holdArm), or none
+    hold: null,
   };
   return self;
 }

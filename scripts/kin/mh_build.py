@@ -83,42 +83,51 @@ thumb -= along * (thumb @ along)
 thumb /= np.linalg.norm(thumb)
 palm = np.cross(along, thumb)                              # a left hand: fingers x thumb is out of the palm
 CURL = {1: (0.12, 0.2, 0.16), 2: (0.2, 0.3, 0.22), 3: (0.24, 0.34, 0.24), 4: (0.28, 0.38, 0.26), 5: (0.32, 0.42, 0.28)}
-M = {}                                                     # bone -> (R, t): x -> R x + t, in the rest pose's space
-
-
-def frame_of(name):
-    if name in M:
-        return M[name]
-    b = bones[name]
-    pr, pt = frame_of(b['parent']) if b['parent'] in bones and b['parent'] != 'lowerarm02.L' and b['parent'] in descendants(bones, 'wrist.L') else (np.eye(3), np.zeros(3))
-    R = np.eye(3)
-    if name.startswith('finger'):
-        f, seg = int(name[6]), int(name[8])
-        d = b['tail'] - b['head']
-        d /= np.linalg.norm(d)
-        R = rot(np.cross(d, palm), CURL[f][seg - 1])
-    h = b['head']
-    # x -> parent(R (x - h) + h)
-    Rc, tc = pr @ R, pr @ (h - R @ h) + pt
-    M[name] = (Rc, tc)
-    return M[name]
-
-
+# the hand closed on a haft (Colin, 19 Nov 2026: "the character actually held the weapon in its hand"): the fingers
+# wrapped round a grip some four centimetres through, the thumb laid over them
+GRIP = {1: (0.55, 0.45, 0.35), 2: (1.25, 1.45, 0.75), 3: (1.3, 1.5, 0.8), 4: (1.35, 1.5, 0.8), 5: (1.4, 1.45, 0.75)}
 handB = descendants(bones, 'wrist.L')
 hv = region(weights, handB)
 hsrc, huv, htri = piece(hv)
 HP = V[hsrc].copy()
-posed = np.zeros_like(HP)
-for i, v in enumerate(hsrc):
-    ws = {b: w for b, w in weights.get(int(v), {}).items() if b in handB}
-    tot = sum(ws.values())
-    for b, w in ws.items():
-        R, t = frame_of(b)
-        posed[i] += (w / tot) * (R @ HP[i] + t)
-# into the hand bone's frame: x toward the palm's back... the palm toward -x, fingers -y, thumb +z
-ex, ey, ez = -palm, -along, thumb
-Hloc = np.stack([(posed - o) @ ex, (posed - o) @ ey, (posed - o) @ ez], axis=1)
-Hloc[:, 1] += 0.012                                       # the wrist's crease a little inside the sleeve
+
+
+def pose_hand(curl):
+    M = {}                                                     # bone -> (R, t): x -> R x + t, in the rest pose's space
+
+    def frame_of(name):
+        if name in M:
+            return M[name]
+        b = bones[name]
+        pr, pt = frame_of(b['parent']) if b['parent'] in bones and b['parent'] != 'lowerarm02.L' and b['parent'] in descendants(bones, 'wrist.L') else (np.eye(3), np.zeros(3))
+        R = np.eye(3)
+        if name.startswith('finger'):
+            f, seg = int(name[6]), int(name[8])
+            d = b['tail'] - b['head']
+            d /= np.linalg.norm(d)
+            R = rot(np.cross(d, palm), curl[f][seg - 1])
+        h = b['head']
+        # x -> parent(R (x - h) + h)
+        Rc, tc = pr @ R, pr @ (h - R @ h) + pt
+        M[name] = (Rc, tc)
+        return M[name]
+
+    posed = np.zeros_like(HP)
+    for i, v in enumerate(hsrc):
+        ws = {b: w for b, w in weights.get(int(v), {}).items() if b in handB}
+        tot = sum(ws.values())
+        for b, w in ws.items():
+            R, t = frame_of(b)
+            posed[i] += (w / tot) * (R @ HP[i] + t)
+    # into the hand bone's frame: x toward the palm's back... the palm toward -x, fingers -y, thumb +z
+    ex, ey, ez = -palm, -along, thumb
+    H = np.stack([(posed - o) @ ex, (posed - o) @ ey, (posed - o) @ ez], axis=1)
+    H[:, 1] += 0.012                                       # the wrist's crease a little inside the sleeve
+    return H
+
+
+Hloc = pose_hand(CURL)
+Hgrip = pose_hand(GRIP)
 
 # ---------------------------------------------------------------- the head
 headB = descendants(bones, 'neck01')
@@ -283,6 +292,7 @@ uv16 = lambda u: b64(np.clip(np.round(u * 65535), 0, 65535), '<u2')
 n8 = lambda n: b64(np.clip(np.round(n * 127), -127, 127), 'i1')
 c8 = lambda c: b64(np.clip(np.round(c * 255), 0, 255), 'u1')
 HN = smooth_normals(Hloc, hsrc, htri)
+HGN = smooth_normals(Hgrip, hsrc, htri)
 
 
 def part(name, Pp, Nn, U, T, C=None):
@@ -300,6 +310,7 @@ js = ["""// kin.js — THE HUMAN'S FACE AND HANDS, made from MakeHuman's base me
 """,
       part('HEAD', P, N, uv, tri, col),
       part('HAND', Hloc, HN, huv, htri),
+      f"export const HAND_GRIP = {{ n: {len(Hgrip)}, pos: '{q16(Hgrip)}', nrm: '{n8(HGN)}', uv: HAND.uv, idx: HAND.idx }};   // the same hand closed: its own places, the open one's map and triangles\n",
       part('CROP', crop, cropN, None, cropT),
       part('SHAVED', shaved, shavedN, None, shavedT),
       f"export const EYES = {[[r5(x) for x in e] for e in eyes]};\n",
@@ -307,6 +318,6 @@ js = ["""// kin.js — THE HUMAN'S FACE AND HANDS, made from MakeHuman's base me
       f"export const CURLS = {[[r5(x) for x in c] for c in curls]};\n"]
 open(out, 'w').write(''.join(js))
 print('head', len(P), 'tris', len(tri), '| hand', len(Hloc), len(htri), '| crop', len(crop), len(cropT), '| shaved', len(shaved), len(shavedT), '| eyes', [[r5(x) for x in e] for e in eyes])
-print('head bbox', P.min(0).round(3), P.max(0).round(3), '| hand bbox', Hloc.min(0).round(3), Hloc.max(0).round(3))
+print('head bbox', P.min(0).round(3), P.max(0).round(3), '| hand bbox', Hloc.min(0).round(3), Hloc.max(0).round(3), '| grip bbox', Hgrip.min(0).round(3), Hgrip.max(0).round(3))
 print('lip verts', int((lip > 0.5).sum()), 'brow verts', int((brow > 0.5).sum()), 'crease', round(float(crease.max()), 2))
 print('hair at', back(0.168), back(0.1), 'size', os.path.getsize(out))
