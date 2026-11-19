@@ -19,6 +19,7 @@ import { LIGHT_NAMES } from './lights.js';
 import { MODES } from './state.js';
 import { SHAPE } from './island/lordhowe-shape.js';
 import { mapSvg } from './island/map.js';
+import { GROUPS, groupOf, glyphSvg } from './glyphs.js';
 
 export const MODE_LINES = {
   survival: 'a tap jumps; held, the jump rises to twice the height, and the ground still takes you back. a dash goes any way you lean, once more in the air. jump at a wall along it and you run along the wall; jump again to leap off.',
@@ -57,11 +58,31 @@ export function createMenu({ doc = globalThis.document, win = globalThis.window,
     const text = hear ? (slot === 'pad' ? 'press a button…' : 'press a key…') : cellText(b(), action, slot);
     return `<span role="cell"><button type="button" class="game-key${hear ? ' hearing' : ''}" data-act="${action}" data-slot="${slot}" aria-label="${esc(`${label}, ${SLOT_WORDS[slot]}: ${hear ? 'waiting' : (text === '—' ? 'none' : text)}. Press to change`)}">${esc(text)}</button></span>`;
   };
+  // THE GLYPHS, POURED (../mercury-buttons.js): each drawing becomes its own body of the one material. A poured glyph is
+  // kept across the sheet's redraws (a box pressed redraws it), put back in its new place, and let go when the sheet closes.
+  const poured = new Map();             // action id -> { el, h }
+  function pour() {
+    const fresh = [...bodyEl.querySelectorAll('.game-glyph')];
+    for (const el of fresh) { const p = poured.get(el.dataset.glyph); if (p) el.replaceWith(p.el); }
+    if (!doc.body?.classList?.contains('merc-sdf')) return;   // the liquid is off here: the drawings stand as they are
+    const todo = [...bodyEl.querySelectorAll('.game-glyph:not(.mercury)')];
+    if (!todo.length) return;
+    import('../mercury-buttons.js').then(({ mount }) => {
+      todo.forEach((el, i) => {
+        if (sheet.hidden || !el.isConnected || poured.has(el.dataset.glyph)) return;
+        el.classList.add('mercury');                                                 // its own drawing stands in until the bake lands
+        let h = null;
+        try { h = mount(el, { svgEl: el.querySelector('svg'), size: 23, interactive: false, thicken: 1.3, rim: 0.04, envFloor: 0.16, seed: 17 + i * 3.7 }); } catch { h = null; }
+        if (h) poured.set(el.dataset.glyph, { el, h }); else el.classList.remove('mercury');
+      });
+    }).catch(() => { /* the drawings stand on their own */ });
+  }
+  function unpour() { for (const { h } of poured.values()) { try { h.destroy(); } catch { /* gone */ } } poured.clear(); }
   function render() {
     const tabs = `<div class="game-tabs" role="tablist" aria-label="The world's settings">${['controls', 'map'].map((t) =>
       `<button type="button" role="tab" class="game-tab${t === tab ? ' on' : ''}" data-tab="${t}" aria-selected="${t === tab}">${t}</button>`).join('')}</div>`;
     bodyEl.innerHTML = tabs + (tab === 'map' ? mapPane() : controlsPane());
-    if (tab === 'controls') padLine();
+    if (tab === 'controls') { padLine(); pour(); }
   }
   // the map: where a body can be (the void; the island), and the island drawn, with where the body is on it
   function mapPane() {
@@ -73,18 +94,27 @@ export function createMenu({ doc = globalThis.document, win = globalThis.window,
       <div class="sec"><h3>${esc(SHAPE.name)}</h3><div class="game-map">${mapSvg(SHAPE, place === 'island' && w ? { at: [w.p[0], w.p[2]], facing: w.yaw } : {})}</div>
         <p class="muted game-line">${esc(ISLAND_NOTE)}</p></div>`;
   }
+  // a control's glyph: the drawing, poured in unimat once the sheet is open (pour, below)
+  const glyph = (id) => `<span class="game-glyph" data-glyph="${esc(id)}">${glyphSvg(id)}</span>`;
+  const label = (id, text, note) => `<span class="game-act" role="cell">${glyph(id)}<span class="game-act-text">${esc(text)}${note ? `<small>${esc(note)}</small>` : ''}</span></span>`;
+  const heads = '<div class="game-bind game-bind-head" role="row"><span role="columnheader">to</span><span role="columnheader">key</span><span role="columnheader">or</span><span role="columnheader">controller</span></div>';
+  // the controls in their groups (glyphs.js GROUPS): moving, flying, building, ships, weapons, the eye; each a table of its own
   function controlsPane() {
     const mode = getMode(), look = b().look;
+    const rows = (g) => {
+      const fixed = g.id === 'move' ? `<div class="game-bind" role="row">${label('look', 'look')}<span class="game-fixed" role="cell">the mouse</span><span class="game-fixed" role="cell">a drag</span><span class="game-fixed" role="cell">right stick</span></div>` : '';
+      return fixed + ACTIONS.filter((a) => groupOf(a) === g.id).map((a) => `<div class="game-bind" role="row">${label(a.id, a.label, a.note)}${box(a.id, 0, a.label)}${box(a.id, 1, a.label)}${
+        a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`).join('');
+    };
+    const groups = GROUPS.map((g) => ({ g, html: rows(g) })).filter((x) => x.html).map(({ g, html }) =>
+      `<section class="game-group" aria-labelledby="game-g-${g.id}"><h4 class="game-group-name" id="game-g-${g.id}">${esc(g.name)}</h4>
+        <div class="game-binds" role="table" aria-labelledby="game-g-${g.id}">${heads}${html}</div></section>`).join('');
     return `
       <div class="sec"><h3>mode</h3>${seg('mode', MODES, mode, 'Mode')}<p class="muted game-line">${esc(MODE_LINES[mode])}</p></div>
       <div class="sec"><h3>controls</h3>
         <p class="muted game-line">press a box, then the key, mouse button or controller button you want there. backspace empties it; esc leaves it as it was.</p>
-        <div class="game-binds" role="table" aria-label="Controls">
-          <div class="game-bind game-bind-head" role="row"><span role="columnheader">to</span><span role="columnheader">key</span><span role="columnheader">or</span><span role="columnheader">controller</span></div>
-          <div class="game-bind" role="row"><span class="game-act" role="cell">look</span><span class="game-fixed" role="cell">the mouse</span><span class="game-fixed" role="cell">a drag</span><span class="game-fixed" role="cell">right stick</span></div>
-          ${ACTIONS.map((a) => `<div class="game-bind" role="row"><span class="game-act" role="cell">${esc(a.label)}${a.note ? `<small>${esc(a.note)}</small>` : ''}</span>${box(a.id, 0, a.label)}${box(a.id, 1, a.label)}${
-            a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`).join('')}
-        </div>
+        <div class="game-legend" aria-hidden="true"><span></span><span>key</span><span>or</span><span>controller</span></div>
+        <div class="game-groups">${groups}</div>
         <p class="muted game-line" id="game-pad-line"></p>
       </div>
       <div class="sec"><h3>looking</h3>
@@ -163,6 +193,7 @@ export function createMenu({ doc = globalThis.document, win = globalThis.window,
     if (sheet.hidden) return;
     listening = null; sheet.hidden = true;
     win.cancelAnimationFrame(padRaf); padRaf = 0; padWas = null;
+    unpour();
     onClose();
   };
   if (x) on(x, 'click', close);

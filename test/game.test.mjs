@@ -31,6 +31,7 @@ import * as Kin from '../src/game/bodies/kin.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText } from '../src/game/menu.js';
+import { GLYPHS, GROUPS, groupOf, glyphOf, glyphSvg } from '../src/game/glyphs.js';
 import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as HO from '../src/game/house.js';
@@ -1396,6 +1397,41 @@ ok('the controls sheet is a sheet like the others, and its close is drawn', () =
   assert.match(read('src/mercury-mount.js'), /\['game-menu-close', [\d.]+\]/, 'the liquid X is mounted (an unmounted one is an empty button)');
   const menu = read('src/game/menu.js');
   for (const piece of ['role="table"', 'aria-pressed=', 'aria-label="${esc(', 'press a key…', 'press a button…', 'back to the defaults']) assert.ok(menu.includes(piece), 'menu.js: ' + piece);
+});
+
+ok('every control has its own glyph, in a group of the sheet (Colin, 19 Nov 2026: "dedicated unimat icons for each")', () => {
+  // each action drawn by a glyph of its own (none falls back to the key), each in one group, the groups Colin named
+  for (const a of I.ACTIONS) { assert.ok(GLYPHS[a.id], 'a glyph for ' + a.id); assert.ok(GROUPS.some((g) => g.id === groupOf(a)), a.id); }
+  assert.ok(GLYPHS.look, 'and the look, which no key does');
+  for (const name of ['moving', 'flying', 'building', 'ships', 'weapons']) assert.ok(GROUPS.some((g) => g.name === name), name);
+  const ids = GROUPS.flatMap((g) => g.ids); assert.equal(new Set(ids).size, ids.length, 'an action in one group only');
+  // one added later (the other keys to come) is drawn as a key, under "more", unless it names its group
+  assert.equal(groupOf({ id: 'later' }), 'more'); assert.equal(groupOf({ id: 'later', group: 'ships' }), 'ships'); assert.equal(groupOf({ id: 'later', group: 'nowhere' }), 'more');
+  assert.equal(glyphOf('later'), GLYPHS.key);
+  // drawings that a browser and the pour can read: tags closed, a 24-unit square, drawn in the text's colour
+  for (const [id, g] of Object.entries(GLYPHS)) {
+    const open = (g.match(/<(path|circle|ellipse|rect|g)\b/g) || []).length, shut = (g.match(/\/>|<\/g>/g) || []).length;
+    assert.equal(open, shut, id + ': every shape closed');
+    assert.ok(!/<script|on\w+=|href/i.test(g), id + ': a drawing only');
+  }
+  assert.match(glyphSvg('jump'), /^<svg viewBox="0 0 24 24"[^>]*stroke="currentColor"[^>]*aria-hidden="true"/);
+  const menu = read('src/game/menu.js');
+  assert.match(menu, /import\('\.\.\/mercury-buttons\.js'\)/, 'poured in unimat, the liquid loaded only when the sheet asks');
+  assert.match(menu, /el\.classList\.add\('mercury'\)/, 'its own drawing stands in until the bake lands (body.merc-sdf .mercury > svg)');
+  assert.match(menu, /unpour\(\);\s*onClose\(\)/, 'let go when the sheet closes');
+  assert.match(menu, /\$\{glyph\(id\)\}/);
+});
+
+ok('the hint stands clear of the bars, measured, on every screen (Colin, 19 Nov 2026: the pill over the bottom bar)', () => {
+  const view = read('src/game/view.js'), css = read('styles.css');
+  const seat = view.slice(view.indexOf('function seatHint()'), view.indexOf('function seatHint()') + 1800);
+  for (const sel of ['#chat .chat-menu', '.nav-collapse-bottom', '#chat-air', '.game-touch', '.game-bar', '.nav-collapse-top']) assert.ok(seat.includes(`'${sel}'`), 'measured: ' + sel);
+  assert.match(seat, /--hint-b/); assert.match(seat, /--hint-t/); assert.match(seat, /max-width: 560px/);
+  assert.match(view, /seatHint\(\); \}\n  \/\/ WHERE THE HINT STANDS/, 'asked whenever it says something');
+  assert.match(view, /if \(now - seatAt > 500\) seatHint\(\);/, 'and twice a second');
+  assert.match(css, /\.game-hint \{[^}]*bottom: var\(--hint-b,/); assert.match(css, /\.game-hint \{ bottom: auto; top: var\(--hint-t,/);
+  assert.ok(!/body\.in-void\.airden \.game-hint/.test(css), 'the air mark is measured: no second lift over it');
+  assert.match(css, /@media \(max-width: 560px\) \{[\s\S]*?\.game-hint \{ bottom: auto/, 'the same width as the measure');
 });
 
 ok('the world tab goes through the door, and each world has the button to the other', () => {

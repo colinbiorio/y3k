@@ -263,6 +263,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-19** (morning) — **The world's controls sheet, in groups, a unimat
+  glyph for each control; the hint clear of the bars** (`src/game/glyphs.js`,
+  `src/game/menu.js`, `src/game/view.js` seatHint, `styles.css`;
+  `test/game.test.mjs`). Colin, having played: "a prettier menu for all the
+  controls -- dedicated unimat icons for each", and a picture of the hint pill
+  over the bottom bar. The controls stand in cards (moving, flying, building,
+  ships, weapons, the eye and the sheet), each control with its own drawing
+  poured in the one material by the mercury system (its drawing stands in
+  until the pour lands, and where there is no WebGL2), its keys as caps; on a
+  phone each control is two lines, its name over its three boxes. The hint's
+  seat was a formula that forgot the chat bar's height when the bottom rail is
+  folded (12 px over it at every desktop size) and on a phone met the bar's
+  second row; now what is there is measured and the line stands 8 px clear
+  (48 sizes and folds, all clear).
 - **2026-11-18** (late afternoon) — **The body button beckons a first visitor**
   (`src/game/state.js` bodyMet, `src/game/view.js` beckon, `styles.css`
   "beckon"; `test/game.test.mjs`). Owed since stage 2 (GAME.md): "something

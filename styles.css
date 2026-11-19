@@ -6153,7 +6153,6 @@ body.in-code #caption { display: none !important; }
    body stands and its reflection lies (the first look, 13 Nov 2026: the mark at the feet in every picture). As in kode,
    it is put away there, unless airden is on, when it is the way to stop it (and the hint steps up over it). */
 body.in-void:not(.airden) .chat-air { visibility: hidden; }
-body.in-void.airden .game-hint { translate: -50% -66px; }
 .game-root.locked .game-canvas { cursor: none; }
 .game-bar .game-mode { color: #eceef2; }
 /* a first visitor is pointed to the body sheet: its button breathes a pale light until the sheet has been opened once
@@ -6170,9 +6169,11 @@ body.in-void.airden .game-hint { translate: -50% -66px; }
 .game-build .login-alt[disabled] { opacity: 0.42; cursor: default; }
 .game-build .login-alt small { margin-left: 5px; font-size: 0.66rem; letter-spacing: 0.02em; }
 .game-build .game-build-down { color: #f2c9b8; }
-/* the hint stands clear of the panel's bottom grip (20px over the hole's edge) and of the chat bar (#chat's own seat) */
+/* the hint stands clear of the panel's bottom grip (20px over the hole's edge) and of the chat bar (#chat's own seat), and
+   of the air mark when airden is on: view.js seatHint measures them and says --hint-b (8px over the highest); the formula
+   is only its first guess, before anything is measured */
 .game-hint { position: absolute; left: 50%; translate: -50% 0; z-index: 2;
-  bottom: max(calc(var(--hole-b, 90px) + 46px), calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b, 90px)) + 62px));
+  bottom: var(--hint-b, max(calc(var(--hole-b, 90px) + 46px), calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b, 90px)) + 84px)));
   max-width: min(92vw, 780px); padding: 7px 14px; border-radius: 16px; font-size: 0.78rem; line-height: 1.4; text-align: center;
   color: #dfe3ea; pointer-events: none; background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
   backdrop-filter: blur(18px) saturate(1.3); }
@@ -6272,29 +6273,51 @@ body:has(#game-body:not([hidden])) .game-touch { display: none; }
 .game-segb { padding: 6px 14px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
 .game-segb:hover { color: var(--ink); }
 .game-segb.on { background: rgba(255, 255, 255, 0.16); color: var(--ink); }
-.game-binds { display: grid; gap: 2px; margin-top: 10px; }
-.game-bind { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; padding: 3px 0; }
-.game-bind-head { padding-bottom: 4px; font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
-.game-act { font-size: 0.86rem; color: var(--ink); }
+.game-binds { display: grid; gap: 2px; }
+/* THE CONTROLS IN THEIR GROUPS (menu.js, glyphs.js; Colin, 19 Nov 2026: "a prettier menu for all the controls --
+   dedicated unimat icons for each"): a card for each group, each control's glyph poured in unimat beside its name,
+   its keys as caps. The columns are said once over the cards; each table keeps its own heads for a reader that hears. */
+.game-legend, .game-bind { display: grid; grid-template-columns: minmax(0, 1.55fr) repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.game-legend { margin: 14px 0 6px; padding: 0 12px; font-size: 10.5px; letter-spacing: 0.16em; color: var(--muted); }
+.game-groups { display: grid; gap: 10px; }
+.game-group { padding: 8px 12px 6px; border: 1px solid rgba(255, 255, 255, 0.075); border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)); }
+.game-group-name { margin: 2px 0 4px; font-size: 11px; font-weight: 500; letter-spacing: 0.18em; color: #aab3c0; }
+.game-bind { padding: 4px 0; border-top: 1px solid rgba(255, 255, 255, 0.045); }
+.game-bind-head + .game-bind { border-top: 0; }
+.game-bind-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.game-act { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.86rem; color: var(--ink); }
+.game-act-text { min-width: 0; }
 .game-act small { display: block; margin-top: 1px; font-size: 0.7rem; line-height: 1.3; color: var(--muted); }
+/* the glyph's seat: a soft well the metal stands in (its own drawing, silver, until the pour lands) */
+.game-glyph { flex: none; position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: #dde3eb;
+  background: radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 70%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.game-glyph > svg { display: block; filter: drop-shadow(0 1px 0.5px rgba(0, 0, 0, 0.45)); }
 .game-fixed { padding: 0 10px; font-size: 0.8rem; color: var(--muted); }
-.game-key { width: 100%; min-height: 30px; padding: 5px 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
-  background: rgba(255, 255, 255, 0.05); color: var(--ink); font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer;
+.game-key { width: 100%; min-height: 32px; padding: 5px 10px; border: 1px solid rgba(255, 255, 255, 0.13); border-bottom-color: rgba(0, 0, 0, 0.35); border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  color: var(--ink); font: inherit; font-size: 0.8rem; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-align: center; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.game-key:hover { background: rgba(255, 255, 255, 0.1); }
+.game-key:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06)); }
+.game-key:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.85); outline-offset: 2px; }
 .game-key.hearing { border-color: rgba(201, 243, 255, 0.75); background: rgba(201, 243, 255, 0.12); color: #c9f3ff; }
+@media (pointer: coarse) { .game-key { min-height: 40px; } }
 .game-range { display: grid; grid-template-columns: 64px minmax(0, 1fr) 44px; gap: 10px; align-items: center; margin-top: 8px; font-size: 0.85rem; color: var(--ink); }
 .game-range input { width: 100%; accent-color: #c9cdd6; }
 .game-range output { font-variant-numeric: tabular-nums; font-size: 0.8rem; text-align: right; color: var(--muted); }
 .game-check { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 0.85rem; color: var(--ink); }
 .game-check input { width: 20px; height: 20px; accent-color: #c9cdd6; }
 @media (max-width: 560px) {
-  .game-bind { grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 4px; }
-  .game-key { padding: 5px 6px; font-size: 0.72rem; }
-  .game-fixed { padding: 0 6px; font-size: 0.72rem; }
+  /* on a phone a control is two lines: its glyph and name, then its three boxes under the columns' names */
+  .game-legend, .game-bind { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 6px; }
+  .game-legend > span:first-child { display: none; }
+  .game-legend { padding: 0 12px; }
+  .game-bind > .game-act { grid-column: 1 / -1; }
+  .game-group { padding: 6px 10px 4px; }
+  .game-key { padding: 5px 6px; font-size: 0.74rem; }
+  .game-fixed { padding: 0 6px; font-size: 0.72rem; text-align: center; }
   /* on a phone the foot is the thumbs': what the void says is said under the bar */
-  .game-hint { bottom: auto; top: calc(var(--hole-t, 58px) + 76px); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 16px); }
-  body.in-void.airden .game-hint { translate: -50% 0; }
+  .game-hint { bottom: auto; top: var(--hint-t, calc(var(--hole-t, 58px) + 112px)); max-width: calc(100vw - var(--hole-l, 58px) - var(--hole-r, 58px) - 16px); }
   /* …and the hole is a slot there: the buttons stand one over the other at its right edge, jump lowest */
   .game-touch { flex-direction: column-reverse; align-items: center; gap: 10px; }
   .game-tfight { align-self: flex-end; }
