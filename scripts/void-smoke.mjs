@@ -722,7 +722,19 @@ try {
     await key.down('KeyW'); await sleep(1800 * slow); r = await read();
     check('W drives it at its speed', r.world.ships[0].speed > 20, r.world.ships[0]);
     out.frames.flying = await frames(2000);
-    await shot('02-flying'); await key.up('KeyW');
+    await shot('02-flying');
+    // climb and dive, and the bank (Colin, 19 Nov 2026: "ships should be able to go straight up ... and when they turn,
+    // the ship should rotate with it like a plane would")
+    const y0 = (await read()).world.ships[0].p[1];
+    await drag(0, -560); await sleep(1500); r = await read();
+    check('the eye as far up as it goes, the skiff points straight up and climbs', r.world.ships[0].tilt < -1.45 && r.world.ships[0].p[1] > y0 + 15, r.world.ships[0]);
+    await shot('02b-straight-up');
+    await drag(0, 520); await sleep(1200);
+    let bank = 0; for (let i = 0; i < 4; i++) { await drag(70, 0); bank = Math.max(bank, Math.abs((await read()).world.ships[0].bank)); }
+    check('turning under way, it banks into the turn', bank > 0.4, bank);
+    await shot('02c-banked'); await sleep(2500); r = await read();
+    check('and levels out of it', Math.abs(r.world.ships[0].bank) < 0.05, r.world.ships[0]);
+    await key.up('KeyW');
     await key.down('Space'); await sleep(800); await key.up('Space'); r = await read();
     check('jump lifts it', r.world.ships[0].p[1] > 4, r.world.ships[0]);
     r = await until((r) => r.world.ships[0].speed < 0.5, 5000);

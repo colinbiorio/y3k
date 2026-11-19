@@ -97,15 +97,18 @@ function sized(figure, at) {
 
 // the eye's line (the fight aims along it), and the fall's turn about the feet
 const AIM = new THREE.Vector3(), TIP = new THREE.Quaternion(), ROLL = new THREE.Quaternion(), TIPV = new THREE.Vector3(), TIPA = new THREE.Vector3();
+const SHIPQ = new THREE.Quaternion(), SHIPE = new THREE.Euler(), YAWQ = new THREE.Quaternion(), UPV = new THREE.Vector3(0, 1, 0);
 // the whole body turned about its feet: over backward when struck down (k: 0 standing, 1 lying), and leaning
-// sideways (roll, radians; + to its right) as it runs along a wall
-function tip(figure, at, yaw, k, roll = 0) {
-  const g = figure.group;
-  if (k < 1e-3 && Math.abs(roll) < 1e-3) { if (g.position.lengthSq() > 0 || g.quaternion.w < 1) { g.position.set(0, 0, 0); g.quaternion.identity(); } return; }
+// sideways (roll, radians; + to its right) as it runs along a wall; aboard a ship, turned as the ship is (its nose up or
+// down, its bank: ships.js posePoint carries the seat round with it)
+function tip(figure, at, yaw, k, roll = 0, ship = null) {
+  const g = figure.group, turned = !!ship && (Math.abs(ship.tilt || 0) > 1e-3 || Math.abs(ship.bank || 0) > 1e-3);
+  if (k < 1e-3 && Math.abs(roll) < 1e-3 && !turned) { if (g.position.lengthSq() > 0 || g.quaternion.w < 1) { g.position.set(0, 0, 0); g.quaternion.identity(); } return; }
   TIPA.set(-Math.cos(yaw), 0, Math.sin(yaw));
   TIP.setFromAxisAngle(TIPA, 1.38 * k);
   TIPA.set(Math.sin(yaw), 0, Math.cos(yaw));
   ROLL.setFromAxisAngle(TIPA, roll); TIP.premultiply(ROLL);
+  if (turned) { SHIPE.set(ship.tilt || 0, ship.yaw, ship.bank || 0, 'YXZ'); SHIPQ.setFromEuler(SHIPE); YAWQ.setFromAxisAngle(UPV, -ship.yaw); SHIPQ.multiply(YAWQ); TIP.premultiply(SHIPQ); }
   TIPV.set(at[0], at[1], at[2]).applyQuaternion(TIP);
   g.quaternion.copy(TIP); g.position.set(at[0] - TIPV.x, at[1] - TIPV.y, at[2] - TIPV.z);
 }
@@ -690,10 +693,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     // along a wall the body leans into it (its right side toward a wall on its right)
     const wr = body.wallrun, lean = wr ? -0.42 * Math.sign(wr.n[0] * -Math.cos(body.yaw) + wr.n[1] * Math.sin(body.yaw)) : 0;
     K.lean = (K.lean || 0) + (lean - (K.lean || 0)) * ease(12, dt);
-    tip(figure, pos, body.yaw, K.fallen, K.lean);
+    tip(figure, pos, body.yaw, K.fallen, K.lean, K.aboard);
     // far from where the numbers began, they begin again under the body
     const far = K.place === 'island' ? null : rebase(body.p[0], body.p[2]);
-    if (far) { K.origin = [(K.origin?.[0] || 0) + far[0], (K.origin?.[1] || 0) + far[1]]; shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen, K.lean || 0); }
+    if (far) { K.origin = [(K.origin?.[0] || 0) + far[0], (K.origin?.[1] || 0) + far[1]]; shift(body, far[0], far[1]); V.rebase(far[0], far[1]); K.world.shift(far[0], far[1]); shiftCombat(K.combat, far[0], far[1]); K.fight.shift(far[0], far[1]); eye.at.x -= far[0]; eye.at.z -= far[1]; shown(body, pos); figure.update(body, 0, pos); tip(figure, pos, body.yaw, K.fallen, K.lean || 0, K.aboard); }
 
     // the eye. While the body sheet is open it stands back far enough for the whole body, level with its middle,
     // and the body is put in what the sheet leaves of the room
@@ -922,7 +925,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         flat: b.flat ? { level: Math.round(b.flat.level * 100) / 100, k: Math.round(b.flat.k * 100) / 100, blend: Math.round(b.flat.blend * 10) / 10 } : null,
         plinth: b.plinth ? { top: Math.round(b.plinth.top * 100) / 100, foot: Math.round(b.plinth.foot * 100) / 100, steps: b.plinth.steps, rose: Math.round(b.plinth.rose * 100) / 100 } : null, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated, on: K.body.on?.kind || null,
-        ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
+        ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, tilt: Math.round((sh.tilt || 0) * 1000) / 1000, bank: Math.round((sh.bank || 0) * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fist: K.body.grip ? K.body.grip.map((v) => Math.round(v * 1000) / 1000) : null, held: K.fight.held?.() || null, hold: { carry: Math.round(HOLD.carry * 100) / 100, reach: Math.round(HOLD.reach * 100) / 100, closed: HOLD.closed },
       fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,

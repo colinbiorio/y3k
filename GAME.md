@@ -277,6 +277,21 @@ The rest of what he said that day:
   higher (3.0 m), and flying, a held Space only climbs: the light never gathers on
   foot any more (both of #159's ways in are gone). Shift is faster, on foot and in
   the air, as it was. Lightspeed is the ship's now (below).
+- **Climb and dive, and the bank** (done, 19 Nov). Driven, a ship's nose comes up or
+  down toward where the eye looks, 1.5 times as steep past the eye's rest (`ships.js`
+  PITCH_GAIN), so the eye's furthest up or down is straight up or down; it comes
+  round at its own turn a second (the skiff 2.6 rad/s, the carrier 0.7) and goes
+  the way its nose points; let be, it comes level. Under way it banks into a turn as
+  a plane does (tan of the bank = speed x turn / g) up to its own BANK (the dart
+  1.3 rad, the skiff 1.1, the dhow 0.75, the ark 0.7, the carrier 0.55), never so far
+  that its side would touch the water, and levels out of it. Its pilot is carried
+  round with it (`posePoint`: the seat turned as the drawing is, three's YXZ; the
+  figure turned the same about its feet: `view.js` tip). Nose up or down near the
+  water, its stern or bow is what is kept clear. The drawings no longer damp the big
+  ships' tilt and bank: what is drawn is what is flown.
+  Rough: the decks a body stands on are level boxes (an unflown ship comes level, so
+  they agree); a ship pointing straight up turns about the vertical where the eye
+  turns (a rocket's roll).
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
