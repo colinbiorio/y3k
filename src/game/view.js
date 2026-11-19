@@ -149,7 +149,31 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
 
   const save = () => { if (st) saveState(storage, st); };
   const focusCanvas = () => { try { K?.renderer.domElement.focus({ preventScroll: true }); } catch { /* it still draws */ } };
-  function say(text, seconds = 4) { const el = $('.game-hint'); if (!el) return; el.textContent = text; el.hidden = !text; sayUntil = text ? performance.now() + seconds * 1000 : 0; }
+  function say(text, seconds = 4) { const el = $('.game-hint'); if (!el) return; el.textContent = text; el.hidden = !text; sayUntil = text ? performance.now() + seconds * 1000 : 0; seatHint(); }
+  // WHERE THE HINT STANDS, MEASURED (Colin, 19 Nov 2026, with a picture: the pill over the bottom bar). A formula for the
+  // chat bar's seat was off by its own height when the bottom rail was folded, and on a phone the line under the bar met
+  // the bar's second row: so what is there is measured, and the line stands 8px clear of it, under the top's things on a
+  // phone (the bar, its lists, the top grip), over the foot's on a wider screen (the chat bar, the grip, the air mark, the
+  // thumbs' buttons where they are under it). Asked again whenever it says something, and twice a second while it shows.
+  let seatAt = 0;
+  function seatHint() {
+    const el = $('.game-hint'); if (!el || el.hidden || !root) return;
+    seatAt = performance.now();
+    const shown = (e) => { if (!e) return null; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? r : null; };
+    const me = el.getBoundingClientRect(), across = (r) => r.left < me.right && me.left < r.right;
+    if (matchMedia('(max-width: 560px)').matches) {
+      let top = 0;
+      for (const sel of ['.game-bar', '.nav-collapse-top', '.game-foes']) { const r = shown(root.querySelector(sel) || document.querySelector(sel)); if (r && r.top < innerHeight / 2) top = Math.max(top, r.bottom); }
+      if (top) root.style.setProperty('--hint-t', `${Math.round(top + 8)}px`);
+    } else {
+      let low = innerHeight;
+      for (const sel of ['#chat .chat-menu', '#chat .chat-box', '.nav-collapse-bottom', '#chat-air', '.game-touch']) {
+        const r = shown(document.querySelector(sel));
+        if (r && r.bottom > innerHeight / 2 && (sel !== '.game-touch' || across(r))) low = Math.min(low, r.top);
+      }
+      if (low < innerHeight) root.style.setProperty('--hint-b', `${Math.round(innerHeight - low + 8)}px`);
+    }
+  }
   // the line that stands when nothing else is being said
   // the standing line is for the first steps: once the body has been moved for a while it is put away
   // (the controls button and its key stay), until the page is opened again
@@ -614,7 +638,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (!paused && Math.hypot(body.v[0], body.v[2]) > 1) K.learned += dt;
     if (sayUntil && now > sayUntil) sayUntil = 0;
     if (beckonAt && now > beckonAt && !sayUntil) { beckonAt = 0; if (!st.bodyMet && !chooser?.isOpen() && !menu?.isOpen()) say(BECKON, 7); }
-    if (!sayUntil) { const h = hint(); if (h !== standing) { standing = h; const el = $('.game-hint'); if (el) { el.textContent = h; el.hidden = !h; } } } else standing = '';
+    if (!sayUntil) { const h = hint(); if (h !== standing) { standing = h; const el = $('.game-hint'); if (el) { el.textContent = h; el.hidden = !h; seatHint(); } } } else standing = '';
+    if (now - seatAt > 500) seatHint();
     if (saveT && now > saveT) { saveT = 0; save(); }
   }
 

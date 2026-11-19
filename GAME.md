@@ -119,6 +119,30 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### Colin's round of 19 November 2026
+
+Having played it, in his words (the parts given to this session): "it'd be
+nice if the character actually held the weapon in its hand instead of just
+rendering it close to their hand. ... a prettier menu for all the controls --
+dedicated unimat icons for each. when building, preview a blueprint/holograph
+of where the item will be placed with an option to confirm placement -- always
+prioritize the intersection of visual appeal and usability. if the ground is
+not flat, instead of telling the user they can't build there, give them an
+option to level the ground around it or build a flat platform to place the
+building on top of." With two pictures: the torch floating beside the hand,
+and the hint pill over the bottom bar.
+
+- **The controls sheet** (done, 19 Nov): the controls in cards (moving,
+  flying, building, ships, weapons, the eye and the sheet: `glyphs.js`
+  GROUPS; an action added to `input.js`'s ACTIONS later may name its `group`,
+  else it goes under "more", drawn as a key), each with its own glyph
+  (`glyphs.js` GLYPHS, 24-unit drawings) poured in unimat by
+  `mercury-buttons.js`'s `mount` when the sheet opens, kept across its
+  redraws and let go when it closes. On a phone a control is two lines.
+- **The hint** (done, 19 Nov): measured, not guessed (`view.js` seatHint): 8 px
+  clear of the chat bar, the grips, the air mark and the thumbs' buttons, or
+  under the bar's rows on a phone.
+
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
 Colin: "let's pick a random small island on earth, generate the entire
