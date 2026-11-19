@@ -53,7 +53,7 @@ import { glyphSvg } from './glyphs.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
-import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, board, carry, leave, carryOn } from './ships.js';
+import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, shipGap, board, carry, leave, carryOn } from './ships.js';
 import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
@@ -477,18 +477,19 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   }
   function putShip(kind) {
     if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
-    if (K.body.flying || !K.body.grounded) { say('stand on the ground to call a ship down', 3); return; }
+    // called from anywhere: on the ground, in the air, on the water or on a deck (in the air it comes to the body's height)
+    const aloft = K.body.flying || !K.body.grounded;
     K.world.ships = [placeShip(K.body, floorAt, kind)];
     nearSaid = K.world.ships[0];   // this says how to board it: the hint near its seat is not said over it at once
     const up = { dhow: 'takes you up to its helm', ark: 'lifts you up into its dome', carrier: 'lifts you up to its helm' }[kind] || 'boards it';
     const where = { skiff: 'in front of', ark: 'ahead of', carrier: 'ahead of' }[kind] || 'beside';
-    say(`${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} comes down ${where} you · ${actKey('board')} ${up}`, 5);
+    say(`${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} comes ${aloft ? 'up' : 'down'} ${where} you · ${actKey('board')} ${up}`, 5);
   }
   function boardOrLeave() {
     if (K.body.light) return;                          // in the light there is no ship to step into
     if (K.aboard) { const s = K.aboard; leave(s, K.body); K.aboard = null; say(`you step off the ${s.kind}`, 2); return; }
     const s = nearShip(K.world.ships, K.body.p);
-    if (!s) { const k = K.world.ships[0]?.kind; if (k) say(`walk to the ${k}'s ${SHIP_KIND[k].door ? 'stern' : 'seat'} to board it`, 3); return; }
+    if (!s) { const far = K.world.ships[0]; if (far) say(`the ${far.kind} is ${Math.round(shipGap(far, K.body.p))} m off · come near it to board`, 3); return; }
     board(s, K.body); K.aboard = s;
     say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
   }
@@ -520,7 +521,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       }
     }
     for (const [sh, art] of K.shipArts) if (!seen.has(sh)) { V.scene.remove(art.group); art.dispose(); K.shipArts.delete(sh); }
-    // coming near a ship's seat, the hint says how to board it (once each time)
+    // coming near a ship (any part of it), the hint says how to board it (once each time)
     const near = !K.aboard && nearShip(K.world.ships, K.body.p);
     if (near && near !== nearSaid) say(`${actKey('board')} boards the ${near.kind}`, 3);
     nearSaid = near || null;

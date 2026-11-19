@@ -673,33 +673,34 @@ try {
   }
 
   if (scene === 'light') {
-    // lightspeed (Colin, 19 Nov 2026): the jump held on past its top gathers the light; held on, the body goes where the
-    // eye looks, faster and faster to the speed of light; let go, it comes home. Flying, two taps of the jump drop it.
+    // the held jump and flight (Colin, 19 Nov 2026: "for lightspeed travel i really only meant when you're in a ship --
+    // ... character flying spacebar means go up, shift means go faster"; "remove necessity to be on the ground to call a
+    // ship"; boarding "should always just be about proximity to the ship"). On foot a held jump never gathers the light;
+    // flying, space climbs and shift is faster, two taps drop; a ship called in the air comes to the body, and is boarded.
     out.frames ||= {};
     let r = await read(); const start = [r.p[0] + r.world.origin[0], r.p[1], r.p[2] + r.world.origin[1]];
-    await key.down('Space');
-    r = await until((r) => r.lightspeed?.phase === 'gather', 4000);
-    check('the jump held on past its top gathers the light', r?.lightspeed?.phase === 'gather' && r.p[1] > 2.5, { light: r?.lightspeed, p: r?.p });
-    r = await until((r) => r.lightspeed?.phase === 'go', 3000);
-    check('held on, it goes', r?.lightspeed?.phase === 'go', r?.lightspeed);
-    out.frames.light = await frames(2500);
-    r = await until((r) => r.lightspeed?.v >= 299792458 && /the speed of light/.test(r.lightspeed.line), 12000 * slow);
-    check('faster and faster, until it is the speed of light', r?.lightspeed?.v >= 299792458 && /the speed of light/.test(r.lightspeed.line) && r.lightspeed.veil > 0.99, r?.lightspeed);
-    await shot('01-lightspeed');
-    await key.up('Space');
-    r = await until((r) => r.lightspeed?.phase === 'home' && /^coming home/.test(r.lightspeed.line), 2000);
-    check('let go, it comes home', r?.lightspeed?.phase === 'home' && /^coming home/.test(r.lightspeed.line), r?.lightspeed);
-    r = await until((r) => !r.lightspeed && r.grounded, 8000);
-    check('back where it set out, on the water', !!r && Math.hypot(r.p[0] + r.world.origin[0] - start[0], r.p[2] + r.world.origin[1] - start[2]) < 0.5 && Math.abs(r.p[1]) < 0.05, { p: r?.p, origin: r?.world.origin, start });
-    check('its frames keep up in the light', out.frames.light.median < 20, out.frames.light);
-    await key.down('Space'); r = await until((r) => r.lightspeed?.phase === 'gather', 4000); await key.up('Space');
+    await key.down('Space'); await sleep(2600); r = await read(); await key.up('Space');
+    check('on foot, space held on past the top of the jump gathers no light', !r.lightspeed, r.lightspeed);
     r = await until((r) => !r.lightspeed && r.grounded, 4000);
-    check('let go while it gathers, nothing comes of it', !!r && Math.hypot(r.p[0] + r.world.origin[0] - start[0], r.p[2] + r.world.origin[1] - start[2]) < 0.5, r?.p);
+    check('it comes down where it rose', !!r && Math.hypot(r.p[0] + r.world.origin[0] - start[0], r.p[2] + r.world.origin[1] - start[2]) < 0.5 && Math.abs(r.p[1]) < 0.05, r?.p);
     await key.press('KeyG'); await sleep(300); await key.press('KeyF'); await sleep(200);
-    await key.down('Space'); await sleep(500); await key.up('Space'); await sleep(200);
-    r = await read(); check('creative flies, and space held a moment climbs', r.flying === true && r.p[1] > 2, { flying: r.flying, p: r.p });
+    await key.down('Space'); await sleep(2600); r = await read(); await key.up('Space');
+    check('creative flies, and space held climbs (no light)', r.flying === true && r.p[1] > 20 && !r.lightspeed, { flying: r.flying, p: r.p, light: r.lightspeed });
+    await key.down('KeyW'); await sleep(1200); const slowV = Math.hypot((await read()).v[0], (await read()).v[2]);
+    await key.down('ShiftLeft'); await sleep(1500); r = await read(); const fastV = Math.hypot(r.v[0], r.v[2]);
+    await key.up('ShiftLeft'); await key.up('KeyW'); await sleep(900);
+    check('flying, shift is faster', fastV > 2.5 * slowV && !r.lightspeed, { slowV, fastV });
+    r = await read(); const hy = r.p[1];
+    await key.press('KeyY'); await sleep(400); r = await read();
+    const sk = r.world.ships[0];
+    check('Y calls a skiff in the air: it comes to the body, at its height', sk?.kind === 'skiff' && Math.abs(sk.p[1] - (hy - 0.02)) < 1.5 && Math.hypot(sk.p[0] - r.p[0], sk.p[2] - r.p[2]) < 5, { ship: sk, p: r.p });
+    await key.press('KeyR'); await sleep(400); r = await read();
+    check('R boards it from beside it, in the air', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard });
+    await key.press('KeyR'); const fall = []; r = await until((r) => { fall.push([+r.p[1].toFixed(2), r.grounded, r.flying, r.world.on]); return !r.world.aboard && Math.abs(r.p[1]) < 0.05 && r.grounded; }, 8000);
+    check('R again steps off, and it falls to the water', !!r && !r.world.aboard && Math.abs(r.p[1]) < 0.05, { p: r?.p, aboard: r?.world.aboard, fall: fall.filter((_, i) => i % 6 === 0) });
+    await key.press('KeyF'); await sleep(200); await key.down('Space'); await sleep(600); await key.up('Space'); await sleep(200);
     await key.press('Space'); await sleep(110); await key.press('Space');
-    r = await until((r) => r.grounded, 6000);
+    r = await until((r) => r.grounded, 8000);
     check('two taps of space drop it out of the air', !!r && r.flying === false && r.grounded, { flying: r?.flying, p: r?.p });
     await key.press('KeyG'); await sleep(200);
   }
@@ -771,7 +772,7 @@ try {
     await page.locator('#game-ship-list [data-ship="ark"]').click(); await sleep(300);
     out.arkSaid = await hintText(); r = await read();
     const ahead = r.world.ships[0] ? (r.world.ships[0].p[0] - r.p[0]) * -Math.sin(r.yaw) + (r.world.ships[0].p[2] - r.p[2]) * -Math.cos(r.yaw) : 0;
-    check('an ark comes down ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'ark' && ahead > 40 && /^an ark comes down ahead of you/.test(out.arkSaid), { ships: r.world.ships, ahead, said: out.arkSaid });
+    check('an ark comes down ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'ark' && ahead > 40 && /^an ark comes (down|up) ahead of you/.test(out.arkSaid), { ships: r.world.ships, ahead, said: out.arkSaid });
     await sleep(2500); await shot('09-ark');
     await key.press('KeyR'); await sleep(500); r = await read();
     check('R lifts the body up into its dome, high on the prow', r.world.aboard === true && r.p[1] > 15, { aboard: r.world.aboard, p: r.p });
@@ -788,7 +789,7 @@ try {
     await page.locator('#game-ship-list [data-ship="carrier"]').click(); await sleep(300);
     out.carrierSaid = await hintText(); r = await read();
     const far = r.world.ships[0] ? (r.world.ships[0].p[0] - r.p[0]) * -Math.sin(r.yaw) + (r.world.ships[0].p[2] - r.p[2]) * -Math.cos(r.yaw) : 0;
-    check('a carrier comes down far ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'carrier' && far > 300 && /^a carrier comes down ahead of you/.test(out.carrierSaid), { ships: r.world.ships, far, said: out.carrierSaid });
+    check('a carrier comes down far ahead of the body, and it says so', r.world.ships.length === 1 && r.world.ships[0].kind === 'carrier' && far > 300 && /^a carrier comes (down|up) ahead of you/.test(out.carrierSaid), { ships: r.world.ships, far, said: out.carrierSaid });
     await sleep(2500); await shot('11-carrier');
     await key.press('KeyR'); await sleep(500); r = await read();
     check('R lifts the body up to its helm, high on the top terrace', r.world.aboard === true && r.p[1] > 50, { aboard: r.world.aboard, p: r.p });

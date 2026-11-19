@@ -71,6 +71,9 @@ export const WALL = {
 // (lifted LIFT clear of the ground as it goes); the rest of the way is counted (s.light.dist) and drawn (light.js),
 // not travelled. The eye's own rest, a little down, steers it level: its pitch counts only past DEAD either way.
 // Under a roof (inside a building) the light does not gather: a held jump there is only a jump.
+// On foot it no longer gathers at all (Colin, 19 Nov 2026: "for lightspeed travel i really only meant when you're in a
+// ship -- and since spacebar moves the ship up, shift should be the speed button, not spacebar -- character flying
+// spacebar means go up, shift means go faster"): a held jump only rises higher, and flying, a held jump only climbs.
 export const LIGHT = { c: 299792458, v0: 40, rise: 7, gather: 0.4, hold: 1.25, flyHold: 0.8, reach: 2400, lift: 140, turn: 2.4, home: 1.7, dead: 0.15 };
 const LIGHT_K = Math.log(LIGHT.c / LIGHT.v0) / LIGHT.rise;
 // Flying, a second tap of the jump this soon after the first lets go of the air (Colin, 19 Nov: "double spacebar to
@@ -160,14 +163,13 @@ export function stepBody(s, inp, dt = STEP) {
     return s;
   }
 
-  // ---- flying (creative): a second tap soon after the first lets go of the air; the jump held on gathers the light
+  // ---- flying (creative): a second tap soon after the first lets go of the air; held, the jump climbs (and sprint is faster)
   if (s.flying) {
     if (s.tapT > 0) s.tapT -= dt;
     if (inp.jumpPressed) {
       if (s.tapT > 0) { s.flying = false; s.tapT = 0; s.buffer = 0; s.rising = false; s.grounded = false; s.coyote = 0; ev.push({ type: 'fly', on: false, tapped: true }); }
       else s.tapT = TAP_TWICE;
     }
-    if (s.flying && inp.jump && s.heldT >= LIGHT.flyHold && !s.world?.inside?.(s.p)) { beginLight(s, ev); return s; }
   }
   if (s.flying) {
     const top = inp.sprint ? FLY_SPRINT : FLY, a = FLY_ACCEL * dt;
@@ -230,8 +232,6 @@ export function stepBody(s, inp, dt = STEP) {
   }
   if (!s.grounded) {
     if (s.rising && (!inp.jump || s.v[1] <= 0)) s.rising = false;
-    // still held past the top of the jump it began: the light gathers
-    if (s.hold && s.heldT >= LIGHT.hold && !s.world?.inside?.(s.p)) { beginLight(s, ev); return s; }
     const g = G * (s.rising ? HOLD_GRAVITY : 1);
     s.p[1] += s.v[1] * dt - 0.5 * g * dt * dt;
     s.v[1] -= g * dt;

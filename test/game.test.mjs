@@ -169,41 +169,20 @@ ok('a dash is not a second dash until it has rested', () => {
   assert.equal(dashes, 2);
 });
 
-// ---- lightspeed and the double tap (Colin, 19 Nov 2026: "when holding spacebar, the speed should get exponentially
-// faster until you reach the speed of light ... once you release spacebar you'll just end up back at the island";
-// "double spacebar to drop down from flying would be nice")
+// ---- the held jump and the double tap (Colin, 19 Nov 2026: "double spacebar to drop down from flying would be nice";
+// and the same day, of the light: "for lightspeed travel i really only meant when you're in a ship -- ... character
+// flying spacebar means go up, shift means go faster")
 const holdFor = (s, sec, extra = {}) => { for (let n = 0, t = 0; t < sec - 1e-9; t += STEP, n++) B.stepBody(s, { ...IDLE, ...extra, jump: true, jumpPressed: n === 0 }, STEP); };
-ok('held on past the top of a held jump the light gathers (let go then, and it only hung a moment); held on, the body goes where the eye looks, its speed doubling until, seven seconds in, it is the speed of light; it is never further than its reach from where it set out; let go, it is brought home there, and lands', () => {
-  const L = B.LIGHT, s = B.createBody();
-  holdFor(s, L.hold - 0.01); assert.equal(s.light, undefined, 'not before ' + L.hold + ' s');
-  holdFor(s, 0.03); assert.equal(s.light?.phase, 'gather', 'then the light gathers');
-  near(s.p[1], 2.95, 0.06, 'just past the top of the held jump');
-  const hung = [...s.p]; B.stepBody(s, { ...IDLE }, STEP); assert.equal(s.light, null, 'let go while it gathers: nothing comes of it');
-  for (let i = 0; i < 400 && !s.grounded; i++) B.stepBody(s, { ...IDLE }, STEP);
-  assert.ok(s.grounded && Math.hypot(s.p[0] - hung[0], s.p[2] - hung[2]) < 1e-9, 'it falls where it hung');
-  // again, held on: the eye turned a quarter round, a little up
-  const b = B.createBody(), yaw = -Math.PI / 2, look = { yaw, pitch: 0.4 };
-  holdFor(b, L.hold + L.gather + 0.02, look); assert.equal(b.light.phase, 'go'); const from = [...b.light.from];
-  const want = [-Math.sin(yaw) * Math.cos(0.4 - L.dead), Math.sin(0.4 - L.dead), -Math.cos(yaw) * Math.cos(0.4 - L.dead)];
-  holdFor(b, 1, look); near(b.light.dir[0] * want[0] + b.light.dir[1] * want[1] + b.light.dir[2] * want[2], 1, 1e-9, 'the way the eye looks');
-  const v1 = b.light.v; holdFor(b, 1, look); assert.ok(b.light.v > v1 * 8 && b.light.v < v1 * 11, 'growing tenfold a second: ' + (b.light.v / v1).toFixed(2));
-  holdFor(b, L.rise - 2 + 0.05, look); near(b.light.v, L.c, 1e-6, 'the speed of light'); holdFor(b, 3, look); near(b.light.v, L.c, 1e-6, 'and no faster');
-  assert.ok(b.light.dist > 3 * L.c, 'more than three light-seconds out: ' + B.lightFar(b.light.dist));
-  const far = Math.hypot(...b.p.map((v, i) => v - from[i])); assert.ok(far <= L.reach + 1e-6 && far > L.reach - 1, 'the body itself no further than its reach: ' + far.toFixed(1));
-  assert.ok(b.p.every(Number.isFinite) && b.light.veil > 0.99 && b.light.frac === 1, 'whole numbers, the veil drawn');
-  B.stepBody(b, { ...IDLE, ...look }, STEP); assert.equal(b.light.phase, 'home', 'let go: home');
-  let t = STEP; while (b.light && t < 5) { B.stepBody(b, { ...IDLE, ...look }, STEP); t += STEP; }
-  near(t, L.home, 0.02, 'in ' + L.home + ' s'); for (let i = 0; i < 3; i++) near(b.p[i], from[i], 1e-9, 'where it set out');
-  assert.ok(b.events.some((e) => e.type === 'light' && e.home), 'and it says so');
-  for (let i = 0; i < 400 && !b.grounded; i++) B.stepBody(b, { ...IDLE }, STEP); assert.ok(b.grounded && b.p[1] === 0, 'then it lands');
-  // on the island: lifted clear of the ground on the way out, and home along a line kept off it
-  const height = (x, z) => 40 - 0.02 * Math.hypot(x, z), w = { ground: { height }, solve: (q) => Math.max(0, height(q.p[0], q.p[2])) }; const c = B.createBody({ world: w, p: [0, 40, 0] }); c.was = [...c.p];
-  holdFor(c, L.hold + L.gather + 0.5, { yaw, pitch: -1.2 }); assert.ok(c.light.phase === 'go' && c.p[1] > w.ground.height(c.p[0], c.p[2]) + 1.9, 'steered down, it stays over the ground');
-  // and a shifted origin moves where it set out with it
-  const d = B.createBody(); holdFor(d, L.hold + L.gather + 0.5); const f0 = [...d.light.from]; B.shift(d, 100, -50); near(d.light.from[0], f0[0] - 100, 1e-12); near(d.light.from[2], f0[2] + 50, 1e-12);
+ok('on foot the light never gathers: a jump held on past its top only comes down again, and lands where it rose', () => {
+  const s = B.createBody();
+  holdFor(s, 1.2); near(s.p[1], 2.95, 0.06, 'at the top of the held jump');
+  holdFor(s, 3); assert.ok(!s.light, 'held on, nothing gathers');
+  for (let i = 0; i < 400 && !s.grounded; i++) B.stepBody(s, { ...IDLE, jump: true }, STEP);
+  assert.ok(s.grounded && s.p[1] === 0 && Math.hypot(s.p[0], s.p[2]) < 1e-9 && !s.light, 'it lands where it rose');
+  assert.ok(!s.events.some((e) => e.type === 'light'), 'and no light was said');
 });
 
-ok('flying, a second tap of the jump soon after the first lets go of the air and the body falls; two taps slower do not; the tap that took off is not the first of a pair; held, it climbs, then gathers the light', () => {
+ok('flying, a second tap of the jump soon after the first lets go of the air and the body falls; two taps slower do not; the tap that took off is not the first of a pair; held, it climbs; sprint is faster', () => {
   const fly = () => { const s = B.createBody({ mode: 'creative', flying: true, grounded: false, p: [0, 10, 0] }); s.was = [...s.p]; return s; };
   const taps = (s, gap) => { const n2 = Math.round(gap / STEP); for (let n = 0; n <= n2 + 3; n++) B.stepBody(s, { ...IDLE, jumpPressed: n === 0 || n === n2, jump: n < 3 || (n >= n2 && n < n2 + 3) }, STEP); };
   let s = fly(); taps(s, 0.2); assert.equal(s.flying, false, 'two quick taps let go');
@@ -215,8 +194,10 @@ ok('flying, a second tap of the jump soon after the first lets go of the air and
   B.stepBody(s, { ...IDLE, jumpPressed: true, jump: true }, STEP); assert.equal(s.flying, true, 'taken off');
   for (let i = 0; i < 12; i++) B.stepBody(s, { ...IDLE }, STEP);
   B.stepBody(s, { ...IDLE, jumpPressed: true, jump: true }, STEP); assert.equal(s.flying, true, 'the next tap soon after is the first of a pair, not the second');
-  s = fly(); const y0 = s.p[1]; holdFor(s, B.LIGHT.flyHold - 0.02, { up: true });
-  assert.ok(!s.light && s.p[1] > y0 + 8, 'held, it climbs: ' + (s.p[1] - y0).toFixed(2)); holdFor(s, 0.05, { up: true }); assert.equal(s.light?.phase, 'gather', 'then the light gathers');
+  s = fly(); const y0 = s.p[1]; holdFor(s, 4, { up: true });
+  assert.ok(!s.light && s.flying && s.p[1] > y0 + 45, 'held, it climbs, and goes on climbing (no light): ' + (s.p[1] - y0).toFixed(2));
+  const quick = fly(), slow = fly(); for (let i = 0; i < 240; i++) { B.stepBody(quick, { ...IDLE, move: [0, 1], sprint: true }, STEP); B.stepBody(slow, { ...IDLE, move: [0, 1] }, STEP); }
+  assert.ok(Math.hypot(quick.v[0], quick.v[2]) > 3 * Math.hypot(slow.v[0], slow.v[2]), 'sprint, faster');
 });
 
 ok('the light\'s line: its speed (m/s, km/s, a share of c, the speed of light), how far out (m, km, light-seconds to light-years), and the farthest of our things it has come as far as', () => {
@@ -2352,6 +2333,20 @@ ok('the dart: eleven metres, put beside the body (it is too long to put in front
   near(Math.hypot(...s2.v), 0, 1, 'stopped there');
 });
 
+ok('boarding is nearness (Colin, 19 Nov 2026: "as long as the character is close to the ship they should be able to board it"): from any side, over or under it, on its deck; and a ship called from the air comes to the body\'s height', () => {
+  for (const k of ['skiff', 'dart', 'dhow', 'ark', 'carrier']) {
+    const S = SP.KIND[k], s = SP.placeShip({ p: [0, 0, 0], yaw: 0.4 }, () => 0, k);
+    for (const [x, y, z] of [[0, 0, S.length / 2], [0, 0, -S.length / 2], [S.beam / 2, 0, 0], [-S.beam / 2, 0, 0]]) {
+      const edge = SP.fromShip(s, [x, y, z]), out = [edge[0] - s.p[0], 0, edge[2] - s.p[2]], m = Math.hypot(out[0], out[2]);
+      const near1 = [edge[0] + (out[0] / m) * (S.board * 0.5), edge[1], edge[2] + (out[2] / m) * (S.board * 0.5)], far1 = [edge[0] + (out[0] / m) * (S.board + S.length + 2), edge[1], edge[2] + (out[2] / m) * (S.board + S.length + 2)];
+      assert.equal(SP.nearShip([s], near1), s, k + ': near it at ' + [x, y, z]); assert.equal(SP.nearShip([s], far1), null, k + ': not from far off');
+    }
+    const aloft = SP.placeShip({ p: [0, 200, 0], yaw: 0 }, () => 0, k);
+    near(SP.seatAt(aloft)[1], 200, 1e-9, k + ': called in the air, its seat at the body\'s height');
+    const low = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, k); near(low.p[1], S.hover, 1e-12, k + ': on the water, at its hover');
+  }
+});
+
 ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {
   const D = SP.DHOW, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
   near(D.length, 28, 1e-9, 'about twenty-eight metres long');
@@ -2389,8 +2384,9 @@ ok('the ark: eighty metres, its ring round its middle riding clear of the water;
   assert.ok(Math.atan2(top - 1.6, ringAt) < (27.5 * Math.PI) / 180 - 0.03, 'its ring\'s top inside the eye\'s view: ' + ((Math.atan2(top - 1.6, ringAt) * 180) / Math.PI).toFixed(1));
   assert.ok(SP.shipPoint(s, [0, 0, -A.length / 2])[2] > 5, 'its stern clear ahead of the body');
   assert.ok(helm[1] - body.p[1] > 15, 'its dome high over the water: ' + helm[1].toFixed(2));
-  assert.equal(SP.nearShip([s], body.p), s, 'boarded from where it was called, near its stern');
-  body.p = [0, 0, s.p[2] + 20]; assert.equal(SP.nearShip([s], body.p), null, 'not from under its ring');
+  assert.equal(SP.nearShip([s], body.p), s, 'boarded from where it was called');
+  body.p = [0, 0, s.p[2] + 20]; assert.equal(SP.nearShip([s], body.p), s, 'and from under its ring (nearness alone: Colin, 19 Nov 2026)');
+  body.p = [s.p[0] + 30, s.p[1] + 3, s.p[2] + 25]; assert.equal(SP.nearShip([s], body.p), s, 'or beside its prow');
   body.p = [-40, 0, 0]; assert.equal(SP.nearShip([s], body.p), null, 'nor from far off'); body.p = [0, 0, 0];
   SP.board(s, body); near(body.p[1], helm[1], 1e-12, 'lifted up into the dome'); near(body.p[2], helm[2], 1e-12, 'at the helm, on the prow');
   for (let t = 0; t < 1; t += 1 / 60) SP.stepShip(s, { move: [0, 1], yaw: Math.PI, pitch: 0 }, 1 / 60);

@@ -261,6 +261,23 @@ The rest of what he said that day:
   While a blueprint is shown, only a building's key acts (its 1 and 2 are
   the blueprint's: level or platform).
 
+### Flight, done right (19 November 2026, after he played #157-#164)
+
+> remove necessity to be on the ground to call a ship, and for lightspeed travel i really only meant when you're in a ship -- and since spacebar moves the ship up, shift should be the speed button, not spacebar -- character flying spacebar means go up, shift means go faster. also, there shouldn't be any prevention 'walk to the ship's stern to board it' -- it should always just be about proximity to the ship -- as long as the character is close to the ship they should be able to board it. weapon holding looks pretty good. one note for exiting lightspeed -- instead of dragging the character back to a single location on the island, when you exit lightspeed, you should always continue going forward, and in front of you, there's the island. like, a globe. if you go too far in one direction you just end up on the other side of it. once our actual planets are built we won't really have to worry about that -- but it's helpful to have the correct animation and logic for smaller flat maps. ... also ships should be able to go straight up -- the angle of incline/decline seems quite limited, but it would be better if they could actually go up and down. and when they turn, the ship should rotate with it like a plane would. for speed -- let's actually do this right. when you hold down shift, speed should increase, and a throttle should show up which you can control with mouse -- but also, you should be able to hit digit to control speed -- 0 being lightspeed and 1 being just above the non-shift speed. also, make the thrusters point in the direction that the ship is moving, and for the giant carrier, perhaps add some to the bottom of the craft too. landing gear would be sick if you don't run out of limit
+
+- **A ship is called from anywhere** (done, 19 Nov). On the ground, on the water, on
+  a deck or in the air: in the air it comes to the body's height (its seat about
+  level with the feet: `ships.js` placeShip) and waits there, hovering.
+- **Boarding is nearness** (done, 19 Nov). `ships.js` shipGap: how far the body is
+  from the nearest of the ship's solid boxes; within its `board` metres of any part
+  of it (beside, over, under, on its deck), the board key takes the seat: the skiff
+  3.2 m, the dart 3.6, the dhow 6, the ark 36, the carrier 260 (so each is still
+  boarded from where it was called). Further off, the line says how far it is.
+- **Space goes up, Shift goes faster** (done, 19 Nov). On foot a held jump only rises
+  higher (3.0 m), and flying, a held Space only climbs: the light never gathers on
+  foot any more (both of #159's ways in are gone). Shift is faster, on foot and in
+  the air, as it was. Lightspeed is the ship's now (below).
+
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
 Colin: "let's pick a random small island on earth, generate the entire
