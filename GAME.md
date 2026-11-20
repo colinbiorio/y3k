@@ -106,7 +106,7 @@ Said to Colin before starting, and standing until he says otherwise.
 | "characters should be able to fly, but only in 'creative' mode" | **done.** |
 | "tap to jump or hold to jump higher -- allowing the character to defy gravity by 2x, but still be affected" | **done.** A tap rises 1.5 m; held, 3.0 m. The pull is halved while rising with the key down, and whole on the way down. |
 | "omnidirectional dash options" | **done.** 6.24 m any way the hands point; once more in the air. |
-| "a light speed fast travel option and simulate the actual speed of light" | **a handy way, for now** (19 Nov): Space held on past a jump's top goes to the speed of light where you look; let go, and you are brought home. The true journey at c: stage 7, with the frozen universe and the glow. |
+| "a light speed fast travel option and simulate the actual speed of light" | **a ship's top gear, for now** (20 Nov): aboard, the throttle's top (0) goes faster and faster to exactly c, counting the true way gone in real time; out of it the ship flies on, and on the island's small map the island is ahead (a globe laid flat). The true journey at c: stage 7, with the frozen universe and the glow. |
 | "rendered with a combination of Higgsfield plugin and whatever 3d rendering system works best" | three.js draws everything. Higgsfield made the pictures the five bodies were drawn from and the surfaces they wear (see Higgsfield, below). |
 
 ## Where it stands
@@ -212,7 +212,9 @@ The rest of what he said that day:
   blotches); that was not made again here (Chromium on Metal, on Apple's
   OpenGL and in software, at the arrival beach's shallows at dusk, standing
   and in the torch's jet). If it shows again: which browser, and where.
-- **Lightspeed** (done). Space still jumps, and held rises twice as high
+- **Lightspeed** (done; **changed the next day**: it is a ship's now, on its
+  throttle, and it no longer comes home; see "Flight, done right" below. What
+  follows is how it first was). Space still jumps, and held rises twice as high
   (3.0 m). Held on past the top (1.25 s from the press), the light gathers
   round the body for 0.4 s; let go then and nothing comes of it (it only hung
   a moment). Held on, the body goes the way the eye looks, steered by it (2.4
@@ -292,6 +294,63 @@ The rest of what he said that day:
   Rough: the decks a body stands on are level boxes (an unflown ship comes level, so
   they agree); a ship pointing straight up turns about the vertical where the eye
   turns (a rocket's roll).
+- **The throttle** (done, 20 Nov). A ship has one (`ships.js` THROTTLE, `s.thr`):
+  0 is its own speed, as forward drives it; 1 to 9 are each the same share
+  faster than the last (1 is 1.32 times its own speed, 9 is 12 times: the skiff
+  288 m/s, the dart 504, the dhow 360, the ark 552, the carrier 864); 10 is the
+  light. **Shift held** opens it three notches a second (slower past 9, so the
+  light is not come to by accident) and its gauge shows: a slim rail at the
+  right of the room, its fill the throttle, `c` at its top. Let go, it stays
+  where it is, and the ship flies on where its nose points with no hand on
+  forward. **The digits set it**: 1 to 9, and 0 is lightspeed (aboard only: on
+  foot the same keys are the weapons and the buildings, as before). **The
+  mouse**: the wheel, a notch a click (a stroke stops at 9; one begun there goes
+  on to the light), and a drag on the gauge with the pointer free. **Back**
+  brakes: the throttle (and the light) to nothing. A ship comes to any
+  throttle's speed as quickly as to its own, and slows from it as quickly. On a
+  phone the gauge shows whenever aboard, under a finger. A controller's L3 opens
+  it only while it is pressed.
+  It is all in the one table (`input.js` ACTIONS): the throttle, its settings,
+  lightspeed and the brake are rows said `as` other actions' keys (one key
+  still does one thing at a time: `ABOARD`), shown in the sheet's ships card
+  with those keys as they are now, each with its glyph.
+- **Lightspeed is a ship's** (done, 20 Nov). At the throttle's top the light
+  gathers about the ship (0.4 s), then it goes where its nose points, steered
+  as ever, its speed doubling and doubling from the throttle's top until, seven
+  seconds in, it is **the speed of light: 299,792,458 m/s exactly, in real
+  seconds, and no faster**. His rule of 13 November stands ("they'll have to
+  actually wait the time it takes for light to travel ... no skipping"): what
+  the line at the top counts is the true way gone at that speed in real time
+  (as far as the Sun takes 8.3 minutes), and nothing shortens it. On foot there
+  is no light at all (`body.js` has none; aboard, `body.light` is the ship's,
+  for the eye, the line and `light.js`, which draws the veil and the glow at
+  the ship's size).
+- **Out of the light, on forward; the map a globe** (done, 20 Nov). Any other
+  throttle, or the brake, brings a ship out: it is not taken home. It flies on
+  along its heading, level, its speed falling over 2.4 s to the throttle's, the
+  streaks running on ahead and thinning as the veil lifts on what is in front.
+  On the island, what is in front is the island: its flat map is a globe laid
+  flat about its middle (`wrap.js`, pure). A ship that has flown at least half
+  the way round (48 km, counted) has gone round, and comes out with the
+  island's middle straight ahead on its own heading, 9 km off, between 250 and
+  900 m up, closing at 1,500 m/s as the veil lifts and settling about 6 km out
+  (seen: Mount Gower and Lidgbird ahead over the sea). A shorter hop is where
+  it is. Flown or walked the slow way, 48 km from the middle is the far side:
+  the body (and its ship) comes back in from the opposite edge going the way it
+  was going, the island ahead; that far out nothing of the island is in sight,
+  so the turn over is not seen. In the void there is nothing to come to: the
+  ship only comes out no higher than 900 m.
+  Numbers: in the light the ship itself goes no faster than 1,500 m/s and no
+  higher than 60 km, and on the island nothing is ever further than 48 km from
+  the middle; the rest of the way is counted and drawn, not travelled.
+  **To take the globe out** when a place is a real one (the solar system):
+  `view.js` calls `wrap.js` in two places only, `globe()` and `outOfLight()`;
+  with those gone, the distance a ship counts in the light is simply how far it
+  has gone. `ships.js` LIGHT.c is the one constant.
+  Rough: a ship pointed up in the light and brought out is put back down under
+  the veil (there is no space to be in yet); Ball's Pyramid, 28 km out, can
+  drop out of sight behind a ship as it goes round; the eye's wheel does not
+  zoom aboard (the keys do).
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 

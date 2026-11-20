@@ -1,11 +1,11 @@
-// light.js — LIGHTSPEED, DRAWN (three.js). body.js says where the body is in it (s.light: gathering, going, coming
-// home; its speed, the share of the way to the speed of light, how far it has gone, the way it goes); this draws it.
+// light.js — LIGHTSPEED, DRAWN (three.js). ships.js says where a ship is in it (s.light: gathering, going, coming
+// out; its speed, the share of the way to the speed of light, how far it has gone, the way it goes); this draws it.
 //
 //   · THE VEIL: deep space closing round the eye just beyond the body, so the small world falls away behind it;
 //     a pale glow where the way goes, prismatic at its rim (Colin, 13 Nov: "an ethereal prismatic glow in transit").
 //   · THE STREAKS: the stars drawn out into lines that come at the eye from where it goes and pass it, longer and
-//     quicker as the speed grows; coming home, they run the other way.
-//   · THE GATHERING: a glow at the body's chest as the light gathers, a flash as it goes, another as it comes home.
+//     quicker as the speed grows; coming out, they run on ahead and thin away as the veil lifts on what is in front.
+//   · THE GATHERING: a glow about the ship as the light gathers, a flash as it goes, another as it comes out.
 //
 // Nothing here moves the body or decides anything: view.js hands it the body's light each frame.
 import * as THREE from 'three';
@@ -65,26 +65,28 @@ export function createLightArt(scene, { lite = false } = {}) {
   let run = 0, flash = 0, was = null;
   return {
     scene,
-    // L: the body's light (or null); camera; at: where the body's chest is; eyeD: how far the eye stands from the body
-    update(L, { camera, at, dt = 0, eyeD = 6 }) {
+    // L: the light (a ship's, handed on by the view; or null); camera; at: where its middle is; eyeD: how far the eye
+    // stands from it; reach: how far beyond that what is in the light reaches (a ship's length); size: how many times a
+    // body's size it is
+    update(L, { camera, at, dt = 0, eyeD = 6, reach = 6, size = 1 }) {
       const phase = L ? L.phase : null;
-      if (phase !== was) { if (phase === 'go' || (was === 'home' && !phase)) flash = 1; was = phase; }
+      if (phase !== was) { if (phase === 'go' || phase === 'out' || (was === 'home' && !phase)) flash = 1; was = phase; }
       flash = Math.max(0, flash - dt * 2.2);
       const gather = phase === 'gather' ? Math.min(1, L.t / L.gatherT) : 0;
       const on = !!L && phase !== 'gather', frac = L ? L.frac : 0, veilAmt = L ? L.veil : 0;
       // the streaks: as quick as the speed, by the share of the way to light (logarithmic, or the eye could not follow)
       if (on) run += (phase === 'home' ? -1 : 1) * (40 + 900 * frac) * dt;
-      U.uLen.value = 1 + 70 * frac; U.uAmt.value = on ? Math.min(1, 0.15 + 1.4 * frac) * (phase === 'home' ? 1 - L.u : 1) : 0; U.uRun.value = run;
+      U.uLen.value = 1 + 70 * frac; U.uAmt.value = on ? Math.min(1, 0.15 + 1.4 * frac) * (phase === 'home' || phase === 'out' ? 1 - L.u : 1) : 0; U.uRun.value = run;
       streaks.visible = U.uAmt.value > 0.002;
       if (L) DIR.set(L.dir[0], L.dir[1], L.dir[2]); else DIR.set(0, 0, 1);
       if (streaks.visible) { streaks.position.copy(camera.position); AT.copy(camera.position).add(DIR); streaks.lookAt(AT); }
       VU.uVeil.value = veilAmt; VU.uDir.value.copy(DIR);
       veil.visible = veilAmt > 0.002;
-      if (veil.visible) { veil.position.copy(camera.position); veil.scale.setScalar(Math.max(8, eyeD + 6)); }
+      if (veil.visible) { veil.position.copy(camera.position); veil.scale.setScalar(Math.max(8, eyeD + reach)); }
       // the gathering, and the flashes as it goes and as it comes home
       const g = Math.max(gather * 0.9, flash);
       glow.visible = g > 0.01;
-      if (glow.visible) { glow.position.set(at[0], at[1], at[2]); glow.scale.setScalar(0.6 + 2.6 * gather + 4 * flash); glowMat.opacity = Math.min(1, g); }
+      if (glow.visible) { glow.position.set(at[0], at[1], at[2]); glow.scale.setScalar((0.6 + 2.6 * gather + 4 * flash) * size); glowMat.opacity = Math.min(1, g); }
     },
     dispose() { scene.remove(veil, streaks, glow); geo.dispose(); mat.dispose(); veilGeo.dispose(); veilMat.dispose(); tex.dispose(); glowMat.dispose(); },
   };

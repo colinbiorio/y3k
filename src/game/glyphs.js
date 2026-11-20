@@ -65,6 +65,11 @@ export const GLYPHS = {
   call_dhow: '<path d="M3 15.5h18l-2.6 4H5.6z"/><path d="M11 15.5V4l7.2 9.5H11"/>',
   call_ark: '<path d="M2.5 12h17"/><ellipse cx="10.5" cy="12" rx="2.6" ry="7.4"/><circle cx="19.6" cy="12" r="1.9"/>',
   call_carrier: '<path d="M2 19.5h20l-2-3.2H4z"/><path d="M5.5 16.3L7 13h10l1.5 3.3M8.2 13l1-3h5.6l1 3"/>',
+  // aboard a ship: its throttle (a gauge, part open), the throttle set (its notches), lightspeed (the stars streaming from ahead), the brake
+  throttle: '<rect x="8" y="2.8" width="8" height="18.4" rx="4"/><path d="M12 17.2v-5"/>',
+  throttle_set: '<path d="M8.5 3v18"/><path d="M8.5 5.5h8M8.5 10h5M8.5 14.5h8M8.5 19h5"/>',
+  lightspeed: '<path d="M9.2 9.9L3 5M14.8 9.9L21 5M9.2 14.1L3 19M14.8 14.1L21 19"/><circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none"/>',
+  brake: '<rect x="5.5" y="5.5" width="13" height="13" rx="2.6"/><path d="M9.5 12h5"/>',
 };
 export const glyphOf = (id) => GLYPHS[id] || GLYPHS.key;
 // the drawing, as the page shows it (and the pour reads it)
