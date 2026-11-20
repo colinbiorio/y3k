@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-20** — **A ship's throttle, lightspeed aboard only, and out of the
+  light on forward with the island ahead** (`src/game/ships.js` THROTTLE, LIGHT,
+  setThrottle; `src/game/wrap.js`, new; `src/game/input.js` ABOARD and the rows
+  said `as` other keys; `src/game/view.js` gauge, outOfLight, globe;
+  `src/game/light.js`; `styles.css` .game-throttle). Colin: "when you hold down
+  shift, speed should increase, and a throttle should show up which you can
+  control with mouse -- but also, you should be able to hit digit to control
+  speed -- 0 being lightspeed ... when you exit lightspeed, you should always
+  continue going forward, and in front of you, there's the island. like, a
+  globe." Shift opens the throttle and its gauge shows; 1 to 9 set it, the
+  wheel and a drag on the gauge too; 0 is the light, exactly c in real time;
+  any other throttle or the brake comes out of it, flying on, and the island's
+  flat map is a globe laid flat (48 km to its far side), so the island is
+  ahead. The globe is `wrap.js` and two calls, to be taken out when the real
+  one is built. GAME.md "Flight, done right".
 - **2026-11-19** (later still) — **Ships climb and dive straight up and down,
   and bank into their turns like planes** (`src/game/ships.js` PITCH_GAIN, BANK,
   posePoint; `src/game/view.js` tip; `src/game/ships/*.js`). Colin: "ships should

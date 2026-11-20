@@ -179,7 +179,82 @@ export const BANK = { skiff: 1.1, dart: 1.3, dhow: 0.75, ark: 0.7, carrier: 0.55
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
   const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side, low = floorAt(x, z) + S.hover;
-  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0 };
+  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0, thr: 0, light: null };
+}
+
+// THE THROTTLE (Colin, 19 Nov 2026: "for speed -- let's actually do this right. when you hold down shift, speed should
+// increase, and a throttle should show up which you can control with mouse -- but also, you should be able to hit digit to
+// control speed -- 0 being lightspeed and 1 being just above the non-shift speed"). s.thr runs from 0 (the ship's own
+// speed, as forward drives it) through the notches 1 to 9, each the same share faster than the last (9 is TOP times its own
+// speed), to 10: the light. Held, sprint opens it RISE notches a second (SLOW past 9, so the light is not come to by
+// accident); let go, it stays where it is. Above nothing it flies the ship on where its nose points with no hand on
+// forward; back cuts it to nothing, a brake. The digits, the wheel and the gauge set it (view.js).
+export const THROTTLE = { top: 12, rise: 3, slow: 0.8, notches: 9 };
+export const speedAt = (S, thr) => S.speed * Math.pow(THROTTLE.top, Math.min(THROTTLE.notches, Math.max(0, thr || 0)) / THROTTLE.notches);
+// LIGHTSPEED, aboard alone (Colin, 19 Nov 2026: "for lightspeed travel i really only meant when you're in a ship"; and of
+// coming out of it: "you should always continue going forward, and in front of you, there's the island. like, a globe").
+// The throttle at its top (0, the wheel or the gauge to its top, sprint held past 9) gathers the light about the ship
+// (GATHER s; brought down then, nothing comes of it). Then it goes where its nose points, steered as ever, its speed from
+// the throttle's top doubling and doubling until RISE s in it is the speed of light: C, exactly, in real metres a real
+// second, and no faster. His standing rule (13 Nov 2026) is that far journeys take the time light takes ("they'll have
+// to actually wait the time it takes for light to travel ... no skipping"): so what it counts (s.light.dist) is the true
+// way gone at that speed, in real time (as far as the Sun: 8.3 minutes), and nothing here shortens it.
+// Brought down again (a digit, back, the wheel, the gauge) it comes OUT: on along its heading, level, its speed falling
+// over OUT s to the throttle's, the veil lifting and the streaks running out ahead.
+// Until there is a real globe to fly round, the ship itself goes no faster than CAP nor higher than CEIL in the light,
+// and where it comes out on a small flat map is the view's and wrap.js's (the map as a globe), so no number is ever
+// huge; the rest of the way is counted and drawn (light.js), not travelled.
+export const LIGHT = { c: 299792458, rise: 7, gather: 0.4, out: 2.4, cap: 1500, lift: 140, ceil: 60000 };
+const ease01 = (u) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, u)));
+const smooth01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// the throttle set (0 to 10; 10 is the light)
+export function setThrottle(s, to) {
+  const t = Math.max(0, Math.min(10, +to || 0));
+  if (t >= 10) { s.thr = 10; if (!s.light || s.light.phase === 'out') s.light = { phase: 'gather', t: 0, gatherT: LIGHT.gather, v: 0, dist: s.light?.dist || 0, dir: noseOf(s), frac: 0, veil: 0, u: 0 }; return s; }
+  s.thr = t;
+  const L = s.light;
+  if (L && L.phase === 'gather') s.light = null;
+  else if (L && L.phase === 'go') { L.phase = 'out'; L.t = 0; L.vOut = L.v; L.fracOut = L.frac; L.veilOut = L.veil; L.placed = false; }
+  return s;
+}
+function stepLight(s, S, dt) {
+  const L = s.light;
+  L.t += dt;
+  if (L.phase === 'gather') {
+    if (L.t >= L.gatherT) { L.phase = 'go'; L.t = 0; L.y0 = s.p[1]; L.v0 = Math.max(speedAt(S, THROTTLE.notches), Math.hypot(...s.v)); L.k = Math.log(LIGHT.c / L.v0) / LIGHT.rise; L.v = L.v0; }
+    return;
+  }
+  if (L.phase === 'go') {
+    L.v = Math.min(LIGHT.c, L.v0 * Math.exp(L.k * L.t));
+    L.frac = Math.log(L.v / L.v0) / Math.log(LIGHT.c / L.v0); L.veil = smooth01(0.06, 0.32, L.frac);
+  } else {
+    const u = Math.min(1, L.t / LIGHT.out), e = ease01(u), to = speedAt(S, Math.min(s.thr || 0, THROTTLE.notches));
+    L.u = u; L.v = Math.exp(Math.log(L.vOut) + (Math.log(to) - Math.log(L.vOut)) * e);
+    L.frac = L.fracOut * (1 - smooth01(0, 0.8, u)); L.veil = L.veilOut * (1 - smooth01(0.1, 0.7, u));
+    if (u >= 1) { s.light = null; return; }
+  }
+  L.dist += L.v * dt;
+}
+// what the light says, in a line: how fast, how far out, and the farthest thing of ours it has come as far as
+const MARKS = [[4.017e16, 'as far as Proxima Centauri'], [4.5e12, 'past Neptune\'s orbit'], [7.78e11, 'as far as Jupiter\'s orbit'], [1.496e11, 'as far as the Sun'], [3.844e8, 'past the Moon']];
+const num = (x, f = 1) => x.toLocaleString('en-US', { maximumFractionDigits: x < 10 ? f : 0 });
+export function lightFar(d) {
+  const ls = d / LIGHT.c;
+  if (d < 1000) return `${Math.round(d)} m`;
+  if (ls < 1) return `${num(d / 1000)} km`;
+  if (ls < 60) return `${num(ls)} light-second${ls < 1.05 ? '' : 's'}`;
+  if (ls < 3600) return `${num(ls / 60)} light-minute${ls < 63 ? '' : 's'}`;
+  if (ls < 86400) return `${num(ls / 3600)} light-hour${ls < 3780 ? '' : 's'}`;
+  if (ls < 31557600) return `${num(ls / 86400)} light-day${ls < 90720 ? '' : 's'}`;
+  return `${num(ls / 31557600, 2)} light-years`;
+}
+export function lightLine(L, ahead = '') {
+  if (!L) return '';
+  if (L.phase === 'gather') return 'the light gathers';
+  if (L.phase === 'out') return `out of the light · ${lightFar(L.dist)} flown${ahead ? ' · ' + ahead : ''}`;
+  const v = L.v, speed = v >= LIGHT.c ? 'the speed of light' : v >= LIGHT.c * 0.01 ? `${(v / LIGHT.c).toFixed(v >= LIGHT.c * 0.1 ? 2 : 3)} c` : v >= 1000 ? `${num(v / 1000)} km/s` : `${Math.round(v)} m/s`;
+  const mark = MARKS.find(([m]) => L.dist >= m);
+  return `lightspeed · ${speed} · ${lightFar(L.dist)} out${mark ? ' · ' + mark[1] : ''}`;
 }
 
 // One step of a ship under the hands (inp: move [right, forward], yaw and pitch of the eye, up, down, sprint), over a
@@ -195,25 +270,42 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   s.spin = toward(s.spin || 0, Math.sign(err) * Math.min(S.turn, Math.sqrt(2 * spin * Math.abs(err))), spin * dt);
   if (Math.abs(err) <= Math.abs(s.spin * dt) + 1e-9 && s.spin * err >= 0) { s.yaw = want; s.spin = 0; }
   else s.yaw = wrap(s.yaw + s.spin * dt);
-  const f = ahead(s), l = leftOf(s), mx = inp.move?.[0] || 0, mz0 = inp.move?.[1] || 0, mz = mz0 < 0 ? mz0 * S.back : mz0;
+  const f = ahead(s), l = leftOf(s), mx = inp.move?.[0] || 0, mz0 = inp.move?.[1] || 0;
+  // the throttle (THROTTLE, below): held, sprint opens it, slower past 9, and at its top the light gathers; back cuts it
+  // (and the light) to nothing
+  if (mz0 < -0.2 && ((s.thr || 0) > 0 || s.light)) setThrottle(s, 0);
+  else if (inp.sprint && (!s.light || s.light.phase === 'out')) setThrottle(s, (s.thr || 0) + dt * ((s.thr || 0) < THROTTLE.notches ? THROTTLE.rise : THROTTLE.slow));
+  const thr = s.thr || 0, L = s.light, cruise = thr > 0 || !!L, mz = cruise ? 1 : mz0 < 0 ? mz0 * S.back : mz0;
   // its nose: toward the eye's pitch (past the eye's own rest, a little down, which flies it level) while it is driven
-  // ahead, level when it is not; it goes the way its nose points (backing, level)
+  // ahead, level when it is not (and as it comes out of the light); it goes the way its nose points (backing, level)
   const p0 = inp.pitch || 0, aim = Math.sign(p0) * Math.min(Math.PI / 2, Math.max(0, Math.abs(p0) - 0.15) * PITCH_GAIN);
-  s.tilt = -toward(-(s.tilt || 0), mz > 0 ? aim * Math.min(1, mz) : 0, S.turn * dt);
-  const nose = noseOf(s), top = inp.sprint ? S.boost : S.speed;
+  s.tilt = -toward(-(s.tilt || 0), mz > 0 && L?.phase !== 'out' ? aim * Math.min(1, mz) : 0, S.turn * dt);
+  const nose = noseOf(s), top = speedAt(S, thr);
   const lift = ((inp.up ? 1 : 0) - (inp.down ? 1 : 0)) * S.climb;
-  const go = mz > 0 ? nose : f;
-  const target = [go[0] * mz * top - l[0] * mx * S.slide, go[1] * mz * top + lift, go[2] * mz * top - l[2] * mx * S.slide];
-  const a = S.accel * dt * (inp.sprint ? 1.6 : 1);
-  for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], (Math.abs(target[i]) < Math.abs(s.v[i]) || target[i] * s.v[i] < 0 ? BRAKE : 1) * a);
-  // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), turned as it is turned,
-  // looked at every fifth of a metre of its way, so a quick ship does not pass through a thin wall between two steps
-  const h = S.length * 0.48, pts = [[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], ...S.edges];
-  const n = Math.max(1, Math.ceil((Math.hypot(s.v[0], s.v[1], s.v[2]) * dt) / 0.2)), from = [...s.p];
-  for (let i = 1; i <= n; i++) {
-    const at = { p: [from[0] + (s.v[0] * dt * i) / n, from[1] + (s.v[1] * dt * i) / n, from[2] + (s.v[2] * dt * i) / n], yaw: s.yaw, tilt: s.tilt, bank: s.bank };
-    if (pts.some((q) => solid(posePoint(at, q)))) { for (let k = 0; k < 3; k++) s.v[k] *= -0.2; break; }
-    s.p = at.p;
+  const h = S.length * 0.48;
+  if (L) stepLight(s, S, dt);
+  if (L && L.phase !== 'gather') {
+    // in the light: the way its nose points (coming out, level along its heading), no faster than CAP itself; through what
+    // is solid (it is light), lifted clear as it goes, never under the ground
+    const way = L.phase === 'go' ? nose : f, v = Math.min(L.v, LIGHT.cap);
+    L.dir = way; s.v = [way[0] * v, way[1] * v, way[2] * v];
+    s.p = [s.p[0] + s.v[0] * dt, s.p[1] + s.v[1] * dt, s.p[2] + s.v[2] * dt];
+    if (L.phase === 'go') s.p[1] = Math.min(LIGHT.ceil, Math.max(s.p[1], L.y0 + LIGHT.lift * smooth01(0, 1.4, L.t)));
+  } else {
+    const go = mz > 0 ? nose : f;
+    const target = [go[0] * mz * top - l[0] * mx * S.slide, go[1] * mz * top + lift, go[2] * mz * top - l[2] * mx * S.slide];
+    // as quick to its speed at any throttle (a faster speed asks a harder push), and as quick to slow from it
+    const a = S.accel * dt * Math.max(1, top / S.speed, Math.hypot(s.v[0], s.v[1], s.v[2]) / S.speed);
+    for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], (Math.abs(target[i]) < Math.abs(s.v[i]) || target[i] * s.v[i] < 0 ? BRAKE : 1) * a);
+    // what is solid stops it: its middle, its bow and stern, its edges (outriggers', wings' tips), turned as it is turned,
+    // looked at every fifth of a metre of its way, so a quick ship does not pass through a thin wall between two steps
+    const pts = [[0, 0, 0], [0, 0.1, h], [0, 0.1, -h], ...S.edges];
+    const n = Math.min(400, Math.max(1, Math.ceil((Math.hypot(s.v[0], s.v[1], s.v[2]) * dt) / 0.2))), from = [...s.p];
+    for (let i = 1; i <= n; i++) {
+      const at = { p: [from[0] + (s.v[0] * dt * i) / n, from[1] + (s.v[1] * dt * i) / n, from[2] + (s.v[2] * dt * i) / n], yaw: s.yaw, tilt: s.tilt, bank: s.bank };
+      if (pts.some((q) => solid(posePoint(at, q)))) { for (let k = 0; k < 3; k++) s.v[k] *= -0.2; break; }
+      s.p = at.p;
+    }
   }
   // never lower than its keel over the water or the ground; nose up or down, its stern or its bow is what is lowest
   const floor = floorAt(s.p[0], s.p[2]), low = floor + Math.max(S.keel * Math.abs(Math.cos(s.tilt)), h * Math.abs(Math.sin(s.tilt)));
@@ -223,7 +315,7 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const room = Math.asin(Math.min(1, Math.max(0, (s.p[1] - floor) / (S.beam / 2)))), most = Math.min(BANK[s.kind] || 1, room);
   const bank = -Math.atan((Math.hypot(s.v[0], s.v[2]) * turnRate) / 9.8) - mx * 0.12;
   s.bank += (Math.max(-most, Math.min(most, bank)) - s.bank) * k(Math.max(1.2, Math.min(5, S.spin * 0.8)));
-  s.thrust += (Math.min(1.4, Math.abs(mz) * (inp.sprint ? 1.4 : 1) + 0.25 * Math.abs(lift) / S.climb + 0.1 * Math.abs(mx)) - s.thrust) * k(4);
+  s.thrust += (Math.min(1.4, Math.abs(mz) * (1 + 0.4 * Math.min(1, thr / THROTTLE.notches) + (L ? 0.4 : 0)) + 0.25 * Math.abs(lift) / S.climb + 0.1 * Math.abs(mx)) - s.thrust) * k(4);
   const [amp, rate] = BOB[s.kind] || BOB.skiff; s.bob = amp * Math.sin(s.t * rate) * (1 - Math.min(1, s.thrust));
   return s;
 }
@@ -324,7 +416,7 @@ export function carry(s, body) {
 // stepping off: to its left side, as high as the seat (the body falls from there to whatever is under it)
 export function leave(s, body) {
   const l = leftOf(s), q = seatAt(s);
-  body.seated = null; body.grounded = false; body.coyote = 0;
+  body.seated = null; body.grounded = false; body.coyote = 0; s.thr = 0; s.light = null;
   body.p = [q[0] + l[0] * 1.3, q[1], q[2] + l[2] * 1.3]; body.was = [...body.p]; body.acc = 0;
   body.v = [s.v[0] * 0.5, Math.max(0, s.v[1] * 0.5), s.v[2] * 0.5];
 }

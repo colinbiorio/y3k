@@ -28,10 +28,25 @@ export const SHORT = {
 const shortId = (what, kind) => ({ weapon: 'take_', build: 'build_', ship: 'call_' })[what] + kind;
 function SHORTCUTS() {
   const words = { weapon: (k) => `the ${k}`, build: (k) => `a ${k}`, ship: (k) => `${k === 'ark' ? 'an' : 'a'} ${k}` };
-  const notes = { weapon: 'in hand at once', build: 'its blueprint where it would go, as the build list gives it (and while one is shown, that one instead)', ship: 'called down near you, as the ships list does' };
+  const notes = { weapon: 'in hand at once (aboard a ship these keys are its throttle)', build: 'its blueprint where it would go, as the build list gives it (and while one is shown, that one instead)', ship: 'called down near you, as the ships list does' };
   return Object.entries(SHORT).flatMap(([what, S]) => S.kinds.map((kind, i) => ({ id: shortId(what, kind), label: words[what](kind), group: S.group, does: [what, kind], ...(i ? {} : { note: notes[what] }) })));
 }
 export const DOES = Object.fromEntries(Object.entries(SHORT).flatMap(([what, S]) => S.kinds.map((kind) => [shortId(what, kind), [what, kind]])));
+// ABOARD A SHIP some keys are the ship's (Colin, 19 Nov 2026: "when you hold down shift, speed should increase, and a
+// throttle should show up which you can control with mouse -- but also, you should be able to hit digit to control speed
+// -- 0 being lightspeed and 1 being just above the non-shift speed"). One key still does one thing at a time, so these
+// rows have no keys of their own: each is said `as` other actions' keys, whatever those are now (the sheet shows them
+// so; a weapon's key changed is this changed with it). `throttle` is what a ship's throttle is set to by each of them,
+// in their order (ships.js THROTTLE: 1 to 9, and 10 the light); on foot the same keys keep their own meanings.
+function ABOARD_ROWS() {
+  const ten = [...SHORT.weapon.kinds.map((k) => shortId('weapon', k)), ...SHORT.build.kinds.map((k) => shortId('build', k))];
+  return [
+    { id: 'throttle', label: 'the throttle', group: 'ships', as: ['sprint'], note: 'aboard, held: it opens, and its gauge shows; let go, it stays where it is and the ship flies on; the wheel sets it too, and a drag on the gauge' },
+    { id: 'throttle_set', label: 'set the throttle', group: 'ships', as: ten.slice(0, 9), throttle: [1, 2, 3, 4, 5, 6, 7, 8, 9], note: 'aboard: the first just above the ship\'s own speed, each the same share faster, the last its top' },
+    { id: 'lightspeed', label: 'lightspeed', group: 'ships', as: [ten[9]], throttle: [10], note: 'aboard only: faster and faster to the speed of light, and no faster; any other throttle, or the brake, comes out of it, on forward' },
+    { id: 'brake', label: 'brake', group: 'ships', as: ['back'], note: 'aboard: the throttle (and the light) to nothing' },
+  ];
+}
 export const ACTIONS = [
   { id: 'forward', label: 'forward', stick: 'left stick' },
   { id: 'back', label: 'back', stick: 'left stick' },
@@ -39,10 +54,10 @@ export const ACTIONS = [
   { id: 'right', label: 'right', stick: 'left stick' },
   { id: 'jump', label: 'jump', note: 'a tap, or held to rise up to twice as high; flying, held, it climbs, and two quick taps drop you; aboard a ship, it rises; running along a wall, it leaps off' },
   { id: 'dash', label: 'dash', note: 'the way you are moving; once in the air' },
-  { id: 'sprint', label: 'sprint', note: 'flying, faster' },
+  { id: 'sprint', label: 'sprint', note: 'flying, faster; aboard a ship, its throttle' },
   { id: 'walk', label: 'walk', note: 'a stick pushed part way walks too' },
   { id: 'fly', label: 'fly', note: 'creative only; a second jump in the air does it too' },
-  { id: 'down', label: 'sink', note: 'flying; on the water it lands' },
+  { id: 'down', label: 'sink', note: 'flying, or aboard a ship; on the water it lands' },
   { id: 'mode', label: 'survival or creative' },
   { id: 'build', label: 'build', note: 'a shelter, a few steps in front; near one, it takes it down' },
   { id: 'attack', label: 'cast the ring', note: 'a tap throws it; held, it spins up and flies harder; in the air, it drives you down' },
@@ -52,12 +67,16 @@ export const ACTIONS = [
   { id: 'weapon', label: 'next weapon', note: 'the ring, the bow or the bell (two more to come); the bar\'s weapons list chooses too' },
   { id: 'spawn', label: 'a bot', note: 'another, at the level last chosen under bots' },
   { id: 'board', label: 'board', note: 'near a ship, take its seat; aboard, step off' },
-  { id: 'zoomIn', label: 'closer', note: 'the wheel does it too' },
+  { id: 'zoomIn', label: 'closer', note: 'the wheel does it too (aboard a ship the wheel is its throttle)' },
   { id: 'zoomOut', label: 'further' },
   { id: 'menu', label: 'controls' },
   ...SHORTCUTS(),
+  ...ABOARD_ROWS(),
 ];
-const IDS = ACTIONS.map((a) => a.id), SHORT_IDS = Object.keys(DOES);
+// (the rows said `as` others have no keys of their own: they are not bound, kept or heard)
+const IDS = ACTIONS.filter((a) => !a.as).map((a) => a.id), SHORT_IDS = Object.keys(DOES);
+// aboard, what each of those actions sets the throttle to
+export const ABOARD = Object.fromEntries(ACTIONS.filter((a) => a.throttle).flatMap((a) => a.as.map((id, i) => [id, a.throttle[i]])));
 
 export const STORE_KEY = 'y3k.game.controls';
 export const DEADZONE = 0.15;
@@ -218,9 +237,9 @@ export function createInput(bindings = defaults()) {
       if (sprintLatch && Math.hypot(mx, mz) < 0.2) sprintLatch = false;   // L3 sprints until you stop
       const zoom = wheel * 0.0016 + ((on('zoomOut') ? 1 : 0) - (on('zoomIn') ? 1 : 0)) * 1.6 * dt;
       const out = {
-        move: [mx, mz], look: [dYaw, dPitch], zoom,
+        move: [mx, mz], look: [dYaw, dPitch], zoom, wheel,
         jump: on('jump'), jumpPressed: pressed.has('jump'), dash: pressed.has('dash'), flyToggle: pressed.has('fly'),
-        sprint: on('sprint') || sprintLatch, walk: on('walk'), up: on('jump'), down: on('down'),
+        sprint: on('sprint') || sprintLatch, sprintHeld: on('sprint'), walk: on('walk'), up: on('jump'), down: on('down'),
         modeToggle: pressed.has('mode'), build: pressed.has('build'), menu: pressed.has('menu'), device,
         attack: on('attack'), attackPressed: pressed.has('attack'), whirl: pressed.has('whirl'), guard: on('guard'), guardPressed: pressed.has('guard'), bind: on('bind'), bindPressed: pressed.has('bind'), weapon: pressed.has('weapon'), spawn: pressed.has('spawn'), board: pressed.has('board'), shortcuts: SHORT_IDS.filter((id) => pressed.has(id)),
       };

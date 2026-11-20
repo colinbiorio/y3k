@@ -9,6 +9,7 @@
 // both controller and keyboard/mouse, with a dedicated 'controls' menu").
 //
 //   node scripts/void-smoke.mjs <desk|pad|phone|bodies|fine> [small] [gpu] [firefox|webkit] [dpr=N] [--shots <dir>]
+//   (and build, fight, wall, island, ship, light, keys, globe: each said below)
 //
 //   desk   the keys and the mouse, the pointer held, the controls sheet, a key
 //          rebound, the three lights, the societies and back, leaving the tab
@@ -32,6 +33,11 @@
 //          deep sea and let down into it to swim with its head out; its palms, birds, woodhens and turtles counted;
 //          the map with where the body is; the frames;
 //          and back to the void
+//   light  the held jump and flight (no light on foot: 20 Nov), a ship called in the air and boarded from beside it,
+//          its throttle (shift held, the digits, the wheel and its stop at 9, a drag on the gauge), lightspeed on 0,
+//          out of it on forward, the brake
+//   globe  the island's map as a globe (src/game/wrap.js): a dart taken to the light there and brought out, the
+//          island's middle straight ahead and coming nearer
 //   fine   how fine it is drawn (src/game/fine.js), at two pixels a point: the room's own remembered `low` is not
 //          the void's; with `gpu`, a page slow with its own work and a browser held to thirty a second both
 //          keep their sharp picture (fewer pixels tried and given back); without, the drawing is the cause and
@@ -55,7 +61,7 @@ import { createServer } from 'node:net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship', 'light', 'keys'].find((s) => argv.includes(s)) || 'desk';
+const scene = ['desk', 'pad', 'phone', 'bodies', 'fine', 'build', 'fight', 'wall', 'island', 'ship', 'light', 'keys', 'globe'].find((s) => argv.includes(s)) || 'desk';
 const small = scene === 'bodies' && argv.includes('small');
 const gpu = argv.includes('gpu');
 const engine = ['firefox', 'webkit'].find((e) => argv.includes(e)) || 'chromium';
@@ -669,7 +675,12 @@ try {
     await key.press('KeyM'); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
     const rows = await page.evaluate(() => ['take_ring', 'build_hall', 'call_carrier'].map((id) => document.querySelector(`#game-menu .game-key[data-act="${id}"][data-slot="0"]`)?.textContent?.trim() || ''));
     check('the controls sheet lists them, with their keys', rows.join() === '3,0,P', rows);
-    await shot('02-controls-keys'); await key.press('Escape'); await sleep(300);
+    await shot('02-controls-keys');
+    // a ship's own keys, said in the same table (input.js ABOARD_ROWS): shown as the keys they share are now
+    const aboardRows = await page.evaluate(() => [...document.querySelectorAll('#game-menu .game-bind')].map((r) => [r.querySelector('.game-act-text')?.firstChild?.textContent || '', ...[...r.querySelectorAll('.game-fixed')].map((c) => c.textContent)]).filter((r) => ['the throttle', 'set the throttle', 'lightspeed', 'brake'].includes(r[0])));
+    check('the ships\' card says the throttle, its settings, lightspeed and the brake, as those keys are now', JSON.stringify(aboardRows) === JSON.stringify([['the throttle', 'left shift', 'right shift', 'L3'], ['set the throttle', '1 to 9', '', ''], ['lightspeed', '0', '', ''], ['brake', 'S', '↓', 'left stick']]), aboardRows);
+    await page.evaluate(() => [...document.querySelectorAll('#game-menu .game-bind')].find((r) => r.querySelector('.game-act-text')?.firstChild?.textContent === 'board')?.scrollIntoView({ block: 'start' })); await sleep(500);
+    await shot('03-controls-ship'); await key.press('Escape'); await sleep(300);
   }
 
   if (scene === 'light') {
@@ -696,6 +707,40 @@ try {
     check('Y calls a skiff in the air: it comes to the body, at its height', sk?.kind === 'skiff' && Math.abs(sk.p[1] - (hy - 0.02)) < 1.5 && Math.hypot(sk.p[0] - r.p[0], sk.p[2] - r.p[2]) < 5, { ship: sk, p: r.p });
     await key.press('KeyR'); await sleep(400); r = await read();
     check('R boards it from beside it, in the air', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard });
+    // the throttle and the light, aboard (Colin, 19 Nov 2026: "when you hold down shift, speed should increase, and a
+    // throttle should show up ... hit digit to control speed -- 0 being lightspeed and 1 being just above the non-shift
+    // speed"; out of the light "you should always continue going forward")
+    await key.down('ShiftLeft'); await sleep(1500); r = await read(); await key.up('ShiftLeft');
+    check('aboard, shift held opens the throttle and it shows', r.world.ships[0].thr > 3 && r.gauge === true, { thr: r.world.ships[0].thr, gauge: r.gauge });
+    await sleep(1200); r = await read();
+    check('let go, it stays open and flies the skiff on', r.world.ships[0].thr > 3 && r.world.ships[0].speed > 40, r.world.ships[0]);
+    await key.press('Digit2'); await sleep(250); r = await read();
+    check('2 sets it at 2 (not the bow: aboard, the digits are the throttle)', r.world.ships[0].thr === 2 && r.fight.weapon !== 'bow', { thr: r.world.ships[0].thr, weapon: r.fight.weapon });
+    await page.mouse.move(box.x, box.y); await page.mouse.wheel(0, -300); await sleep(250); r = await read();
+    check('the wheel up three clicks: 5', r.world.ships[0].thr === 5, r.world.ships[0].thr);
+    await page.mouse.wheel(0, -900); await sleep(450); r = await read();
+    check('a long stroke of the wheel stops at 9, short of the light', r.world.ships[0].thr === 9 && !r.lightspeed, { thr: r.world.ships[0].thr, light: r.lightspeed });
+    await page.mouse.wheel(0, 500); await sleep(250); r = await read();
+    check('and the wheel down brings it down: 4', r.world.ships[0].thr === 4, r.world.ships[0].thr);
+    // the gauge, dragged with the pointer free: two thirds of the way up its rail
+    const rail = await page.locator('.game-throttle-track').boundingBox();
+    await page.mouse.move(rail.x + rail.width / 2, rail.y + rail.height * 0.5); await page.mouse.down(); await page.mouse.move(rail.x + rail.width / 2, rail.y + rail.height * 0.3, { steps: 4 }); await page.mouse.up(); await sleep(250); r = await read();
+    check('the gauge dragged to seven tenths of its height: 7', r.world.ships[0].thr === 7, r.world.ships[0].thr);
+    await shot('02-throttle'); await page.mouse.move(box.x, box.y);
+    await key.press('Digit0'); r = await until((r) => r.lightspeed?.phase === 'go', 3000);
+    check('0: the light gathers, and it goes', r?.lightspeed?.phase === 'go', r?.lightspeed);
+    r = await until((r) => r.lightspeed?.v > 1e7, 9000); await shot('03-ship-light');
+    check('faster and faster', r?.lightspeed?.v > 1e7 && /^lightspeed · /.test(r.lightspeed.line), r?.lightspeed);
+    const sh0 = r.world.ships[0], yaw0 = sh0.yaw, at0 = [sh0.p[0] + r.world.origin[0], sh0.p[2] + r.world.origin[1]];
+    await key.press('Digit4'); r = await until((r) => r.lightspeed?.phase === 'out' && /^out of the light · /.test(r.lightspeed.line), 1500);
+    check('4: out of the light', /^out of the light · .* flown$/.test(r?.lightspeed?.line || ''), r?.lightspeed);
+    r = await until((r) => !r.lightspeed, 4000);
+    const sh1 = r.world.ships[0], went = [sh1.p[0] + r.world.origin[0] - at0[0], sh1.p[2] + r.world.origin[1] - at0[1]], along = (went[0] * Math.sin(yaw0) + went[1] * Math.cos(yaw0)) / (Math.hypot(...went) || 1);
+    check('and on forward along its way at 4, not back to where it set out', !!r && along > 0.99 && Math.hypot(...went) > 1000 && sh1.thr === 4 && Math.abs(sh1.speed - 24 * Math.pow(12, 4 / 9)) < 3, { went, along, ship: sh1 });
+    await key.down('KeyS'); await sleep(200); await key.up('KeyS'); await sleep(100); r = await read();
+    check('back brakes: the throttle to nothing', r.world.ships[0].thr === 0, r.world.ships[0]);
+    r = await until((r) => r.world.ships[0].speed < 1 && !r.gauge, 6000);
+    check('it slows to a hover, the gauge put away', !!r, r?.world.ships[0]);
     await key.press('KeyR'); const fall = []; r = await until((r) => { fall.push([+r.p[1].toFixed(2), r.grounded, r.flying, r.world.on]); return !r.world.aboard && Math.abs(r.p[1]) < 0.05 && r.grounded; }, 8000);
     check('R again steps off, and it falls to the water', !!r && !r.world.aboard && Math.abs(r.p[1]) < 0.05, { p: r?.p, aboard: r?.world.aboard, fall: fall.filter((_, i) => i % 6 === 0) });
     await key.press('KeyF'); await sleep(200); await key.down('Space'); await sleep(600); await key.up('Space'); await sleep(200);
@@ -703,6 +748,26 @@ try {
     r = await until((r) => r.grounded, 8000);
     check('two taps of space drop it out of the air', !!r && r.flying === false && r.grounded, { flying: r?.flying, p: r?.p });
     await key.press('KeyG'); await sleep(200);
+  }
+
+  if (scene === 'globe') {
+    // the island's map is a globe (Colin, 19 Nov 2026): out of the light the ship goes on forward and the island is ahead
+    await page.locator('#game-controls').click(); await page.waitForFunction(() => !document.getElementById('game-menu').hidden, null, { timeout: 5000 });
+    await page.locator('#game-menu [data-tab="map"]').click(); await sleep(300);
+    await page.locator('#game-menu [data-place="island"]').click();
+    let r = await until((r) => r.world.place === 'island', 30000); await sleep(1500 * slow);
+    await key.press('KeyU'); await sleep(600); await key.press('KeyR'); await sleep(400); r = await read();
+    check('on the island, a dart called and boarded', r.world.aboard === true, r.world);
+    await key.press('Digit0'); r = await until((r) => r.lightspeed?.phase === 'go', 3000);
+    await drag(400, 0); await sleep(2500);
+    r = await read(); const yaw = r.world.ships[0].yaw;
+    await key.press('Digit3'); r = await until((r) => r.lightspeed?.phase === 'out' && /^out of the light/.test(r.lightspeed.line), 1500);
+    check('3: out of the light, the island ahead', /^out of the light · .* flown · the island ahead$/.test(r?.lightspeed?.line || ''), r?.lightspeed);
+    await sleep(900); await shot('01-coming-out');
+    r = await until((r) => !r.lightspeed, 4000); await sleep(300); r = await read();
+    const sh = r.world.ships[0], to = [-488 - sh.p[0], 472 - sh.p[2]], d = Math.hypot(...to), ahead = (to[0] * Math.sin(sh.yaw) + to[1] * Math.cos(sh.yaw)) / d;
+    check('the island\'s middle straight ahead, kilometres off, and it is going toward it', ahead > 0.98 && d > 4500 && d < 8000 && Math.abs(sh.yaw - yaw) < 0.05 && sh.speed > 30, { ahead, d, ship: sh });
+    await shot('02-island-ahead');
   }
 
   if (scene === 'ship') {

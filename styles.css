@@ -6235,6 +6235,21 @@ body.in-void:not(.airden) .chat-air { visibility: hidden; }
   font-size: 0.74rem; letter-spacing: 0.04em; color: #eef1ff; pointer-events: none; white-space: nowrap; background: rgba(8, 10, 28, 0.42); backdrop-filter: blur(10px);
   box-shadow: 0 0 0 1px rgba(180, 200, 255, 0.18), 0 0 18px rgba(140, 160, 255, 0.22); text-shadow: 0 0 8px rgba(170, 190, 255, 0.55); }
 .game-light[hidden] { display: none; }
+/* the throttle aboard a ship (game/view.js gauge): a slim glass rail at the right (inside the frame's right grip), its fill the throttle, its top the light;
+   under a thumb it stands higher, over the thumbs' buttons */
+.game-throttle { position: absolute; right: calc(var(--hole-r, 0px) + 52px); top: calc(var(--hole-t, 0px) + (100% - var(--hole-t, 0px) - var(--hole-b, 0px)) / 2); translate: 0 -50%; z-index: 2; width: 30px; height: 210px; box-sizing: border-box;
+  padding: 22px 0 26px; border-radius: 15px; background: rgba(8, 10, 28, 0.38); backdrop-filter: blur(10px); cursor: ns-resize; touch-action: none; user-select: none;
+  box-shadow: 0 0 0 1px rgba(180, 200, 255, 0.18), 0 0 18px rgba(140, 160, 255, 0.18); }
+.game-throttle[hidden] { display: none; }
+@media (pointer: coarse) { .game-throttle { right: calc(var(--hole-r, 0px) + 16px); top: calc(var(--hole-t, 0px) + (100% - var(--hole-t, 0px) - var(--hole-b, 0px)) * 0.36); height: 180px; width: 34px; } }
+.game-throttle-track { position: relative; height: 100%; width: 6px; margin: 0 auto; border-radius: 3px;
+  background: repeating-linear-gradient(to top, rgba(255, 255, 255, 0.26) 0 1px, rgba(255, 255, 255, 0.08) 1px 10%); }
+.game-throttle-fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--thr, 0) * 100%); border-radius: 3px;
+  background: linear-gradient(to top, #6f8cff, #e8eeff); box-shadow: 0 0 10px rgba(150, 180, 255, 0.7); transition: height 0.12s linear; }
+.game-throttle-c, .game-throttle-n { position: absolute; left: 0; right: 0; text-align: center; color: #eef1ff; pointer-events: none; }
+.game-throttle-c { top: 4px; font-size: 0.7rem; opacity: 0.75; }
+.game-throttle-n { bottom: 5px; font-size: 0.74rem; font-weight: 600; }
+.game-throttle.light .game-throttle-fill { background: linear-gradient(to top, #a9bcff, #ffffff); box-shadow: 0 0 18px rgba(225, 235, 255, 0.95); }
 /* the key that does a list's item at once (src/game/input.js SHORT), on its button in the bar's lists */
 .game-build button .game-cap { margin-left: 7px; padding: 0 5px; border-radius: 4px; font: inherit; font-size: 0.66rem; line-height: 1.35;
   border: 1px solid currentColor; opacity: 0.55; }

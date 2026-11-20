@@ -32,6 +32,11 @@ export const PLACE_LINES = {
   island: `31.55° S, 159.08° E, in the Tasman Sea: a crescent ${Math.round(SHAPE.length / 100) / 10} km long, Mount Gower at its south end, a coral lagoon in its hollow`,
 };
 // what the map says of the island, plainly: where its numbers come from, and what is not there yet
+// several keys in one cell: a run of them (1 2 3 … 9) is said by its ends, others side by side
+export function runOf(labels) {
+  if (labels.length > 2 && labels.every((l, i) => l.length === 1 && (!i || l.charCodeAt(0) === labels[i - 1].charCodeAt(0) + 1))) return `${labels[0]} to ${labels.at(-1)}`;
+  return labels.join(' ');
+}
 export const ISLAND_NOTE = `Its land and peaks are from elevation data (the AWS Terrain Tiles; here SRTM, about 30 m apart), which trims the summits (Gower reads ${SHAPE.peaks[0].h} m; it is 875) and blurs the shore outward (${SHAPE.landKm2} km² of land; the island's own is 14.55). The lagoon's floor and its reef are shaped by rule, and Ball's Pyramid is modelled from its size: the data misses it. What lives there: kentia palms in its forests; the woodhen, found nowhere else, curious on the forest floor; sooty terns over the sea and the land; red-tailed tropicbirds along Gower's and Lidgbird's cliffs; green turtles in the lagoon. Still to come: the Lord Howe stick insect, by night.`;
 
 // what a box says, and what it says to someone who cannot see it
@@ -111,8 +116,10 @@ export function createMenu({ doc = globalThis.document, win = globalThis.window,
         + fix('cancel', 'leave it', 'the build key again does too', [of('menu', 1) || of('menu', 0), of('build', 0), of('menu', 'pad')])
         + fix('level', 'level the ground', 'where it is uneven; the whirl key changes the choice', ['1', '', ''])
         + fix('platform', 'build a platform', 'where it is uneven', ['2', '', '']) : '';
-      return fixed + ACTIONS.filter((a) => groupOf(a) === g.id).map((a) => `<div class="game-bind" role="row">${label(a.id, a.label, a.note)}${box(a.id, 0, a.label)}${box(a.id, 1, a.label)}${
-        a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`).join('') + after;
+      // a row said `as` other actions' keys (input.js ABOARD_ROWS: a ship's throttle) shows those keys as they are now
+      const all = (a, slot) => runOf(a.as.map((id) => (ACTIONS.find((x) => x.id === id)?.stick && slot === 'pad' ? ACTIONS.find((x) => x.id === id).stick : of(id, slot))).filter(Boolean));
+      return fixed + ACTIONS.filter((a) => groupOf(a) === g.id).map((a) => (a.as ? fix(a.id, a.label, a.note, [all(a, 0), all(a, 1), all(a, 'pad')]) : `<div class="game-bind" role="row">${label(a.id, a.label, a.note)}${box(a.id, 0, a.label)}${box(a.id, 1, a.label)}${
+        a.stick ? `<span class="game-fixed" role="cell">${esc(a.stick)}</span>` : box(a.id, 'pad', a.label)}</div>`)).join('') + after;
     };
     const groups = GROUPS.map((g) => ({ g, html: rows(g) })).filter((x) => x.html).map(({ g, html }) =>
       `<section class="game-group" aria-labelledby="game-g-${g.id}"><h4 class="game-group-name" id="game-g-${g.id}">${esc(g.name)}</h4>

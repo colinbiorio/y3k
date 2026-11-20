@@ -30,7 +30,7 @@ import * as F from '../src/game/fine.js';
 import * as Kin from '../src/game/bodies/kin.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
-import { MODE_LINES, cellText } from '../src/game/menu.js';
+import { MODE_LINES, cellText, runOf } from '../src/game/menu.js';
 import { GLYPHS, GROUPS, groupOf, glyphOf, glyphSvg } from '../src/game/glyphs.js';
 import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
@@ -40,6 +40,7 @@ import * as WO from '../src/game/workshop.js';
 import * as TO from '../src/game/tower.js';
 import * as HA from '../src/game/hall.js';
 import * as SP from '../src/game/ships.js';
+import * as WR from '../src/game/wrap.js';
 import { solveBoxes, rayBox } from '../src/game/solids.js';
 import * as CB from '../src/game/combat.js';
 import * as GR from '../src/game/island/ground.js';
@@ -200,17 +201,17 @@ ok('flying, a second tap of the jump soon after the first lets go of the air and
   assert.ok(Math.hypot(quick.v[0], quick.v[2]) > 3 * Math.hypot(slow.v[0], slow.v[2]), 'sprint, faster');
 });
 
-ok('the light\'s line: its speed (m/s, km/s, a share of c, the speed of light), how far out (m, km, light-seconds to light-years), and the farthest of our things it has come as far as', () => {
-  const L = B.LIGHT, line = (v, dist, phase = 'go') => B.lightLine({ phase, v, dist });
+ok('the light\'s line: its speed (m/s, km/s, a share of c, the speed of light), how far out (m, km, light-seconds to light-years), and the farthest of our things it has come as far as; coming out, how far it flew and what is ahead', () => {
+  const L = SP.LIGHT, line = (v, dist, phase = 'go') => SP.lightLine({ phase, v, dist });
   assert.equal(line(383, 120), 'lightspeed · 383 m/s · 120 m out');
   assert.equal(line(3.7e4, 2.2e6), 'lightspeed · 37 km/s · 2,200 km out');
   assert.equal(line(0.42 * L.c, 9e7), 'lightspeed · 0.42 c · 90,000 km out');
   assert.equal(line(L.c, 1.3 * L.c), 'lightspeed · the speed of light · 1.3 light-seconds out · past the Moon');
   assert.equal(line(L.c, 520 * L.c), 'lightspeed · the speed of light · 8.7 light-minutes out · as far as the Sun');
-  assert.equal(B.lightFar(4.3 * 31557600 * L.c), '4.3 light-years');
-  assert.equal(B.lightLine({ phase: 'gather' }), 'the light gathers · let go to stay');
-  assert.match(B.lightLine({ phase: 'home', dist: 2 * L.c }), /^coming home · 2 light-seconds$/);
-  assert.equal(B.lightLine(null), '');
+  assert.equal(SP.lightFar(4.3 * 31557600 * L.c), '4.3 light-years');
+  assert.equal(SP.lightLine({ phase: 'gather' }), 'the light gathers');
+  assert.equal(SP.lightLine({ phase: 'out', dist: 2 * L.c }, 'the island ahead'), 'out of the light · 2 light-seconds flown · the island ahead');
+  assert.equal(SP.lightLine(null), '');
   const view = read('src/game/view.js');
   assert.match(view, /createLightArt\(V\.scene, \{ lite: K\.lite \}\)/, 'the view draws it, in whichever place it is');
   assert.match(view, /<div class="game-light" role="status" hidden><\/div>/, 'its line has a place of its own');
@@ -355,7 +356,7 @@ ok('the origin moved under the body: the same place, in new numbers', () => {
 console.log('the void: the hands');
 
 ok('every action has two keys\' places and a controller\'s, and no key or button is given twice', () => {
-  const d = I.defaults(), ids = I.ACTIONS.map((a) => a.id);
+  const d = I.defaults(), ids = I.ACTIONS.filter((a) => !a.as).map((a) => a.id);        // (a row said `as` other actions' keys has none of its own: the ship's throttle)
   assert.deepEqual(Object.keys(d.keys), ids); assert.deepEqual(Object.keys(d.pad), ids);
   const keys = ids.flatMap((id) => { assert.equal(d.keys[id].length, 2); return d.keys[id].filter(Boolean); });
   assert.equal(new Set(keys).size, keys.length, 'keys');
@@ -2294,7 +2295,9 @@ ok('aboard, the skiff turns toward where the eye looks, drives along its heading
   step({ move: [0, 1], yaw: Math.PI }, 2);
   near(Math.hypot(...s.v), SP.SKIFF.speed, 1e-9, 'at its speed'); assert.ok(s.p[2] > 30 && Math.abs(s.p[0]) < 1e-6, 'along its heading: ' + s.p.map((v) => v.toFixed(2)));
   near(body.p[2], SP.seatAt(s)[2], 1e-12, 'the body carried with it');
-  step({ move: [0, 1], yaw: Math.PI, sprint: true }, 2); near(Math.hypot(...s.v), SP.SKIFF.boost, 1e-9, 'opened up');
+  step({ move: [0, 1], yaw: Math.PI, sprint: true }, 2); near(s.thr, 6, 0.06, 'held, sprint opens the throttle three notches a second');
+  step({ move: [0, 0], yaw: Math.PI }, 2); near(Math.hypot(...s.v), SP.speedAt(SP.SKIFF, s.thr), 1e-6, 'let go, it stays open: the skiff flies on at its speed, no hand on forward');
+  step({ move: [0, -1], yaw: Math.PI }, 1 / 60); assert.equal(s.thr, 0, 'back cuts it');
   step({ move: [0, 1], yaw: Math.PI / 2 }, 0.25);
   const turned = s.yaw; assert.ok(turned < -1e-3 && turned > -SP.SKIFF.turn * (0.25 + 2 / 60) - 1e-6, 'turning toward the eye at its rate: ' + turned.toFixed(3));
   step({ move: [0, 1], yaw: Math.PI / 2 }, 2); near(s.yaw, -Math.PI / 2, 1e-9, 'pointing where the eye looks');
@@ -2371,6 +2374,87 @@ ok('climb and dive, and the bank (Colin, 19 Nov 2026: "ships should be able to g
   for (let t = 0; t < 3; t += dt) SP.stepShip(w, { move: [0, 1], yaw: Math.PI, pitch: 0 }, dt);
   for (let t = 0; t < 2; t += dt) { SP.stepShip(w, { move: [0, 1], yaw: Math.PI / 2, pitch: 0 }, dt); low = Math.max(low, (SP.CARRIER.beam / 2) * Math.sin(Math.abs(w.bank)) - (w.p[1] - 0)); }
   assert.ok(low <= 1e-6, 'low over the water, it banks no further than its side clears it');
+});
+
+ok('the throttle and the light, a ship\'s alone (Colin, 19 Nov 2026: "when you hold down shift, speed should increase ... hit digit to control speed -- 0 being lightspeed and 1 being just above the non-shift speed"; "when you exit lightspeed, you should always continue going forward")', () => {
+  const dt = 1 / 60, T = SP.THROTTLE;
+  for (const k of ['skiff', 'carrier']) {
+    const S = SP.KIND[k];
+    assert.ok(SP.speedAt(S, 1) > S.speed * 1.2 && SP.speedAt(S, 1) < S.speed * 1.4, k + ': 1 just above its own speed');
+    near(SP.speedAt(S, 9), S.speed * T.top, 1e-9, k + ': 9 its top'); for (let n = 1; n < 9; n++) near(SP.speedAt(S, n + 1) / SP.speedAt(S, n), Math.pow(T.top, 1 / 9), 1e-9, 'each notch the same share faster');
+    const s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, k); s.p[1] = 300;
+    SP.setThrottle(s, 5); let t = 0; while (Math.hypot(...s.v) < SP.speedAt(S, 5) - 1e-6 && t < 10) { SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0 }, dt); t += dt; }
+    assert.ok(t <= S.speed / S.accel + 0.1, k + ': at 5 as quickly as at its own speed: ' + t.toFixed(2));
+    SP.setThrottle(s, 10); assert.equal(s.light.phase, 'gather', k + ': 0, the light gathers');
+    SP.setThrottle(s, 4); assert.equal(s.light, null, k + ': brought down while it gathers, nothing comes of it');
+    SP.setThrottle(s, 10); for (t = 0; t < SP.LIGHT.gather + 0.02; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0 }, dt);
+    assert.equal(s.light.phase, 'go', k + ': then it goes');
+    for (t = 0; t < SP.LIGHT.rise + 0.1; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI / 2, pitch: 0.3 }, dt);
+    assert.equal(s.light.v, 299792458, k + ': the speed of light, exactly, in real metres a second'); assert.equal(SP.LIGHT.c, 299792458);
+    { const d0 = s.light.dist; for (let i = 0; i < 60; i++) SP.stepShip(s, { move: [0, 0], yaw: Math.PI / 2, pitch: 0.3 }, dt); near(s.light.dist - d0, 299792458, 1, k + ': a real second at it counts one light-second, no more'); } assert.ok(s.light.dist > 0.4 * SP.LIGHT.c && s.light.veil > 0.99, k + ': far out, the veil drawn');
+    assert.ok(Math.hypot(...s.v) <= SP.LIGHT.cap + 1e-6 && s.p.every(Number.isFinite), k + ': the ship itself no faster than its cap');
+    near(s.yaw, -Math.PI / 2, 1e-6, k + ': steered where the eye looks');
+    const yaw = s.yaw; SP.setThrottle(s, 3); assert.equal(s.light.phase, 'out', k + ': 3, it comes out');
+    const p0 = [...s.p]; for (t = 0; s.light && t < 5; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI / 2, pitch: 0.3 }, dt);
+    near(t, SP.LIGHT.out, 0.05, k + ': over ' + SP.LIGHT.out + ' s'); assert.equal(s.light, null);
+    const went = [s.p[0] - p0[0], s.p[2] - p0[2]], along = (went[0] * Math.sin(yaw) + went[1] * Math.cos(yaw)) / Math.hypot(...went);
+    assert.ok(along > 0.999 && Math.hypot(...went) > 1000, k + ': on along its heading, not back to where it set out: ' + Math.hypot(...went).toFixed(0));
+    near(Math.hypot(...s.v), SP.speedAt(S, 3), 1, k + ': at the throttle\'s speed');
+    SP.stepShip(s, { move: [0, -1], yaw: Math.PI / 2, pitch: 0 }, dt); assert.equal(s.thr, 0, k + ': back brakes it');
+  }
+  const s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dart'); s.p[1] = 50;
+  for (let t = 0; t < 3.1; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, sprint: true }, dt);
+  assert.ok(s.thr > 9 && !s.light, 'sprint held: past 9 slower, so the light is not come to by accident: ' + s.thr.toFixed(2));
+  for (let t = 0; t < 1.5; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, sprint: true }, dt);
+  assert.ok(s.light, 'held on, the light'); const body = B.createBody(); SP.leave(s, body); assert.ok(!s.light && s.thr === 0, 'stepping off lets the throttle and the light go');
+  const view = read('src/game/view.js');
+  assert.match(view, /if \(K\.aboard && ABOARD\[id\]\) \{ setThrottle\(K\.aboard, ABOARD\[id\]\); continue; \}/, 'aboard, the digits set it');
+  assert.match(view, /body\.light = K\.aboard\?\.light \|\| null;/, 'on foot, no light');
+  assert.match(view, /<div class="game-throttle" role="slider"/, 'its gauge');
+});
+
+ok('the one table says a ship\'s keys too: the throttle, its nine settings and lightspeed are rows said as other actions\' keys (one key still does one thing at a time), shown in the ships\' card', () => {
+  const rows = I.ACTIONS.filter((a) => a.as);
+  assert.deepEqual(rows.map((a) => a.id), ['throttle', 'throttle_set', 'lightspeed', 'brake']);
+  for (const a of rows) { assert.equal(groupOf(a), 'ships', a.id); assert.ok(GLYPHS[a.id] && a.note, a.id + ' drawn and said'); for (const id of a.as) assert.ok(I.ACTIONS.find((x) => x.id === id && !x.as), a.id + ' as a real action: ' + id); }
+  const d = I.defaults(), keyOf = (id) => d.keys[id][0];
+  assert.deepEqual(Object.entries(I.ABOARD).map(([id, n]) => [keyOf(id), n]), [['Digit1', 1], ['Digit2', 2], ['Digit3', 3], ['Digit4', 4], ['Digit5', 5], ['Digit6', 6], ['Digit7', 7], ['Digit8', 8], ['Digit9', 9], ['Digit0', 10]], '1 to 9 set it, 0 is the light');
+  assert.deepEqual(rows[0].as, ['sprint']); assert.deepEqual(rows[3].as, ['back']);
+  for (const a of rows) { assert.equal(d.keys[a.id], undefined, a.id + ' has no key of its own'); assert.equal(I.bindKey(I.defaults(), a.id, 0, 'KeyZ').keys[a.id], undefined, 'and cannot be given one'); }
+  assert.equal(runOf(['1', '2', '3', '4', '5', '6', '7', '8', '9']), '1 to 9'); assert.equal(runOf(['0']), '0'); assert.equal(runOf(['1', '2', 'Q']), '1 2 Q'); assert.equal(runOf(['left shift']), 'left shift'); assert.equal(runOf([]), '');
+  const menu = read('src/game/menu.js'); assert.match(menu, /a\.as \? fix\(a\.id, a\.label, a\.note, \[all\(a, 0\), all\(a, 1\), all\(a, 'pad'\)\]\)/, 'the sheet shows them as those keys are now');
+});
+
+ok('a small flat map is a globe (Colin, 19 Nov 2026: "if you go too far in one direction you just end up on the other side of it"): past its far side a point comes round from the opposite edge, going the way it was going, the middle ahead; out of the light, one that has gone round has the middle straight ahead', () => {
+  const G = WR.GLOBE, mid = [-488, 472];
+  assert.deepEqual(WR.midOf({ x0: -3760, x1: 2784, z0: -4368, z1: 5312 }), mid); assert.deepEqual(WR.midOf(null), [0, 0]);
+  assert.equal(WR.roundOf(mid[0] + G.half - 1, mid[1], mid), null, 'not before the far side'); assert.equal(WR.roundOf(mid[0], mid[1], mid), null);
+  for (const a of [0, 0.7, 2.1, -1.3, Math.PI]) {
+    const d = [Math.sin(a), Math.cos(a)], p = [mid[0] + d[0] * (G.half + 30), mid[1] + d[1] * (G.half + 30)], far = WR.roundOf(p[0], p[1], mid), q = [p[0] - far[0], p[1] - far[1]];
+    near(Math.hypot(q[0] - mid[0], q[1] - mid[1]), G.half - 30, 1e-6, 'as far inside the opposite edge as it had gone past this one');
+    near(((mid[0] - q[0]) * d[0] + (mid[1] - q[1]) * d[1]) / (G.half - 30), 1, 1e-9, 'and the middle is now straight ahead of the way it was going');
+    assert.equal(WR.roundOf(q[0], q[1], mid), null, 'once');
+  }
+  // a way that misses the middle comes back as far to its other side
+  { const p = [mid[0] + 3000, mid[1] + Math.sqrt(G.half ** 2 - 3000 ** 2) + 5], far = WR.roundOf(p[0], p[1], mid), q = [p[0] - far[0], p[1] - far[1]]; near(q[0] - mid[0], -3000, 1, 'mirrored through the middle'); assert.ok(q[1] < mid[1]); }
+  const big = WR.roundOf(mid[0] + G.half * 7.5, mid[1], mid); near(Math.abs(mid[0] + G.half * 7.5 - big[0] - mid[0]), G.half * 0.5, 1e-6, 'however far, it is brought within the globe');
+  assert.equal(WR.wentRound(G.half - 1), false, 'a short hop has not gone round'); assert.equal(WR.wentRound(G.half), true); assert.equal(WR.wentRound(4e16), true);
+  for (const yaw of [0, 1.1, -2.6]) {
+    const to = WR.comeOut([999999, 31000, -5], yaw, mid), ahead = [Math.sin(yaw), Math.cos(yaw)];
+    near((mid[0] - to[0]) * ahead[0] + (mid[1] - to[2]) * ahead[1], G.ahead, 1e-6, 'the middle straight ahead, ' + G.ahead + ' m off'); near(Math.hypot(mid[0] - to[0], mid[1] - to[2]), G.ahead, 1e-6);
+    assert.equal(to[1], G.high, 'brought down to where the land can be seen'); assert.equal(WR.comeOut([0, 3, 0], yaw, mid)[1], G.low, 'or up clear of it');
+  }
+  assert.ok(G.ahead > Math.hypot(3272, 4840) + 2500, 'it comes out over the sea, well short of the shore');
+  // flown out of the light on the island's map: ships.js carries it on along its heading, and it ends kilometres short of the middle, going toward it
+  const s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'dart'), dt = 1 / 60; s.p[1] = 300;
+  SP.setThrottle(s, 10); for (let t = 0; t < 9; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI + 0.9, pitch: 0 }, dt);
+  SP.setThrottle(s, 3); assert.ok(WR.wentRound(s.light.dist)); s.p = WR.comeOut(s.p, s.yaw, mid);
+  let t = 0; while (s.light && t < 5) { SP.stepShip(s, { move: [0, 0], yaw: Math.PI + 0.9, pitch: 0 }, dt); t += dt; }
+  const left = Math.hypot(mid[0] - s.p[0], mid[1] - s.p[2]), toward = ((mid[0] - s.p[0]) * s.v[0] + (mid[1] - s.p[2]) * s.v[2]) / (left * Math.hypot(s.v[0], s.v[2]));
+  assert.ok(left > 5000 && left < 7500 && toward > 0.999, 'out of the light, the island ' + (left / 1000).toFixed(1) + ' km ahead and coming nearer');
+  const view = read('src/game/view.js');
+  assert.match(view, /function outOfLight\(sh\) \{/); assert.match(view, /function globe\(\) \{/);
+  assert.equal(view.split('roundOf(').length - 1, 1, 'the globe is in the view in two places only (wrap.js: to take it out)'); assert.equal(view.split('comeOut(').length - 1, 1);
 });
 
 ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {

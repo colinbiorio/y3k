@@ -35,8 +35,8 @@
 import * as THREE from 'three';
 import { createVoid } from './void.js';
 import { createFigure } from './figure.js';
-import { createBody, advance, shown, shift, setMode, WATER, SPRINT, lightLine } from './body.js';
-import { createInput, wireInput, loadBindings, keyLabel, padLabel, DOES } from './input.js';
+import { createBody, advance, shown, shift, setMode, WATER, SPRINT } from './body.js';
+import { createInput, wireInput, loadBindings, keyLabel, padLabel, DOES, ABOARD } from './input.js';
 import { rebase } from './rings.js';
 import { LIGHTS } from './lights.js';
 import { loadState, saveState, ZOOM } from './state.js';
@@ -53,7 +53,8 @@ import { glyphSvg } from './glyphs.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
-import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, shipGap, board, carry, leave, carryOn } from './ships.js';
+import { SHIPS, KIND as SHIP_KIND, placeShip, stepShip, nearShip, shipGap, board, carry, leave, carryOn, setThrottle, lightLine, THROTTLE } from './ships.js';
+import { GLOBE, midOf, roundOf, wentRound, comeOut } from './wrap.js';
 import { createSkiffArt } from './ships/skiff.js';
 import { createDartArt } from './ships/dart.js';
 import { createDhowArt } from './ships/dhow.js';
@@ -78,6 +79,8 @@ const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const worn = (st) => st.kind + ' ' + JSON.stringify(st.looks[st.kind]);
 const LEARNED = 14;        // seconds of moving after which the standing hint is put away
+// the island's middle: its flat map is a globe laid flat about it (wrap.js, until the planets are built)
+const MID = midOf(SHAPE.extent);
 const IDLE = { move: [0, 0], look: [0, 0], zoom: 0, jump: false, jumpPressed: false, dash: false, flyToggle: false, sprint: false, walk: false, up: false, down: false, modeToggle: false, menu: false, device: 'keys',
   attack: false, attackPressed: false, whirl: false, guard: false, guardPressed: false, bind: false, bindPressed: false, spawn: false };
 const turnTo = (a, b, max) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI; return Math.abs(d) <= max ? b : a + Math.sign(d) * max; };
@@ -189,12 +192,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (chooser?.isOpen()) return '';                 // the body is what is looked at: nothing is said over its feet
     if (plan) return '';                              // the blueprint's own panel says what may be done
     const b = input.bindings, k = (id) => keyLabel(b.keys[id][0] || b.keys[id][1]) || '—';
-    // in the light: how to come home (its speed and distance are on the line at the top)
+    // in the light: how to come out of it (its speed and distance are on the line at the top)
     const L = K.body.light;
-    if (L) return L.phase === 'gather' ? `keep holding ${input.device === 'pad' ? padLabel(b.pad.jump) || '—' : k('jump')} for lightspeed · let go to stay` : L.phase === 'go' ? `steer where you look · let go of ${input.device === 'pad' ? padLabel(b.pad.jump) || '—' : k('jump')} to come home` : '';
+    if (L) return L.phase === 'go' ? `steer where you look · 1 to 9 or ${input.device === 'pad' ? 'the stick back' : k('back')} to come out of the light` : '';
     // aboard a ship, its own short line, as long as the body is in its seat
-    if (K.aboard && !touch) return input.device === 'pad' ? `left stick drives · ${padLabel(b.pad.jump) || '—'} rises · ${padLabel(b.pad.down) || '—'} sinks · ${padLabel(b.pad.board) || '—'} steps off`
-      : `${k('forward')} drives · it turns where you look · ${k('jump')} rises · ${k('down')} sinks · ${k('sprint')} faster · ${k('board')} steps off`;
+    if (K.aboard && !touch) return input.device === 'pad' ? `left stick drives · ${padLabel(b.pad.jump) || '—'} rises · ${padLabel(b.pad.down) || '—'} sinks · ${padLabel(b.pad.sprint) || '—'} held, the throttle · ${padLabel(b.pad.board) || '—'} steps off`
+      : `${k('forward')} drives · it turns where you look · ${k('jump')} rises · ${k('down')} sinks · ${k('sprint')} held, the throttle · 1 to 9 set it, 0 lightspeed · ${k('back')} brakes · ${k('board')} steps off`;
     if (touch || K.learned > LEARNED) return '';
     if (input.device === 'pad') return `left stick moves · ${padLabel(b.pad.jump) || '—'} jumps, held longer rises higher · ${padLabel(b.pad.dash) || '—'} dashes · ${padLabel(b.pad.menu) || '—'} for the controls`;
     return `${locked ? 'esc frees the pointer · ' : 'click to look around · '}${k('forward')} ${k('left')} ${k('back')} ${k('right')} move · ${k('jump')} jumps, held longer rises higher · ${k('dash')} dashes · ${k('menu')} for the controls`;
@@ -494,11 +497,52 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const s = nearShip(K.world.ships, K.body.p);
     if (!s) { const far = K.world.ships[0]; if (far) say(`the ${far.kind} is ${Math.round(shipGap(far, K.body.p))} m off · come near it to board`, 3); return; }
     board(s, K.body); K.aboard = s;
-    say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${actKey('sprint')} opens it up · ${actKey('board')} steps off`, 8);
+    say(`aboard the ${s.kind} · ${touch ? 'the stick drives it' : `${actKey('forward')} drives it`} · it turns where you look · ${actKey('jump')} rises · ${actKey('down')} sinks · ${touch ? 'the gauge is its throttle' : `${actKey('sprint')} held opens the throttle (1 to 9 set it, 0 is lightspeed)`} · ${actKey('board')} steps off`, 8);
   }
   // the ships drawn, and those let be coasting to a stop
   const SHIP_ARTS = { skiff: createSkiffArt, dart: createDartArt, dhow: createDhowArt, ark: createArkArt, carrier: createCarrierArt };
-  let shipWake = 0, nearSaid = null;
+  let shipWake = 0, nearSaid = null, throttleTo = null, thrShown = -1, wheelQuiet = 1, wheelGate = false;
+  // COMING OUT OF THE LIGHT, AND GOING ROUND (wrap.js; Colin, 19 Nov 2026: "when you exit lightspeed, you should always
+  // continue going forward, and in front of you, there's the island. like, a globe"). A ship that has gone round comes
+  // out with the island's middle straight ahead (under the veil, so it is not seen put there), flying on toward it; in
+  // the void there is nothing to come to, and it only comes down to where the water can be seen. These two are all of
+  // the globe there is in the view: with a real globe to fly round, they go.
+  function outOfLight(sh) {
+    const L = sh.light;
+    if (!L || L.phase !== 'out' || L.placed) return;
+    L.placed = true; L.round = wentRound(L.dist);
+    if (!L.round) return;                                // a short hop: it is where it is
+    const to = K.place === 'island' ? comeOut(sh.p, sh.yaw, MID) : [sh.p[0], Math.min(sh.p[1], GLOBE.high), sh.p[2]];
+    K.eye.at.x += to[0] - sh.p[0]; K.eye.at.y += to[1] - sh.p[1]; K.eye.at.z += to[2] - sh.p[2];
+    sh.p = to;
+  }
+  function globe() {
+    if (K.place !== 'island') return;
+    const p = K.aboard ? K.aboard.p : K.body.p, far = roundOf(p[0], p[2], MID);
+    if (!far) return;
+    if (K.aboard) { K.aboard.p[0] -= far[0]; K.aboard.p[2] -= far[1]; }
+    shift(K.body, far[0], far[1]); K.eye.at.x -= far[0]; K.eye.at.z -= far[1];
+  }
+  // the wheel is a ship's throttle: a notch for every hundred of its turning (a mouse's click, a short stroke of two
+  // fingers). A stroke stops at 9: only one begun there (after a moment's rest) goes on to the light
+  function wheelThrottle(sh, turned, dt) {
+    wheelQuiet += dt;
+    if (!turned) return;
+    const thr = sh.light && sh.light.phase !== 'out' ? 10 : sh.thr || 0;
+    if (wheelQuiet > 0.3) wheelGate = thr >= THROTTLE.notches;
+    wheelQuiet = 0;
+    setThrottle(sh, clamp(thr - turned / 100, 0, wheelGate ? 10 : THROTTLE.notches));
+  }
+  // the throttle's gauge: shown aboard while it is open (or sprint is held, or the light is about the ship); a drag on it
+  // sets it (the pointer free), the wheel too (ships.js THROTTLE)
+  function gauge(inp) {
+    const el = $('.game-throttle'); if (!el) return;
+    const sh = K.aboard, thr = sh ? (sh.light && sh.light.phase !== 'out' ? 10 : sh.thr || 0) : 0, show = !!sh && (touch || thr > 0.01 || !!sh.light || !!inp?.sprintHeld);
+    if (el.hidden === show) el.hidden = !show;
+    if (!show || Math.abs(thr - thrShown) < 0.01) return;
+    thrShown = thr; el.style.setProperty('--thr', (thr / 10).toFixed(3)); el.classList.toggle('light', thr >= 10); el.setAttribute('aria-valuenow', String(Math.round(thr)));
+    const n = el.querySelector('.game-throttle-n'); if (n) n.textContent = thr >= 10 ? 'c' : thr >= 0.5 ? String(Math.round(thr)) : '';
+  }
   // the ships no one flies: they slow to a hover and ride it (ships.js), and a body standing on one goes with it
   function drift(dt) {
     for (const sh of K.world.ships) {
@@ -629,6 +673,8 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       eye.yaw += inp.look[0];
       if (eye.yaw > Math.PI) eye.yaw -= 2 * Math.PI; else if (eye.yaw < -Math.PI) eye.yaw += 2 * Math.PI;
       eye.pitch = clamp(eye.pitch + inp.look[1], PITCH[0], PITCH[1]);
+      // aboard a ship the wheel is its throttle; the eye's zoom keeps its keys
+      if (K.aboard) { wheelThrottle(K.aboard, inp.wheel || 0, dt); if (inp.wheel) { const z = inp.zoom - inp.wheel * 0.0016; inp.zoom = Math.abs(z) < 1e-9 ? 0 : z; } }
       if (inp.zoom) { st.zoom = clamp(st.zoom * Math.exp(inp.zoom), ZOOM.min, ZOOM.max); saveT = now + 600; }
       if (inp.modeToggle) modeTo(body.mode === 'survival' ? 'creative' : 'survival');
       if (inp.build) buildHere();
@@ -645,7 +691,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       if (inp.board) boardOrLeave();
       // one key each: a weapon in hand, a building's blueprint, a ship called down (input.js SHORT), as the bar's lists do;
       // while a blueprint is shown only a building's key acts (that building is shown instead: 1 and 2 are the blueprint's)
-      if (!body.light) for (const id of inp.shortcuts || []) { const [what, kind] = DOES[id]; if (plan && what !== 'build') continue; if (what === 'weapon') takeWeapon(kind); else if (what === 'build') buildHere(kind); else putShip(kind); }
+      // aboard a ship some of them are its throttle instead (input.js ABOARD: 1 to 9, and the light)
+      for (const id of inp.shortcuts || []) {
+        if (K.aboard && ABOARD[id]) { setThrottle(K.aboard, ABOARD[id]); continue; }
+        if (body.light) continue;
+        const [what, kind] = DOES[id]; if (plan && what !== 'build') continue; if (what === 'weapon') takeWeapon(kind); else if (what === 'build') buildHere(kind); else putShip(kind);
+      }
       if (inp.menu) openMenu();
       K.world.update(dt);
       if (plan) planStep();
@@ -654,9 +705,13 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       drift(dt);
       if (K.aboard) {
         // aboard: the ship flies under the hands, and the body sits in it
-        stepShip(K.aboard, { move: inp.move, yaw: eye.yaw, pitch: eye.pitch, up: inp.up, down: inp.down, sprint: inp.sprint }, dt, { floorAt, solid: (q) => K.world.solid(q) });
+        if (throttleTo != null) { setThrottle(K.aboard, throttleTo); throttleTo = null; }
+        stepShip(K.aboard, { move: inp.move, yaw: eye.yaw, pitch: eye.pitch, up: inp.up, down: inp.down, sprint: inp.sprintHeld ?? inp.sprint }, dt, { floorAt, solid: (q) => K.world.solid(q) });
+        outOfLight(K.aboard);
         carry(K.aboard, body);
       } else advance(body, { ...(down ? IDLE : C.slow ? { ...inp, walk: true, sprint: false } : inp), yaw: eye.yaw, pitch: eye.pitch }, dt);
+      body.light = K.aboard?.light || null;          // the light is the ship's: the eye, the line and the drawing read it here
+      globe();
       // what the body did, on the water
       for (const e of body.events.splice(0)) {
         const at = e.at || body.p;
@@ -713,6 +768,12 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     if (!eye.has) { eye.at.set(tx, ty, tz); eye.has = true; eye.d = st.zoom; }
     else if (body.light && body.light.phase !== 'gather') eye.at.set(tx, ty, tz);     // in the light the eye keeps up at once
     else { const kh = ease(16, dt), kv = ease(10, dt); eye.at.x += (tx - eye.at.x) * kh; eye.at.z += (tz - eye.at.z) * kh; eye.at.y += (ty - eye.at.y) * kv; }
+    // a ship at its throttle's top would leave the eye behind (a skiff at 288 m/s, eighteen metres): it pulls ahead of
+    // the eye by a third of how far back the eye stands, and no more
+    if (K.aboard && !stand) {
+      const lx = tx - eye.at.x, ly = ty - eye.at.y, lz = tz - eye.at.z, lag = Math.hypot(lx, ly, lz), most = 0.33 * Math.max(st.zoom, SHIP_KIND[K.aboard.kind].view);
+      if (lag > most) { const k = 1 - most / lag; eye.at.x += lx * k; eye.at.y += ly * k; eye.at.z += lz * k; }
+    }
     const sy = Math.sin(eye.yaw), cy = Math.cos(eye.yaw);
     const along = (p) => { const c = Math.cos(p); return [-sy * c, Math.sin(p), -cy * c]; };
     const zoomNow = K.aboard ? Math.max(st.zoom, SHIP_KIND[K.aboard.kind].view) : st.zoom;          // aboard, the eye stands back enough for the ship
@@ -746,7 +807,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const side = eye.side * (SHOULDER * Math.min(1, eye.d / 4) + eye.wall) * (1 - u);
     camera.position.set(eye.at.x - fx * eye.d + cy * side, Math.max(lowest + 0.1, eye.at.y - fy * eye.d), eye.at.z - fz * eye.d - sy * side);
     camera.rotation.set(pitch, eye.yaw, 0, 'YXZ');
-    const fov = FOV + 12 * smooth(SPRINT + 1, 46, Math.hypot(body.v[0], body.v[2])) + 20 * (body.light ? body.light.frac : 0);    // the view opens a little at speed, and more toward light
+    const fov = FOV + 12 * smooth(SPRINT + 1, 46, Math.hypot(body.v[0], body.v[2])) + (K.aboard ? 9 * Math.min(1, (K.aboard.thr || 0) / THROTTLE.notches) : 0) + 20 * (body.light ? body.light.frac : 0);    // the view opens a little at speed (a ship's throttle too), and more toward light
     eye.fov += (fov - eye.fov) * ease(6, dt);
     if (Math.abs(camera.fov - eye.fov) > 0.02) { camera.fov = eye.fov; camera.updateProjectionMatrix(); }
     // the picture is slid so the body stands in what the sheet leaves (the mirror's eye takes the same slide: void.js copies this one's projection)
@@ -765,9 +826,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     K.fight.update(K.combat, paused ? 0 : dt, camera, body, fist);
     if (body.light || K.lightArt) {
       if (K.lightArt?.scene !== V.scene) { K.lightArt?.dispose(); K.lightArt = createLightArt(V.scene, { lite: K.lite }); }
-      K.lightArt.update(body.light, { camera, at: [pos[0], pos[1] + figure.look * 0.8, pos[2]], dt: paused ? 0 : dt, eyeD: eye.d });
+      const sh = K.aboard, len = sh ? SHIP_KIND[sh.kind].length : 0;                 // about a ship, the light is the ship's size
+      K.lightArt.update(body.light, { camera, at: sh ? [sh.p[0], sh.p[1] + (sh.bob || 0), sh.p[2]] : [pos[0], pos[1] + figure.look * 0.8, pos[2]], dt: paused ? 0 : dt, eyeD: eye.d, reach: sh ? len : 6, size: sh ? Math.max(1, len / 5) : 1 });
     }
-    if (now > lightT) { lightT = now + 120; const line = lightLine(body.light); if (line !== lightSaid) { lightSaid = line; const el = $('.game-light'); if (el) { el.textContent = line; el.hidden = !line; } } }
+    gauge(paused ? null : inp);
+    if (now > lightT) { lightT = now + 120; const line = lightLine(body.light, K.place === 'island' && body.light?.round ? 'the island ahead' : ''); if (line !== lightSaid) { lightSaid = line; const el = $('.game-light'); if (el) { el.textContent = line; el.hidden = !line; } } }
     K.blue?.update(paused ? 0 : dt);
     hud(dt);
     V.setScale(camera);
@@ -819,6 +882,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="game-hud" aria-hidden="true"><i class="game-reticle"></i><div class="game-hp"><i></i></div><i class="game-hurt"></i></div>
       <div class="game-foes" role="status" hidden></div>
       <div class="game-light" role="status" hidden></div>
+      <div class="game-throttle" role="slider" aria-label="throttle" aria-valuemin="0" aria-valuemax="10" hidden><div class="game-throttle-track"><div class="game-throttle-fill"></div></div><span class="game-throttle-c">c</span><b class="game-throttle-n"></b></div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
       <div class="game-plan" role="group" aria-label="where the building goes" hidden></div>
@@ -844,6 +908,15 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       onClose: () => { menuShut = performance.now(); input.clear(); standing = ''; } });
     wire = wireInput(input, { el: holder, paused: () => !root || root.inert || menu.isOpen(), onLock: (on) => { locked = on; root?.classList.toggle('locked', on); standing = ''; } });
     const on = (t, ev, fn, opt) => { t.addEventListener(ev, fn, opt); offs.push(() => t.removeEventListener(ev, fn, opt)); };
+    // the throttle's gauge, dragged (a mouse with the pointer free, or a finger): its height is the throttle, its top the light
+    { const g = $('.game-throttle'); let dragT = false;
+      const at = (e) => { const r = g.querySelector('.game-throttle-track').getBoundingClientRect(), u = clamp((r.bottom - e.clientY) / (r.height || 1), 0, 1); throttleTo = u > 0.96 ? 10 : Math.round(u * 10 * 2) / 2; };
+      if (g) {
+        on(g, 'pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); dragT = true; try { g.setPointerCapture(e.pointerId); } catch { /* it still sets */ } at(e); });
+        on(g, 'pointermove', (e) => { if (dragT) at(e); });
+        on(g, 'pointerup', () => { dragT = false; }); on(g, 'pointercancel', () => { dragT = false; });
+        on(g, 'mousedown', (e) => e.stopPropagation());
+      } }
     // a bar button pressed with the mouse hands the focus back to the canvas, so the jump key is the body's again
     const press = (sel, fn) => { const el = $(sel); if (el) on(el, 'click', (e) => { if (e.detail > 0) focusCanvas(); fn(); }); };
     press('#game-mode', () => modeTo(K.body.mode === 'survival' ? 'creative' : 'survival'));
@@ -918,14 +991,14 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     (globalThis.Y3K ||= {}).game = { read: () => (K ? { p: [...K.body.p], v: [...K.body.v], mode: K.body.mode, flying: K.body.flying, grounded: K.body.grounded,
       dashing: K.body.dashT > 0, lightspeed: K.body.light ? { phase: K.body.light.phase, v: K.body.light.v, dist: K.body.light.dist, frac: Math.round(K.body.light.frac * 1000) / 1000, veil: Math.round(K.body.light.veil * 1000) / 1000, line: $('.game-light')?.textContent || '' } : null, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
-      kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(),
+      kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(), gauge: !$('.game-throttle')?.hidden,
       plan: plan ? { kind: plan.kind, did: plan.r?.did, choice: plan.choice, turn: plan.turn, at: plan.at && { x: Math.round(plan.at.x * 100) / 100, z: Math.round(plan.at.z * 100) / 100, yaw: Math.round(plan.at.yaw * 1000) / 1000 },
         y: plan.r?.b ? Math.round((plan.r.b.y || 0) * 100) / 100 : 0, level: !!plan.r?.level, platform: !!plan.r?.platform, shown: K.blue?.shown || null, panel: !$('.game-plan')?.hidden } : null,
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, base: b.base || null,
         flat: b.flat ? { level: Math.round(b.flat.level * 100) / 100, k: Math.round(b.flat.k * 100) / 100, blend: Math.round(b.flat.blend * 10) / 10 } : null,
         plinth: b.plinth ? { top: Math.round(b.plinth.top * 100) / 100, foot: Math.round(b.plinth.foot * 100) / 100, steps: b.plinth.steps, rose: Math.round(b.plinth.rose * 100) / 100 } : null, built: !!(KINDS[b.kind].phase(b).rest >= 1), open: Math.round((K.arts.get(b)?.open ?? 0) * 100) / 100 })), inside: K.world.inside(K.body.p)?.kind || null, indoor: Math.round(K.indoor * 100) / 100, eyeD: Math.round(K.eye.d * 100) / 100,
         climbing: !!K.body.climbing, wallrun: !!K.body.wallrun, place: K.place, origin: K.origin || [0, 0], aboard: !!K.aboard, seated: !!K.body.seated, on: K.body.on?.kind || null,
-        ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, tilt: Math.round((sh.tilt || 0) * 1000) / 1000, bank: Math.round((sh.bank || 0) * 1000) / 1000, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
+        ships: K.world.ships.map((sh) => ({ kind: sh.kind, p: sh.p.map((v) => Math.round(v * 100) / 100), yaw: Math.round(sh.yaw * 1000) / 1000, tilt: Math.round((sh.tilt || 0) * 1000) / 1000, bank: Math.round((sh.bank || 0) * 1000) / 1000, thr: Math.round((sh.thr || 0) * 100) / 100, speed: Math.round(Math.hypot(...sh.v) * 100) / 100 })), depth: Math.round((K.body.depth || 0) * 100) / 100, swim: !!K.body.swim,
         ground: K.world.ground ? Math.round(K.world.ground.height(K.body.p[0], K.body.p[2]) * 100) / 100 : 0, life: K.void.life ? K.void.life.counts() : null, choice: st.building, hidden: !!K.eye.hide, eye: K.camera.position.toArray().map((v) => Math.round(v * 100) / 100) },
       fist: K.body.grip ? K.body.grip.map((v) => Math.round(v * 1000) / 1000) : null, held: K.fight.held?.() || null, hold: { carry: Math.round(HOLD.carry * 100) / 100, reach: Math.round(HOLD.reach * 100) / 100, closed: HOLD.closed },
       fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,
