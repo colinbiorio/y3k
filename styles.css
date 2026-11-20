@@ -6372,3 +6372,78 @@ body:has(#game-body:not([hidden])) .game-touch { display: none; }
   .game-tfight { align-self: flex-end; }
   .game-tfight .game-tbtn { width: 46px; height: 46px; }
 }
+
+/* ===== THE WORLD IN LIQUID GLASS ============================================
+   Colin, 19 Nov 2026, of the world's bar and its pills: "any black/grey background or really background at all should
+   always be liquid glass, transparent material." y3kode's glass (above: its rim, its lip, its drop) is drawn over a
+   still room and needs no blur. The world is a live picture, so here the glass is what glass does to it: CLEAR, the
+   scene coming through blurred, its colour lifted and a shade deeper (the depth is what keeps a white word legible over
+   a pale sky or sand: deeper where a pane carries words, --wg-see-ink, than where it carries glyphs, --wg-see), a rim
+   of light bright at the top left and again at the far corner, a lip inside the top edge, a highlight across its upper
+   half, a soft shadow under it, and a soft shadow round every word. Where nothing can be blurred (Settings' glass off,
+   or a browser without backdrop-filter) the pane brings a smoke of its own (--wg-fill), or the words would stand on a
+   sharp moving picture. One recipe, on every pane the world puts over its picture. */
+:root {
+  --wg-sheen: radial-gradient(140% 180% at 14% -50%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.035) 46%, rgba(255, 255, 255, 0.015));
+  --wg-fill: rgba(0, 0, 0, 0);
+  --wg-see: blur(12px) saturate(1.7) brightness(0.8);
+  --wg-see-ink: blur(16px) saturate(1.6) brightness(0.56);
+  --wg-rim: linear-gradient(150deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.3) 22%, rgba(255, 255, 255, 0.07) 50%, rgba(255, 255, 255, 0.18) 76%, rgba(255, 255, 255, 0.62));
+  --wg-lip: inset 0 1px 0 rgba(255, 255, 255, 0.42), inset 0 10px 16px -12px rgba(255, 255, 255, 0.34), inset 0 -10px 18px -14px rgba(0, 0, 0, 0.22);
+  --wg-drop: 0 12px 30px -14px rgba(0, 0, 0, 0.4);
+  --wg-ink: 0 1px 1.5px rgba(0, 0, 0, 0.5), 0 0 10px rgba(0, 0, 0, 0.32);
+}
+:root[data-glass="none"] { --wg-fill: rgba(16, 20, 28, 0.58); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { :root { --wg-fill: rgba(16, 20, 28, 0.58); } }
+
+/* the panes: the bar (the void's and the societies', the one bar), the word under a glyph, the lines the world says */
+.world-bar, .game-tip, .game-hint, .game-foes {
+  background: var(--wg-sheen), linear-gradient(var(--wg-fill), var(--wg-fill)); background-blend-mode: normal;
+  backdrop-filter: var(--wg-see-ink); -webkit-backdrop-filter: var(--wg-see-ink);
+  box-shadow: var(--wg-lip), var(--wg-drop); border-color: transparent; color: #f6f8fb; text-shadow: var(--wg-ink); }
+/* the void's bar is glyphs, which carry their own edge: the clearer glass; with a list open it is words again */
+.game-bar { backdrop-filter: var(--wg-see); -webkit-backdrop-filter: var(--wg-see); }
+.game-bar:has(.game-build:not([hidden])) { backdrop-filter: var(--wg-see-ink); -webkit-backdrop-filter: var(--wg-see-ink); }
+/* the rim: a 1px ring of light masked out of a gradient, as y3kode's */
+.world-bar::after, .game-tip::after, .game-hint::after, .game-foes::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: var(--wg-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.world-bar .login-alt, .world-status { color: rgba(244, 247, 251, 0.9); text-shadow: var(--wg-ink); }
+.world-bar .login-alt:hover, .world-bar .login-alt.on { color: #fff; }
+
+/* THE BAR IN GLYPHS (view.js barFace, glyphs.js BAR): a glyph a button, poured in unimat, its word in the tip below.
+   The glyph's seat is bare: hovered, or with its list open, a clearer bubble of glass gathers under it. */
+/* 42px tall: under it, the bar's list ends above the bright edge where the page's top band meets its hole (92px down) */
+.game-bar { gap: 2px; padding: 3px 6px; border-radius: 18px; }
+/* on a phone its top band is still where the top grip rests (the phone's .world-bar, above) */
+@media (max-width: 560px) { .game-bar { padding: 26px 5px 4px; } }
+.game-bar .game-barb { position: relative; display: grid; place-items: center; width: 40px; height: 36px; margin: 0; padding: 0; border-radius: 12px;
+  color: #eef2f7; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: background 0.2s ease, box-shadow 0.2s ease; }
+.game-bar .game-barg { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; }
+.game-bar .game-barg > svg { display: block; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+/* the poured glyph's own fine shadow and a soft one round it, as the words have (--wg-ink): its edge on a pale sky */
+.game-bar .game-barg > canvas { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 5px rgba(0, 0, 0, 0.26)); }
+@media (hover: hover) { .game-bar .game-barb:hover { background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.34); } }
+.game-bar .game-barb[aria-expanded="true"] { background: rgba(255, 255, 255, 0.17); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+.game-bar .game-barb:focus-visible { outline: 1px solid rgba(235, 242, 250, 0.9); outline-offset: 1px; }
+/* a glyph whose pour cannot be seen wears its own drawing (view.js lookBar): the bar is never blank */
+.game-bar .game-barb.bare .game-barg > svg { display: block !important; }
+.game-bar .game-barb.bare .game-barg > canvas { visibility: hidden; }
+.game-bar .game-build { margin: 1px 4px 1px; padding: 1px 0 0; border-top-color: rgba(255, 255, 255, 0.16); }
+.game-bar .game-build .login-alt { margin-top: 0; }
+.game-build .login-alt[disabled] { opacity: 0.55; }
+/* the word: shown on hover, on focus, held; never in the way of a press */
+.game-tip { position: fixed; left: 0; top: 0; z-index: 5; padding: 3px 9px 4px; border-radius: 9px; font-size: 0.7rem; line-height: 1.2;
+  letter-spacing: 0.02em; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; translate: 0 -3px;
+  transition: opacity 0.14s ease, translate 0.14s ease, visibility 0s linear 0.14s; }
+.game-tip.on { opacity: 1; visibility: visible; translate: 0 0; transition: opacity 0.14s ease, translate 0.14s ease, visibility 0s; }
+@media (prefers-reduced-motion: reduce) { .game-tip, .game-tip.on { translate: none; transition: none; } }
+/* a line the word would stand on (a phone's hint is under the bar too) gives way for the word's moment (view.js showTip) */
+.game-hint, .game-foes, .game-light { transition: opacity 0.14s ease; }
+.game-root .under-tip { opacity: 0; }
+/* a phone: the eight in one row, as wide as the bar's room allows (8 cells of at most 31px) */
+@media (max-width: 560px) { .game-bar { gap: 0; } .game-bar .game-barb { width: min(31px, calc((100vw - 2 * (var(--rail-w) + 6px) - 10px) / 8)); height: 36px; }
+  .game-bar .game-barg { width: 24px; height: 24px; } }

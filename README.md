@@ -263,6 +263,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-21** — **The world's bar is glyphs, and its panes are liquid glass**
+  (`src/game/glyphs.js` BAR, `src/game/view.js` barFace, pourBar, lookBar, the
+  tip; `styles.css` THE WORLD IN LIQUID GLASS). Colin: "this bar still needs to
+  be turned into glyphs, and any black/grey background or really background at
+  all should always be liquid glass, transparent material." Each of the bar's
+  eight words is a glyph poured in unimat (the mode drawn as the one it is, the
+  weapons as the one in hand); the word is still the button's name, said under
+  the bar on hover, on focus, and to a finger held or tapped. The bar, its
+  lists, the hint and the foes line are clear glass: the picture through them
+  blurred and a shade deeper, a rim of light, a shadow round every word.
+  GAME.md "the bar in glyphs, the world in liquid glass".
 - **2026-11-21** — **A picture reaches a presence that thinks on your own
   sign-in** (`server.mjs`, both conversation doors; `own-relay.mjs` SHOWN,
   UNSHOWN, run; `src/own-brain.js`; `src/brain.js` `attached`). Colin, of a

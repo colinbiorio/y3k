@@ -49,7 +49,7 @@ import { createShelterArt } from './buildings/shelter.js';
 import { createHouseArt } from './buildings/house.js';
 import { createPlinthArt } from './buildings/plinth.js';
 import { createBlueprint } from './blueprint.js';
-import { glyphSvg } from './glyphs.js';
+import { glyphSvg, BAR } from './glyphs.js';
 import { createWorkshopArt } from './buildings/workshop.js';
 import { createTowerArt } from './buildings/tower.js';
 import { createHallArt } from './buildings/hall.js';
@@ -184,6 +184,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       }
       if (low < innerHeight) root.style.setProperty('--hint-b', `${Math.round(innerHeight - low + 8)}px`);
     }
+    if (tipAt) tipOver();                              // the line has moved: is the bar's word standing on it now?
   }
   // the line that stands when nothing else is being said
   // the standing line is for the first steps: once the body has been moved for a while it is put away
@@ -204,7 +205,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   }
   function showMode() {
     const el = $('#game-mode'); if (!el) return;
-    el.textContent = K.body.mode; el.setAttribute('aria-pressed', String(K.body.mode === 'creative'));
+    barGlyph(el, BAR.mode(K.body.mode), K.body.mode); el.setAttribute('aria-pressed', String(K.body.mode === 'creative'));
     root.classList.toggle('creative', K.body.mode === 'creative');
     const sink = $('#game-t-sink'); if (sink) sink.hidden = !K.body.flying;
   }
@@ -219,11 +220,11 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   function lightTo(name) { st.light = K.void.setLight(name); K.figure.setEnv(LIGHTS[st.light].env); root.dataset.light = st.light; still = 0; save(); }
   function openMenu() {
     if (!menu || menu.isOpen() || performance.now() - menuShut < 250) return;
-    wire?.release(); input.clear(); menu.open();
+    wire?.release(); input.clear(); hideTip(); menu.open();        // (a sheet takes the pointer from the bar: its word would never hear it leave)
   }
   function openBody() {
     if (!chooser || chooser.isOpen() || menu.isOpen() || performance.now() - menuShut < 250) return;
-    wire?.release(); input.clear(); turned = 0; chooser.open();
+    wire?.release(); input.clear(); hideTip(); turned = 0; chooser.open();
     if (!st.bodyMet) { st.bodyMet = true; save(); beckon(); }
     beckonAt = 0; if ($('.game-hint')?.textContent === BECKON) say('', 0);      // found: the line has done its work
   }
@@ -231,6 +232,126 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // is for; both stop for good once the sheet has been opened (state.js bodyMet)
   const BECKON = 'five kinds of body, and this is one · the body button makes it yours';
   function beckon() { $('#game-body-open')?.classList.toggle('beckon', !st.bodyMet); }
+  // ---- THE BAR IN GLYPHS (glyphs.js BAR; Colin, 19 Nov 2026: "this bar still needs to be turned into glyphs"). Each button
+  // is its glyph, poured in unimat by the same mount the rail's glyphs use (../mercury-buttons.js; until the pour lands, or
+  // where there is no WebGL2, the drawing stands in), and its word: the button's name, shown under it on hover, on focus,
+  // and to a finger when held (a finger cannot hover; the press that showed the word does not also press the button).
+  const barFace = (glyph) => `<span class="game-barg" data-glyph="${glyph}">${glyphSvg(glyph)}</span>`;
+  const barPoured = new Map();          // button id -> { el, h }
+  // a button's word, and its glyph drawn again (and poured again) only when it is another
+  function barGlyph(btn, glyph, word) {
+    btn.setAttribute('aria-label', word);
+    if (tipAt === btn) placeTip();
+    const g = btn.querySelector('.game-barg'); if (!g || g.dataset.glyph === glyph) return;
+    const was = barPoured.get(btn.id); if (was) { try { was.h.destroy(); } catch { /* gone */ } barPoured.delete(btn.id); }
+    g.classList.remove('mercury'); g.dataset.glyph = glyph; g.innerHTML = glyphSvg(glyph);
+    pourBar();
+  }
+  function pourBar() {
+    if (!root || !document.body.classList.contains('merc-sdf')) return;   // the liquid is off here: the drawings stand as they are
+    const todo = [...root.querySelectorAll('.game-barg:not(.mercury)')];
+    if (!todo.length) return;
+    import('../mercury-buttons.js').then(({ mount }) => {
+      todo.forEach((el, i) => {
+        const id = el.parentElement?.id;
+        if (!root || !el.isConnected || !id || barPoured.has(id)) return;
+        el.classList.add('mercury');                                       // its own drawing stands in until the bake lands
+        let h = null;
+        // a bright floor and less of the glass let through: silver that reads on a pale sky as on the night (the sheet's glyphs stand on a dark sheet and keep 0.16)
+        try { h = mount(el, { svgEl: el.querySelector('svg'), size: 24, thicken: 1.3, rim: 0.04, envFloor: 0.4, trans: 0.55, seed: 41 + i * 5.3 }); } catch { h = null; }
+        if (h) barPoured.set(id, { el, h }); else el.classList.remove('mercury');
+      });
+    }).catch(() => { /* the drawings stand on their own */ });
+  }
+  function unpourBar() { clearInterval(lookT); lookT = 0; for (const { h } of barPoured.values()) { try { h.destroy(); } catch { /* gone */ } } barPoured.clear(); blank.clear(); }
+  // THE BAR IS NEVER BLANK. A glyph's pour is the liquid's business (the drawing stands in while its bake lands), but one
+  // whose pour cannot be seen (the liquid's canvas lost, as a starved machine loses it: seen once, the whole page's metal
+  // gone and the bar with it) would be an empty seat in the only bar there is. So the glyphs are looked at: all of them
+  // 2, 4 and 6 s after the bar is poured, then one a second; one that shows nothing twice running wears its own drawing
+  // (`bare`, styles.css) until its pour is seen again. Looked at through a 12 px copy: the liquid's own canvas is not read.
+  let lookT = 0, lookN = 0, lookC = null;
+  const blank = new Map();              // button id -> how many looks running it showed nothing
+  function lookAt(b) {
+    const g = b.querySelector('.game-barg'); if (!g || !g.offsetWidth) return;
+    if (!g.classList.contains('mercury')) { b.classList.remove('bare'); blank.delete(b.id); return; }   // not poured: its drawing already stands
+    let seen = false;
+    try {
+      const c = g.querySelector('canvas.mercury-blob');
+      if (c && c.width) {
+        lookC ||= Object.assign(document.createElement('canvas'), { width: 12, height: 12 }).getContext('2d', { willReadFrequently: true });
+        lookC.clearRect(0, 0, 12, 12); lookC.drawImage(c, 0, 0, 12, 12);
+        const d = lookC.getImageData(0, 0, 12, 12).data; let k = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 20) k++;
+        seen = k >= 3;
+      }
+    } catch { seen = true; }            // it cannot be looked at here: the pour is left as it is
+    const n = seen ? 0 : (blank.get(b.id) || 0) + 1;
+    blank.set(b.id, n); b.classList.toggle('bare', n >= 2);
+  }
+  function lookBar() {
+    const bs = root ? [...root.querySelectorAll('.game-barb')] : []; if (!bs.length) return;
+    lookN += 1;
+    if (lookN <= 6) { if (lookN % 2 === 0) bs.forEach(lookAt); } else lookAt(bs[lookN % bs.length]);
+  }
+  // THE WORD, under the glyph it names: one tip for the bar, standing outside it (a glass inside the bar's glass could only
+  // blur the bar, not the picture). The mouse's hover and the keyboard's focus show it; held by a finger it shows and the
+  // press does nothing else; tapped, it shows a moment too, so a phone learns the bar as it is used.
+  let tipAt = null, tipBy = '', tipT = 0;
+  // the word put where it stands; asked again when its button's word changes or a list opens under it (which must not
+  // also keep it there: a tap's word goes after its moment, so only showTip touches the clock)
+  function placeTip() {
+    const t = $('.game-tip'), b = tipAt; if (!t || !b) return;
+    t.textContent = b.getAttribute('aria-label') || '';
+    // under the bar, not just the glyph: with a list open the word would stand on the list. And clear of the bright edge
+    // where the page's top band meets its hole (it is drawn over the world): between the bar and the edge where it fits,
+    // else just inside the hole
+    const r = b.getBoundingClientRect(), under = b.closest('.game-bar')?.getBoundingClientRect() || r, w = t.offsetWidth, h = t.offsetHeight;
+    const hole = $('.game-room')?.getBoundingClientRect();
+    let top = Math.max(r.bottom, under.bottom) + 4;
+    if (hole && top + h > hole.top - 4 && top < hole.top + 8) top = hole.top + 8;
+    t.style.left = `${Math.round(Math.min(innerWidth - w - 6, Math.max(6, r.left + r.width / 2 - w / 2)))}px`;
+    t.style.top = `${Math.round(top)}px`;
+    t.classList.add('on');
+    tipOver();
+  }
+  function showTip(b, by) { if (!b) return; clearTimeout(tipT); tipAt = b; tipBy = by; placeTip(); }
+  // a line the word would stand on gives way while it is said (on a phone the hint is under the bar too); asked again
+  // whenever the hint is seated, since a list opening under the word moves the hint to where the word is
+  function tipOver() {
+    const t = $('.game-tip'); if (!t || !root) return;
+    const on = t.classList.contains('on'), a = on ? t.getBoundingClientRect() : null;
+    for (const el of root.querySelectorAll('.game-hint, .game-foes, .game-light')) {
+      const q = on && !el.hidden ? el.getBoundingClientRect() : null;
+      el.classList.toggle('under-tip', !!q && q.width > 0 && a.left < q.right && q.left < a.right && a.top < q.bottom && q.top < a.bottom);
+    }
+  }
+  // a list opened or shut under a shown word: the word moves to stay under the bar
+  function reTip() { placeTip(); }
+  function hideTip(ms = 0) { clearTimeout(tipT); tipT = setTimeout(() => { $('.game-tip')?.classList.remove('on'); tipAt = null; tipBy = ''; tipOver(); }, ms); }
+  function wireWords(bar, on) {
+    if (!bar) return;
+    let holdT = 0, held = null;
+    const barb = (e) => e.target.closest?.('.game-barb');
+    on(bar, 'pointerover', (e) => { const b = barb(e); if (b && e.pointerType === 'mouse') showTip(b, 'hover'); });
+    on(bar, 'pointerout', (e) => { const b = barb(e); if (b && e.pointerType === 'mouse' && !b.contains(e.relatedTarget) && tipBy === 'hover') hideTip(); });
+    on(bar, 'focusin', (e) => { const b = barb(e); if (b && b.matches(':focus-visible')) showTip(b, 'focus'); });
+    on(bar, 'focusout', () => { if (tipBy === 'focus') hideTip(); });
+    on(bar, 'pointerdown', (e) => {
+      held = null; clearTimeout(holdT);
+      const b = barb(e); if (!b || e.pointerType === 'mouse') return;
+      holdT = setTimeout(() => { held = b; showTip(b, 'touch'); }, 380);
+    });
+    on(bar, 'pointerup', (e) => {
+      clearTimeout(holdT);
+      const b = barb(e); if (!b || e.pointerType === 'mouse') return;
+      if (held !== b) showTip(b, 'touch');
+      hideTip(held === b ? 1100 : 900);
+    });
+    on(bar, 'pointercancel', () => { clearTimeout(holdT); if (tipBy === 'touch') hideTip(600); });
+    // the long press is not also a press
+    on(bar, 'click', (e) => { const b = barb(e); if (b && held === b) { e.preventDefault(); e.stopImmediatePropagation(); } held = null; }, true);
+    on(bar, 'contextmenu', (e) => { if (barb(e)) e.preventDefault(); });
+  }
   // the body, made again as it was chosen, standing where it stood. One that cannot be made leaves the one that was.
   function dress() {
     let made = null;
@@ -378,7 +499,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       el.innerHTML = (near ? `<button type="button" class="login-alt game-build-down" data-build="down">take down the ${near.kind}</button>` : '')
         + BUILDINGS.map((b) => `<button type="button" class="login-alt${b.kind === st.building ? ' on' : ''}" data-build="${b.kind}"${b.ready ? '' : ' disabled aria-disabled="true"'}>${b.label}${b.ready ? capOf('build_' + b.kind) : '<small>to come</small>'}</button>`).join('');
     }
-    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open)); reTip();
   }
   // ---- the places (the map tab): the void, or Lord Howe Island. Everything that lives in a scene goes to the new one;
   // each place keeps its own buildings and where the body last stood in it; the first time on the island, its beach
@@ -431,7 +552,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       el.innerHTML = LEVELS.map((L, i) => `<button type="button" class="login-alt${i + 1 === st.level ? ' on' : ''}" data-bot="${i + 1}">${i + 1} · ${L.name}<small>${['easy', 'steady', 'quick', 'hard', 'fierce'][i]}</small></button>`).join('')
         + (n ? `<button type="button" class="login-alt game-build-down" data-bot="clear">clear them (${n})</button>` : '');
     }
-    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open)); reTip();
   }
   // ---- the weapons (stage 5): the bar's list of the five (those not made yet greyed); T, or the list, changes the one in hand
   function listWeapons(show) {
@@ -441,7 +562,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       listBuilds(false); listBots(false); listShips(false);
       el.innerHTML = WEAPONS.map((w) => `<button type="button" class="login-alt${w.id === K.combat.weapon ? ' on' : ''}" data-weapon="${w.id}"${w.ready ? '' : ' disabled aria-disabled="true"'}>${w.label}${w.ready ? capOf('take_' + w.id) : '<small>to come</small>'}</button>`).join('');
     }
-    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open)); reTip();
   }
   const weaponWords = (w) => {
     const next = `${actKey('weapon')} the ${nextWeapon(w)}`;
@@ -457,6 +578,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const [c1, c2, w1, w2] = WORDS[K?.combat?.weapon] || WORDS.ring, cast = $('#game-t-cast'), whirl = $('#game-t-whirl');
     if (cast) { cast.textContent = c1; cast.setAttribute('aria-label', c2); }
     if (whirl) { whirl.textContent = w1; whirl.setAttribute('aria-label', w2); }
+    const bar = $('#game-weapons'); if (bar) barGlyph(bar, BAR.weapons(K?.combat?.weapon), `weapons · the ${K?.combat?.weapon || 'ring'}`);
   }
   function takeWeapon(w) {
     if (!chooseWeapon(K.combat, w)) return;
@@ -479,7 +601,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         + SHIPS.map((sh) => `<button type="button" class="login-alt" data-ship="${sh.kind}"${sh.ready ? '' : ' disabled aria-disabled="true"'}>${sh.label}${sh.ready ? capOf('call_' + sh.kind) : '<small>to come</small>'}</button>`).join('')
         + (any && !K.aboard ? `<button type="button" class="login-alt game-build-down" data-ship="away">send the ${any.kind} away</button>` : '');
     }
-    el.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    el.hidden = !open; btn.setAttribute('aria-expanded', String(open)); reTip();
   }
   function putShip(kind) {
     if (K.aboard) { say(`you are aboard the ${K.aboard.kind}`, 3); return; }
@@ -866,14 +988,14 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     root.innerHTML = `
       <div class="game-canvas"></div>
       <div class="world-bar game-bar">
-        <button type="button" id="game-mode" class="login-alt game-mode" aria-pressed="false" title="survival or creative">survival</button>
-        <button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog" title="who you are here: five kinds of body">body</button>
-        <button type="button" id="game-build" class="login-alt" aria-expanded="false" aria-controls="game-build-list" title="put up a building, a few steps in front of you">build</button>
-        <button type="button" id="game-weapons" class="login-alt" aria-expanded="false" aria-controls="game-weapon-list" title="the weapon in hand: the ring, the bow, the bell, the thread or the torch">weapons</button>
-        <button type="button" id="game-bots" class="login-alt" aria-expanded="false" aria-controls="game-bot-list" title="call up a bot to fight, at one of five levels">bots</button>
-        <button type="button" id="game-ships" class="login-alt" aria-expanded="false" aria-controls="game-ship-list" title="a ship in front of you, to board and fly">ships</button>
-        <button type="button" id="game-controls" class="login-alt" aria-haspopup="dialog">controls</button>
-        ${toSocieties ? '<button type="button" id="game-societies" class="login-alt" title="the world that was here first">the societies</button>' : ''}
+        <button type="button" id="game-mode" class="login-alt game-barb game-mode" aria-pressed="false" aria-label="${BAR.mode(st.mode)}" aria-description="survival or creative">${barFace(BAR.mode(st.mode))}</button>
+        <button type="button" id="game-body-open" class="login-alt game-barb" aria-haspopup="dialog" aria-label="body" aria-description="who you are here: five kinds of body">${barFace(BAR.body)}</button>
+        <button type="button" id="game-build" class="login-alt game-barb" aria-expanded="false" aria-controls="game-build-list" aria-label="build" aria-description="put up a building, a few steps in front of you">${barFace(BAR.build)}</button>
+        <button type="button" id="game-weapons" class="login-alt game-barb" aria-expanded="false" aria-controls="game-weapon-list" aria-label="weapons" aria-description="the weapon in hand: the ring, the bow, the bell, the thread or the torch">${barFace(BAR.weapons(st.weapon))}</button>
+        <button type="button" id="game-bots" class="login-alt game-barb" aria-expanded="false" aria-controls="game-bot-list" aria-label="bots" aria-description="call up a bot to fight, at one of five levels">${barFace(BAR.bots)}</button>
+        <button type="button" id="game-ships" class="login-alt game-barb" aria-expanded="false" aria-controls="game-ship-list" aria-label="ships" aria-description="a ship in front of you, to board and fly">${barFace(BAR.ships)}</button>
+        <button type="button" id="game-controls" class="login-alt game-barb" aria-haspopup="dialog" aria-label="controls" aria-description="every key and button, the mode, the light, and the map">${barFace(BAR.controls)}</button>
+        ${toSocieties ? `<button type="button" id="game-societies" class="login-alt game-barb" aria-label="the societies" aria-description="the world that was here first">${barFace(BAR.societies)}</button>` : ''}
         <div class="game-build" id="game-build-list" role="group" aria-label="what to build" hidden></div>
         <div class="game-build game-weapons" id="game-weapon-list" role="group" aria-label="the weapon in hand" hidden></div>
         <div class="game-build game-bots" id="game-bot-list" role="group" aria-label="a bot to fight, by level" hidden></div>
@@ -885,6 +1007,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       <div class="game-throttle" role="slider" aria-label="throttle" aria-valuemin="0" aria-valuemax="10" hidden><div class="game-throttle-track"><div class="game-throttle-fill"></div></div><span class="game-throttle-c">c</span><b class="game-throttle-n"></b></div>
       <i class="game-room" aria-hidden="true"></i>
       <div class="game-hint" role="status" hidden></div>
+      <div class="game-tip" aria-hidden="true"></div>
       <div class="game-plan" role="group" aria-label="where the building goes" hidden></div>
       <div class="game-touch"${touch ? '' : ' hidden'}>
         <button type="button" id="game-t-sink" class="game-tbtn" aria-label="Sink" hidden>sink</button>
@@ -984,6 +1107,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       on(el, 'contextmenu', (e) => e.preventDefault());
     }
     labelWeapon(); beckon(); beckonAt = st.bodyMet ? 0 : performance.now() + 6000;
+    wireWords($('.game-bar'), on); pourBar(); lookN = 0; lookT = setInterval(lookBar, 1000);
     on(holder, 'pointerdown', (e) => { if (e.pointerType === 'touch' && !touch) { touch = true; $('.game-touch').hidden = false; standing = ' '; } });
     ro = new ResizeObserver(size); ro.observe(holder); size();
     // read only, for whoever is checking the game from outside it (a test's browser, the console). `seen` is where the body's middle is on the canvas, in px
@@ -1019,6 +1143,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     ro?.disconnect(); ro = null;
     wire?.release(); wire?.off(); wire = null;
     menu?.off(); menu = null;
+    unpourBar();
     chooser?.off(); chooser = null; pose = 0; stand = null; K?.camera?.clearViewOffset();
     for (const f of offs.splice(0)) f();
     save();
