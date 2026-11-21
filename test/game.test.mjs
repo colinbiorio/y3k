@@ -31,7 +31,7 @@ import * as Kin from '../src/game/bodies/kin.js';
 import { LIGHTS, LIGHT_NAMES } from '../src/game/lights.js';
 import { createWorldGate } from '../src/game/gate.js';
 import { MODE_LINES, cellText, runOf } from '../src/game/menu.js';
-import { GLYPHS, GROUPS, groupOf, glyphOf, glyphSvg } from '../src/game/glyphs.js';
+import { GLYPHS, GROUPS, groupOf, glyphOf, glyphSvg, BAR } from '../src/game/glyphs.js';
 import * as SH from '../src/game/shelter.js';
 import { createWorld, BODY, KINDS, BUILDINGS } from '../src/game/world.js';
 import * as PL from '../src/game/plinth.js';
@@ -1256,7 +1256,7 @@ ok('the body sheet is a sheet like the others, but does not cover what it is abo
 ok('while the sheet is open the body poses: the hands are not read, it is made again as it is chosen, and the game goes on when it closes', () => {
   const view = read('src/game/view.js');
   assert.ok(view.includes("import { createChooser, standIn } from './chooser.js';"));
-  assert.ok(view.includes('<button type="button" id="game-body-open" class="login-alt" aria-haspopup="dialog"'), 'the bar has the button');
+  assert.ok(view.includes('<button type="button" id="game-body-open" class="login-alt game-barb" aria-haspopup="dialog"'), 'the bar has the button');
   assert.ok(view.includes("press('#game-body-open', openBody);"));
   assert.ok(view.includes('const posing = chooser.isOpen();')); assert.ok(view.includes('const paused = !posing && (root.inert || menu.isOpen());'), 'its own sheet does not stop the picture');
   assert.ok(view.includes('const inp = paused || posing ? IDLE : input.frame(dt);'), 'the hands are not read');
@@ -1491,6 +1491,46 @@ ok('every control has its own glyph, in a group of the sheet (Colin, 19 Nov 2026
   assert.match(menu, /el\.classList\.add\('mercury'\)/, 'its own drawing stands in until the bake lands (body.merc-sdf .mercury > svg)');
   assert.match(menu, /unpour\(\);\s*onClose\(\)/, 'let go when the sheet closes');
   assert.match(menu, /\$\{glyph\(id\)\}/);
+});
+
+ok('the bar is glyphs, each word its name and shown on hover, focus or a long press, in liquid glass (Colin, 19 Nov 2026)', () => {
+  const view = read('src/game/view.js'), css = read('styles.css');
+  assert.ok(view.includes("import { glyphSvg, BAR } from './glyphs.js';"));
+  // each of the bar's eight words is a glyph, and still the button's name
+  const words = { 'game-body-open': 'body', 'game-build': 'build', 'game-weapons': 'weapons', 'game-bots': 'bots', 'game-ships': 'ships', 'game-controls': 'controls', 'game-societies': 'the societies' };
+  for (const [id, word] of Object.entries(words)) assert.match(view, new RegExp(`id="${id}" class="login-alt game-barb"[^>]*aria-label="${word}"[^>]*>\\$\\{barFace\\(BAR\\.`), id);
+  assert.match(view, /id="game-mode" class="login-alt game-barb game-mode" aria-pressed="false" aria-label="\$\{BAR\.mode\(st\.mode\)\}"/);
+  for (const g of ['survival', 'creative', 'body', 'build', 'spawn', 'board', 'menu', 'societies']) assert.ok(GLYPHS[g], 'drawn: ' + g);
+  assert.equal(BAR.mode('creative'), 'creative'); assert.equal(BAR.mode('survival'), 'survival'); assert.equal(BAR.mode('junk'), 'survival');
+  for (const w of ['ring', 'bow', 'bell', 'thread', 'torch']) assert.equal(BAR.weapons(w), 'take_' + w, 'the weapon in hand, drawn');
+  assert.equal(BAR.weapons('nothing'), 'take_ring');
+  // the mode and the weapon in hand are drawn as they are, poured again only when another
+  assert.ok(view.includes("barGlyph(el, BAR.mode(K.body.mode), K.body.mode)"));
+  assert.ok(view.includes("barGlyph(bar, BAR.weapons(K?.combat?.weapon)"));
+  assert.match(view, /if \(!g \|\| g\.dataset\.glyph === glyph\) return;/);
+  // poured in unimat by the rail's own mount, let go when the world closes
+  assert.match(view, /import\('\.\.\/mercury-buttons\.js'\)\.then\(\(\{ mount \}\) =>/);
+  assert.ok(view.includes("wireWords($('.game-bar'), on); pourBar();") && view.includes('unpourBar();'));
+  // the word: one tip outside the bar (a glass in a glass blurs only the glass), hover and focus and a held finger; the long press is not a press
+  assert.ok(view.includes('<div class="game-tip" aria-hidden="true"></div>'));
+  for (const piece of ["e.pointerType === 'mouse') showTip(b, 'hover')", "b.matches(':focus-visible')) showTip(b, 'focus')", "holdT = setTimeout(() => { held = b; showTip(b, 'touch'); }, 380)", 'e.stopImmediatePropagation()']) assert.ok(view.includes(piece), piece);
+  // the glass: clear, the picture blurred through it, a rim, legible words; a smoke of its own where nothing is blurred
+  assert.match(css, /\.world-bar, \.game-tip, \.game-hint, \.game-foes \{[^}]*backdrop-filter: var\(--wg-see-ink\); -webkit-backdrop-filter: var\(--wg-see-ink\);[^}]*text-shadow: var\(--wg-ink\)/);
+  assert.match(css, /--wg-fill: rgba\(0, 0, 0, 0\);/); assert.match(css, /:root\[data-glass="none"\] \{ --wg-fill: rgba\(16, 20, 28, 0\.58\); \}/);
+  assert.match(css, /@supports not \(\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(css, /@media \(max-width: 560px\) \{ \.game-bar \{ padding: 26px 5px 4px; \} \}/, 'a phone keeps the top grip\'s band');
+  // the glyph bar is the clearer glass, words the deeper (the societies' bar is words; so is the void's with a list open)
+  assert.match(css, /\.game-bar \{ backdrop-filter: var\(--wg-see\); -webkit-backdrop-filter: var\(--wg-see\); \}/);
+  assert.match(css, /\.game-bar:has\(\.game-build:not\(\[hidden\]\)\) \{ backdrop-filter: var\(--wg-see-ink\);/);
+  // the bar is never blank: a glyph whose pour cannot be seen twice running wears its own drawing until it is seen again
+  for (const piece of ['lookT = setInterval(lookBar, 1000)', "b.classList.toggle('bare', n >= 2)", 'clearInterval(lookT)', "getContext('2d', { willReadFrequently: true })", "if (!g.classList.contains('mercury')) { b.classList.remove('bare');"]) assert.ok(view.includes(piece), piece);
+  assert.ok(css.includes('.game-bar .game-barb.bare .game-barg > svg { display: block !important; }') && css.includes('.game-bar .game-barb.bare .game-barg > canvas { visibility: hidden; }'));
+  // the word is said under the bar, and a line it would stand on gives way for its moment
+  assert.ok(view.includes("el.classList.toggle('under-tip',") && css.includes('.game-root .under-tip { opacity: 0; }'));
+  assert.ok(view.includes('if (tipAt) tipOver();'), 'asked again when the hint is seated (a list opening moves the hint under the word)');
+  // a list opening under a tapped word moves the word but does not keep it: only showTip touches the clock
+  assert.ok(view.includes('function reTip() { placeTip(); }') && view.includes('if (tipAt === btn) placeTip();') && view.includes("function showTip(b, by) { if (!b) return; clearTimeout(tipT); tipAt = b; tipBy = by; placeTip(); }"));
+  assert.ok(view.includes('let top = Math.max(r.bottom, under.bottom) + 4;') && view.includes('if (hole && top + h > hole.top - 4 && top < hole.top + 8) top = hole.top + 8;'), 'under the bar, clear of the frame\'s edge');
 });
 
 ok('the hint stands clear of the bars, measured, on every screen (Colin, 19 Nov 2026: the pill over the bottom bar)', () => {

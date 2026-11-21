@@ -352,6 +352,48 @@ The rest of what he said that day:
   drop out of sight behind a ship as it goes round; the eye's wheel does not
   zoom aboard (the keys do).
 
+### The same day, later: the bar in glyphs, the world in liquid glass
+
+> this bar still needs to be turned into glyphs, and any black/grey background or really background at all should always be liquid glass, transparent material.
+
+(With two pictures: the bar of words on a near-black pill, and the hint "R
+boards the carrier" on dark grey.)
+
+- **The bar in glyphs** (done, 21 Nov). Each of its eight words is a glyph
+  (`glyphs.js` BAR: survival a heart and creative a spark, drawn as the mode
+  it is; the body a bust; build, bots, ships and controls as the sheet draws
+  them; the weapons as the one in hand, `take_ring` and the rest; the
+  societies as their stars, joined), poured in unimat by the rail's own
+  `mount` (`view.js` pourBar: a bright floor and less of the glass let
+  through than the sheet's glyphs, so it is silver on a pale sky as on the
+  night; poured again only when the glyph changes, let go when the world
+  closes). The word stays the button's name (aria-label, with what it does
+  as its description) and is said by one tip (`.game-tip`, outside the bar: a
+  glass inside a glass can only blur the glass): on hover, on keyboard focus,
+  and to a finger, held (the long press says it and does nothing else) or
+  tapped (it acts and says it a moment). The tip stands between the bar and
+  the bright edge where the page's top band meets its hole, or just inside
+  the hole when a list is open; a line it would stand on (a phone's hint is
+  under the bar too) gives way for its moment. The bar is 42 px tall, so its
+  open list ends above that edge; on a phone the eight stand in one row.
+  **Never blank** (`view.js` lookBar): each glyph is looked at (a 12 px copy
+  of its canvas; all of them 2, 4 and 6 s after the pour, then one a second),
+  and one whose pour shows nothing twice running wears its own drawing until
+  the pour is seen again. Why: under software drawing, starved, the whole
+  page's metal was once lost and the bar stood empty of words and glyphs.
+- **Liquid glass** (begun, 21 Nov): `styles.css` THE WORLD IN LIQUID GLASS,
+  one recipe (`--wg-*`): clear, the picture through it blurred, its colour
+  lifted and a shade deeper (deeper where a pane carries words, `--wg-see-ink`,
+  than where it carries glyphs, `--wg-see`: so a white word reads over a pale
+  sky or sand), a rim of light, a lip, a sheen, a soft shadow under it and
+  round each word and glyph; where nothing can be blurred (Settings' glass
+  off, no backdrop-filter) a smoke of its own (`--wg-fill`). On the bar (the
+  void's and the societies'), its lists, the tip, the hint and the foes
+  line. Looked at on the machine's own chip over the pale void, dusk, night,
+  the island's sky, trunks and grass, with the glass off, and on a phone.
+  Rough: how deep the glass is (`--wg-see` 0.8, `--wg-see-ink` 0.56) is a
+  matter of taste; the glyphs are quietest over the pale void's mid-blue.
+
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
 Colin: "let's pick a random small island on earth, generate the entire

@@ -70,7 +70,21 @@ export const GLYPHS = {
   throttle_set: '<path d="M8.5 3v18"/><path d="M8.5 5.5h8M8.5 10h5M8.5 14.5h8M8.5 19h5"/>',
   lightspeed: '<path d="M9.2 9.9L3 5M14.8 9.9L21 5M9.2 14.1L3 19M14.8 14.1L21 19"/><circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none"/>',
   brake: '<rect x="5.5" y="5.5" width="13" height="13" rx="2.6"/><path d="M9.5 12h5"/>',
+  // the bar's own (BAR, below): the two modes, the body, the societies
+  // survival: the heart the ground keeps you to
+  survival: '<path d="M12 20.2C6.6 16.6 3.5 13.4 3.5 9.6A4.4 4.4 0 0 1 12 7.3a4.4 4.4 0 0 1 8.5 2.3c0 3.8-3.1 7-8.5 10.6z"/>',
+  // creative: a spark, and a smaller one
+  creative: '<path d="M10 3.5c.8 4.6 2.4 6.2 7 7-4.6.8-6.2 2.4-7 7-.8-4.6-2.4-6.2-7-7 4.6-.8 6.2-2.4 7-7z"/><path d="M18.5 15.5v5M16 18h5"/>',
+  // who you are here
+  body: '<circle cx="12" cy="6.8" r="3.4"/><path d="M5 20.5a7 7 0 0 1 14 0"/>',
+  // the world that was here first: its societies, as the stars they are drawn as, joined
+  societies: '<circle cx="12" cy="5.2" r="2.3"/><circle cx="5" cy="17.8" r="2.3"/><circle cx="19" cy="17.8" r="2.3"/><path d="M10.1 8.6l-3.2 5.8M13.9 8.6l3.2 5.8M8.9 17.8h6.2"/>',
 };
+// THE BAR IN GLYPHS (view.js; Colin, 19 Nov 2026: "this bar still needs to be turned into glyphs"): each of its words is
+// drawn, the word kept as the button's name and shown on hover, focus or a long press. The mode is drawn as the one it
+// is; the weapons as the one in hand (take_ring, take_bow, ...); the rest as the sheet draws them.
+export const BAR = { mode: (m) => (m === 'creative' ? 'creative' : 'survival'), body: 'body', build: 'build', weapons: (w) => (GLYPHS['take_' + w] ? 'take_' + w : 'take_ring'),
+  bots: 'spawn', ships: 'board', controls: 'menu', societies: 'societies' };
 export const glyphOf = (id) => GLYPHS[id] || GLYPHS.key;
 // the drawing, as the page shows it (and the pour reads it)
 export const glyphSvg = (id, px = 22) => `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${glyphOf(id)}</svg>`;
