@@ -393,6 +393,20 @@ boards the carrier" on dark grey.)
   the island's sky, trunks and grass, with the glass off, and on a phone.
   Rough: how deep the glass is (`--wg-see` 0.8, `--wg-see-ink` 0.56) is a
   matter of taste; the glyphs are quietest over the pale void's mid-blue.
+- **The rest in glass** (done, 21 Nov): the same recipe on the lightspeed
+  line and the throttle's rail (their rim in the prism's colour), the
+  blueprint's panel (its rim blue, amber or red), the thumbs' buttons, the
+  health track, a toast in the world tab, and the societies' panes (who is
+  near, a voice, a way, the hands, a name tag). The controls sheet is a
+  deeper glass (`--wg-see-xl`) behind a thin unblurred veil, its cards glass
+  on glass; the picture waits while it is open, so its blur is made once.
+  The body sheet stands over a moving picture: it is the real glass only with
+  Settings' glass fully on and on a wide screen (measured on the machine's
+  own chip: 16.7 ms a frame with it and without), and as it was elsewhere.
+  Rough: a phone's body sheet and the map's drawn sea are not glass; the
+  societies' panes were changed by rule and looked at only as far as a
+  guest's empty world shows them (the bar); the page's own frame and chat bar
+  are not the world's and were left.
 
 ### The first place on the map: Lord Howe Island (17 November 2026)
 
