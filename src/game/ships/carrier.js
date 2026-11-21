@@ -18,6 +18,8 @@ import * as THREE from 'three';
 import { CARRIER as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
 import { jetPivot, aimJets } from './jets.js';
+import { createGear } from './gear.js';
+import { GEAR } from '../ships.js';
 import { gatherer } from '../buildings/parts.js';
 
 const TAU = 2 * Math.PI, EN = S.engines;
@@ -198,11 +200,14 @@ export function createCarrierArt({ lite = false } = {}) {
 
   let down = 0;
   setSails(down, 0);
+  // its landing gear (./gear.js): down when it is slow and low, folded away in flight
+  const gear = createGear(body, GEAR.carrier, S.keel, bronze); geos.push(...gear.geos);
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      gear.update(s.gear ?? 1);
       aimJets(jets, s.jet);                                                // its nozzles point the way it is driven, as far as they turn
       // the sails come down when someone takes the helm, and are furled up to their yards when it is let be
       const want = aboard ? 1 : 0;

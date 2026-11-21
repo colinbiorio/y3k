@@ -13,6 +13,8 @@ import * as THREE from 'three';
 import { SKIFF as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
 import { jetPivot, aimJets } from './jets.js';
+import { createGear } from './gear.js';
+import { GEAR } from '../ships.js';
 
 const L = S.length, U0 = -L / 2;
 // the hull at a place along it (u from the stern, 0, to the bow, 1): its half-width, its gunwale's height, its depth
@@ -101,11 +103,14 @@ export function createSkiffArt({ lite = false } = {}) {
   const trailMat = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.4, 0.62, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
   const trail = new THREE.Sprite(trailMat); trail.position.set(0, 0, -0.9); jet.add(trail);
 
+  // its landing gear (./gear.js): down when it is slow and low, folded away in flight
+  const gear = createGear(body, GEAR.skiff, S.keel, bronze); geos.push(...gear.geos);
   return {
     group,
     update(s, { t = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      gear.update(s.gear ?? 1);
       aimJets([jet], s.jet);                                               // its nozzle points the way it is driven
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
       const on = Math.min(1.4, s.thrust);

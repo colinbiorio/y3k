@@ -185,6 +185,20 @@ export const BANK = { skiff: 1.1, dart: 1.3, dhow: 0.75, ark: 0.7, carrier: 0.55
 // still, less as its speed carries it, least as it sinks.
 export const SWIVEL = { skiff: Math.PI / 2, dart: 1.2, dhow: 1.0, ark: 0.75, carrier: 0.6 };
 export const JET_PUSH = 3, JET_RATE = 3.5;
+// LANDING GEAR (Colin, 19 Nov 2026: "landing gear would be sick"). Each kind's legs: where they hinge under it (y, and
+// each [x, z]), how far their feet reach below its keel (len), how thick (r). s.gear is how far down they are: they come
+// down (GEAR_TIME s) when it is slow and low over the water or the ground, and fold away as it flies off. Down, it
+// rides no lower than its feet: sunk onto the ground, it stands on them.
+export const GEAR = {
+  skiff: { len: 0.45, y: -0.3, r: 0.028, legs: [[0.3, 1.2], [-0.3, 1.2], [0, -1.6]] },
+  dart: { len: 0.7, y: -0.3, r: 0.04, legs: [[0, 3.2], [0.5, -2.6], [-0.5, -2.6]] },
+  dhow: { len: 1.0, y: -1.0, r: 0.09, legs: [[1.8, 4], [-1.8, 4], [1.8, -6], [-1.8, -6]] },
+  ark: { len: 1.0, y: -2.3, r: 0.26, legs: [[1.6, 21], [-1.6, 21], [1.6, -24], [-1.6, -24]] },
+  carrier: { len: 6, y: -20, r: 1.1, legs: [-170, -80, 10, 100].flatMap((z) => [[46, z], [-46, z]]) },
+};
+export const GEAR_TIME = 1.2;
+// should its legs be down: slow, and its keel within a few leg-lengths of what is under it
+export const gearWanted = (S, G, over, speed) => over < 3 * G.len + 2 && speed < 0.6 * S.speed;
 // a way in the world (a direction, not a place) in a ship's own frame, turned as it is turned: posePoint, undone
 export function toPose(s, [X, Y, Z]) {
   const cb = Math.cos(s.bank || 0), sb = Math.sin(s.bank || 0), ct = Math.cos(s.tilt || 0), st = Math.sin(s.tilt || 0), c = Math.cos(s.yaw), n = Math.sin(s.yaw);
@@ -218,7 +232,7 @@ export function jetFor(s, push) {
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
   const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side, low = floorAt(x, z) + S.hover;
-  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0, thr: 0, light: null, jet: jetFor({ kind: k, yaw: body.yaw }, [0, 1, 0]), lift: 0.5 };
+  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0, thr: 0, light: null, jet: jetFor({ kind: k, yaw: body.yaw }, [0, 1, 0]), lift: 0.5, gear: 1 };
 }
 
 // THE THROTTLE (Colin, 19 Nov 2026: "for speed -- let's actually do this right. when you hold down shift, speed should
@@ -349,7 +363,9 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
     }
   }
   // never lower than its keel over the water or the ground; nose up or down, its stern or its bow is what is lowest
-  const floor = floorAt(s.p[0], s.p[2]), low = floor + Math.max(S.keel * Math.abs(Math.cos(s.tilt)), h * Math.abs(Math.sin(s.tilt)));
+  const floor = floorAt(s.p[0], s.p[2]), G = GEAR[s.kind] || GEAR.skiff;
+  s.gear = toward(s.gear ?? 1, gearWanted(S, G, s.p[1] - floor - S.keel, Math.hypot(s.v[0], s.v[1], s.v[2])) ? 1 : 0, dt / GEAR_TIME);
+  const low = floor + Math.max(S.keel * Math.abs(Math.cos(s.tilt)), h * Math.abs(Math.sin(s.tilt))) + G.len * s.gear;
   if (s.p[1] < low) { s.p[1] = low; if (s.v[1] < 0) s.v[1] = 0; }
   // banked into a turn as a plane is, and out of it; its engine as bright as it is driven
   const turnRate = dt > 0 ? wrap(s.yaw - was) / dt : 0, k = (r) => 1 - Math.exp(-r * dt);

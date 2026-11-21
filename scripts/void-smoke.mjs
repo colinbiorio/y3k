@@ -785,10 +785,12 @@ try {
     check('R boards it: the body sits in it', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard, seated: r.world.seated });
     // its thruster points the way it is driven (Colin, 19 Nov 2026: "make the thrusters point in the direction that the ship is moving")
     check('hanging still, its nozzle points straight down', r.world.ships[0].jet[1] < -0.97, r.world.ships[0].jet);
+    check('and its landing gear is down', r.world.ships[0].gear === 1, r.world.ships[0].gear);
     out.shipHint = await hintText();
     await key.down('KeyW'); await sleep(1800 * slow); r = await read();
     check('W drives it at its speed', r.world.ships[0].speed > 20, r.world.ships[0]);
     check('and under way its nozzle has swung back', r.world.ships[0].jet[2] < -0.9 && r.world.ships[0].jet[1] < -0.2, r.world.ships[0].jet);
+    check('its landing gear folded away in flight', r.world.ships[0].gear === 0, r.world.ships[0].gear);
     out.frames.flying = await frames(2000);
     await shot('02-flying');
     // climb and dive, and the bank (Colin, 19 Nov 2026: "ships should be able to go straight up ... and when they turn,
