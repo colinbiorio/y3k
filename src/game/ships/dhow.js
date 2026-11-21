@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { DHOW as S, DHOW_HULL } from '../ships.js';
 import { glowTexture } from '../fight.js';
+import { jetPivot, aimJets } from './jets.js';
 
 const L = S.length, U0 = -L / 2;
 // the hull at u (0 the stern, 1 the prow): half its width, its sheer (the deck's edge), its depth, the prow's rake
@@ -162,13 +163,15 @@ export function createDhowArt({ lite = false } = {}) {
   { const ring = new THREE.TorusGeometry(RING.r, 0.08, 10, 48); ring.translate(0, RING.y, RING.z); add(ring, bronze);
     add(rod([0, DECK(0.02) - 0.4, U0 + 0.2], [0, RING.y + RING.r, RING.z], 0.08), bronze); }
   const swirlU = { uTime: { value: 0 }, uOn: { value: 0 } }, swirlMat = keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide }));
-  const tex = glowTexture(), glows = [];
+  // the pods stand on a ring of their own, gimballed in the bronze one (./jets.js): the eight turn together
+  const tex = glowTexture(), glows = [], R2 = RING.r * 0.84, jet = jetPivot(body, 0, RING.y, RING.z - 0.12);
+  add(new THREE.TorusGeometry(R2, 0.06, 10, 44), bronze, jet);
   for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * 2 * Math.PI, x = RING.r * Math.cos(a), y = RING.y + RING.r * Math.sin(a);
-    const pod = new THREE.CylinderGeometry(0.17, 0.13, 0.55, 14, 1, true); pod.rotateX(Math.PI / 2); pod.translate(x, y, RING.z - 0.1); add(pod, bronze);
-    const disc = new THREE.CircleGeometry(0.13, 20); disc.rotateY(Math.PI); disc.translate(x, y, RING.z - 0.38); add(disc, swirlMat);
+    const a = (k / 8) * 2 * Math.PI, x = R2 * Math.cos(a), y = R2 * Math.sin(a);
+    const pod = new THREE.CylinderGeometry(0.17, 0.13, 0.55, 14, 1, true); pod.rotateX(Math.PI / 2); pod.translate(x, y, 0.02); add(pod, bronze, jet);
+    const disc = new THREE.CircleGeometry(0.13, 20); disc.rotateY(Math.PI); disc.translate(x, y, -0.26); add(disc, swirlMat, jet);
     const gm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-    const glow = new THREE.Sprite(gm); glow.position.set(x, y, RING.z - 0.5); body.add(glow); glows.push(glow);
+    const glow = new THREE.Sprite(gm); glow.position.set(x, y, -0.38); jet.add(glow); glows.push(glow);
   }
 
   let open = 0.12;
@@ -178,6 +181,7 @@ export function createDhowArt({ lite = false } = {}) {
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      aimJets([jet], s.jet);                                               // its ring of engines points the way it is driven
       // the sails spread when someone takes the helm, and fold up along their yards when it is let be
       const want = aboard ? 1 : 0.12;
       if (Math.abs(want - open) > 0.002 || aboard) { open += (want - open) * (1 - Math.exp(-1.5 * dt)); setSails(open, t); }

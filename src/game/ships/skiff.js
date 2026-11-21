@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { SKIFF as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
+import { jetPivot, aimJets } from './jets.js';
 
 const L = S.length, U0 = -L / 2;
 // the hull at a place along it (u from the stern, 0, to the bow, 1): its half-width, its gunwale's height, its depth
@@ -42,7 +43,7 @@ const UV_VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = project
 
 export function createSkiffArt({ lite = false } = {}) {
   const group = new THREE.Group(), body = new THREE.Group(), geos = [], mats = [];
-  const keep = (m) => { mats.push(m); return m; }, add = (g, m) => { geos.push(g); const mesh = new THREE.Mesh(g, m); body.add(mesh); return mesh; };
+  const keep = (m) => { mats.push(m); return m; }, add = (g, m, to = body) => { geos.push(g); const mesh = new THREE.Mesh(g, m); to.add(mesh); return mesh; };
   group.add(body); body.rotation.order = 'YXZ';
   const ceramic = keep(new THREE.MeshPhysicalMaterial({ color: new THREE.Color(0.93, 0.92, 0.88), roughness: 0.22, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12, side: THREE.DoubleSide, envMapIntensity: 0.9 }));
   const bronze = keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.66, 0.44, 0.21), roughness: 0.32, metalness: 1, envMapIntensity: 0.9 }));
@@ -89,23 +90,27 @@ export function createSkiffArt({ lite = false } = {}) {
     add(rod([0, sheer(0.04) - 0.02, U0 + 0.15], [0, EY + ER, EZ + 0.04], 0.03), bronze);
     add(rod([0, -0.12, U0 + 0.4], [0, EY - ER, EZ + 0.04], 0.025), bronze); }
   const swirlU = { uTime: { value: 0 }, uOn: { value: 0 } };
-  const discG = new THREE.CircleGeometry(ER - 0.03, 40); discG.rotateY(Math.PI); discG.translate(0, EY, EZ - 0.005);
-  const disc = add(discG, keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide })));
+  // what turns in the ring (./jets.js): the nozzle, a smaller ring gimballed in it, with its plasma, its glow and its streak
+  const jet = jetPivot(body, 0, EY, EZ);
+  add(new THREE.TorusGeometry(ER * 0.8, 0.045, 10, 40), bronze, jet);
+  const discG = new THREE.CircleGeometry(ER * 0.8 - 0.02, 40); discG.rotateY(Math.PI); discG.translate(0, 0, -0.005);
+  const disc = add(discG, keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide })), jet);
   const tex = glowTexture();
   const glowMat = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-  const glow = new THREE.Sprite(glowMat); glow.position.set(0, EY, EZ - 0.1); body.add(glow);
+  const glow = new THREE.Sprite(glowMat); glow.position.set(0, 0, -0.1); jet.add(glow);
   const trailMat = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.4, 0.62, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-  const trail = new THREE.Sprite(trailMat); trail.position.set(0, EY, EZ - 0.9); body.add(trail);
+  const trail = new THREE.Sprite(trailMat); trail.position.set(0, 0, -0.9); jet.add(trail);
 
   return {
     group,
     update(s, { t = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      aimJets([jet], s.jet);                                               // its nozzle points the way it is driven
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
       const on = Math.min(1.4, s.thrust);
       glow.scale.setScalar(0.9 + 0.9 * on); glowMat.opacity = 0.45 + 0.4 * Math.min(1, on);
-      trail.scale.set(0.5 + 0.4 * on, 0.5 + 0.4 * on, 1); trail.position.z = EZ - 0.35 - 0.9 * on; trailMat.opacity = 0.5 * Math.min(1, on);
+      trail.scale.set(0.5 + 0.4 * on, 0.5 + 0.4 * on, 1); trail.position.z = -0.35 - 0.9 * on; trailMat.opacity = 0.5 * Math.min(1, on);
       disc.visible = true;
     },
     dispose() { for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); tex.dispose(); },

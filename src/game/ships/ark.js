@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { ARK as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
+import { jetPivot, aimJets } from './jets.js';
 import { gatherer } from '../buildings/parts.js';
 
 const RG = S.ring, DM = S.dome, EN = S.engines, TAU = 2 * Math.PI;
@@ -172,7 +173,7 @@ export function createArkArt({ lite = false } = {}) {
   // ---- four plasma engines in a cross at the stern, each on its pylon: a nacelle, a bronze ring, its swirl and its glow
   const swirlU = { uTime: { value: 0 }, uOn: { value: 0 } }, swirlMat = keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide }));
   const bronze = keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(0.66, 0.44, 0.21), roughness: 0.32, metalness: 1, envMapIntensity: 0.9 }));
-  const glows = [], zm = (EN.z0 + EN.z1) / 2;
+  const glows = [], jets = [], zm = (EN.z0 + EN.z1) / 2;
   for (const [ux, uy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const cx = ux * EN.off, cy = uy * EN.off;
     const nac = turned([[EN.r * 0.9, EN.z0], [EN.r, EN.z0 + 0.8], [EN.r, EN.z1 - 1.6], [EN.r * 0.82, EN.z1 - 0.5], [EN.r * 0.4, EN.z1], [0, EN.z1 + 0.15]], 24);
@@ -180,8 +181,12 @@ export function createArkArt({ lite = false } = {}) {
     add(rod([ux * (S.spine - 0.2), uy * (S.spine - 0.2), zm], [ux * (EN.off - EN.r * 0.8), uy * (EN.off - EN.r * 0.8), zm], 0.42, 0.42, 4), ceramic);
     const ring = new THREE.TorusGeometry(EN.r * 0.88, 0.13, 10, 36); ring.translate(cx, cy, EN.z0 - 0.05); add(ring, bronze);
     const disc = new THREE.CircleGeometry(EN.r * 0.8, 32); disc.rotateY(Math.PI); disc.translate(cx, cy, EN.z0 - 0.1); add(disc, swirlMat);
+    // …and its nozzle, gimballed just behind (./jets.js): its own plasma and its glow turn with it
+    const jet = jetPivot(body, cx, cy, EN.z0 - 0.8); jets.push(jet);
+    add(new THREE.TorusGeometry(EN.r * 0.66, 0.1, 10, 32), bronze, jet);
+    { const d2 = new THREE.CircleGeometry(EN.r * 0.6, 28); d2.rotateY(Math.PI); add(d2, swirlMat, jet); }
     const gm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-    const glow = new THREE.Sprite(gm); glow.position.set(cx, cy, EN.z0 - 1.2); body.add(glow); glows.push(glow);
+    const glow = new THREE.Sprite(gm); glow.position.set(0, 0, -0.4); jet.add(glow); glows.push(glow);
   }
 
   return {
@@ -189,6 +194,7 @@ export function createArkArt({ lite = false } = {}) {
     update(s, { t = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      aimJets(jets, s.jet);                                                // its nozzles point the way it is driven
       ringG.rotation.z = (t * RG.turn) % TAU;   // the ring turns, once a minute, whoever is aboard
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
       const on = Math.min(1.4, s.thrust);

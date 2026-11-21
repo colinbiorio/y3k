@@ -112,9 +112,11 @@ const CARRIER_TERRACES = [
 const CARRIER_MASTS = [{ z: 50 }, { z: -70 }].map((m) => ({ ...m, foot: 30, top: 150, yard: 145, boom: 50, wide: 42, narrow: 32 }));
 const CARRIER_TOWERS = [[24, 60, 22, 85], [-24, 60, 22, 85], [14, -130, 30, 105], [-14, -130, 30, 105]].map(([x, z, y0, y1]) => ({ x, z, y0, y1 }));
 const CARRIER_ENGINES = { xs: [-40, -20, 0, 20, 40], y: -14, z: -207, r: 6 };
+// …and eight under it, let into its lowest terrace's underside, that hold it up (four along each side)
+const CARRIER_UNDER = [-150, -60, 30, 110].flatMap((z) => [[28, z], [-28, z]]);
 export const CARRIER = {
   length: 400, beam: 120, bow: 70, bowNarrow: 0.25,
-  terraces: CARRIER_TERRACES, masts: CARRIER_MASTS, towers: CARRIER_TOWERS, engines: CARRIER_ENGINES,
+  terraces: CARRIER_TERRACES, masts: CARRIER_MASTS, towers: CARRIER_TOWERS, engines: CARRIER_ENGINES, under: CARRIER_UNDER, underR: 5,
   keel: 21, hover: 30,              // its lowest terrace's underside rides clear of the water
   seat: [0, 30.6, 108],             // the helm: in a pavilion at the front of the top terrace, looking out over the prow
   speed: 72, boost: 170, back: 0.3, slide: 12, climb: 14,
@@ -172,6 +174,43 @@ export const doorAt = (s) => shipPoint(s, kindOf(s).door || kindOf(s).seat);   /
 // small ones steeper than the big), never so far that its side would touch the water, and it levels out of it.
 export const PITCH_GAIN = 1.5;
 export const BANK = { skiff: 1.1, dart: 1.3, dhow: 0.75, ark: 0.7, carrier: 0.55 };
+// THE THRUSTERS POINT THE WAY THE SHIP IS DRIVEN (Colin, 19 Nov 2026: "make the thrusters point in the direction that
+// the ship is moving, and for the giant carrier, perhaps add some to the bottom of the craft too"). What drives a ship
+// is what holds it up and what sends it the way asked of it: up, and JET_PUSH times the speed asked over its own. s.jet
+// is the way its exhaust goes for that, in its own frame (astern is [0, 0, -1]): straight down as it hangs still, back
+// and a little down under way, astern at its throttle's top and in the light, down and aside as it rises or slides, and
+// never upward. Its nozzles turn no further from astern than its SWIVEL (the skiff's right down; the great ones' part of
+// the way: the carrier has thrusters under it for the rest), and swing there at JET_RATE, not at once. s.lift is how
+// hard what holds it up works (those thrusters under the carrier are as bright): most as it rises, some as it hangs
+// still, less as its speed carries it, least as it sinks.
+export const SWIVEL = { skiff: Math.PI / 2, dart: 1.2, dhow: 1.0, ark: 0.75, carrier: 0.6 };
+export const JET_PUSH = 3, JET_RATE = 3.5;
+// a way in the world (a direction, not a place) in a ship's own frame, turned as it is turned: posePoint, undone
+export function toPose(s, [X, Y, Z]) {
+  const cb = Math.cos(s.bank || 0), sb = Math.sin(s.bank || 0), ct = Math.cos(s.tilt || 0), st = Math.sin(s.tilt || 0), c = Math.cos(s.yaw), n = Math.sin(s.yaw);
+  const x1 = c * X - n * Z, z2 = n * X + c * Z, y1 = Y * ct + z2 * st;
+  return [x1 * cb + y1 * sb, -x1 * sb + y1 * cb, -Y * st + z2 * ct];
+}
+// a way swung toward another by at most `max` radians (two nearly opposite: by way of astern)
+function swing(a, b, max) {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (d < -0.8) { b = [0, 0, -1]; d = -a[2]; }
+  const ang = Math.acos(Math.max(-1, Math.min(1, d)));
+  if (ang <= max) return [b[0], b[1], b[2]];
+  const k = max / ang, sn = Math.sin(ang), wa = Math.sin((1 - k) * ang) / sn, wb = Math.sin(k * ang) / sn;
+  return [a[0] * wa + b[0] * wb, a[1] * wa + b[1] * wb, a[2] * wa + b[2] * wb];
+}
+// the way a ship's exhaust would go to push it along `push` (the world's), kept within its swivel of astern
+export function jetFor(s, push) {
+  const d = toPose(s, push), n = Math.hypot(d[0], d[1], d[2]);
+  if (!(n > 1e-9)) return [0, 0, -1];
+  const j = [-d[0] / n, -d[1] / n, -d[2] / n], most = SWIVEL[s.kind] ?? 1, off = Math.acos(Math.max(-1, Math.min(1, -j[2])));
+  if (off <= most) return j;
+  const side = Math.hypot(j[0], j[1]);
+  if (side < 1e-6) return [0, 0, -1];                    // asked to push it straight back: its nozzles stay astern
+  const k = Math.sin(most) / side;
+  return [j[0] * k, j[1] * k, -Math.cos(most)];
+}
 
 // put by the body (near enough to board), pointing the way it faces, riding at its hover over what is under it; called
 // from the air (Colin, 19 Nov 2026: "remove necessity to be on the ground to call a ship"), it comes to the body's height
@@ -179,7 +218,7 @@ export const BANK = { skiff: 1.1, dart: 1.3, dhow: 0.75, ark: 0.7, carrier: 0.55
 export function placeShip(body, floorAt = () => 0, kind = 'skiff') {
   const k = cleanShip(kind), S = KIND[k], [side, fwd] = S.put, c = Math.cos(body.yaw), n = Math.sin(body.yaw);
   const x = body.p[0] + n * fwd + c * side, z = body.p[2] + c * fwd - n * side, low = floorAt(x, z) + S.hover;
-  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0, thr: 0, light: null };
+  return { kind: k, p: [x, Math.max(low, (body.p[1] || 0) - S.seat[1]), z], v: [0, 0, 0], yaw: body.yaw, spin: 0, bank: 0, tilt: 0, thrust: 0, t: 0, bob: 0, thr: 0, light: null, jet: jetFor({ kind: k, yaw: body.yaw }, [0, 1, 0]), lift: 0.5 };
 }
 
 // THE THROTTLE (Colin, 19 Nov 2026: "for speed -- let's actually do this right. when you hold down shift, speed should
@@ -283,17 +322,19 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const nose = noseOf(s), top = speedAt(S, thr);
   const lift = ((inp.up ? 1 : 0) - (inp.down ? 1 : 0)) * S.climb;
   const h = S.length * 0.48;
+  let asked = [0, 0, 0];                                 // the speed asked of it (its thrusters point for it, below)
   if (L) stepLight(s, S, dt);
   if (L && L.phase !== 'gather') {
     // in the light: the way its nose points (coming out, level along its heading), no faster than CAP itself; through what
     // is solid (it is light), lifted clear as it goes, never under the ground
     const way = L.phase === 'go' ? nose : f, v = Math.min(L.v, LIGHT.cap);
-    L.dir = way; s.v = [way[0] * v, way[1] * v, way[2] * v];
+    L.dir = way; s.v = [way[0] * v, way[1] * v, way[2] * v]; asked = s.v;
     s.p = [s.p[0] + s.v[0] * dt, s.p[1] + s.v[1] * dt, s.p[2] + s.v[2] * dt];
     if (L.phase === 'go') s.p[1] = Math.min(LIGHT.ceil, Math.max(s.p[1], L.y0 + LIGHT.lift * smooth01(0, 1.4, L.t)));
   } else {
     const go = mz > 0 ? nose : f;
     const target = [go[0] * mz * top - l[0] * mx * S.slide, go[1] * mz * top + lift, go[2] * mz * top - l[2] * mx * S.slide];
+    asked = target;
     // as quick to its speed at any throttle (a faster speed asks a harder push), and as quick to slow from it
     const a = S.accel * dt * Math.max(1, top / S.speed, Math.hypot(s.v[0], s.v[1], s.v[2]) / S.speed);
     for (let i = 0; i < 3; i++) s.v[i] = toward(s.v[i], target[i], (Math.abs(target[i]) < Math.abs(s.v[i]) || target[i] * s.v[i] < 0 ? BRAKE : 1) * a);
@@ -316,6 +357,11 @@ export function stepShip(s, inp, dt, { floorAt = () => 0, solid = () => false } 
   const bank = -Math.atan((Math.hypot(s.v[0], s.v[2]) * turnRate) / 9.8) - mx * 0.12;
   s.bank += (Math.max(-most, Math.min(most, bank)) - s.bank) * k(Math.max(1.2, Math.min(5, S.spin * 0.8)));
   s.thrust += (Math.min(1.4, Math.abs(mz) * (1 + 0.4 * Math.min(1, thr / THROTTLE.notches) + (L ? 0.4 : 0)) + 0.25 * Math.abs(lift) / S.climb + 0.1 * Math.abs(mx)) - s.thrust) * k(4);
+  // its thrusters: against what holds it up and what sends it the way asked (never pushing it down), swung there
+  const push = [(JET_PUSH * asked[0]) / S.speed, Math.max(0.15, 1 + (JET_PUSH * asked[1]) / S.speed), (JET_PUSH * asked[2]) / S.speed];
+  s.jet = swing(s.jet || [0, 0, -1], jetFor(s, push), JET_RATE * dt);
+  const rising = Math.max(0, s.v[1]) / S.climb, under = 1 - Math.min(1, Math.hypot(s.v[0], s.v[2]) / S.speed);
+  s.lift = (s.lift || 0) + (Math.min(1.4, inp.down ? 0.08 : 0.3 + 0.25 * under + (inp.up ? 0.5 : 0) + 0.5 * Math.min(1, rising)) - (s.lift || 0)) * k(3);
   const [amp, rate] = BOB[s.kind] || BOB.skiff; s.bob = amp * Math.sin(s.t * rate) * (1 - Math.min(1, s.thrust));
   return s;
 }
