@@ -424,6 +424,34 @@ await ok('y3kode answers and can think: the stream opens, and a job is answered 
   assert.ok(made[0].closed);
 });
 
+await ok('a picture that comes with a turn is handed to a y3kode that can see; one that cannot is told so in words, the camera\'s or one the person attached', async () => {
+  const run = async (senses, prompt) => {
+    const { ES, made } = fakeES();
+    const asked = [];
+    const cmd = async (c) => { if (c.cmd === 'engine.hello') return { ok: true, thinkers: ['claude'], ...(senses ? { senses } : {}) }; asked.push(c); return { ok: true, text: '[calm] ok', usage: { in: 1, out: 1 } }; };
+    const stop = startOwnBrain({ ES, timer: clock(), cmd, fetchFn: async () => ({}) });
+    await settle();
+    made[0].emit('job', { id: 'c'.repeat(32), provider: 'claude', system: 's', prompt, image: 'PICTURE' });
+    await settle();
+    stop();
+    return asked[0];
+  };
+  const CAM = '(A camera frame comes with this message: that is them, right now.)\nTheir newest message:\nlook';
+  const MINE = '(A picture comes with this message: one they chose to show you, not the camera.)\nTheir newest message:\nlook';
+  // it can see: the picture goes, and the words are the site's
+  let c = await run(['image'], CAM);
+  assert.equal(c.image, 'PICTURE'); assert.equal(c.prompt, CAM);
+  c = await run(['image'], MINE);
+  assert.equal(c.image, 'PICTURE'); assert.equal(c.prompt, MINE);
+  // it cannot (a y3kode from before 2026-10-19): no picture goes, and it is told so
+  c = await run(null, CAM);
+  assert.equal(c.image, undefined);
+  assert.equal(c.prompt, '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)\nTheir newest message:\nlook');
+  c = await run(null, MINE);
+  assert.equal(c.image, undefined);
+  assert.equal(c.prompt, '(A picture came with this message, one they chose to show you, but this connection carries text only, so you cannot see it.)\nTheir newest message:\nlook');
+});
+
 await ok('a turn the site let go of while y3kode thought (cancel) is not answered; the others are, and a cancel for nothing here keeps nothing', async () => {
   const { ES, made } = fakeES();
   const posted = [];

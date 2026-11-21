@@ -1609,10 +1609,11 @@ const ownRelay = createRelay({ maxHeld: Math.max(0, Number(process.env.OWN_HELD_
 // counts with its own copy of the system prompt and prompt, in every bound.
 // It counted only that copy, while each waiting /api/brain kept its parsed
 // body — a conversation and a picture, up to BRAIN_BODY_MAX — alive for the
-// wordless rescue, counted by nothing. A picture the door lets go before it
-// waits (`letGo`, its bytes: the sign-in only notes that one came, toPrompt)
-// is not counted. On a key the provider reads neither.
-const bodyHeld = (req, letGo = 0) => Math.max(0, (BODY_BYTES.get(req) || 0) - letGo);
+// wordless rescue, counted by nothing. A picture is counted with the rest: it
+// goes with the turn (2026-11-21; it was let go before the turn waited, and
+// its bytes taken off, while the sign-in was only told that one came). On a
+// key the provider reads neither.
+const bodyHeld = (req) => BODY_BYTES.get(req) || 0;
 // The ledger's name for a turn on someone's own sign-in. Such a turn has one
 // limit, the person's own plan: it is $0 on their ledger and draws nothing
 // from a presence's budget.
@@ -4061,7 +4062,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, room: roomHere, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, attached, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, room: roomHere, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
       // a page loaded for another account (forAnother): it reloads, and nothing is read or written
       if (forAnother(req, loadedFor)) return json(409, RELOAD);
       // Marked here, before anything else touches the array: the scrub map and
@@ -4475,12 +4476,19 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           // The page is told to let the turn go if the person goes away mid-turn.
           const gone = new AbortController();
           res.on('close', () => gone.abort());
-          // A picture never reaches the sign-in: the prompt only says one came
-          // (own-relay.mjs toPrompt). So it is let go here, before the turn
-          // waits, and what the route still holds is counted (bodyHeld).
-          const picture = typeof image === 'string' ? image.length : 0;
-          if (image) image = true;
-          const o = { ...opts, signal: gone.signal, source: sourceOf(req), holds: bodyHeld(req, picture) };
+          // THE PICTURE GOES WITH THE TURN (2026-11-21). It was let go here
+          // ("a picture never reaches the sign-in: the prompt only says one
+          // came"), which stopped being true on 19 Oct, when the relay, the
+          // page and y3kode learned to carry it: this door and the stream's
+          // went on dropping it, so on a sign-in the presence was told of
+          // every picture that it "came, but this connection carries text
+          // only" (Colin, 21 Nov, of one sent at half past two: "the picture
+          // isn't making it through to me"). Now it rides to the page
+          // (own-relay.mjs run), which hands it to a y3kode that can see, and
+          // the words say which it is: the camera, or one they attached. The
+          // route's whole body is counted while the turn waits, the picture
+          // in it (bodyHeld).
+          const o = { ...opts, signal: gone.signal, source: sourceOf(req), holds: bodyHeld(req), attached: attached === true };
           const out = tendMode
             ? await own.p.chat(null, own.model, tendMessages, image, paint, o)
             : await chatWithRescue(own.p, null, own.model, messages, image, paint, o);
@@ -4719,7 +4727,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       // The chat's attached picture is made to fit inside this before it is sent
       // (src/media-rules.mjs, CHAT_IMAGE_MAX).
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor, room: roomHere } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, image, attached, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor, room: roomHere } = await readJsonBody(req, BRAIN_BODY_MAX);
       // as /api/brain: a page loaded for another account reloads, before the stream opens
       if (forAnother(req, loadedFor)) return json(409, RELOAD);
       messages = markMessages(messages, when);
@@ -4755,11 +4763,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // matching branch in /api/brain above.
         pid = own.pid; useKey = null; useModel = own.model; ownP = own.p;
         opts.source = sourceOf(req);
-        // as /api/brain: a picture is only noted, so it is let go before the
-        // turn waits, and what the route still holds is counted
-        const picture = typeof image === 'string' ? image.length : 0;
-        if (image) image = true;
-        opts.holds = bodyHeld(req, picture);
+        // as /api/brain: the picture goes with the turn, and the route's
+        // whole body is counted while it waits
+        opts.holds = bodyHeld(req);
+        opts.attached = attached === true;
       } else {
         // the site has no key of its own (see /api/brain above): the page says
         // how to bring one

@@ -263,6 +263,27 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-21** — **A picture reaches a presence that thinks on your own
+  sign-in** (`server.mjs`, both conversation doors; `own-relay.mjs` SHOWN,
+  UNSHOWN, run; `src/own-brain.js`; `src/brain.js` `attached`). Colin, of a
+  picture sent at half past two: the presence answered "the picture isn't making
+  it through to me, this connection is only carrying your words right now". On
+  19 Oct the relay, the page and y3kode learned to carry a camera frame to
+  Claude Code as an image; the two doors a conversation comes in by
+  (`/api/brain`, `/api/brain/stream`) went on letting every picture go before
+  the turn reached the relay (`image = true`, from when the sign-in could only
+  be told one had come), so on a sign-in nothing was ever seen: a camera frame
+  or a picture attached by the message box, the presence was told it "came, but
+  this connection carries text only". Now the picture goes with the turn to
+  your page, which hands it to a y3kode that can see (0.3.2 and later; an
+  older one is still told plainly that it cannot). The words say which picture
+  it is: the camera ("that is them, right now") or one you chose to show it
+  ("not the camera"); a picture too large to carry is no longer said to have
+  come with the turn. The door's whole body is counted while the turn waits,
+  the picture in it. Tests: the live doors hand a 900 KB picture to the page at
+  both, counted (nine of ten at once under 8 MB, where all ten went uncounted);
+  the relay's lines; the page's hand-off to a y3kode that sees and one that
+  does not. A key's turn already carried its picture, and is unchanged.
 - **2026-11-20** — **A ship's throttle, lightspeed aboard only, and out of the
   light on forward with the island ahead** (`src/game/ships.js` THROTTLE, LIGHT,
   setThrottle; `src/game/wrap.js`, new; `src/game/input.js` ABOARD and the rows

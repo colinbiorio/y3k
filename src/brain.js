@@ -494,7 +494,7 @@ export async function respond(text, image, paint, presence) {
       let msgs = history.slice(-12);
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1);
       const body = onWire(msgs);
-      if (image) body.image = image;
+      if (image) { body.image = image; body.attached = true; }   // only a picture the person attached comes this way (respondStream's fallback)
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       Object.assign(body, keyFields());   // the key, and the rung chosen here
@@ -696,6 +696,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
       const body = onWire(msgs);
       if (image) body.image = image;
+      if (image && attached) body.attached = true;   // a picture they chose, not the camera (own-relay.mjs SHOWN)
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (room) body.room = room;             // the room on this screen, so the readout can name it (honest senses)

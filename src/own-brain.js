@@ -33,7 +33,10 @@ const PROBE_MS = 15000;
 const PART_MS = 250;
 // own-relay.mjs SEEN / UNSEEN, the line about a camera frame in a turn's words
 const SEEN_LINE = '(A camera frame comes with this message: that is them, right now.)';
-const UNSEEN_LINE = '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)';                       // how often a turn's words so far are read from y3kode and passed on                    // how often a page that cannot think yet looks for y3kode again
+const UNSEEN_LINE = '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)';
+// own-relay.mjs SHOWN / UNSHOWN: the same, of a picture the person attached
+const SHOWN_LINE = '(A picture comes with this message: one they chose to show you, not the camera.)';
+const UNSHOWN_LINE = '(A picture came with this message, one they chose to show you, but this connection carries text only, so you cannot see it.)';                       // how often a turn's words so far are read from y3kode and passed on                    // how often a page that cannot think yet looks for y3kode again
 const PICK_KEY = 'y3k.brainPick';          // the provider last chosen in Settings → Brain (settings.js PICK)
 const OWNER_KEY = 'y3k.owner';             // whose this browser is now: an account's id, or 'guest' (brain.js OWNER_KEY, claimBrowser)
 
@@ -398,7 +401,7 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
         let prompt = job.prompt, image = null;
         if (typeof job.image === 'string' && job.image) {
           if (seesHere) image = job.image;
-          else prompt = String(prompt).replace(SEEN_LINE, UNSEEN_LINE);
+          else prompt = String(prompt).replace(SEEN_LINE, UNSEEN_LINE).replace(SHOWN_LINE, UNSHOWN_LINE);
         }
         r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt, tag: job.id, ...(image ? { image } : {}), ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
       } finally {
