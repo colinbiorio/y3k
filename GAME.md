@@ -1513,3 +1513,5 @@ For stage 7, already in hand and kept outside the repository until then:
   Meeus; a floating origin and a logarithmic depth, so a metre and an
   astronomical unit fit in one picture; the ground as a cube of quadtrees
   wrapped on a sphere; a light-speed trip as a record of two clock times.
+
+**21 November 2026: begun.** The solar system has a working memory of its own now, [`SOLAR.md`](SOLAR.md): Colin's words for it, the plan (depth first), and its first brick, the clockwork in `src/game/solar/`: where every body is and how it is turned for any date, and the sky as it is seen from the island, measured against JPL (the plan above said Keplerian elements and Meeus; what was built is closer than that, and SOLAR.md says by how much). Nothing in the world tab uses it yet.
