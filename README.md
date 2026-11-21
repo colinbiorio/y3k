@@ -263,6 +263,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-21** (later) — **The rest of the world in liquid glass**
+  (`styles.css` THE WORLD IN LIQUID GLASS). The controls sheet and its cards,
+  the blueprint's panel, the throttle, the lightspeed line, the thumbs'
+  buttons, toasts in the world tab and the societies' panes wear the same
+  clear glass as the bar; the body sheet too where Settings' glass is fully on.
+  GAME.md "The rest in glass".
 - **2026-11-21** — **The world's bar is glyphs, and its panes are liquid glass**
   (`src/game/glyphs.js` BAR, `src/game/view.js` barFace, pourBar, lookBar, the
   tip; `styles.css` THE WORLD IN LIQUID GLASS). Colin: "this bar still needs to

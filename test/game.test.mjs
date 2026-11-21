@@ -1533,6 +1533,23 @@ ok('the bar is glyphs, each word its name and shown on hover, focus or a long pr
   assert.ok(view.includes('let top = Math.max(r.bottom, under.bottom) + 4;') && view.includes('if (hole && top + h > hole.top - 4 && top < hole.top + 8) top = hole.top + 8;'), 'under the bar, clear of the frame\'s edge');
 });
 
+ok('the rest of the world\'s panes are the same glass: the light\'s line, the throttle, the blueprint, the thumbs, the societies\' panes, a toast, the sheets', () => {
+  const css = read('styles.css');
+  assert.match(css, /\.game-light, \.game-throttle, \.game-plan, \.game-tbtn, \.world-nearrow, \.world-voice, \.world-way, \.hands-body, \.world-tag, body\.in-world #toast \{[^}]*backdrop-filter: var\(--wg-see-ink\); -webkit-backdrop-filter: var\(--wg-see-ink\);/);
+  for (const sel of ['.game-light::after', '.game-throttle::after', '.game-plan::after', '.game-tbtn::after', 'body.in-world #toast::after', '.game-group::after']) assert.ok(css.includes(sel), 'a rim: ' + sel);
+  // the blueprint's rim keeps its colour: blue, amber, red
+  assert.match(css, /\.game-plan\[data-did="steep"\] \{ --wg-rim: [^}]*rgba\(255, 196, 110/); assert.match(css, /\.game-plan\[data-did="blocked"\] \{ --wg-rim: [^}]*rgba\(255, 118, 108/);
+  // the controls sheet: a thin unblurred veil, a deeper glass, cards of glass on glass; solid where nothing is blurred
+  assert.ok(css.includes('#game-menu { background: rgba(8, 12, 20, 0.16); backdrop-filter: none; -webkit-backdrop-filter: none; }'));
+  assert.match(css, /#game-menu \.sheet \{[^}]*backdrop-filter: var\(--wg-see-xl\); -webkit-backdrop-filter: var\(--wg-see-xl\);/);
+  assert.ok(css.includes(':root[data-glass="none"] { --wg-fill-xl: rgba(16, 20, 28, 0.92); }'));
+  assert.match(read('src/game/view.js'), /if \(!paused\) still = 0; else if \(\+\+still > 4\) return;/, 'the picture waits under the sheet: its glass is one blur');
+  // the body sheet stands over a moving picture: the real glass only with the glass fully on, on a wide screen
+  assert.match(css, /@media \(min-width: 721px\) \{ :root\[data-glass="all"\] #game-body \.sheet \{[^}]*backdrop-filter: var\(--wg-see-xl\);/);
+  // one system in Smooth too: the world's panes follow --wg-fill
+  assert.ok(css.includes(':root[data-gfx="smooth"][data-glass="none"] { --wg-fill: rgba(16, 20, 28, 0.76); }') && !/data-glass="none"\] :is\(\.world-nearrow/.test(css));
+});
+
 ok('the hint stands clear of the bars, measured, on every screen (Colin, 19 Nov 2026: the pill over the bottom bar)', () => {
   const view = read('src/game/view.js'), css = read('styles.css');
   const seat = view.slice(view.indexOf('function seatHint()'), view.indexOf('function seatHint()') + 1800);
