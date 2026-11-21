@@ -13,9 +13,13 @@
 //   lightTime(a, b, when)       seconds for light leaving a at `when` to reach b where b will then be
 //   distance(a, b, when)        km between them at that instant
 //   sky(lat, lon, when)         what an observer on the Earth sees: for every body its altitude and azimuth,
-//                               distance, light time, angular size, phase, bright limb, the face turned to us
+//                               distance, light time, angular size, brightness, phase, bright limb, the face
+//                               turned to us
+//   apparent(from, id, when)    where a body is seen from any point in space
 //   horizonMatrix(lat, lon, when)   the turn that takes a star catalogue's J2000 directions to that horizon
+//   refraction(alt)             the air's lift, degrees
 //   gmst, gast, lst             sidereal time, radians
+//   julianTT, fromTT, deltaT    the clock; centreOfMass(when) the solar system's
 //
 // THE FRAME. x toward the equinox of J2000, z toward the north pole of the ecliptic of J2000: the ICRF turned
 // about x by the obliquity 84381.448 arcsec. It is the frame JPL Horizons calls "Ecliptic of J2000.0", so its
@@ -31,9 +35,10 @@
 // and the dwarf planets about the solar system's centre of mass: small theories fitted to JPL's ephemerides
 // (orbits.js). Rotation: the IAU's models (bodies.js); the Earth by precession, nutation and sidereal time.
 //
-// NO ARRAY OR OBJECT IS MADE once it is warm, if the caller passes `out`: a frame leaves about a hundred bytes of
-// the engine's own boxed numbers behind and nothing else (the test measures it). Every function is a pure
-// function of its arguments: it asks no clock and keeps no state but a memory of the last instant asked.
+// NO ARRAY OR OBJECT IS MADE once it is warm, if the caller passes `out`: a frame that asks everything leaves a
+// few hundred bytes of the engine's own boxed numbers behind and nothing else (the test measures it). Every
+// function is a pure function of its arguments: it asks no clock and keeps no state but a memory of the last
+// instant asked.
 import { VSOP, VSOP_UNIT } from './vsop87b.js';
 import { ELP, ELP_UNIT } from './elp2000.js';
 import { ORBITS } from './orbits.js';

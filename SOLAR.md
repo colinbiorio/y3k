@@ -56,7 +56,7 @@ error has not been measured; what cannot yet be done well is written under "What
 ## Where it stands
 
 **Step 1 is built.** `src/game/solar/` is the clockwork: five plain modules with no page and no three in them,
-used by nothing in the world tab yet. `test/solar.test.mjs` (21 checks) holds it to the sky.
+used by nothing in the world tab yet. `test/solar.test.mjs` (22 checks) holds it to the sky.
 
 | file | what it is |
 |---|---|
@@ -164,6 +164,12 @@ it is the eight planets' doing here; Pluto, the asteroids and the belt beyond Ne
 slowly. Measured at 1800, 1850, 2150 and 2199: Mercury 0.1", Venus 0.1", Earth 0.1", Mars 0.3", Jupiter 0.1",
 Saturn 0.2", Uranus 1.1", Neptune 0.5", the Moon 0.5". The moons and dwarf planets have not been measured
 outside 1900-2100 and must not be trusted there.
+
+**The year 3000**, which the place is named for. Measured at 2500, and twice in 3000: Mercury 0.6", Venus 1.1",
+Earth 0.8", Mars 9.6", Jupiter 1.4", Saturn 3.8", Uranus 15.7", Neptune 1.6", the Moon 11.1" at worst (Mars and
+the giants against their systems' centres of mass: JPL's planet-centre ephemerides end near 2200). A millennium
+out, the Sun, the Moon and the planets are still within a quarter of an arcminute of where they will be, which is
+less than the eye can tell; where each moon will be along its orbit is not known to this clockwork.
 
 ### The sky from Lord Howe Island
 

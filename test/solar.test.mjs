@@ -135,6 +135,17 @@ ok('outside its two centuries the clockwork wears slowly, and by how much is kno
   measured.push('at 1800, 1850, 2150 and 2199 (outside the fitted span): ' + line.join(', '));
 });
 
+ok('and in the year 3000, which the place is named for, the planets and the Moon are still where the eye would look', () => {
+  const M = V.millennium, line = [];
+  for (const id of Object.keys(M.bodies)) {
+    let worst = 0;
+    M.dates.forEach((jd, k) => { const m = id === 'moon' ? S.relative(id, S.fromTT(jd)) : S.position(id, S.fromTT(jd)); worst = Math.max(worst, between(m, M.bodies[id][k]) * ASEC); });
+    under(worst, 20, id + ' in 2500 and 3000, arcsec');      // a third of what the sharpest eye resolves
+    line.push(`${id} ${worst.toFixed(1)}"`);
+  }
+  measured.push('in 2500 and 3000 (a millennium outside the fitted span; the moons are not measured there): ' + line.join(', '));
+});
+
 // ------------------------------------------------------------------------------------------- the light time
 ok('lightTime is the time of a journey at c: light leaving now meets the body where it will be', () => {
   const t = Date.UTC(2026, 10, 21, 0, 0, 0);

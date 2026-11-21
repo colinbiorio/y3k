@@ -31,7 +31,13 @@ const r3 = (x) => Math.round(x * 1000) / 1000;
   const far = [2378498.5, 2396758.5, 2506331.5, 2524228.5], beyond = {};
   for (const id of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']) beyond[id] = (await vectors(cache, HORIZONS[id], '500@10', far)).map((x) => x.p.map(r3));
   beyond.moon = (await vectors(cache, '301', '500@399', far)).map((x) => x.p.map(r3));
-  save('vectors.json', { source: 'JPL Horizons, ' + FILE_API, asked: vectorLines('<command>', '<center>').join(' ') + " TLIST=<dates>", note: 'geometric, km, ecliptic of J2000 (ICRF), at Julian dates of TDB; dates = mulberry32 seed 20261121, uniform on 1900-2100', dates: jds, bodies, centre, beyond: { note: 'the same, at 3 January 1800 and 1 January 1850, 2150 and 2199', dates: far, bodies: beyond } });
+  // and the years 2500 and 3000, for the site's name: the giants' centres are not in Horizons that far ahead (their
+  // satellite ephemerides end near 2200), so there the giants and Mars are their systems' centres of mass
+  const ahead = [2634166.5, 2816788.5, 2816970.5], millennium = {};
+  for (const [id, cmd] of [['mercury', '199'], ['venus', '299'], ['earth', '399'], ['mars', '4'], ['jupiter', '5'], ['saturn', '6'], ['uranus', '7'], ['neptune', '8']]) millennium[id] = (await vectors(cache, cmd, '500@10', ahead)).map((x) => x.p.map(r3));
+  millennium.moon = (await vectors(cache, '301', '500@399', ahead)).map((x) => x.p.map(r3));
+  save('vectors.json', { source: 'JPL Horizons, ' + FILE_API, asked: vectorLines('<command>', '<center>').join(' ') + " TLIST=<dates>", note: 'geometric, km, ecliptic of J2000 (ICRF), at Julian dates of TDB; dates = mulberry32 seed 20261121, uniform on 1900-2100', dates: jds, bodies, centre, beyond: { note: 'the same, at 3 January 1800 and 1 January 1850, 2150 and 2199', dates: far, bodies: beyond },
+    millennium: { note: 'the same, at 1 January 2500, 1 January 3000 and 2 July 3000; Mars and the giants are their systems\' centres of mass here', dates: ahead, bodies: millennium } });
 }
 
 // 2. what is seen from Lord Howe Island: Horizons' observer table at 14 instants of UT across 1973-2026
