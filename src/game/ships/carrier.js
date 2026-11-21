@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { CARRIER as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
+import { jetPivot, aimJets } from './jets.js';
 import { gatherer } from '../buildings/parts.js';
 
 const TAU = 2 * Math.PI, EN = S.engines;
@@ -164,15 +165,31 @@ export function createCarrierArt({ lite = false } = {}) {
     for (const { t, zs, y } of mouths) for (const z of zs) for (const sd of [-1, 1]) lamp(sd * (t.hw + 0.6), y + 3.5, z, t === T[0] ? 14 : 10); }   // at their mouths
   // ---- astern, the row of five great plasma ring engines on their pylons
   const swirlU = { uTime: { value: 0 }, uOn: { value: 0 } }, swirlMat = keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide }));
-  const glows = [];
+  const glows = [], jets = [];
   { const G = gatherer();
     for (const x of EN.xs) {
       const ring = new THREE.TorusGeometry(EN.r, 0.8, 12, 48); ring.translate(x, EN.y, EN.z); G.put(ring, 0, 0);
       G.put(rod([x, EN.y + EN.r * 0.6, T[0].z0 + 0.5], [x, EN.y + EN.r * 0.6, EN.z + 0.6], 0.9, 0.9, 6), 0, 0);
       G.put(rod([x, EN.y - EN.r * 0.6, T[0].z0 + 0.5], [x, EN.y - EN.r * 0.6, EN.z + 0.6], 0.9, 0.9, 6), 0, 0);
-      const disc = new THREE.CircleGeometry(EN.r * 0.9, 40); disc.rotateY(Math.PI); disc.translate(x, EN.y, EN.z - 0.05); add(disc, swirlMat);
+      // what turns in the ring (./jets.js): the nozzle, a smaller ring gimballed in it, with its plasma and its glow
+      const jet = jetPivot(body, x, EN.y, EN.z); jets.push(jet);
+      add(new THREE.TorusGeometry(EN.r * 0.8, 0.6, 12, 44), bronze, jet);
+      const disc = new THREE.CircleGeometry(EN.r * 0.74, 40); disc.rotateY(Math.PI); disc.translate(0, 0, -0.05); add(disc, swirlMat, jet);
       const gm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-      const glow = new THREE.Sprite(gm); glow.position.set(x, EN.y, EN.z - 4); body.add(glow); glows.push(glow);
+      const glow = new THREE.Sprite(gm); glow.position.set(0, 0, -4); jet.add(glow); glows.push(glow);
+    }
+    add(G.geometry(), bronze); }
+  // ---- under it, eight thrusters that hold it up (Colin, 19 Nov 2026: "for the giant carrier, perhaps add some to the
+  // bottom of the craft too"): bronze rings let into its lowest terrace's underside, as bright as they work (ships.js
+  // s.lift: most as it rises, some as it hangs still, less under way)
+  const liftU = { uTime: { value: 0 }, uOn: { value: 0 } }, liftMat = keep(new THREE.ShaderMaterial({ uniforms: liftU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide }));
+  const lifts = [];
+  { const G = gatherer(), y = T[0].y0 - 0.35;
+    for (const [x, z] of S.under) {
+      const ring = new THREE.TorusGeometry(S.underR, 0.42, 10, 40); ring.rotateX(Math.PI / 2); ring.translate(x, y, z); G.put(ring, 0, 0);
+      const disc = new THREE.CircleGeometry(S.underR * 0.9, 32); disc.rotateX(Math.PI / 2); disc.translate(x, y + 0.1, z); add(disc, liftMat);
+      const gm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+      const glow = new THREE.Sprite(gm); glow.position.set(x, y - 1.5, z); body.add(glow); lifts.push(glow);
     }
     add(G.geometry(), bronze); }
   // the small craft's own little plasma, astern of each
@@ -186,12 +203,16 @@ export function createCarrierArt({ lite = false } = {}) {
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      aimJets(jets, s.jet);                                                // its nozzles point the way it is driven, as far as they turn
       // the sails come down when someone takes the helm, and are furled up to their yards when it is let be
       const want = aboard ? 1 : 0;
       if (Math.abs(want - down) > 0.002 || aboard) { down += (want - down) * (1 - Math.exp(-0.8 * dt)); setSails(down, t); }
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
       const on = Math.min(1.4, s.thrust);
       for (const g of glows) { g.scale.setScalar(22 + 26 * on); g.material.opacity = 0.35 + 0.5 * Math.min(1, on); }
+      const up = Math.min(1.4, s.lift || 0);                                // …and those under it, as hard as they hold it up
+      liftU.uTime.value = t; liftU.uOn.value = Math.min(1, up);
+      for (const g of lifts) { g.scale.setScalar(9 + 16 * up); g.material.opacity = 0.12 + 0.55 * Math.min(1, up); }
       nightU.value = night; lampMat.opacity = 0.85 * night; lantern.emissiveIntensity = 1.4 * night;
     },
     dispose() { for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); tex.dispose(); },

@@ -2514,6 +2514,35 @@ ok('a small flat map is a globe (Colin, 19 Nov 2026: "if you go too far in one d
   assert.equal(view.split('roundOf(').length - 1, 1, 'the globe is in the view in two places only (wrap.js: to take it out)'); assert.equal(view.split('comeOut(').length - 1, 1);
 });
 
+ok('the thrusters point the way the ship is driven (Colin, 19 Nov 2026: "make the thrusters point in the direction that the ship is moving, and for the giant carrier, perhaps add some to the bottom of the craft too"): down as it hangs still, back and a little down under way, astern at its top, aside as it slides, astern in its own frame as it climbs nose up; within its swivel, never upward, swung and not snapped; what holds it up works hardest rising', () => {
+  const dt = 1 / 60, dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  for (const k of ['skiff', 'dart', 'dhow', 'ark', 'carrier']) {
+    const s = SP.placeShip({ p: [0, 0, 0], yaw: 0.7 }, () => 0, k); s.p[1] = 400;
+    const run = (inp, sec) => { for (let t = 0; t < sec; t += dt) { SP.stepShip(s, { yaw: 0.7 + Math.PI, pitch: 0, move: [0, 0], ...inp }, dt); near(Math.hypot(...s.jet), 1, 1e-9, k + ': a way'); assert.ok(Math.acos(Math.min(1, -s.jet[2])) <= SP.SWIVEL[k] + 1e-6, k + ': within its swivel'); assert.ok(s.jet[1] <= 1e-9, k + ': never upward'); } return s.jet; };
+    const down = Math.min(Math.PI / 2, SP.SWIVEL[k]);
+    let j = run({}, 3); near(Math.acos(-j[2]), down, 1e-6, k + ': hanging still, down as far as its nozzles turn'); assert.ok(Math.abs(j[0]) < 1e-9);
+    const hang = s.lift;
+    j = run({ move: [0, 1] }, 4); near(Math.atan2(-j[1], -j[2]), Math.atan(1 / SP.JET_PUSH), 1e-3, k + ': under way, back and a little down');
+    assert.ok(s.lift < hang - 0.1, k + ': its speed carries it, and what holds it up eases');
+    SP.setThrottle(s, 9); j = run({}, 4); assert.ok(-j[2] > 0.999, k + ': at its throttle\'s top, astern'); SP.setThrottle(s, 0); run({}, 5);
+    j = run({ up: true }, 3); near(Math.acos(-j[2]), down, 1e-6, k + ': rising, down'); assert.ok(s.lift > 1.2, k + ': and what holds it up works its hardest: ' + s.lift.toFixed(2));
+    run({ down: true }, 3); assert.ok(s.lift < 0.15, k + ': sinking, its least');
+    run({}, 3); j = run({ move: [1, 0] }, 3); assert.ok(j[0] > 0.2, k + ': slid to its right, the exhaust to its left: ' + j[0].toFixed(2));
+    run({}, 3); j = run({ move: [0, 1], pitch: 1.2 }, 6); assert.ok(-j[2] > 0.999 && s.tilt < -1.5, k + ': climbing nose up, astern in its own frame');
+  }
+  const s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, 'skiff'); s.p[1] = 100; SP.stepShip(s, { yaw: Math.PI, pitch: 0, move: [0, 0] }, dt); const j0 = [...s.jet];
+  SP.setThrottle(s, 9); SP.stepShip(s, { yaw: Math.PI, pitch: 0, move: [0, 0] }, dt); near(Math.acos(dot(j0, s.jet)), SP.JET_RATE * dt, 1e-6, 'swung at its rate, not snapped');
+  const q = { kind: 'dart', p: [3, 4, 5], yaw: 0.9, tilt: -0.6, bank: 0.4, bob: 0 };
+  for (const v of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.3, -0.5, 0.8]]) { const w = SP.posePoint(q, v).map((x, i) => x - q.p[i]), back = SP.toPose(q, w); for (let i = 0; i < 3; i++) near(back[i], v[i], 1e-12, 'posePoint, undone'); }
+  assert.deepEqual(SP.jetFor({ kind: 'carrier', yaw: 0 }, [0, 0, -1]), [0, 0, -1], 'asked to push it straight back, its nozzles stay astern');
+  // drawn: a pivot for each nozzle, turned by the ship's jet; the carrier's eight under it, as bright as they work
+  for (const k of ['skiff', 'dart', 'dhow', 'ark', 'carrier']) { const art = read(`src/game/ships/${k}.js`); assert.match(art, /jetPivot\(body, /, k + ': its nozzle in a pivot'); assert.match(art, /aimJets\((\[jet\]|jets), s\.jet\);/, k + ': turned by its jet'); }
+  const C = SP.CARRIER, T0 = C.terraces[0]; assert.equal(C.under.length, 8, 'eight under the carrier');
+  for (const [x, z] of C.under) assert.ok(Math.abs(x) + C.underR < T0.hw && z - C.underR > T0.z0 && z + C.underR < T0.z1 - C.bow, 'let into its lowest terrace');
+  assert.ok(T0.y0 - 0.35 - 0.42 > -C.keel, 'and clear of the water at its lowest');
+  assert.match(read('src/game/ships/carrier.js'), /liftU\.uOn\.value = Math\.min\(1, up\);/, 'as bright as its lift');
+});
+
 ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {
   const D = SP.DHOW, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
   near(D.length, 28, 1e-9, 'about twenty-eight metres long');

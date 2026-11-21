@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { DART as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
+import { jetPivot, aimJets } from './jets.js';
 
 const L = S.length, U0 = -L / 2, LOZ = 1.6;                     // the section's squareness: 1 a diamond, 2 an ellipse
 // the hull at u (0 the tail, 1 the point): its half-width and its half-height
@@ -99,17 +100,21 @@ export function createDartArt({ lite = false } = {}) {
   }
   // ---- the engines: two slim nacelles by the tail, their nozzles' rings, the plasma in them, their glows and streaks
   const swirlU = { uTime: { value: 0 }, uOn: { value: 0 } }, swirlMat = keep(new THREE.ShaderMaterial({ uniforms: swirlU, vertexShader: UV_VERT, fragmentShader: SWIRL, side: THREE.DoubleSide }));
-  const tex = glowTexture(), glows = [], trails = [];
+  const tex = glowTexture(), glows = [], trails = [], jets = [];
   for (const sd of [-1, 1]) {
     const x = sd * 0.52, z0 = U0 - 0.45, z1 = U0 + 1.9;
     const nac = new THREE.CylinderGeometry(0.21, 0.17, z1 - z0, 20, 1, true); nac.rotateX(Math.PI / 2); nac.translate(x, -0.02, (z0 + z1) / 2); add(nac, alloy);
     const nose = new THREE.SphereGeometry(0.21, 16, 10, 0, 2 * Math.PI, 0, Math.PI / 2); nose.rotateX(Math.PI / 2); nose.scale(1, 1, 1.8); nose.translate(x, -0.02, z1); add(nose, alloy);
     const ring = new THREE.TorusGeometry(0.17, 0.035, 10, 32); ring.translate(x, -0.02, z0); add(ring, bronzeTrim);
     const disc = new THREE.CircleGeometry(0.15, 28); disc.rotateY(Math.PI); disc.translate(x, -0.02, z0 - 0.005); add(disc, swirlMat);
+    // …and its nozzle, gimballed just behind (./jets.js): its own plasma, its glow and its streak turn with it
+    const jet = jetPivot(body, x, -0.02, z0 - 0.15); jets.push(jet);
+    add(new THREE.TorusGeometry(0.14, 0.03, 10, 28), bronzeTrim, jet);
+    { const d2 = new THREE.CircleGeometry(0.125, 24); d2.rotateY(Math.PI); add(d2, swirlMat, jet); }
     const gm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.45, 0.7, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-    const glow = new THREE.Sprite(gm); glow.position.set(x, -0.02, z0 - 0.1); body.add(glow); glows.push(glow);
+    const glow = new THREE.Sprite(gm); glow.position.set(0, 0, -0.05); jet.add(glow); glows.push(glow);
     const tm = keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.4, 0.62, 1.0), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-    const trail = new THREE.Sprite(tm); trail.position.set(x, -0.02, z0 - 0.8); body.add(trail); trails.push(trail);
+    const trail = new THREE.Sprite(tm); trail.position.set(0, 0, -0.7); jet.add(trail); trails.push(trail);
   }
 
   let open = 1;
@@ -118,13 +123,14 @@ export function createDartArt({ lite = false } = {}) {
     update(s, { t = 0, dt = 0, aboard = false } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      aimJets(jets, s.jet);                                                // its nozzles point the way it is driven
       // the canopy lifts while it waits for a pilot, and shuts over one
       open += ((aboard ? 0 : 1) - open) * (1 - Math.exp(-4 * dt));
       hinge.rotation.x = -0.75 * open;
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
-      const on = Math.min(1.4, s.thrust), z0 = U0 - 0.45;
+      const on = Math.min(1.4, s.thrust);
       for (const g of glows) { g.scale.setScalar(0.6 + 0.8 * on); g.material.opacity = 0.4 + 0.45 * Math.min(1, on); }
-      for (const tr of trails) { tr.scale.set(0.4 + 0.4 * on, 0.4 + 0.4 * on, 1); tr.position.z = z0 - 0.3 - 1.2 * on; tr.material.opacity = 0.55 * Math.min(1, on); }
+      for (const tr of trails) { tr.scale.set(0.4 + 0.4 * on, 0.4 + 0.4 * on, 1); tr.position.z = -0.2 - 1.2 * on; tr.material.opacity = 0.55 * Math.min(1, on); }
     },
     dispose() { for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); tex.dispose(); },
   };

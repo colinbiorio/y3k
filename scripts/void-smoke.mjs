@@ -783,9 +783,12 @@ try {
     await shot('01-skiff');
     await key.press('KeyR'); await sleep(400); r = await read();
     check('R boards it: the body sits in it', r.world.aboard === true && r.world.seated === true, { aboard: r.world.aboard, seated: r.world.seated });
+    // its thruster points the way it is driven (Colin, 19 Nov 2026: "make the thrusters point in the direction that the ship is moving")
+    check('hanging still, its nozzle points straight down', r.world.ships[0].jet[1] < -0.97, r.world.ships[0].jet);
     out.shipHint = await hintText();
     await key.down('KeyW'); await sleep(1800 * slow); r = await read();
     check('W drives it at its speed', r.world.ships[0].speed > 20, r.world.ships[0]);
+    check('and under way its nozzle has swung back', r.world.ships[0].jet[2] < -0.9 && r.world.ships[0].jet[1] < -0.2, r.world.ships[0].jet);
     out.frames.flying = await frames(2000);
     await shot('02-flying');
     // climb and dive, and the bank (Colin, 19 Nov 2026: "ships should be able to go straight up ... and when they turn,
@@ -870,6 +873,10 @@ try {
     await sleep(2500); await shot('11-carrier');
     await key.press('KeyR'); await sleep(500); r = await read();
     check('R lifts the body up to its helm, high on the top terrace', r.world.aboard === true && r.p[1] > 50, { aboard: r.world.aboard, p: r.p });
+    // the thrusters under it ("for the giant carrier, perhaps add some to the bottom of the craft too"): at work as it hangs, their hardest as it rises
+    const hang = r.world.ships[0].lift; await key.down('Space'); await sleep(1600); r = await read();
+    check('rising, the thrusters under the carrier work their hardest, and its great nozzles turn down as far as they go', hang > 0.3 && hang < 0.8 && r.world.ships[0].lift > 1.1 && Math.abs(Math.acos(-r.world.ships[0].jet[2]) - 0.6) < 0.02, { hang, ship: r.world.ships[0] });
+    await drag(0, -560); await sleep(900); await shot('11b-carrier-from-under'); await key.up('Space'); await drag(0, 520); await sleep(600);
     await key.down('KeyW'); await sleep(5000 * slow); r = await read();
     check('W moves it, the slowest of all, toward its speed', r.world.ships[0].speed > 6, r.world.ships[0]);
     out.frames.carrier = await frames(2000);

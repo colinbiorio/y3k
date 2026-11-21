@@ -263,6 +263,14 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-21** — **A ship's thrusters point the way it is driven, and the
+  carrier has eight under it** (`src/game/ships.js` s.jet, s.lift, SWIVEL,
+  jetFor; `src/game/ships/jets.js`, new; `src/game/ships/*.js`). Colin: "make
+  the thrusters point in the direction that the ship is moving, and for the
+  giant carrier, perhaps add some to the bottom of the craft too." Each nozzle
+  is a ring gimballed in its mount: down as the ship hangs still, back under
+  way, aside as it slides; the carrier's underside thrusters are as bright as
+  they work. GAME.md "Flight, done right".
 - **2026-11-21** (later) — **The rest of the world in liquid glass**
   (`styles.css` THE WORLD IN LIQUID GLASS). The controls sheet and its cards,
   the blueprint's panel, the throttle, the lightspeed line, the thumbs'

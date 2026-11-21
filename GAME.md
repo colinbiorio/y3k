@@ -351,6 +351,23 @@ The rest of what he said that day:
   the veil (there is no space to be in yet); Ball's Pyramid, 28 km out, can
   drop out of sight behind a ship as it goes round; the eye's wheel does not
   zoom aboard (the keys do).
+- **The thrusters point the way the ship is driven** (done, 21 Nov). What
+  drives a ship is what holds it up and what sends it the way asked: `ships.js`
+  `s.jet` is the way its exhaust goes for that, in its own frame: straight down
+  as it hangs still, back and a little down under way (18 degrees at its own
+  speed), astern at its throttle's top and in the light, down and aside as it
+  rises or slides, astern in its own frame as it climbs nose up, never upward.
+  Its nozzles turn no further from astern than its SWIVEL (the skiff's right
+  down, the dart 1.2 rad, the dhow 1.0, the ark 0.75, the carrier 0.6) and
+  swing there at 3.5 rad/s, not at once. Drawn (`ships/jets.js`): each engine's
+  mount stays where it was, and a smaller ring gimballed in it carries the
+  plasma, its glow and its streak (the dhow's eight pods turn together on a
+  ring of their own).
+  **Under the carrier**, eight thrusters let into its lowest terrace's
+  underside hold it up (`s.lift`): at work as it hangs still, their hardest as
+  it rises, eased as its speed carries it, least as it sinks.
+  Rough: braking or backing, the nozzles do not turn forward (they stay astern,
+  dim); the eye, looking up from under the carrier, stands close under its hull.
 
 ### The same day, later: the bar in glyphs, the world in liquid glass
 
