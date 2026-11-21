@@ -263,6 +263,10 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-21** (later) — **Landing gear** (`src/game/ships.js` GEAR, s.gear;
+  `src/game/ships/gear.js`, new). Colin: "landing gear would be sick." Each
+  ship's legs come down when it is slow and low, and fold away as it flies
+  off; sunk onto the ground it stands on its feet. GAME.md "Flight, done right".
 - **2026-11-21** — **A ship's thrusters point the way it is driven, and the
   carrier has eight under it** (`src/game/ships.js` s.jet, s.lift, SWIVEL,
   jetFor; `src/game/ships/jets.js`, new; `src/game/ships/*.js`). Colin: "make

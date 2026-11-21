@@ -15,6 +15,8 @@ import * as THREE from 'three';
 import { DHOW as S, DHOW_HULL } from '../ships.js';
 import { glowTexture } from '../fight.js';
 import { jetPivot, aimJets } from './jets.js';
+import { createGear } from './gear.js';
+import { GEAR } from '../ships.js';
 
 const L = S.length, U0 = -L / 2;
 // the hull at u (0 the stern, 1 the prow): half its width, its sheer (the deck's edge), its depth, the prow's rake
@@ -176,11 +178,14 @@ export function createDhowArt({ lite = false } = {}) {
 
   let open = 0.12;
   setSails(open, 0);
+  // its landing gear (./gear.js): down when it is slow and low, folded away in flight
+  const gear = createGear(body, GEAR.dhow, S.keel, bronze); geos.push(...gear.geos);
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      gear.update(s.gear ?? 1);
       aimJets([jet], s.jet);                                               // its ring of engines points the way it is driven
       // the sails spread when someone takes the helm, and fold up along their yards when it is let be
       const want = aboard ? 1 : 0.12;

@@ -368,6 +368,16 @@ The rest of what he said that day:
   it rises, eased as its speed carries it, least as it sinks.
   Rough: braking or backing, the nozzles do not turn forward (they stay astern,
   dim); the eye, looking up from under the carrier, stands close under its hull.
+- **Landing gear** (done, 21 Nov). Every ship has legs (`ships.js` GEAR: three
+  under the skiff and the dart, four under the dhow and the ark, eight under
+  the carrier; `ships/gear.js` draws a strut, a brace and a foot for each,
+  hinged under the hull). `s.gear`: they come down in 1.2 s when it is slow
+  (under six tenths of its own speed) and its keel is within a few leg-lengths
+  of the water or the ground, and fold back and are put away as it flies off.
+  Down, it rides no lower than its feet: sunk onto the ground, it stands on
+  them (the skiff's keel 0.45 m up, the carrier's 6 m).
+  Rough: the feet do not find uneven ground one by one (the ship stands level
+  over what is under its middle); the ark's legs are long stilts from its spine.
 
 ### The same day, later: the bar in glyphs, the world in liquid glass
 

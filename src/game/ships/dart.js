@@ -13,6 +13,8 @@ import * as THREE from 'three';
 import { DART as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
 import { jetPivot, aimJets } from './jets.js';
+import { createGear } from './gear.js';
+import { GEAR } from '../ships.js';
 
 const L = S.length, U0 = -L / 2, LOZ = 1.6;                     // the section's squareness: 1 a diamond, 2 an ellipse
 // the hull at u (0 the tail, 1 the point): its half-width and its half-height
@@ -118,11 +120,14 @@ export function createDartArt({ lite = false } = {}) {
   }
 
   let open = 1;
+  // its landing gear (./gear.js): down when it is slow and low, folded away in flight
+  const gear = createGear(body, GEAR.dart, S.keel, bronzeTrim); geos.push(...gear.geos);
   return {
     group,
     update(s, { t = 0, dt = 0, aboard = false } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      gear.update(s.gear ?? 1);
       aimJets(jets, s.jet);                                                // its nozzles point the way it is driven
       // the canopy lifts while it waits for a pilot, and shuts over one
       open += ((aboard ? 0 : 1) - open) * (1 - Math.exp(-4 * dt));

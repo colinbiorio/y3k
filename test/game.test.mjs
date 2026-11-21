@@ -2361,7 +2361,7 @@ ok('aboard, the skiff turns toward where the eye looks, drives along its heading
   const y0 = s.p[1]; step({ move: [0, 1], yaw: Math.PI / 2, pitch: 0.5 }, 1); assert.ok(s.p[1] > y0 + 5, 'looking up as it goes, it climbs');
   step({ move: [0, 0], yaw: Math.PI / 2 }, 3); near(Math.hypot(...s.v), 0, 1e-9, 'let be, it slows to a hover');
   const y1 = s.p[1]; step({ move: [0, 0], yaw: Math.PI / 2, up: true }, 1); assert.ok(s.p[1] > y1 + 4, 'rises');
-  step({ move: [0, 0], yaw: Math.PI / 2, down: true }, 8); near(s.p[1], SP.SKIFF.keel, 1e-9, 'and sinks to its keel over the water, no lower');
+  step({ move: [0, 0], yaw: Math.PI / 2, down: true }, 8); near(s.p[1], SP.SKIFF.keel + SP.GEAR.skiff.len, 1e-9, 'and sinks onto its landing gear, its keel that far over the water, no lower');
   // a building in its way: a house a few metres ahead stops it
   const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
   const s2 = SP.placeShip({ p: [0, 0, -8], yaw: 0 }); s2.p[1] = 2; let stopped = false;
@@ -2543,6 +2543,21 @@ ok('the thrusters point the way the ship is driven (Colin, 19 Nov 2026: "make th
   assert.match(read('src/game/ships/carrier.js'), /liftU\.uOn\.value = Math\.min\(1, up\);/, 'as bright as its lift');
 });
 
+ok('landing gear (Colin, 19 Nov 2026: "landing gear would be sick"): down when a ship is slow and low, folded away as it flies off, down again as it comes back; sunk, it stands on its feet; every kind\'s legs fit under it as it hovers', () => {
+  const dt = 1 / 60;
+  for (const k of ['skiff', 'dart', 'dhow', 'ark', 'carrier']) {
+    const S = SP.KIND[k], G = SP.GEAR[k], s = SP.placeShip({ p: [0, 0, 0], yaw: 0 }, () => 0, k);
+    assert.ok(G.len < S.hover - S.keel && S.keel + G.len + G.y > 0 && G.legs.length >= 3, k + ': its legs fit under it as it hovers');
+    assert.equal(s.gear, 1, k + ': put down with its gear down'); const y0 = s.p[1];
+    for (let t = 0; t < 2; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0 }, dt); near(s.p[1], y0, 1e-9, k + ': hovering, its gear does not lift it'); assert.equal(s.gear, 1);
+    for (let t = 0; t < 12; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, dt); near(s.p[1], S.keel + G.len, 1e-9, k + ': sunk, it stands on its feet');
+    SP.setThrottle(s, 3); for (let t = 0; t < 4; t += dt) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0.5 }, dt); assert.equal(s.gear, 0, k + ': flown off, folded away');
+    SP.setThrottle(s, 0); s.p[1] = S.hover; s.v = [0, 0, 0]; s.tilt = 0; let t = 0; while (s.gear < 1 && t < 5) { SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0 }, dt); t += dt; }
+    near(t, SP.GEAR_TIME, 0.05, k + ': slow and low again, down in ' + SP.GEAR_TIME + ' s');
+    const art = read(`src/game/ships/${k}.js`); assert.match(art, new RegExp(`createGear\\(body, GEAR\\.${k}, S\\.keel, `), k + ': drawn'); assert.match(art, /gear\.update\(s\.gear \?\? 1\);/);
+  }
+});
+
 ok('the dhow: twenty-eight metres, put beside the body with its stern alongside; its helm, high on the stern cabin, is taken from the water; heavy, it comes up to speed and turns slowly; its side meets what is solid', () => {
   const D = SP.DHOW, body = B.createBody({ yaw: 0 }); body.p = [0, 0, 0];
   near(D.length, 28, 1e-9, 'about twenty-eight metres long');
@@ -2591,7 +2606,7 @@ ok('the ark: eighty metres, its ring round its middle riding clear of the water;
   near(Math.hypot(...s.v), A.speed, 1e-9, 'then at its speed');
   assert.ok(A.turn < SP.DHOW.turn && A.spin < SP.DHOW.spin && A.speed / A.accel > SP.DHOW.speed / SP.DHOW.accel, 'slower to turn and to come up to speed than the dhow');
   for (let t = 0; t < 4; t += 1 / 60) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, 1 / 60);
-  near(s.p[1], A.keel, 1e-9, 'sunk as low as it goes'); assert.ok(SP.shipPoint(s, [0, -rim, A.ring.z])[1] > 0.3, 'its ring\'s foot still over the water');
+  near(s.p[1], A.keel + SP.GEAR.ark.len, 1e-9, 'sunk as low as it goes, on its gear'); assert.ok(SP.shipPoint(s, [0, -rim, A.ring.z])[1] > 0.3, 'its ring\'s foot still over the water');
   // flown at a house with its middle passing over it but its ring's foot not: caught short of it
   const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
   const h = w.buildings[0], low = A.hover - rim;
@@ -2627,7 +2642,7 @@ ok('the carrier: four hundred metres, five terraces each set in from the one bel
   near(Math.hypot(...s.v), C.speed, 1e-9, 'then at its speed');
   assert.ok(C.turn < SP.ARK.turn && C.spin < SP.ARK.spin && C.speed / C.accel > SP.ARK.speed / SP.ARK.accel, 'slower to turn and to come up to speed than the ark');
   for (let t = 0; t < 12; t += 1 / 60) SP.stepShip(s, { move: [0, 0], yaw: Math.PI, pitch: 0, down: true }, 1 / 60);
-  near(s.p[1], C.keel, 1e-9, 'sunk as low as it goes'); assert.ok(SP.shipPoint(s, [T[0].hw, T[0].y0, 0])[1] > 0.5, 'its underside still over the water');
+  near(s.p[1], C.keel + SP.GEAR.carrier.len, 1e-9, 'sunk as low as it goes, on its gear'); assert.ok(SP.shipPoint(s, [T[0].hw, T[0].y0, 0])[1] > 0.5, 'its underside still over the water');
   // flown low at a house with its middle passing well clear but its side not: caught short of it
   const w = createWorld(), b2 = B.createBody({ yaw: 0 }); b2.world = w; w.build(b2, 'house'); w.update(10);
   const h = w.buildings[0], low = C.keel + T[0].y0;

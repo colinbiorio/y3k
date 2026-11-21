@@ -18,6 +18,8 @@ import * as THREE from 'three';
 import { ARK as S } from '../ships.js';
 import { glowTexture } from '../fight.js';
 import { jetPivot, aimJets } from './jets.js';
+import { createGear } from './gear.js';
+import { GEAR } from '../ships.js';
 import { gatherer } from '../buildings/parts.js';
 
 const RG = S.ring, DM = S.dome, EN = S.engines, TAU = 2 * Math.PI;
@@ -189,11 +191,14 @@ export function createArkArt({ lite = false } = {}) {
     const glow = new THREE.Sprite(gm); glow.position.set(0, 0, -0.4); jet.add(glow); glows.push(glow);
   }
 
+  // its landing gear (./gear.js): down when it is slow and low, folded away in flight
+  const gear = createGear(body, GEAR.ark, S.keel, bronze); geos.push(...gear.geos);
   return {
     group,
     update(s, { t = 0, aboard = false, night = 0 } = {}) {
       group.position.set(s.p[0], s.p[1] + (s.bob || 0), s.p[2]);           // its bob is its own (ships.js BOB): what stands on it rides it
       body.rotation.set(s.tilt, s.yaw, s.bank);
+      gear.update(s.gear ?? 1);
       aimJets(jets, s.jet);                                                // its nozzles point the way it is driven
       ringG.rotation.z = (t * RG.turn) % TAU;   // the ring turns, once a minute, whoever is aboard
       swirlU.uTime.value = t; swirlU.uOn.value = Math.min(1, s.thrust);
