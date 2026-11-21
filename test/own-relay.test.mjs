@@ -340,6 +340,27 @@ await ok('no job is larger than y3kode takes: the prompt is cut to fit, oldest t
   assert.equal(job2.image, 'frame', 'the frame rides with the job (2026-10-19), and the words say it is there');
   relay.answer(member, job2.id, { ok: true, text: 'ok' });
   await c2;
+  // a picture the person attached is not the camera, and the words say so (2026-11-21); the page of a y3kode
+  // that cannot see swaps either line for its "cannot see it" (src/own-brain.js)
+  const c3 = p.chat(null, 'm', [{ role: 'user', content: 'look at this' }], 'photo', false, { attached: true });
+  const job3 = jobsOf(a).at(-1);
+  assert.equal(job3.prompt, '(A picture comes with this message: one they chose to show you, not the camera.)\nTheir newest message:\nlook at this');
+  assert.equal(job3.image, 'photo');
+  relay.answer(member, job3.id, { ok: true, text: 'ok' });
+  await c3;
+  // one too large to carry is not carried, and is not said to be: the words said a frame "comes with this
+  // message" over a turn whose picture had been let go
+  const c4 = p.chat(null, 'm', [{ role: 'user', content: 'and this' }], 'A'.repeat(relayModule.MAX_IMAGE + 1), false, {});
+  const job4 = jobsOf(a).at(-1);
+  assert.equal(job4.image, undefined);
+  assert.ok(job4.prompt.startsWith('(A camera frame came with this message, but this connection carries text only'), job4.prompt.slice(0, 80));
+  relay.answer(member, job4.id, { ok: true, text: 'ok' });
+  await c4;
+  assert.equal(toPrompt([{ role: 'user', content: 'x' }], 'p', MAX_PROMPT, { carried: false, attached: true }),
+    '(A picture came with this message, one they chose to show you, but this connection carries text only, so you cannot see it.)\nTheir newest message:\nx');
+  // the page's copies of the four lines are the relay's, letter for letter
+  const PAGE = (await import('node:fs')).readFileSync(new URL('../src/own-brain.js', import.meta.url), 'utf8');
+  for (const line of [relayModule.SEEN, relayModule.UNSEEN, relayModule.SHOWN, relayModule.UNSHOWN]) assert.ok(PAGE.includes(`'${line}'`), `the page does not know the line: ${line}`);
   // an ordinary conversation is not touched
   assert.equal(toPrompt([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'how?' }], null),
     'The conversation so far:\nThem: hi\nYou: hello\n\nTheir newest message:\nhow?');

@@ -236,16 +236,21 @@ export const UNSEEN = '(A camera frame came with this message, but this connecti
 // Since 2026-10-19 the frame itself travels with the turn (a y3kode that can
 // see says so in its hello: senses), and the words say what it is instead.
 export const SEEN = '(A camera frame comes with this message: that is them, right now.)';
+// A PICTURE THEY CHOSE (21 Nov 2026): the box by the message attaches a picture
+// too, and that is not the camera and not them right now. A turn that carries
+// one says which it is (the page says so: `attached`, src/brain.js).
+export const SHOWN = '(A picture comes with this message: one they chose to show you, not the camera.)';
+export const UNSHOWN = '(A picture came with this message, one they chose to show you, but this connection carries text only, so you cannot see it.)';
 // At most `max` characters (MAX_PROMPT: what y3kode takes). The newest message
 // always goes, cut to its newest end if it alone is too long; the turns before
 // it ride along newest first while they fit, so a long conversation loses its
 // oldest turns first.
-export function toPrompt(messages, image, max = MAX_PROMPT, { carried = false } = {}) {
+export function toPrompt(messages, image, max = MAX_PROMPT, { carried = false, attached = false } = {}) {
   const turns = (Array.isArray(messages) ? messages : [])
     .map((m) => ({ role: m?.role, text: textOf(m?.content) }))
     .filter((t) => t.text);
   const last = turns.length && turns[turns.length - 1].role === 'user' ? turns.pop() : null;
-  const tail = image ? [carried ? SEEN : UNSEEN, NEWEST] : [NEWEST];
+  const tail = image ? [attached ? (carried ? SHOWN : UNSHOWN) : (carried ? SEEN : UNSEEN), NEWEST] : [NEWEST];
   const fixed = tail.join('\n').length + 1;
   let newest = last ? last.text : SILENCE;
   if (fixed + newest.length > max) newest = newest.slice(newest.length - Math.max(0, max - fixed));
@@ -649,8 +654,10 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
     // the route's options carry what only it knows: whose machine asked
     // (source), what it holds while it waits (holds), the translator's spare
     // turn, and its day's count (admit)
-    const pic = (image) => (typeof image === 'string' ? image : typeof image?.data === 'string' ? image.data : null);
-    const run = (paint, opts, messages, image, signal, onPart) => ask(user, { system: systemFor(paint, opts), prompt: toPrompt(messages, image, MAX_PROMPT, { carried: !!pic(image) }), effort: effortFor(opts), signal,
+    // one too large to carry (ask, MAX_IMAGE) is not carried, and the words say so: they said a frame
+    // "comes with this message" over a turn whose picture ask() had let go
+    const pic = (image) => { const s = typeof image === 'string' ? image : typeof image?.data === 'string' ? image.data : null; return s && s.length <= MAX_IMAGE ? s : null; };
+    const run = (paint, opts, messages, image, signal, onPart) => ask(user, { system: systemFor(paint, opts), prompt: toPrompt(messages, image, MAX_PROMPT, { carried: !!pic(image), attached: opts?.attached === true }), effort: effortFor(opts), signal,
       spare: opts?.spare, source: opts?.source, holds: opts?.holds, admit: opts?.admit, onPart, image: pic(image) });
     return {
       detect: () => false,

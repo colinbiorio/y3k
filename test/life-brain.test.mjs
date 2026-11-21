@@ -376,7 +376,7 @@ await ok('every door that may think on the sign-in tells the relay whose machine
   // one a body could name: its source, and its body's bytes as read
   assert.match(RELAY, /source: opts\?\.source/);
   assert.match(RELAY, /holds: opts\?\.holds/);
-  assert.match(SERVER, /^const bodyHeld = \(req, letGo = 0\) => Math\.max\(0, \(BODY_BYTES\.get\(req\) \|\| 0\) - letGo\);$/m);
+  assert.match(SERVER, /^const bodyHeld = \(req\) => BODY_BYTES\.get\(req\) \|\| 0;$/m);
   const read = fnSrc('readJsonBody');
   assert.match(read, /\n\s*BODY_BYTES\.set\(req, size\);\n/);
   assert.ok(read.indexOf('BODY_BYTES.set(req, size)') > read.indexOf('for await (const c of req)'), 'the bytes are noted before the body is read');
@@ -384,19 +384,19 @@ await ok('every door that may think on the sign-in tells the relay whose machine
     chess: [route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'), /own\.p\.chat\(own\.key, useModel, \[\{ role: 'user', content: userMsg \}\], null, false,\n\s*\{ system: sys, raw: true, effort: effort \|\| 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     match: [route('// ---- think: one metered move', '// ===== '), /own\.p\.chat\(own\.key, useModel, \[\{ role: 'user', content: mkUser\(rejected\) \}\], null, false,\n\s*\{ system: sys, raw: true, effort: b\.effort \|\| 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     speak: [route("req.url === '/api/speak'", "req.url === '/api/brain')"), /brain\.p\.chat\(brain\.key, brain\.model, \[\{ role: 'user', content: prompt \}\], null, false, withClock\(\{ system, raw: true, noThink: true, source: sourceOf\(req\), holds: bodyHeld\(req\) \}, b\.tz\)\);/],
-    // a picture is only noted on the sign-in: let go before the turn waits, and not counted
-    brain: [brainRoute, /const picture = typeof image === 'string' \? image\.length : 0;\n\s*if \(image\) image = true;\n\s*const o = \{ \.\.\.opts, signal: gone\.signal, source: sourceOf\(req\), holds: bodyHeld\(req, picture\) \};\n\s*const out = tendMode\n\s*\? await own\.p\.chat\(null, own\.model, tendMessages, image, paint, o\)\n\s*: await chatWithRescue\(own\.p, null, own\.model, messages, image, paint, o\);/],
+    // a picture goes with the turn on the sign-in (2026-11-21: it was let go here, and only noted), so the
+    // whole body is counted, and the relay is told when it is one the person attached
+    brain: [brainRoute, /const o = \{ \.\.\.opts, signal: gone\.signal, source: sourceOf\(req\), holds: bodyHeld\(req\), attached: attached === true \};\n\s*const out = tendMode\n\s*\? await own\.p\.chat\(null, own\.model, tendMessages, image, paint, o\)\n\s*: await chatWithRescue\(own\.p, null, own\.model, messages, image, paint, o\);/],
     handoff: [handoffRoute, /\} else if \(own\) \{\n\s*out = await chatWithRescue\(own\.p, null, own\.model, messages, null, false, \{ \.\.\.opts, source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     voice: [voiceRoute, /const o = \{ system, noThink: true, raw: true, source: sourceOf\(req\), holds: bodyHeld\(req\) \};[\s\S]*await brain\.p\.chat\(brain\.key, model, \[\{ role: 'user', content: text \}\], null, false, o\);/],
     computer: [route("reqPath === '/api/computer/step'", "reqPath === '/api/voice/self'"), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: userMsg \}\], image, false,\n\s*\{ system: sys, raw: true, effort: 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     selfVoice: [route("reqPath === '/api/voice/self'", "req.url === '/api/voice/design'"), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: 'Design your own voice\.' \}\], null, false,\n\s*\{ system: sys, raw: true, effort: 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     twenty: [route("reqPath === '/api/twenty'", '// ===== THE WORLD'), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: userMsg \}\], null, false,\n\s*\{ system: sys, raw: true, effort, source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
-    stream: [streamRoute, /pid = own\.pid; useKey = null; useModel = own\.model; ownP = own\.p;\n\s*opts\.source = sourceOf\(req\);\n(\s*\/\/.*\n)*\s*const picture = typeof image === 'string' \? image\.length : 0;\n\s*if \(image\) image = true;\n\s*opts\.holds = bodyHeld\(req, picture\);\n/],
+    stream: [streamRoute, /pid = own\.pid; useKey = null; useModel = own\.model; ownP = own\.p;\n\s*opts\.source = sourceOf\(req\);\n(\s*\/\/.*\n)*\s*opts\.holds = bodyHeld\(req\);\n\s*opts\.attached = attached === true;\n/],
   };
   for (const [name, [src, call]] of Object.entries(doors)) assert.match(src, call, `${name} does not tell the relay whose machine asked, and what it holds`);
-  // the only picture let go is on the sign-in: a key's turn still sees it
-  assert.equal(codeOf(SERVER).split('if (image) image = true;').length - 1, 2);
-  assert.ok(brainRoute.indexOf('if (image) image = true;') > brainRoute.indexOf('if (own) {'), '/api/brain lets a picture go before it is on the sign-in');
+  // no door lets a picture go any more: on the sign-in, as on a key, the turn carries it
+  assert.equal(codeOf(SERVER).split('image = true;').length - 1, 0, 'a door turns the picture into a bare note again: the sign-in is told one came and never sees it');
   // the stream's every call on the sign-in carries those options
   assert.match(streamRoute, /\(ownP \|\| BRAIN_PROVIDERS\[pid\]\)\.chatStream\(useKey, useModel, messages, \(c\) => parser\.push\(c\), image, paint, ac\.signal, opts\);/);
   assert.match(streamRoute, /\(ownP \|\| BRAIN_PROVIDERS\[pid\]\)\.chat\(useKey, useModel, messages, image, paint, \{ \.\.\.opts, noThink: true, signal: ac\.signal \}\);/);
@@ -1141,7 +1141,7 @@ console.log('\nnothing counts everyone together any more:');
       for (const h of [...crowd, tenth]) await h.page.close();
     });
 
-    await ok('a turn on the sign-in counts what its route holds while it waits: a long conversation counts whole against what the relay holds for everyone, and a picture, only noted, is let go first and counts for nothing', async () => {
+    await ok('a turn on the sign-in counts what its route holds while it waits: a long conversation counts whole against what the relay holds for everyone, and so does a picture, which goes with the turn to the page (it was let go first, and only noted)', async () => {
       // five accounts on one machine, each asking two turns at once, and
       // nothing else out on the site
       const MACHINE = { 'x-forwarded-for': '198.51.100.21' };
@@ -1182,18 +1182,45 @@ console.log('\nnothing counts everyone together any more:');
       for (const a of long.filter((x) => x.res)) assert.deepEqual(a.res, { available: false, reason: 'upstream', why: 'own-full', provider: 'own' });
       await answerFrom(before);
       for (const a of long) assert.ok((await a.done).available === true || a.res.why === 'own-full', JSON.stringify(a.res));
-      // A picture of 900KB, with a word: the sign-in is told one came, and
-      // never sees it, so the route lets it go before the turn waits, and it is
-      // counted by nothing. All ten go.
+      // A picture of 900KB, with a word. It goes with the turn (2026-11-21):
+      // each job that reaches a page carries the picture itself, and the
+      // words say a frame comes with it, not that one came and cannot be
+      // seen. So the door holds it while the turn waits and it is counted
+      // like the conversation it rides beside: not all ten at once. (It was
+      // let go before the turn waited and counted by nothing, all ten going,
+      // because the sign-in was only ever told that a picture had come.)
+      const PIC = 'A'.repeat(900 * 1000);
       const seen = people.map((h) => h.page.jobs().length);
-      const pictures = askAll({ messages: [{ role: 'user', content: 'look at this' }], image: 'A'.repeat(900 * 1000) });
-      assert.ok(await until(() => out() - went >= 10 || pictures.some((a) => a.res)), `${out() - went} pictures out`);
+      const letGo = () => people.reduce((n, h) => n + h.page.cancels().length, 0);
+      const went2 = out(), gone2 = letGo();
+      const pictures = askAll({ messages: [{ role: 'user', content: 'look at this' }], image: PIC });
+      const held2 = () => (out() - went2) - (letGo() - gone2);
+      assert.ok(await until(() => held2() + pictures.filter((a) => a.res).length >= 10), `${held2()} pictures held, ${pictures.filter((a) => a.res).length} answered`);
       await sleep(200);
-      assert.deepEqual(pictures.filter((a) => a.res).map((a) => a.res), [], 'a picture let go before the turn waits was counted');
-      assert.equal(out() - went, 10);
-      for (const [i, h] of people.entries()) for (const j of h.page.jobs().slice(seen[i])) assert.match(j.prompt, /A camera frame came with this message/);
+      // (ten of 900KB are 9MB, and the relay holds 8MB for everyone: nine at most)
+      assert.ok(held2() >= 5 && held2() <= 9, `${held2()} of ten pictures from one machine were held at once: a picture that goes with the turn was not counted`);
+      for (const a of pictures.filter((x) => x.res)) assert.deepEqual(a.res, { available: false, reason: 'upstream', why: 'own-full', provider: 'own' });
+      const reached = people.flatMap((h, k) => h.page.jobs().slice(seen[k]));
+      assert.ok(reached.length >= 5, `${reached.length} picture turns reached a page`);
+      for (const job of reached) {
+        assert.equal(job.image, PIC, 'the picture did not reach the page: the door let it go, and the sign-in was only told one came');
+        assert.match(job.prompt, /A camera frame comes with this message: that is them, right now\./);
+        assert.doesNotMatch(job.prompt, /cannot see it/);
+      }
       await answerFrom(seen);
-      for (const a of pictures) assert.equal((await a.done).available, true, JSON.stringify(a.res));
+      for (const a of pictures) assert.ok((await a.done).available === true || a.res.why === 'own-full', JSON.stringify(a.res));
+      // one the person attached says so, at both doors: it is not the camera, and not them right now
+      const mine = people[0];
+      const one = await mine.page.turn(() => T.post('/api/brain', { messages: [{ role: 'user', content: 'and this one' }], image: PIC, attached: true }, mine.cookie, MACHINE).then((r) => r.json()),
+        { ok: true, text: '[calm] I see it.', usage: { in: 5, out: 2 } });
+      assert.equal(one.job.image, PIC);
+      assert.match(one.job.prompt, /A picture comes with this message: one they chose to show you, not the camera\./);
+      assert.match(one.res.speech || '', /I see it/, JSON.stringify(one.res));
+      const two = await mine.page.turn(() => T.post('/api/brain/stream', { messages: [{ role: 'user', content: 'and this, as it comes' }], image: PIC, attached: true }, mine.cookie, MACHINE).then((r) => r.text()),
+        { ok: true, text: '[calm] I see that one too.', usage: { in: 5, out: 2 } });
+      assert.equal(two.job.image, PIC, 'the stream door let the picture go');
+      assert.match(two.job.prompt, /A picture comes with this message: one they chose to show you, not the camera\./);
+      assert.match(two.res, /I see that one too/);
       for (const h of people) await h.page.close();
     });
 
