@@ -280,11 +280,12 @@ export function purkinje(rgb, level, adapted = 0, out = [0, 0, 0]) {
 }
 // a point seen by rods alone: white under the shift, as linear sRGB of unit luminance
 export const ROD_WHITE = Object.freeze(xyzRgb(1, 1, 2, [0, 0, 0]));
-// TWINKLING: the air's turbulence makes a star's light flicker, the more the more air it is seen through: by A. T.
-// Young's (1967) law, as the air mass to the 1.75th power. For an eye (a 7 mm pupil, a tenth of a second) the flicker
-// is taken as 15% at the zenith, held under 60%; low down the colours flicker apart (the air spreads them: a rising
-// Sirius flashes). Planets, which are discs, do not twinkle.
-export const TWINKLE = Object.freeze({ zenith: 0.15, most: 0.6, power: 1.75, hz: 4 });
+// TWINKLING: the air's turbulence makes a star's light flicker, the more the more air it is seen through: as the air
+// mass to the 1.75th power (A. T. Young's 1967 law). Its size for an eye is chosen, not measured: Young's law, and the
+// measurements since (D. Dravins et al., PASP 109, 173, 1997), are for telescopes, and taken down to a 7 mm pupil they
+// give a quarter at the zenith, which is not what an eye sees; here a tenth at the zenith, held under a half. Low down
+// the colours flicker apart (the air spreads them: a rising Sirius flashes). Planets, which are discs, do not twinkle.
+export const TWINKLE = Object.freeze({ zenith: 0.10, most: 0.5, power: 1.75, hz: 4 });
 export const airMass = (up) => 1 / (Math.max(up, 0) + 0.025 * Math.exp(-11 * Math.max(up, 0)));      // Rozenberg's
 export const twinkle = (up) => Math.min(TWINKLE.most, TWINKLE.zenith * airMass(up) ** TWINKLE.power);
 

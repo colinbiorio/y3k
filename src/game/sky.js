@@ -570,7 +570,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     // each veil is drawn out to where it falls under a two-hundredth of the sky's own brightness as shown (at night
     // half of one of the screen's 255 steps; the Sun's, by day, still reaches the 60 degrees it always did)
     const least = 5e-3 * exposure * adapted;
-    SHARED.uAirReach.value = Math.cos(reach(luminance(GLARE_U.value), least, SHARED.uAirHeld.value) * D2R);
+    SHARED.uAirReach.value = Math.cos(reach(luminance(GLARE_U.value.toArray(v3)), least, SHARED.uAirHeld.value) * D2R);
     // the tables: the sky as seen when its light or the eye's height has moved; the air to the land every frame
     LOOK.uH.value = U.sky.uH.value = U.moon.uH.value = L.height;
     if (moved(skyAt, L.alt, L.height, 0.01) && (SKYGAIN.value > 1e-6 || !skyAt)) { U.sky.uSunUp.value = s[1]; U.sky.uNorm.value = 1 / per; run(mSky, skyRT); skyAt = { alt: L.alt, h: L.height, per }; }
