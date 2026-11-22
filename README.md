@@ -263,6 +263,32 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-22** — **The true sky over the island, its first part: the air and
+  the Sun, behind a switch** (`src/game/sky.js`, `src/game/solar/clock.js`,
+  `air.js`, `daylight.js`, new; `island/island.js`, `view.js`;
+  `test/sky.test.mjs`, 18 checks). Colin: "model the solar system as accurately
+  as possible and make it explorable ... ultra-high quality experience rather
+  than quantity of output". Add `?sky=true` to the address and Lord Howe
+  Island stands under the sky that is over it at this moment: the Sun where
+  the clockwork sees it, a disc of its true size, limb-darkened, reddened and
+  flattened on the horizon; the air by S. Hillaire's method with the real
+  air's numbers (the standard atmosphere, a clean sea haze, the ozone layer),
+  in lux and cd/m2 from noon to the end of twilight; the land, the sea, the
+  buildings, the ships and the bodies lit by them and standing in that air;
+  and the eye: a bright scene drawn bright and a dark one dark (Krawczyk's
+  key), with one curve (Reinhard's) that holds the sand under white and keeps
+  the sky a luminous blue. Without the switch nothing has changed: the page
+  fetches none of the sky's files, and twenty moments of the void, the island,
+  a house and a ship, drawn by main and by this with the same frames, are the
+  same pictures. It stays off until the night and the Moon are made.
+  Measured: the light on level ground at the end of civil twilight 2.8 lux
+  (the Explanatory Supplement: 3.4); the GPU's sky within 0.3% of the model's;
+  the Sun's disc, through a telescope view, 0.855 as high as wide half a
+  degree up (refraction: 0.856) and within 1% of its true width; sixty frames
+  a second with it on. [`SOLAR.md`](SOLAR.md) "Step 2, first part" has the
+  method, the sources and what is approximated; GAME.md says what changed in
+  the look and why.
+
 - **2026-11-21** (later) — **Landing gear** (`src/game/ships.js` GEAR, s.gear;
   `src/game/ships/gear.js`, new). Colin: "landing gear would be sick." Each
   ship's legs come down when it is slow and low, and fold away as it flies
