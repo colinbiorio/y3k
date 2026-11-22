@@ -305,8 +305,12 @@ ok('the eye: a bright scene is drawn bright and a dark one dark (Krawczyk\'s key
 
 ok('the eye\'s own veil round the Sun (the CIE\'s disability glare) falls off as it should', () => {
   near(A.veil(1), 10 + (5 + 0.05) * (1 + (30 / 62.5) ** 4) + 0.00125, 1e-9);
-  assert.equal(A.veil(0.01), A.veil(0.1), 'nearer than a tenth of a degree it is held');
-  let was = Infinity; for (const t of [0.1, 0.5, 1, 3, 10, 30, 60, 100]) { assert.ok(A.veil(t) < was); was = A.veil(t); }
+  // the equation is for a point: inside the Sun's disc it is held at its value at the limb (not at 0.1 degrees, where
+  // it drew a spot in the disc's middle), so it is the same all over the disc and goes on unbroken outside it
+  near(A.GLARE.held, Math.atan(695700 / 149597870.7) * 180 / Math.PI, 2e-4, 'held at the Sun\'s mean angular radius');
+  for (const t of [0, 0.01, 0.1, 0.2, 0.26]) assert.equal(A.veil(t), A.veil(A.GLARE.held), 'held inside the disc, at ' + t);
+  near(A.veil(A.GLARE.held * 1.0001) / A.veil(A.GLARE.held), 1, 1e-3, 'and unbroken at the limb');
+  let was = Infinity; for (const t of [0.27, 0.5, 1, 3, 10, 30, 60, 100]) { assert.ok(A.veil(t) < was); was = A.veil(t); }
   within(A.veil(10), 0.05, 0.08, 'per lux, ten degrees off'); within(A.veil(30) / (10 / 900), 0.5, 0.9, 'Stiles and Holladay\'s 10 / angle^2, near enough, at 30');
 });
 

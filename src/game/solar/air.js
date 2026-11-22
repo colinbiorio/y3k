@@ -367,8 +367,11 @@ export function meter(samples, weights = null) { let s = 0, n = 0, i = 0; for (c
 // The eye's own veil round a bright light (disability glare): the luminance laid over the scene per lux at the eye,
 // `deg` degrees from the light. The CIE's general disability glare equation (CIE 146:2002, after J. J. Vos, 1999):
 // 10/θ^3 + (5/θ^2 + 0.1 p/θ)(1 + (A/62.5)^4) + 0.0025 p, for 0.1 to 100 degrees, age A and eye pigment p.
-export const GLARE = Object.freeze({ age: 30, pigment: 0.5 });
-export function veil(deg) { const t = Math.max(deg, 0.1), k = 1 + (GLARE.age / 62.5) ** 4; return 10 / (t * t * t) + (5 / (t * t) + 0.1 * GLARE.pigment / t) * k + 0.0025 * GLARE.pigment; }
+// The equation is for a point, and the Sun is not one: nearer its middle than its limb (`held`, its mean angular
+// radius in degrees) the veil is held at its value at the limb. Held at 0.1 degrees instead, it rose 18 times inside
+// the disc and drew a bright spot a fifth of a degree across in the disc's middle, seen through a dark glass.
+export const GLARE = Object.freeze({ age: 30, pigment: 0.5, held: 0.2666 });
+export function veil(deg) { const t = Math.max(deg, GLARE.held), k = 1 + (GLARE.age / 62.5) ** 4; return 10 / (t * t * t) + (5 / (t * t) + 0.1 * GLARE.pigment / t) * k + 0.0025 * GLARE.pigment; }
 
 // ------------------------------------------------------------------------------------------- the same, for the GPU
 // One chunk of GLSL that sky.js puts in front of its passes: the medium, the two tables' look-ups, the shadow's

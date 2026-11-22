@@ -76,7 +76,7 @@ vec3 airUnshow(vec3 c) {
 const VEIL_GLSL = `
 vec3 airVeil(vec3 d, vec3 sun, vec3 glare) {
   if (dot(d, sun) < 0.5) return vec3(0.0);
-  float t = max(degrees(2.0 * asin(min(1.0, 0.5 * length(d - sun)))), 0.1);
+  float t = max(degrees(2.0 * asin(min(1.0, 0.5 * length(d - sun)))), ${f(GLARE.held)});      // held inside the disc (air.js GLARE)
   float v = 10.0 / (t * t * t) + (5.0 / (t * t) + ${f(0.1 * GLARE.pigment)} / t) * ${f(1 + (GLARE.age / 62.5) ** 4)} + ${f(0.0025 * GLARE.pigment)};
   return glare * v * (1.0 - smoothstep(40.0, 60.0, t));
 }`;
