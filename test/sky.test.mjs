@@ -84,16 +84,21 @@ ok('the clear air thins with height as the U.S. Standard Atmosphere (1976) does'
 
 ok('the air\'s depth straight up is the measured one: Rayleigh, the sea\'s haze, the ozone layer', () => {
   const d = A.AIR.rayleigh.depth;
-  near(d[1], 0.0973, 0.0005, 'Rayleigh at 550 nm (Hansen and Travis; Bodhaine et al. give 0.0973 at 1013 hPa)');
-  near(d[0], 0.0411, 0.0005, '680 nm'); near(d[2], 0.2429, 0.001, '440 nm');
+  near(A.rayleighDepth(0.55), 0.0973, 0.0002, 'Rayleigh at 550 nm (Hansen and Travis; Bodhaine et al. give 0.0973 at 1013 hPa)');
+  assert.deepEqual(A.WAVES, [0.611, 0.549, 0.464], 'the screen\'s own red, green and blue');
+  near(d[0], 0.0634, 0.0005, '611 nm'); near(d[1], 0.0981, 0.0005, '549 nm'); near(d[2], 0.1952, 0.001, '464 nm');
+  // ozone: 300 Dobson units; its cross-sections between the bins of the measured table (strongest in the orange)
+  near(A.ozoneCross(0.605), 5.019e-25, 1e-30, 'a bin\'s middle is its own value'); near(A.ozoneCross(0.55), (3.091e-25 + 3.5e-25) / 2, 1e-30, 'between two');
+  for (let c = 0; c < 3; c += 1) near(A.AIR.ozone.absorb[c] * 15, A.ozoneCross(A.WAVES[c]) * 300 * 2.687e20, 1e-9, 'the layer holds 300 Dobson units: its depth is the cross-section times the molecules over a square metre');
+  assert.ok(A.AIR.ozone.absorb[0] > A.AIR.ozone.absorb[1] && A.AIR.ozone.absorb[1] > 5 * A.AIR.ozone.absorb[2], 'it takes red and green and leaves blue');
   assert.equal(A.AIR.mie.depth, 0.06); near(A.AIR.mie.extinct * A.AIR.mie.scale, 0.06, 1e-12, 'the haze');
   near(A.AIR.ground, 6371.008, 0.001, 'the Earth\'s mean radius, from bodies.js');
   // the table against the closed form: Rayleigh's depth, the haze's, 15 km of ozone at its peak
   const want = [0, 1, 2].map((c) => d[c] + 0.06 * (1 - Math.exp(-100 / 1.2)) + A.AIR.ozone.absorb[c] * 15);
   const T = A.transmittance(0, 1), od = A.opticalDepth(0, 1);
   for (let c = 0; c < 3; c += 1) { near(od[c], want[c], 2e-4, 'the integral, colour ' + c); near(-Math.log(T[c]), want[c], 1.5e-3, 'the table, colour ' + c); }
-  near(A.luminance(T), 0.838, 0.004, 'a Sun overhead keeps 84% of its light');
-  measured.push(`depth straight up (680, 550, 440 nm): ${want.map((x) => x.toFixed(4)).join(', ')}; a Sun overhead arrives with ${(A.luminance(T) * 100).toFixed(1)}% of its light`);
+  within(A.luminance(T), 0.82, 0.85, 'a Sun overhead keeps five sixths of its light');
+  measured.push(`depth straight up (611, 549, 464 nm): ${want.map((x) => x.toFixed(4)).join(', ')}; a Sun overhead arrives with ${(A.luminance(T) * 100).toFixed(1)}% of its light`);
 });
 
 ok('the transmittance table: grazing the sea it agrees with a slow sum, and with the air mass people measure', () => {
@@ -144,7 +149,7 @@ ok('the Sun above the air: the solar constant times the efficacy of sunlight, by
   const L = A.sunLuminance(133300, 0.2666); within(L, 1.9e9, 2.0e9, 'cd/m2');
   for (const a of A.SUN.limb) { let s = 0; const n = 4000; for (let i = 0; i < n; i += 1) { const r = (i + 0.5) / n, mu = Math.sqrt(1 - r * r); s += (a + 2) / 2 * Math.pow(mu, a) * 2 * r / n; } near(s, 1, 2e-3, 'the darkened disc sends what the plain one would'); }
   assert.ok(A.SUN.limb[2] > A.SUN.limb[1] && A.SUN.limb[1] > A.SUN.limb[0], 'the limb is redder than the middle');
-  measured.push(`the Sun above the air at 1 au: ${Math.round(A.sunIlluminance(AU)).toLocaleString('en-US')} lux; its disc's mean luminance ${sig(L)} cd/m2; limb darkening exponents (680, 550, 440 nm) ${A.SUN.limb.map((x) => x.toFixed(3)).join(', ')}`);
+  measured.push(`the Sun above the air at 1 au: ${Math.round(A.sunIlluminance(AU)).toLocaleString('en-US')} lux; its disc's mean luminance ${sig(L)} cd/m2; limb darkening exponents (611, 549, 464 nm) ${A.SUN.limb.map((x) => x.toFixed(3)).join(', ')}`);
 });
 
 const D = createDaylight({ lat: LAT, lon: LON });
@@ -200,16 +205,18 @@ ok('the zenith and the light on level ground: noon, a low Sun, sunset, the end o
   }
 });
 
-ok('the light\'s colour: a high Sun is nearly white, a low one reddens; the zenith is blue, and bluer still in twilight', () => {
+ok('the light\'s colour: a high Sun is nearly white, a low one reddens; the zenith is the sky\'s own blue, and deeper in twilight', () => {
   const hue = (c) => [c[0] / c[1], c[2] / c[1]];
-  const noon = hue(D.at(NOON, 2).direct); within(noon[0], 1.03, 1.12, 'red over green at noon'); within(noon[1], 0.82, 0.93, 'blue over green at noon');
+  const noon = hue(D.at(NOON, 2).direct); within(noon[0], 1.0, 1.06, 'red over green at noon'); within(noon[1], 0.88, 0.97, 'blue over green at noon');
   let was = noon;
   for (const alt of [30, 10, 3, 0.5]) { const h = hue(D.at(find(alt, NOON, NOON + 8 * 3600e3), 2).direct); assert.ok(h[0] > was[0] && h[1] < was[1], 'redder at ' + alt); was = h; }
-  within(was[0], 5, 40, 'on the horizon the red is many times the green');
-  D.at(NOON + 4 * 3600e3, 2); const day = hue(D.toward([0, 1, 0])); within(day[1], 1.5, 2.6, 'the zenith by day: blue over green'); within(day[0], 0.4, 0.8, 'red over green');
+  within(was[0], 1.8, 5, 'on the horizon the red is twice the green and more'); within(was[1], 0.01, 0.3, 'and the blue is nearly gone');
+  // a blue sky is a daylight of 15,000 to 25,000 K (the CIE's daylight locus: x 0.261 to 0.250, y 0.270 to 0.255):
+  // in the screen's own numbers, red over green 0.73 to 0.67 and blue over green 1.67 to 1.89
+  D.at(NOON + 4 * 3600e3, 2); const day = hue(D.toward([0, 1, 0])); within(day[0], 0.6, 0.85, 'the zenith by day: red over green'); within(day[1], 1.45, 2.05, 'blue over green');
   D.at(find(-6, NOON, NOON + 9 * 3600e3), 2); const dusk = hue(D.toward([0, 1, 0]));
-  assert.ok(dusk[1] > day[1] * 1.3, 'ozone takes the green and red out of twilight: the zenith is bluer than by day');
-  measured.push(`the Sun's own colour at the ground (red and blue over green): noon ${noon.map((x) => x.toFixed(2)).join(', ')}; seen half a degree up ${was.map((x) => x.toFixed(2)).join(', ')}; the zenith by day ${day.map((x) => x.toFixed(2)).join(', ')}, at the end of civil twilight ${dusk.map((x) => x.toFixed(2)).join(', ')}`);
+  assert.ok(dusk[1] > day[1] * 1.3 && dusk[0] < day[0], 'ozone takes the red and green out of twilight: the zenith is a deeper blue than by day, not a purple');
+  measured.push(`the Sun's own colour at the ground (red and blue over green): noon ${noon.map((x) => x.toFixed(2)).join(', ')}; seen half a degree up ${was.map((x) => x.toFixed(2)).join(', ')}; the zenith by day ${day.map((x) => x.toFixed(2)).join(', ')} (a blue sky of 15,000 to 25,000 K on the CIE's daylight locus is 0.73 to 0.67, 1.67 to 1.89), at the end of civil twilight ${dusk.map((x) => x.toFixed(2)).join(', ')}`);
 });
 
 ok('the Earth\'s shadow rises opposite a set Sun, with the pink band over it (the Belt of Venus)', () => {
@@ -218,12 +225,15 @@ ok('the Earth\'s shadow rises opposite a set Sun, with the pink band over it (th
   const low = A.luminance(look(2)), band = A.luminance(look(12)), high = A.luminance(look(40));
   assert.ok(band > low * 1.8, `the band (${band}) over the shadow (${low})`);
   assert.ok(band > high * 1.2, 'and the band is brighter than the sky higher up');
-  // the band is pink: it is lit by light that has lost its blue on a long way through the air; the shadow is grey-blue
-  const pink = look(8), grey = look(3);
-  assert.ok(pink[0] / pink[2] > 1.6 && pink[0] / pink[2] > grey[0] / grey[2] * 1.5, 'the band is redder than the shadow under it');
+  // the band is pink: it is lit by light that has lost its blue on a long way through the air; the shadow under it
+  // is grey-blue, and the sky over it blue
+  const pink = look(8), grey = look(3), blue = look(40);
+  assert.ok(pink[0] / pink[2] > grey[0] / grey[2] * 1.3, 'the band is redder than the shadow under it');
+  assert.ok(pink[0] / pink[2] > blue[0] / blue[2] * 1.5, 'and than the sky above it');
+  assert.ok(pink[0] > pink[1], 'in the band red is over green: pink, where the rest of the sky is blue');
   // twice as many samples along each look change nothing: the shadow's edge is found, not stepped over
   for (const alt of [2, 5, 12]) { const c = Math.cos(alt * D2R), d = [away[0] * c, Math.sin(alt * D2R), away[2] * c]; near(A.luminance(A.skyRay(L.height, d, L.sun, 32)) / A.luminance(A.skyRay(L.height, d, L.sun, 64)), 1, 0.02, 'samples at ' + alt); }
-  measured.push(`opposite a Sun 2° down: the Earth's shadow 2° up ${fig(low)} cd/m2, the band 12° up ${fig(band)}, the sky 40° up ${fig(high)}; red over blue ${(grey[0] / grey[2]).toFixed(2)} in the shadow, ${(pink[0] / pink[2]).toFixed(2)} in the band`);
+  measured.push(`opposite a Sun 2° down: the Earth's shadow 2° up ${fig(low)} cd/m2, the band 12° up ${fig(band)}, the sky 40° up ${fig(high)}; red over blue ${(grey[0] / grey[2]).toFixed(2)} in the shadow, ${(pink[0] / pink[2]).toFixed(2)} in the band, ${(blue[0] / blue[2]).toFixed(2)} above it`);
 });
 
 // ------------------------------------------------------------------------------------------------- the eye
@@ -242,8 +252,23 @@ ok('the eye: noon is shown as it was, a dim scene dimmer; it follows the light i
   const up = half(10, 1000), down = half(1000, 10);
   within(up, 0.25, 0.5, 'to the light'); within(down, 1.4, 2.1, 'to the dark'); assert.ok(down > 3 * up);
   near(A.adapt(0, 500, 1 / 60), 500, 1e-9, 'an eye just opened is already adapted');
-  // the meter: one bright patch does not rule it
+  // the meter: one bright patch does not rule it; what is given more weight counts more
   near(A.meter([100, 100, 100, 100]), 100, 1e-9); assert.ok(A.meter([100, 100, 100, 1e6]) < 1100);
+  near(A.meter([10, 1000], [1, 1]), 100, 1e-9); assert.ok(A.meter([10, 1000], [3, 1]) < 40);
+  // looking at the land shows the land, looking up shows the sky: at sunset the eye opens further for the dark
+  // ground at its feet than for the bright sky
+  const set = find(0.5, NOON, NOON + 8 * 3600e3), S = D.at(set, 2), n = Math.hypot(S.sun[0], S.sun[2]), f = [S.sun[0] / n, 0, S.sun[2] / n], r = [-f[2], 0, f[0]];
+  const tip = (p) => [[f[0] * Math.cos(p), Math.sin(p), f[2] * Math.cos(p)], r, [-f[0] * Math.sin(p), Math.cos(p), -f[2] * Math.sin(p)]];
+  const atFeet = D.scene(...tip(-0.35), 0.8, 0.52), atSky = D.scene(...tip(0.16), 0.8, 0.52);
+  assert.ok(atFeet < atSky, 'the ground at its feet reads darker than the sunset');
+  // and facing a low Sun it is never so open that the sky in view is, taken together, past the screen's white
+  for (const alt of [20, 5, 1]) {
+    const ms = find(alt, NOON, NOON + 8 * 3600e3), Lq = D.at(ms, 2), m = Math.hypot(Lq.sun[0], Lq.sun[2]), ff = [Lq.sun[0] / m, 0, Lq.sun[2] / m], rr = [-ff[2], 0, ff[0]], p = -0.1;
+    const F = [ff[0] * Math.cos(p), Math.sin(p), ff[2] * Math.cos(p)], Uv = [-ff[0] * Math.sin(p), Math.cos(p), -ff[2] * Math.sin(p)], sc = D.scene(F, rr, Uv, 0.8, 0.52);
+    let sum = 0, cnt = 0;
+    for (let j = -1; j <= 1; j += 1) for (let i = -2; i <= 2; i += 1) { const d = [F[0] + rr[0] * i * 0.32 + Uv[0] * j * 0.312, F[1] + Uv[1] * j * 0.312, F[2] + rr[2] * i * 0.32 + Uv[2] * j * 0.312], k = Math.hypot(...d); if (d[1] / k > 0.004) { sum += A.luminance(D.toward(d.map((x) => x / k), [0, 0, 0], 10)); cnt += 1; } }
+    assert.ok(cnt > 0 && sum / cnt * A.exposureFor(sc) <= 1.02, `facing a Sun ${alt} degrees up, the sky in view is shown at ${sum / cnt * A.exposureFor(sc)}`);
+  }
   measured.push(`noon on the beach: the scene reads ${fig(scene)} cd/m2, exposure ${sig(A.exposureFor(scene))} per cd/m2, the Sun's light in the picture's units ${key.toFixed(2)} (the island's own noon light was 2.4); half-way to a brighter scene in ${up.toFixed(2)} s, to a darker in ${down.toFixed(2)} s`);
 });
 
@@ -276,7 +301,7 @@ ok('no page and no three in the numbers; the clockwork still asks no clock; the 
   const air = read('src/game/solar/air.js');
   assert.match(air, /Hillaire[^]*EGSR 2020[^]*github\.com\/sebh\/UnrealEngineSkyAtmosphere/);
   assert.match(air, /MIT License\n\/\/\n\/\/ Copyright \(c\) 2020 Epic Games, Inc\.[^]*Permission is hereby granted[^]*THE SOFTWARE IS PROVIDED "AS IS"/);
-  for (const src of ['Hansen', 'Standard Atmosphere', 'Smirnov', 'Bruneton', 'Darula', 'Hestroffer', 'Krawczyk', 'CIE 146:2002', 'ISO 12232']) assert.ok(air.includes(src), 'the source is named: ' + src);
+  for (const src of ['Hansen', 'Standard Atmosphere', 'Smirnov', 'Bruneton', 'Bremen', 'Darula', 'Hestroffer', 'Krawczyk', 'CIE 146:2002', 'ISO 12232']) assert.ok(air.includes(src), 'the source is named: ' + src);
   assert.equal(BODIES.earth.atmosphere.pressure, 101400, 'the pressure the depth is scaled to is the Earth\'s own record');
 });
 

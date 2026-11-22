@@ -7,7 +7,7 @@
 // each as three numbers (red, green, blue: "were the light white"); air.js `luminance()` makes one of the three.
 import { sky as skyOf } from './ephemeris.js';
 import { BODIES } from './bodies.js';
-import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter } from './air.js';
+import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter, keyFor } from './air.js';
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 // Is the true sky asked for? Only by `?sky=true` in the page's address: until the night and the Moon are made and
@@ -16,6 +16,7 @@ export function skyAsked(search) { try { return new URLSearchParams(search || ''
 const STEP = 0.25;                            // degrees of the Sun's height between two workings of the sky's irradiance
 const GROUND = 0.18;                          // how much of the light the land and sea give back, taken together (the photographer's average scene)
 // the heights the sky's irradiance is kept for (km): it changes little with height near the ground
+const READS = new Array(15).fill(0), WEIGHTS = new Array(15).fill(1);
 const rung = (km) => (km < 0.05 ? 0.002 : km < 0.2 ? 0.1 : km < 0.6 ? 0.35 : km < 1.5 ? 1 : km < 4 ? 2.5 : km < 10 ? 6 : km < 30 ? 18 : 50);
 
 export function createDaylight({ lat, lon }) {
@@ -75,23 +76,21 @@ export function createDaylight({ lat, lon }) {
     },
     // how bright the scene is to an eye: fifteen looks across what it sees (forward, right and up are the eye's own
     // axes, tanX and tanY the half-width and half-height of its view), the sky where a look clears the horizon and
-    // the ground where it does not, as a meter reads them
+    // the ground where it does not, read as a camera's centre-weighted meter reads them: what the eye looks at counts
+    // most, so looking at the land shows the land, and looking up shows the sky. And the eye is never so open that
+    // the sky it has in view is, taken together, past the screen's white: facing a low Sun it narrows, as eyes do,
+    // and the land in front goes dark rather than the sunset white.
     scene(forward, right, up, tanX, tanY) {
-      const g = this.groundLuminance(forward), reads = [];
+      const g = this.groundLuminance(forward); let k = 0, sky = 0, n = 0;
       for (let j = -1; j <= 1; j += 1) for (let i = -2; i <= 2; i += 1) {
-        const x = i * 0.4 * tanX, y = j * 0.6 * tanY;
-        d[0] = forward[0] + right[0] * x + up[0] * y; d[1] = forward[1] + right[1] * x + up[1] * y; d[2] = forward[2] + right[2] * x + up[2] * y;
-        const n = Math.hypot(d[0], d[1], d[2]); d[0] /= n; d[1] /= n; d[2] /= n;
-        reads.push(d[1] > 0.004 ? luminance(this.toward(d, a, 10)) : g);
+        const x = i * 0.4, y = j * 0.6;
+        d[0] = forward[0] + right[0] * x * tanX + up[0] * y * tanY; d[1] = forward[1] + right[1] * x * tanX + up[1] * y * tanY; d[2] = forward[2] + right[2] * x * tanX + up[2] * y * tanY;
+        const len = Math.hypot(d[0], d[1], d[2]); d[0] /= len; d[1] /= len; d[2] /= len;
+        if (d[1] > 0.004) { const l = luminance(this.toward(d, a, 10)); READS[k] = l; sky += l; n += 1; } else READS[k] = g;
+        WEIGHTS[k] = Math.exp(-(x * x + y * y) / 0.5); k += 1;
       }
-      return meter(reads);
-    },
-    // two colours the sea's surface wants: the sky straight up, and the sky low over the horizon the way the eye looks
-    seaSky(forward, zenith = [0, 0, 0], horizon = [0, 0, 0]) {
-      d[0] = 0; d[1] = 1; d[2] = 0; this.toward(d, zenith, 16);
-      const n = Math.hypot(forward[0], forward[2]) || 1, e = 4 * D2R;
-      d[0] = forward[0] / n * Math.cos(e); d[1] = Math.sin(e); d[2] = forward[2] / n * Math.cos(e); this.toward(d, horizon, 16);
-      return [zenith, horizon];
+      const read = meter(READS, WEIGHTS);
+      return n ? Math.max(read, keyFor(read) * sky / n) : read;
     },
   };
 }

@@ -22,7 +22,7 @@ import { SEA_FLOOR, seaSheet } from './ground.js';
 import { vnoise } from './life.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
-import { createTrueSky, canDrawTrueSky } from '../sky.js';
+import { createTrueSky, canDrawTrueSky, SKY_OVER_GLSL } from '../sky.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -235,9 +235,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     uSun: skyU.uSun, uSunCol: skyU.uSunCol, uZenith: skyU.uZenith, uHorizon: skyU.uHorizon, uSunAmt: { value: 1 }, uSkyAmt: { value: 1 },
   };
   // under the true sky the sea's own colour is lit by what falls on level water (in three colours), and the sky in
-  // it is the sky's own brightness: these three lines of its drawing are written for the one or the other
-  if (air) seaU.uBodyAmt = { value: new THREE.Color(1, 1, 1) };
-  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? '' : ' * uSkyAmt', seaFoam = air ? '(0.12 + 0.88 * uBodyAmt)' : '(0.12 + 0.88 * uSkyAmt)';
+  // it is the sky itself, read where each ripple throws the eye's line (sky.js skyOver): these lines of its drawing
+  // are written for the one or the other
+  if (air) Object.assign(seaU, { uBodyAmt: { value: new THREE.Color(1, 1, 1) } }, air.seaSky);
+  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? 'skyOver(r, normalize(uSun))' : 'mix(uHorizon, uZenith, pow(r.y, 0.55)) * uSkyAmt', seaFoam = air ? '(0.12 + 0.88 * uBodyAmt)' : '(0.12 + 0.88 * uSkyAmt)';
   const seaMat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]), transparent: true, depthWrite: false, fog: true,
     vertexShader: `varying vec3 vW;
@@ -247,7 +248,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       }`,
     fragmentShader: `
       uniform float uTime; uniform sampler2D uH; uniform sampler2D uP; uniform vec4 uGrid; uniform vec4 uPGrid; uniform vec4 uDrops[${DROPS}];
-      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' : ''}
+      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' + SKY_OVER_GLSL : ''}
       varying vec3 vW;
       #include <fog_pars_fragment>
       float sh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -291,7 +292,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
         body *= ${seaLit};
         // the sky in it, at a slant; the sun's glitter
         vec3 r = reflect(-v, n); r.y = abs(r.y);
-        vec3 sky = mix(uHorizon, uZenith, pow(r.y, 0.55))${seaSky};
+        vec3 sky = ${seaSky};
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
         vec3 c = mix(body, sky, fres);
         c += uSunCol * uSunAmt * pow(max(dot(r, normalize(uSun)), 0.0), 420.0) * 3.0 * step(0.0, uSun.y);

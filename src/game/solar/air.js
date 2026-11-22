@@ -4,19 +4,26 @@
 // (github.com/sebh/UnrealEngineSkyAtmosphere, MIT; the notice is kept at the foot of this file): a table of the
 // air's transmittance, a table of its multiple scattering, and a march along each line of sight that reads both.
 //
-// THE MEDIUM (kilometres and 1/km; three wavelengths stand for red, green and blue: 680, 550 and 440 nm):
+// THE MEDIUM (kilometres and 1/km). Three wavelengths stand for red, green and blue: 611, 549 and 464 nm, the
+// dominant wavelengths of the screen's own primaries (sRGB's, against its white). The paper, after Bruneton, has
+// 680, 550 and 440: that pair of ends scatters six times apart where the screen's colours scatter three, so its
+// day is bluer than the sky is, and its red sits beyond the ozone layer's absorption, so its twilight is purple.
 //   · Rayleigh: the clear air itself. Its depth straight up is the measured one (J. E. Hansen and L. D. Travis,
 //     Space Sci. Rev. 16, 527 (1974): 0.008569 λ^-4 (1 + 0.0113 λ^-2 + 0.00013 λ^-4), λ in µm, at 1013.25 hPa),
 //     at the pressure bodies.js carries for the Earth (NASA's fact sheet: 1014 hPa). Its thinning with height is
 //     the U.S. Standard Atmosphere's (1976): seven layers of temperature, the density following from each. One
 //     exponential (the paper's 8 km, or the fact sheet's 8.5) is right near the ground and for the whole column,
 //     and two to three times too dense from 30 to 50 km, which is the air twilight is made of.
-//   · Mie: the haze of a clean sea air. Depth 0.06 at 550 nm (the open ocean's usual 0.06 to 0.07 at 500 nm:
-//     A. Smirnov et al., J. Atmos. Sci. 59, 501 (2002) and J. Geophys. Res. 114, D06204 (2009)); sea salt hardly
-//     absorbs (single-scattering albedo 0.99); grey; in the lowest air (scale height 1.2 km) and thrown forward
-//     (Cornette-Shanks, g = 0.8): the last two as the paper has them. The weather is not modelled: this is one day.
-//   · Ozone: 300 Dobson units in one layer, a tent from 10 to 40 km with its peak at 25, absorbing as E. Bruneton's
-//     2017 model has it (which the paper takes): without it twilight is not blue.
+//   · Mie: the haze of a clean sea air. Depth 0.06 at 550 nm: what ships far from land measure over the open
+//     ocean (0.06 to 0.07 at 500 nm: A. Smirnov et al., J. Atmos. Sci. 59, 501 (2002), and J. Geophys. Res. 114,
+//     D06204 (2009), the Maritime Aerosol Network; island stations, which today's continents reach, average 0.11).
+//     Sea salt hardly absorbs (single-scattering albedo 0.99); grey; in the lowest air (scale height 1.2 km) and
+//     thrown forward (Cornette-Shanks, g = 0.8): the last two as the paper has them. The weather is not modelled:
+//     this is one clear day of the clean Earth the game is set on.
+//   · Ozone: 300 Dobson units in one layer, a tent from 10 to 40 km with its peak at 25 (E. Bruneton's 2017 model,
+//     which the paper takes), absorbing by the cross-sections that model carries (the University of Bremen's
+//     measurements at 233 K, averaged in bins of 10 nm), read at the three wavelengths: without it twilight is
+//     not blue.
 //   · The ground is the sea: it gives back 6% of what falls on it.
 // THE EARTH: a sphere of its mean radius (bodies.js); the air ends 100 km up. A ray is followed in the observer's
 // own frame (y up): only heights above the ground are ever formed, by differences that keep their figures in a
@@ -29,8 +36,14 @@ import { BODIES, AU } from './bodies.js';
 
 const PI = Math.PI;
 const EARTH = BODIES.earth;
-export const WAVES = [0.68, 0.55, 0.44];                                  // µm: red, green, blue
-const hansenTravis = (um) => 0.008569 * um ** -4 * (1 + 0.0113 * um ** -2 + 0.00013 * um ** -4);
+export const WAVES = [0.611, 0.549, 0.464];                               // µm: red, green, blue
+// the clear air's depth straight up at 1013.25 hPa (Hansen and Travis)
+export const rayleighDepth = (um) => 0.008569 * um ** -4 * (1 + 0.0113 * um ** -2 + 0.00013 * um ** -4);
+// ozone's absorption cross-section (m2 a molecule), between the middles of the 10 nm bins on either side
+// (precomputed_atmospheric_scattering's demo.cc, kOzoneCrossSection: the bins these three wavelengths fall between)
+const OZONE_BINS = { 450: 2.316e-26, 460: 3.669e-26, 540: 3.091e-25, 550: 3.5e-25, 600: 5.019e-25, 610: 4.305e-25 };
+export function ozoneCross(um) { const nm = um * 1000, lo = Math.floor((nm - 5) / 10) * 10, t = (nm - 5 - lo) / 10; return OZONE_BINS[lo] * (1 - t) + OZONE_BINS[lo + 10] * t; }
+const OZONE_PEAK = 300 * 2.687e20 / 15000;                                // molecules/m3 at the layer's peak: 300 Dobson units over a tent of 15 km
 
 // The U.S. Standard Atmosphere, 1976 (NOAA, NASA, USAF), to 86 km: geopotential heights (km) where a layer begins,
 // the temperature's rise through it (K/km), 288.15 K at the sea; g0 M / R* = 34.1632 K/km. The density at each
@@ -53,14 +66,14 @@ export function airDensity(h) {
 }
 // the whole column of it, were it all as dense as at the sea (km): 8.45 (P / (rho g) is 8.43; gravity eases with height)
 const RAY_SCALE = (() => { const n = 4000; let s = 0; for (let i = 0; i <= n; i += 1) s += (i === 0 || i === n ? 1 : i & 1 ? 4 : 2) * airDensity(100 * i / n); return s * 100 / (3 * n); })();
-const RAY_DEPTH = WAVES.map((w) => hansenTravis(w) * EARTH.atmosphere.pressure / 101325);
+const RAY_DEPTH = WAVES.map((w) => rayleighDepth(w) * EARTH.atmosphere.pressure / 101325);
 const MIE = { scale: 1.2, depth: 0.06, albedo: 0.99, g: 0.8 };
 export const AIR = Object.freeze({
   ground: (2 * EARTH.radii[0] + EARTH.radii[2]) / 3,                      // km: the Earth's mean radius
   height: 100,                                                            // km of air over it
   rayleigh: Object.freeze({ column: RAY_SCALE, depth: RAY_DEPTH, scatter: RAY_DEPTH.map((d) => d / RAY_SCALE) }),      // column: km of sea-level air the whole of it comes to
   mie: Object.freeze({ ...MIE, extinct: MIE.depth / MIE.scale, scatter: MIE.albedo * MIE.depth / MIE.scale }),
-  ozone: Object.freeze({ centre: 25, half: 15, absorb: [0.000650, 0.001881, 0.000085] }),
+  ozone: Object.freeze({ centre: 25, half: 15, absorb: WAVES.map((w) => ozoneCross(w) * OZONE_PEAK * 1000) }),
   albedo: 0.06,
 });
 // the Sun above the air. 1361 W/m2 is the IAU's nominal solar constant (2015 Resolution B3). The efficacy is
@@ -287,12 +300,14 @@ export function sunThrough(h0, sunUp, radius = 0.2666, out = [0, 0, 0]) {
 // saturation-based speed of ISO 12232: half a stop kept for the highlights), which is also where the island's
 // own noon stood before any of this. A dimmer scene is shown dimmer, as the eye sees it, by the key of
 // G. Krawczyk, K. Myszkowski and H.-P. Seidel ("Perceptual effects in real-time tone mapping", SCCG 2005):
-// a(L) = 1.03 - 2 / (2 + log10(L + 1)), taken here relative to full day. `floor` is the least the eye is ever
-// adapted to: the night sky's own glow. Nothing draws that glow yet (the night is the next step); the number is
-// here so that the exposure does not run away after dusk. The eye follows a scene that brightens in half a second
-// and one that darkens in two and a half (the real eye takes minutes to the dark; a game cannot wait that long).
+// a(L) = 1.03 - 2 / (2 + log10(L + 1)), carried through the curve their method shows it with (a / (1 + a)) and
+// taken relative to full day: a scene of 1 cd/m2 (the end of civil twilight) is shown a third as bright as day.
+// `floor` is the least the eye is ever adapted to: the night sky's own glow. Nothing draws that glow yet (the
+// night is the next step); the number is here so that the exposure does not run away after dusk. The eye follows
+// a scene that brightens in half a second and one that darkens in two and a half (the real eye takes minutes to
+// the dark; a game cannot wait that long).
 export const EYE = Object.freeze({ grey: 0.18 / Math.SQRT2, day: 4000, floor: 2e-4, toLight: 0.5, toDark: 2.5 });
-const krawczyk = (L) => 1.03 - 2 / (2 + Math.log10(L + 1));
+const krawczyk = (L) => { const a = 1.03 - 2 / (2 + Math.log10(L + 1)); return a / (1 + a); };
 export function keyFor(L) { return EYE.grey * krawczyk(Math.max(L, 0)) / krawczyk(EYE.day); }
 export function exposureFor(L) { const l = Math.max(L, EYE.floor); return keyFor(l) / l; }
 // the luminance the eye is adapted to, dt seconds on, toward the scene's
@@ -301,8 +316,9 @@ export function adapt(was, scene, dt) {
   if (!(was > 0)) return to;
   return was * Math.pow(to / was, 1 - Math.exp(-dt / (to > was ? EYE.toLight : EYE.toDark)));
 }
-// the scene's luminance as a meter reads it: the mean of the logarithms (one bright patch does not rule it)
-export function meter(samples) { let s = 0, n = 0; for (const L of samples) { s += Math.log(Math.max(L, 1e-6)); n += 1; } return n ? Math.exp(s / n) : EYE.floor; }
+// the scene's luminance as a meter reads it: the mean of the logarithms (one bright patch does not rule it), each
+// reading by its weight if weights are given
+export function meter(samples, weights = null) { let s = 0, n = 0, i = 0; for (const L of samples) { const w = weights ? weights[i] : 1; i += 1; s += w * Math.log(Math.max(L, 1e-6)); n += w; } return n > 0 ? Math.exp(s / n) : EYE.floor; }
 // The eye's own veil round a bright light (disability glare): the luminance laid over the scene per lux at the eye,
 // `deg` degrees from the light. The CIE's general disability glare equation (CIE 146:2002, after J. J. Vos, 1999):
 // 10/θ^3 + (5/θ^2 + 0.1 p/θ)(1 + (A/62.5)^4) + 0.0025 p, for 0.1 to 100 degrees, age A and eye pigment p.

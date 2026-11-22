@@ -120,6 +120,16 @@ vec3 skyLook(vec3 d) {
   float ld = length(d.xz), ls = length(uSun.xz), ca = (ld > 1.0e-5 && ls > 1.0e-5) ? clamp(dot(d.xz, uSun.xz) / (ld * ls), -1.0, 1.0) : 1.0;
   return texture2D(uSkyView, (vec2(sqrt(max(0.0, 0.5 - 0.5 * ca)), v) + 0.5 / uSkySize) * (uSkySize / (uSkySize + 1.0))).rgb;
 }`;
+// the same reading for a drawing of its own that wants the sky in it (the sea's surface): skyOver(d, sun) is the
+// sky's light from a direction (y up), in the picture's own units; its uniforms are the sky's own (`seaSky`, below)
+export const SKY_OVER_GLSL = `
+uniform sampler2D uSkyView; uniform vec2 uSkySize; uniform float uSkyH; uniform float uSkyGain;
+vec3 skyOver(vec3 d, vec3 sun) {
+  float h = clamp(uSkyH, 0.0, ${f(AIR.height - 0.001)}), beta = acos(clamp(sqrt(h * (${f(2 * AIR.ground)} + h)) / (${f(AIR.ground)} + h), 0.0, 1.0)), zha = 3.14159265358979 - beta;
+  float za = acos(clamp(d.y, -1.0, 1.0)), v = za <= zha ? 0.5 * (1.0 - sqrt(max(0.0, 1.0 - za / zha))) : 0.5 + 0.5 * sqrt(clamp((za - zha) / beta, 0.0, 1.0));
+  float ld = length(d.xz), ls = length(sun.xz), ca = (ld > 1.0e-5 && ls > 1.0e-5) ? clamp(dot(d.xz, sun.xz) / (ld * ls), -1.0, 1.0) : 1.0;
+  return texture2D(uSkyView, (vec2(sqrt(max(0.0, 0.5 - 0.5 * ca)), v) + 0.5 / uSkySize) * (uSkySize / (uSkySize + 1.0))).rgb * uSkyGain;
+}`;
 // the air between the eye and the land: side by side, one square of the view for each slice of distance
 const AP_FRAG = `
 ${AIR_GLSL}
@@ -230,7 +240,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
 
-  const R = new THREE.Vector3(), Uu = new THREE.Vector3(), B = new THREE.Vector3(), buf = new THREE.Vector2(), fwd = [0, 0, -1], rgt = [1, 0, 0], upv = [0, 1, 0], zen = [0, 0, 0], hor = [0, 0, 0];
+  const R = new THREE.Vector3(), Uu = new THREE.Vector3(), B = new THREE.Vector3(), buf = new THREE.Vector2(), fwd = [0, 0, -1], rgt = [1, 0, 0], upv = [0, 1, 0];
   let lastT = NaN, frame = 0, adapted = 0, sceneL = 0, exposure = 0, sight = 1, skyAt = null, wrapAt = null, seen = 0;
   const state = { sunCol: new THREE.Color(), skyCol: new THREE.Color(), night: 0, env: 1, exposure: 0 };
   // is the land between the eye and the Sun? (a walk out along the Sun's way, the steps growing)
@@ -256,7 +266,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       fwd[0] = -B.x; fwd[1] = -B.y; fwd[2] = -B.z; rgt[0] = R.x; rgt[1] = R.y; rgt[2] = R.z; upv[0] = Uu.x; upv[1] = Uu.y; upv[2] = Uu.z;
       sceneL = day.scene(fwd, rgt, upv, 1 / pe[0], 1 / pe[5]);
     }
-    adapted = adapt(adapted, sceneL, dt); exposure = exposureFor(adapted);
+    adapted = adapt(adapted, sceneL, dt); exposure = exposureFor(adapted) * Math.pow(2, api.bias);
     // the sky's own light on level ground, per lux of the Sun: what every table is kept over
     const per = Math.max(luminance(L.sky) / L.lux, 1e-12), gain = per * L.lux * exposure;
     SHARED.uAirGain.value = gain; SHARED.uAirEnv.value = gain; U.dome.uSunGain.value = L.lux * exposure;
@@ -286,10 +296,9 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     state.sunCol.setRGB(d0 * 0.625, d1 * 0.625, d2 * 0.625);
     const k = exposure / Math.PI * 3.4; state.skyCol.setRGB(L.sky[0] * k, L.sky[1] * k, L.sky[2] * k);
     state.night = Math.min(1, Math.max(0, (-L.alt - 2) / 8)); state.exposure = exposure;
-    // the sea's own few numbers: the sky straight up and low ahead, the Sun's glitter, how lit its own colour is
+    // the sea's own few numbers: where the Sun is, its glitter, how lit the water's own colour is (the sky in it, it
+    // reads from the table: seaSky)
     if (sea) {
-      day.seaSky(fwd, zen, hor);
-      sea.uZenith.value.setRGB(zen[0] * exposure, zen[1] * exposure, zen[2] * exposure); sea.uHorizon.value.setRGB(hor[0] * exposure, hor[1] * exposure, hor[2] * exposure);
       sea.uSun.value.set(s[0], s[1], s[2]); sea.uSunCol.value.setRGB(d0 / top, d1 / top, d2 / top); sea.uSunAmt.value = top / 2.4;
       sea.uBodyAmt.value.setRGB(L.level[0] * exposure / 2.4, L.level[1] * exposure / 2.4, L.level[2] * exposure / 2.4);
     }
@@ -300,8 +309,11 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   // a texel of the sky as seen, as the GPU made it (for a Sun of 1 lux): the probes compare it with air.js's own
   const px = new Uint16Array(4);
   function peek(i, j) { renderer.readRenderTargetPixels(skyRT, i, j, 1, 1, px); return [0, 1, 2].map((c) => THREE.DataUtils.fromHalfFloat(px[c]) * (skyAt ? skyAt.per : 1)); }
-  return {
+  const api = {
     dome, fog, day, state, update, peek, tables: { sky: [SW, SH], air: [AN, AW], made },
+    bias: 0,      // stops added to the exposure: nothing sets it but a probe (a dark glass, to look at the Sun's own disc)
+    // the uniforms SKY_OVER_GLSL reads: the table of the sky as seen, its size, the eye's height, what brings it to the picture's units
+    seaSky: { uSkyView: U.look.uSkyView, uSkySize: U.look.uSkySize, uSkyH: U.look.uH, uSkyGain: SHARED.uAirGain },
     read() { const L = day.light; return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, sight, materials: seen, zenith: luminance(day.toward([0, 1, 0])), tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } }; },
     dispose() {
       SHARED.uAirEnv.value = 1; SHARED.uAirAP.value = null;
@@ -309,5 +321,6 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       envRT?.dispose();
     },
   };
+  return api;
 }
 export { AIR };
