@@ -357,6 +357,52 @@ try {
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
     const faceYaw = async (target) => { for (let i = 0; i < 5; i++) { const d = wrap(target - (await read()).yaw); if (Math.abs(d) < 0.03) break; await drag(Math.max(-900, Math.min(900, -d / 0.0024)), 0); await sleep(120); } };
     const aimAt = async () => { const r = await read(), b = r.fight.bots[0]; if (b) await faceYaw(Math.atan2(-(b.p[0] - r.p[0]), -(b.p[2] - r.p[2]))); };
+    // the bow and the thread go for the bot nearest the eye's line (BOW.assist 0.12 rad, THREAD.assist 0.22): the line
+    // from the camera along where it looks, which passes the head the camera turns round. Turning the body toward a bot
+    // is not enough: bots hover a metre or two over the eye, so with several about, a level line can sit nearer another
+    // (the lash then broke a weak sentinel and had nothing left to snare; an arrow went between them). So the line is
+    // laid on the bot from the head, turned and tipped. And a drag turns the eye 0.0024 rad a pixel only while the page
+    // holds the pointer: when the lock is not granted it is read as a touch, 0.0052 rad a pixel, and a turn worked out
+    // for the first overshot and swung further off each time. So each turn learns the pixel's worth from the last.
+    let gx = 0.0024, gy = 0.0024;          // rad a pixel, learned as it turns, kept for the next turn
+    const turnTo = async (wantYaw, wantPitch) => {
+      for (let i = 0; i < 8; i++) {
+        const r0 = await read(), ey = wrap(wantYaw - r0.yaw), ep = wantPitch - r0.pitch;
+        if (Math.abs(ey) < 0.01 && Math.abs(ep) < 0.01) return;
+        const px = Math.abs(ey) < 0.01 ? 0 : Math.max(-900, Math.min(900, -ey / gx)), py = Math.abs(ep) < 0.01 ? 0 : Math.max(-900, Math.min(900, -ep / gy));
+        await drag(px, py); await sleep(120);
+        const r1 = await read(), dy = wrap(r1.yaw - r0.yaw), dp = r1.pitch - r0.pitch;
+        if (Math.abs(px) > 20 && Math.abs(dy) > 1e-3) gx = Math.min(0.02, Math.max(0.0005, -dy / px));
+        if (Math.abs(py) > 20 && Math.abs(dp) > 1e-3) gy = Math.min(0.02, Math.max(0.0005, -dp / py));
+      }
+    };
+    const ahead = (r) => [-Math.sin(r.yaw) * Math.cos(r.pitch), Math.sin(r.pitch), -Math.cos(r.yaw) * Math.cos(r.pitch)];
+    const aimTrue = async (which) => {
+      for (let i = 0; i < 2; i++) {        // twice: the bot moves while the eye turns
+        const r = await read(), b = which(r); if (!b) return null;
+        const f = ahead(r), c = r.world.eye, d = r.world.eyeD, at = [c[0] + f[0] * d, c[1] + f[1] * d, c[2] + f[2] * d];
+        const dx = b.p[0] - at[0], dy = b.p[1] - at[1], dz = b.p[2] - at[2];
+        await turnTo(Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz)));
+      }
+      // then one quick turn to where the bot will be when it is let go: its drift over a tenth of a second, carried on
+      // for the time a turn and the letting go take (about 0.35 s)
+      const q0 = await read(), b0 = which(q0); if (!b0) return null;
+      const t0 = Date.now(); await sleep(100);
+      const q1 = await read(), b1 = q1.fight.bots.find((x) => x.id === b0.id) || b0, dt = Math.max(0.05, (Date.now() - t0) / 1000), L = 0.35;
+      const P = [0, 1, 2].map((k) => b1.p[k] + ((b1.p[k] - b0.p[k]) / dt) * L);
+      const f1 = ahead(q1), c1 = q1.world.eye, d1 = q1.world.eyeD, at1 = [c1[0] + f1[0] * d1, c1[1] + f1[1] * d1, c1[2] + f1[2] * d1];
+      const ey = wrap(Math.atan2(-(P[0] - at1[0]), -(P[2] - at1[2])) - q1.yaw), ep = Math.atan2(P[1] - at1[1], Math.hypot(P[0] - at1[0], P[2] - at1[2])) - q1.pitch;
+      await drag(Math.max(-900, Math.min(900, -ey / gx)), Math.max(-900, Math.min(900, -ep / gy)));
+      return { id: b1.id };
+    };
+    // how far off the eye's line was from a bot, read just after letting go (for the output)
+    const offFrom = async (id) => {
+      const r = await read(), b = r.fight.bots.find((x) => x.id === id); if (!b) return null;
+      const f = ahead(r), c = r.world.eye, v = [b.p[0] - c[0], b.p[1] - c[1], b.p[2] - c[2]], n = Math.hypot(...v);
+      const off = Math.acos(Math.max(-1, Math.min(1, (f[0] * v[0] + f[1] * v[1] + f[2] * v[2]) / n)));
+      return Math.round(off * 1000) / 1000;
+    };
+    const nearest = (r) => r.fight.bots.filter((b) => b.mode === 'fight').sort((a, b) => Math.hypot(a.p[0] - r.p[0], a.p[2] - r.p[2]) - Math.hypot(b.p[0] - r.p[0], b.p[2] - r.p[2]))[0];
     const pick = async (level) => { await page.locator('#game-bots').click(); await sleep(250); await page.locator(`#game-bot-list [data-bot="${level}"]`).click(); await sleep(200); };
     await page.locator('#game-bots').click(); await sleep(250);
     const listed = await page.locator('#game-bot-list button').evaluateAll((els) => els.map((e) => e.dataset.bot));
@@ -413,8 +459,14 @@ try {
     const worth = (r) => r.fight.bots.reduce((a, b) => a + b.hp, 0) - 1000 * r.fight.broken, w0 = worth(r);
     await aimAt(); await key.down('KeyJ'); await sleep(900); r = await read();
     check('held, the bow draws', r.fight.bow === 'drawing' && r.fight.draw > 0.8, r.fight);
-    await shot('09-drawn'); await aimAt(); await key.up('KeyJ');
-    r = await until((r) => worth(r) < w0, 3000);
+    // the bots strafe while the eye turns (a turn takes a few tenths of a second, and the arrow's own allowance is 0.12
+    // rad), so a draw may be aimed again: up to three, each said in the output with how far off it was let go
+    await shot('09-drawn'); out.bowAims = [await aimTrue(nearest)]; await key.up('KeyJ'); if (out.bowAims[0]) out.bowAims[0].off = await offFrom(out.bowAims[0].id);
+    r = await until((r) => worth(r) < w0, 1500);
+    while (worth(r) >= w0 && out.bowAims.length < 3) {
+      await sleep(400); await key.down('KeyJ'); await sleep(950); const a = await aimTrue(nearest); await key.up('KeyJ'); if (a) a.off = await offFrom(a.id); out.bowAims.push(a);
+      r = await until((r) => worth(r) < w0, 1500);
+    }
     check('let go, its arrow strikes', worth(r) < w0, { w0, w: worth(r), bots: r.fight.bots });
     await sleep(450); await key.press('KeyE'); await sleep(60); r = await read();
     check('the whirl\'s key looses a volley', r.fight.bolts >= 5, r.fight);
@@ -459,10 +511,17 @@ try {
     const w2 = worth(r);
     await aimWarden(); await key.down('KeyJ'); await sleep(1100); r = await read();
     check('held, the thread\'s spindle spins up', r.fight.thread === 'spinning' && r.fight.spin > 0.9, r.fight);
-    await aimWarden(); await key.up('KeyJ'); await sleep(40); await shot('12b-lash');
+    const theWarden = (r2) => r2.fight.bots.find((x) => x.id === warden?.id && x.mode !== 'broken') || nearest(r2);
+    out.lashAims = [await aimTrue(theWarden)]; await key.up('KeyJ'); if (out.lashAims[0]) out.lashAims[0].off = await offFrom(out.lashAims[0].id); await sleep(40); await shot('12b-lash');
     r = await until((r) => worth(r) < w2, 3000);
     check('let go, it lashes out and strikes', worth(r) < w2, { w2, w: worth(r), bots: r.fight.bots });
     r = await until((r) => r.fight.snare != null, 600);
+    // as with the bow: the warden strafes while the eye turns, so the spin may be aimed again, up to three times
+    while (r.fight.snare == null && out.lashAims.length < 3) {
+      await until((r) => r.fight.thread === 'held', 1500); await sleep(450);
+      await key.down('KeyJ'); await sleep(1150); const a = await aimTrue(theWarden); await key.up('KeyJ'); if (a) a.off = await offFrom(a.id); out.lashAims.push(a);
+      r = await until((r) => r.fight.snare != null, 900);
+    }
     check('spun all the way, it snares the bot it meets', r.fight.snare != null, r.fight);
     await sleep(350); await shot('12c-snared');
     await key.press('KeyT'); await sleep(150); const after1 = (await read()).fight.weapon; await key.press('KeyT'); await sleep(150); r = await read();
