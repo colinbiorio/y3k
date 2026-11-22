@@ -488,18 +488,25 @@ direction and leaves the second out.
   its top, 133, 81, 13 from its bottom), its light coming through less air.
 - **The glare is cut with the disc.** With the eye swept across the Sun behind the body, the share of the disc
   in sight reads 1 in the clear and 0 behind the body or a palm's trunk.
-- **Frames.** At the game's pixel cap (a window of 1470 x 956 points at two pixels a point: 2940 x 1912 drawn),
-  standing, walking and turning at noon, facing a Sun 5 degrees high, and at dusk: 16.7 ms a frame, sixty a second (the 99th percentile 16.8; one frame of 50 ms in twenty seconds) with the true sky,
-  and the same without it. The sky's own share: 0.07 to 0.15 ms of the page's thread a frame; on the GPU, the air
-  between eye and land 0.01 to 0.07 ms every frame, the sky as seen 0.7 ms when the Sun has moved a hundredth of
-  a degree (every two seconds or so of the real clock), the wrapped sky 0.05 to 0.09 ms and its blurring when the
-  Sun has moved a fifth of a degree. The two tables made once, as the island opens: about 300 ms.
+- **Frames** (measured again on 22 November with the code as it stands, nothing else of the probe's running).
+  At the game's pixel cap (a window of 1470 x 956 points at two pixels a point: 2940 x 1912 drawn), standing,
+  walking and turning at noon, facing a Sun 5 degrees high, and at dusk, about 1,140 frames a run: with the true sky,
+  two runs, 16.7 ms a frame, sixty a second, the 99th percentile 16.8 (the longest frame 33 ms); without
+  it, one run the same and one with a few frames of 33 to 83 ms at noon, where the true sky is not drawn at all (the
+  machine's own load: the Mac was in use). The sky's own share: 0.12 to 0.14 ms of the page's thread a frame; on
+  the GPU, the air between eye and land 0.03 to 0.07 ms every frame, the sky as seen 0.63 to 0.77 ms when the Sun
+  has moved a hundredth of a degree (every two seconds or so of the real clock), the wrapped sky 0.06 ms and its
+  blurring when the Sun has moved a fifth of a degree. The two tables made once, as the island opens: 290 to
+  315 ms.
 - **The lighter path** (`?gfx=smooth`: one pixel a point, the sky table 128 x 72, 16 slices of 16 x 16):
-  16.7 ms a frame with the true sky and without; its passes 0.03, 0.2 and 0.06 ms. At a phone's size (390 x 844 points, 780 x 1688 drawn): 16.7 ms a frame with it and without. All of this is on the Mac's
+  16.7 ms a frame with the true sky and without, the 99th percentile 16.8; its passes 0.02, 0.21 and 0.06 ms. At
+  a phone's size on it (390 x 844 points, one pixel a point): the same, with it and without. Given a phone's
+  touch at that size the M2 chose two pixels a point (780 x 1688) and held 16.7 ms. All of this is on the Mac's
   chip: no phone has drawn it yet.
-- **Back in the void** after the island under the true sky, and on the island again: no error, sixty frames a
-  second, the void as it was (a body's materials carry the sky's lines with them, and those do nothing where
-  there is no air).
+- **Walked under the true sky** (22 November): the beach, a house built and walked into (at noon and with the Sun
+  5 degrees up), a ship called, boarded and sailed into twilight, the body flown 110 m up toward and away from a
+  Sun 2 degrees up, the night, the void and the island again: no console error anywhere, the void as it was. The
+  sky's files are fetched when the island is first come to, not before.
 
 ### What is approximated
 

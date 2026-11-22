@@ -238,15 +238,23 @@ in the same framing, at noon and with the Sun 20 and 5 degrees high):
 
 **Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the
 Mac's own chip): at 2940 x 1912 (a full window at two pixels a point) a frame
-takes 16.7 ms with the true sky and without it, standing, walking, turning,
-facing a low Sun and at dusk; on the lighter path and at a phone's size the
-same. The sky's own share is about a tenth of a millisecond of the page's
-thread a frame and less of the GPU's, and 0.7 ms more when the Sun has moved
-(every two seconds or so); the two tables it reads are made once, in a third
-of a second, as the island opens. Back in the void after the island nothing
-of the sky remains. No phone's own chip has drawn it yet. The contact sheets
-(day, twilight, rooms, phone, the Sun's disc, the three curves) are in the
-scratch folder `solar/sky1`, with a note of what each picture is.
+takes 16.7 ms with the true sky, standing, walking, turning, facing a low Sun
+and at dusk (two runs, the 99th percentile 16.8 ms), and the same without it;
+on the lighter path and at a phone's size the same. The sky's own share is
+about a tenth of a millisecond of the page's thread a frame and less of the
+GPU's, and 0.6 to 0.8 ms more when the Sun has moved (every two seconds or
+so); the two tables it reads are made once, in a third of a second, as the
+island opens. Walked under it (the beach, inside a house, a ship's deck,
+flying, the night) and back to the void: no console error, and nothing of the
+sky remains in the void. **With the switch off nothing changed**: twenty
+moments of the void, the controls, the island in its three lights, a house
+and a ship, drawn by main and by this with the page's frames, clock and dice
+held the same, are the same pictures (the only pixels that differ are the
+page's own glass and arrows, which differ as much between two runs of main),
+and the page fetches no file of the sky's. No phone's own chip has drawn it
+yet. The contact sheets (day, twilight, rooms, phone, the Sun's disc, the
+three curves) are in the scratch folder `solar/sky1`, with a note of what each
+picture is.
 
 ### Colin's round of 19 November 2026
 
