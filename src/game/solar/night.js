@@ -244,26 +244,37 @@ export const thresholdLux = (B) => magLux(limitingMagnitude(B));
 // drawn at k of the screen's own thresholds for a point, which is POINTS.floor of white in its middle pixel on a dark
 // screen and POINTS.weber of what is round it on a bright one. Where it stands under one threshold it fades as it is.
 // The screen's threshold is the viewer's, not the world's, and is chosen: a point of a pixel or two on a screen's dark
-// grey is hard to see under about a hundredth of white (4 to 10 of the 255 steps there), and the first pictures, drawn
-// with a third of that, showed the sixth-magnitude stars as three steps over the sky: there, but lost to the eye.
+// grey needs about a fortieth of white in its middle pixel to be seen at all (twenty of the 255 steps there); pictures
+// drawn with a third and a hundredth of that showed the sixth-magnitude stars as three and nine steps over the sky, and
+// a viewer saw a few hundred stars where the eye sees thousands.
+// The screen cannot hold the eye's range of points either: from the faintest seen to Sirius at night is 1,700
+// thresholds, three powers of ten, where a screen has one and a half between a point it shows and white. Shown linearly
+// every star over V 1.5 would be the same white. So above one threshold the screen's step grows as the thresholds to the
+// power POINTS.power, a half: the exponent S. S. Stevens found for how bright a point of light looks against its light
+// (Psychophysics, 1975: 0.5 for a point source, 0.33 for a field of 5 degrees), which keeps the magnitude scale's order
+// and its even steps (each magnitude is 1.58 times the screen's light of the next) and brings Sirius to white.
 // Its light is laid over the pixels round its true place as a Gaussian of POINTS.sigma pixels, each pixel taking what
 // falls on its own square (so its total does not change as it moves across them, and it neither swims nor flickers).
 // The cones see a point's colour only well above the rods' threshold: its colour comes in between 10 and 100 thresholds
 // (POINTS.colour, in their logarithm; the "photochromatic interval"), and fully where the eye is in day vision.
-export const POINTS = Object.freeze({ sigma: 0.65, floor: 0.012, weber: 0.12, colour: Object.freeze([1, 2]) });
+export const POINTS = Object.freeze({ sigma: 0.65, floor: 0.025, weber: 0.12, power: 0.5, colour: Object.freeze([1, 2]) });
+export const pointScale = (k) => (k >= 1 ? k ** POINTS.power : k);      // under one threshold a point fades as it is
 export function pointShown(lux, B, shownBg = 0) {
   const k = lux / thresholdLux(B), step = Math.max(POINTS.floor, POINTS.weber * shownBg);
-  return { thresholds: k, peak: k * step };
+  return { thresholds: k, peak: pointScale(k) * step };
 }
 // THE PURKINJE SHIFT: under rod vision colour goes and what is left leans blue. H. W. Jensen, S. Premoze, P. Shirley,
 // W. B. Thompson, J. A. Ferwerda and M. M. Stark, "Night rendering" (University of Utah, UUCS-00-016, 2000), the method
 // their SIGGRAPH 2001 night sky (Jensen et al., "A physically-based night sky model") is tone-mapped with: the
 // scotopic luminance V = Y (1.33 (1 + (Y + Z) / X) - 1.68) (G. W. Larson, H. Rushmeier and C. Piatko, 1997); a rod
 // saturation s, 0 below 10^-2 cd/m2 and 1 above 10^0.6, 3 x^2 - 2 x^3 between (x = (log10 Y + 2) / 2.6); the
-// chromaticity moved toward (0.25, 0.25) by 1 - s and the luminance toward k V, k being the ratio of Y to V for white
-// (here sunlight, the game's white: 0.389; theirs, 0.4468, was for their own white). The level each pixel is judged at
-// is its own luminance, but never less than the eye's adaptation: an eye adapted to day sees no dark corner with rods.
-export const PURKINJE = Object.freeze({ blue: Object.freeze([0.25, 0.25]), lo: -2, hi: 0.6, white: 1 / (1.33 * (1 + (1 + 1.089) / 0.9505) - 1.68) });
+// chromaticity moved toward a night blue by 1 - s and the luminance toward k V, k being the ratio of Y to V for white
+// (here sunlight, the game's white: 0.389; theirs, 0.4468, was for their own white). The blue is the mean they measured
+// over ten realist paintings of night, x, y = 0.29, 0.28; they drew toward the bluest of them, 0.25, 0.25, to allow for
+// printing, which a screen does not need (at 0.25, 0.25 a moonless sky read as a deep navy). The level each pixel is
+// judged at is its own luminance, but never less than the eye's adaptation: an eye adapted to day sees no dark corner
+// with rods.
+export const PURKINJE = Object.freeze({ blue: Object.freeze([0.29, 0.28]), lo: -2, hi: 0.6, white: 1 / (1.33 * (1 + (1 + 1.089) / 0.9505) - 1.68) });
 export function rodShare(Y) { const lg = Math.log10(Math.max(Y, 1e-12)); return lg <= PURKINJE.lo ? 0 : lg >= PURKINJE.hi ? 1 : smooth((lg - PURKINJE.lo) / (PURKINJE.hi - PURKINJE.lo)); }
 export function scotopic(rgb) {
   const m = RGB_XYZ, X = m[0] * rgb[0] + m[1] * rgb[1] + m[2] * rgb[2], Y = m[3] * rgb[0] + m[4] * rgb[1] + m[5] * rgb[2], Z = m[6] * rgb[0] + m[7] * rgb[1] + m[8] * rgb[2];
@@ -279,7 +290,7 @@ export function purkinje(rgb, level, adapted = 0, out = [0, 0, 0]) {
   return xyzRgb(x * Yn / y, Yn, (1 - x - y) * Yn / y, out);
 }
 // a point seen by rods alone: white under the shift, as linear sRGB of unit luminance
-export const ROD_WHITE = Object.freeze(xyzRgb(1, 1, 2, [0, 0, 0]));
+export const ROD_WHITE = Object.freeze(xyzRgb(PURKINJE.blue[0] / PURKINJE.blue[1], 1, (1 - PURKINJE.blue[0] - PURKINJE.blue[1]) / PURKINJE.blue[1], [0, 0, 0]));
 // TWINKLING: the air's turbulence makes a star's light flicker, the more the more air it is seen through: as the air
 // mass to the 1.75th power (A. T. Young's 1967 law). Its size for an eye is chosen, not measured: Young's law, and the
 // measurements since (D. Dravins et al., PASP 109, 173, 1997), are for telescopes, and taken down to a 7 mm pupil they
@@ -344,7 +355,8 @@ export function scatterAt(mu, out = [0, 0, 0]) {
 //   glowAt(dir, out)  the night's own glow along a direction as seen (world frame: x east, y up, z south): the Milky Way,
 //                     the zodiacal light and the airglow through the air, and the air's scattering of them (cd/m2)
 //   state.level       the night's light on level ground (lux, three colours): that glow over the dome, and the stars'
-//   state.mean        the glow above the air, its mean over the dome (cd/m2): what the air scatters
+//   state.mean        the glow above the air as the air scatters it: its mean over the dome, weighted by what of
+//                     each direction's light reaches the low air (cd/m2)
 //   state.sunLon      the Sun's ecliptic longitude (radians), for the zodiacal light
 //   state.w2j         the world's directions to the J2000 equator (row-major), for the GPU
 // `stars` is stars.js's array (this file does not read it itself), or null for no stars.
@@ -393,9 +405,13 @@ export function createNight({ lat, lon, stars = null }) {
     const W = state.w2j; for (let k = 0; k < 3; k += 1) { W[3 * k] = hz[k]; W[3 * k + 1] = hz[6 + k]; W[3 * k + 2] = -hz[3 + k]; }
     // the Sun's ecliptic longitude: opposite the Earth's, seen from the Sun
     position('earth', when, v); state.sunLon = Math.atan2(-v[1], -v[0]);
-    // the glow above the air, its mean over the dome
-    const m = [0, 0, 0];
-    for (const q of DOME) { const s = sources(q.d, q.d[1]); for (let c = 0; c < 3; c += 1) m[c] += s.mw * S10 * MW_TINT[c] + s.zl * S10 * ZODIACAL.colour[c] + s.ag * AIRGLOW.colour[c]; }
+    // the glow above the air that the low air scatters: its mean over the dome, each direction weighted by how much of
+    // its light gets down to the low air (the airglow's edge-on brightening near the horizon is all but gone by then)
+    const m = [0, 0, 0], tw = [0, 0, 0];
+    for (const q of DOME) {
+      const s = sources(q.d, q.d[1]); transmittance(state.km, q.d[1], tmp2);
+      for (let c = 0; c < 3; c += 1) { m[c] += (s.mw * S10 * MW_TINT[c] + s.zl * S10 * ZODIACAL.colour[c] + s.ag * AIRGLOW.colour[c]) * tmp2[c]; tw[c] += tmp2[c]; }
+    }
     // the stars above the horizon: their mean over the dome, and their light on level ground through the air
     const sm = state.starsMean.map((x) => x * 2 * PI), sl = state.starsLevel.slice();
     if (stars && withStars) {
@@ -405,10 +421,10 @@ export function createNight({ lat, lon, stars = null }) {
         starDirection(stars[k + 1], stars[k + 2], stars[k + 3], stars[k + 4], years, sd);
         const u = hz[6] * sd[0] + hz[7] * sd[1] + hz[8] * sd[2]; if (u <= 0) continue;
         const e = magLux(stars[k + 5]); bvColour(stars[k + 6], col); transmittance(state.km, u, tmp2);
-        for (let c = 0; c < 3; c += 1) { sm[c] += e * col[c]; sl[c] += e * col[c] * tmp2[c] * u; }
+        for (let c = 0; c < 3; c += 1) { sm[c] += e * col[c] * tmp2[c]; sl[c] += e * col[c] * tmp2[c] * u; }
       }
     }
-    for (let c = 0; c < 3; c += 1) { state.mean[c] = m[c] / DOME.length + sm[c] / (2 * PI); state.starsLevel[c] = sl[c]; state.starsMean[c] = sm[c] / (2 * PI); }
+    for (let c = 0; c < 3; c += 1) { const T = tw[c] / DOME.length; state.mean[c] = (m[c] / DOME.length + sm[c] / (2 * PI)) / T; state.starsLevel[c] = sl[c]; state.starsMean[c] = sm[c] / (2 * PI) / T; }
     // the night's light on level ground: the glow over the dome, cosine-weighted, and the stars'
     const L = [0, 0, 0];
     for (const q of DOME) { glowAt(q.d, sc); for (let c = 0; c < 3; c += 1) L[c] += sc[c] * q.w; }
@@ -528,6 +544,8 @@ const float N_PMID = ${f(PIXEL_MIDDLE)};
 const float N_PFLOOR = ${f(POINTS.floor)};
 const float N_PWEBER = ${f(POINTS.weber)};
 const vec2 N_PCOLOUR = vec2(${f(POINTS.colour[0])}, ${f(POINTS.colour[1])});
+// the screen's steps for k thresholds (POINTS.power over one threshold; under it, as it is)
+float nightPointScale(float k) { return k >= 1.0 ? pow(k, ${f(POINTS.power)}) : k; }
 // twinkling (TWINKLE): its spread, in the logarithm of the light, by the look's height
 float nightTwinkle(float up) { float s = max(up, 0.0), X = 1.0 / (s + 0.025 * exp(-11.0 * s)); return min(${f(TWINKLE.most)}, ${f(TWINKLE.zenith)} * pow(X, ${f(TWINKLE.power)})); }
 `;

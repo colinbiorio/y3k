@@ -219,11 +219,11 @@ ok('the Purkinje shift: nothing by day; under rod vision colour goes and a blue 
   assert.deepEqual(N.purkinje([0.3, 0.45, 0.9], 1e-4, 100), [0.3, 0.45, 0.9], 'nor in a dark corner when the eye is adapted to day');
   const w = N.purkinje([1, 1, 1], 1e-4); near(luminance(w), 1, 1e-3, 'a white under rods keeps its luminance (the game\'s white, sunlight)');
   const X = 0.4124 * w[0] + 0.3576 * w[1] + 0.1805 * w[2], Y = 0.2126 * w[0] + 0.7152 * w[1] + 0.0722 * w[2], Z = 0.0193 * w[0] + 0.1192 * w[1] + 0.9505 * w[2];
-  near(X / (X + Y + Z), 0.25, 1e-3); near(Y / (X + Y + Z), 0.25, 1e-3);
+  near(X / (X + Y + Z), 0.29, 1e-3); near(Y / (X + Y + Z), 0.28, 1e-3);
   const red = luminance(N.purkinje([1, 0, 0], 1e-4)), blue = luminance(N.purkinje([0, 0, 1], 1e-4));
   assert.ok(blue / red > 5 * (0.0722 / 0.2126), 'blue light seen by rods gains on red');
   near(N.rodShare(0.01), 0, 1e-12); near(N.rodShare(10 ** 0.6), 1, 1e-12); within(N.rodShare(0.1), 0.2, 0.5, 'mesopic');
-  measured.push(`the Purkinje shift (Jensen et al.): rod vision under ${sig(0.01)} cd/m2, cone vision over ${sig(10 ** 0.6)}; a white under rods goes to x, y = 0.25, 0.25, its luminance kept (k = ${N.PURKINJE.white.toFixed(3)}, Y over V for sunlight)`);
+  measured.push(`the Purkinje shift (Jensen et al.): rod vision under ${sig(0.01)} cd/m2, cone vision over ${sig(10 ** 0.6)}; a white under rods goes to x, y = ${N.PURKINJE.blue.join(', ')} (their paintings' mean), its luminance kept (k = ${N.PURKINJE.white.toFixed(3)}, Y over V for sunlight)`);
 });
 
 ok('twinkling: strongest low down, held under 50%; planets are drawn without it', () => {
@@ -238,6 +238,10 @@ ok('a point is shown by how many of the eye\'s thresholds it stands over the sky
   const B = 2.5e-4, lim = N.limitingMagnitude(B), at = N.pointShown(N.magLux(lim), B, 0.03);
   near(at.thresholds, 1, 1e-9, 'at the limiting magnitude, one threshold'); near(at.peak, N.POINTS.floor, 1e-12, 'shown at the screen\'s own threshold');
   const bright = N.pointShown(N.magLux(lim - 2.5), B, 0.03); near(bright.thresholds, 10, 1e-6, 'ten times brighter, ten thresholds');
+  near(bright.peak, N.POINTS.floor * Math.sqrt(10), 1e-12, 'shown on the point-source power of a half');
+  near(N.pointShown(N.magLux(lim + 1), B, 0.03).peak, N.POINTS.floor * 10 ** -0.4, 1e-12, 'under one threshold it fades as it is');
+  // Sirius at night stands about 1,700 thresholds over the sky: white, and only just
+  const sir = N.pointShown(N.magLux(-1.46) * 0.8, B, 0.03); within(sir.thresholds, 1000, 2500, 'Sirius, thresholds'); within(sir.peak, 0.7, 1.4, 'Sirius at white');
   assert.ok(N.pointShown(N.magLux(1), 1, 0.4).peak > N.pointShown(N.magLux(1), 1, 0.01).peak, 'on a brighter screen it needs more');
   // the share of a point's light on each pixel's square adds to one wherever it falls between them (so it neither
   // swims nor flickers as the eye turns)
@@ -246,7 +250,7 @@ ok('a point is shown by how many of the eye\'s thresholds it stands over the sky
   for (const [fx, fy] of [[0, 0], [0.5, 0.5], [0.25, 0.8], [0.9, 0.1]]) { let sum = 0; for (let y = -3; y <= 3; y += 1) for (let x = -3; x <= 3; x += 1) sum += share(x - fx, y - fy); near(sum, 1, 3e-3, 'its total at ' + fx + ', ' + fy); }
   near(share(0, 0), N.PIXEL_MIDDLE, 1e-9, 'a centred point\'s middle pixel');
   assert.match(read('src/game/solar/night.js'), /float nightPixel\(vec2 o\)/);
-  measured.push(`a point at the eye's limit is shown ${(N.POINTS.floor * 100).toFixed(1)}% of white over a dark sky in its middle pixel, at ten thresholds ten times that; its light is a Gaussian of ${N.POINTS.sigma} pixels, ${(N.PIXEL_MIDDLE * 100).toFixed(0)}% of it in the middle pixel when centred, its total the same wherever it falls`);
+  measured.push(`a point at the eye's limit is shown ${(N.POINTS.floor * 100).toFixed(1)}% of white over a dark sky in its middle pixel, at ten thresholds ${Math.sqrt(10).toFixed(2)} times that (the power ${N.POINTS.power}), Sirius at night (${sir.thresholds.toFixed(0)} thresholds) at ${(sir.peak * 100).toFixed(0)}%; its light is a Gaussian of ${N.POINTS.sigma} pixels, ${(N.PIXEL_MIDDLE * 100).toFixed(0)}% of it in the middle pixel when centred, its total the same wherever it falls`);
 });
 
 // ------------------------------------------------------------------------------------------------- the Moon

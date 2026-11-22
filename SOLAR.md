@@ -45,7 +45,8 @@ error has not been measured; what cannot yet be done well is written under "What
    Sun, the Moon with its phase and its face, the planets where they are and as bright as they are, for the real
    clock, seen from Lord Howe Island (31.55 S, 159.08 E); the eye's adaptation from noon to a moonless night.
    In four parts, each looked at before the next: **the air and the Sun** (built, 22 November 2026, behind a
-   switch: below); the night (stars, the Milky Way, the planets); the Moon; the clock's dial, the sea's mirror, phones.
+   switch: below); **the night** (built the same day, behind the same switch: below); the Moon; the clock's dial,
+   the sea's mirror, phones.
 3. **The seamless rise.** The air's scattering from the beach to space; the Earth as a globe under the island
    (his clean Earth: no city lights), the island at its real place; numerical precision at planetary scale, so
    that a metre on the sand and the distance to the Moon live in one picture without a seam.
@@ -60,7 +61,10 @@ error has not been measured; what cannot yet be done well is written under "What
 **Step 1 is built.** `src/game/solar/` is the clockwork: five plain modules with no page and no three in them.
 `test/solar.test.mjs` (22 checks) holds it to the sky. **Step 2's first part is built behind a switch** (the
 air and the Sun: its own section below): three more plain modules beside the clockwork, one that draws, and
-`test/sky.test.mjs` (18 checks). The world tab uses them only when the page's address says `?sky=true`.
+`test/sky.test.mjs` (18 checks). **Its second part, the night, is built behind the same switch** (its own section
+below): the stars, the Milky Way, the zodiacal light, the airglow, the planets, the Moon's light and the eye at
+night, in `night.js` and two generated files, and `test/night.test.mjs` (18 checks). The world tab uses them only
+when the page's address says `?sky=true`.
 
 | file | what it is |
 |---|---|
@@ -534,8 +538,9 @@ direction and leaves the second out.
   were painted for the old light: its grass gives back 42% of what falls on it and its sand 65%, where real
   grass gives back 20 to 25% and coral sand about 40%, so the land stands higher against the sky than a real
   island does.
-- **After the end of twilight there is nothing**: no stars, no airglow, no Moon. The exposure holds at the
-  night sky's own level (2e-4 cd/m2, `EYE.floor`) and the picture goes black. That is the next part.
+- **After the end of twilight there was nothing** (as this part first shipped): no stars, no airglow, no Moon; the
+  exposure held at the night sky's own level (2e-4 cd/m2, `EYE.floor`) and the picture went black. The night is the
+  second part, below.
 
 ### What the next parts need from here
 
@@ -556,6 +561,222 @@ direction and leaves the second out.
 - **The sea**: `SKY_OVER_GLSL` already gives its surface the sky; the Sun's and the Moon's own glitter want the disc.
 - **Phones**: the lighter path (smaller tables: 128 x 72 and 16 slices of 16 x 16) is drawn and measured on the
   Mac's chip, not yet on a phone's.
+
+## Step 2, second part: the night (22 November 2026)
+
+Colin, 22 November 2026, as the first part was looked at: "the ultimate goal is the most realistic game ever made",
+with Jedi: Fallen Order's detail as the floor, and "i would FAR prefer quality over quantity".
+
+Standing on the beach after the end of twilight, the sky is the night over that beach at the world's clock's
+instant: the catalogue's 9,096 stars where they are, as bright and as coloured as they are, coming out one by one in
+twilight in the order the eye finds them; the Milky Way and every star too faint for the catalogue, with the
+Magellanic Clouds and the Coalsack; the zodiacal light and the airglow, which keep a moonless sky from black; the
+planets where the clockwork puts them; the Moon's light on the land, in the air and on the sea, its disc of its true
+size and phase; and the eye that sees it, which loses colour and gains blue as it darkens.
+
+**It is behind the switch, as the first part is:** `?sky=true`, and nothing changes without it. One more word for
+whoever is judging: `&stars=light` draws each star as its light falls on its pixels, through the same curve as the
+sky (as a camera would record it), instead of by the eye's thresholds (below, "The eye at night").
+
+| file | what it is |
+|---|---|
+| `solar/night.js` | the night as numbers: the photometric zero, the stars' places and colours, the zodiacal light, the airglow, the air's scattering of them, the eye's threshold, the Purkinje shift, twinkling; and the same written out for the GPU (`NIGHT_GLSL`, `NIGHT_EYE_GLSL`) from the same constants |
+| `solar/stars.js` | the Yale Bright Star Catalogue as 9,096 x 7 numbers, brightest first. Generated (`scripts/solar/stars.mjs`, byte for byte) |
+| `solar/milkyway-cube.jpg` | the Milky Way and every star too faint for the catalogue, in true units: six faces of 512 texels, 411 KB. Made by `scripts/solar/calibrate.py`, `texture.py` and `cube.py` (it comes out byte for byte from the floats `texture.py` writes) |
+| `solar/milkyway.js` | the texture's numbers, and the same light in 5-degree cells for the page's own thread (the eye's meter, the light on level ground) and the tests. Generated (`scripts/solar/milkyway.py`) |
+| `solar/daylight.js` | now also the Moon, the planets, the night's glow, the key light and the whole sky's light on level ground; the Sun's own numbers (`sky`, `direct`, `level`, `toward()`) are as they were |
+| `../sky.js` | draws it: the night in the dome, the air and the sea, the Moon's sky table, the stars' and planets' points, the eye |
+
+### One zero for the night
+
+Every light at night is on the Sun's own scale: a light of V magnitude m gives E(m) = E_sun(1 au) 10^(-0.4 (m + 26.74))
+lux above the air (air.js's Sun, and the clockwork's magnitude for it). A surface brightness of one S10, one star
+of V = 10 to the square degree (27.78 V mag to the square arcsecond, the unit the night sky's references use), is
+E(10) over a square degree. So the stars, the planets, the Moon, the Milky Way, the zodiacal light and the airglow
+are all in the same lux and cd/m2 as the day, through the same air, into the same eye.
+
+### The stars
+
+- **The catalogue**: D. Hoffleit and W. H. Warren Jr., The Bright Star Catalogue, 5th revised edition (Yale
+  University Observatory, 1991; CDS V/50), from the copy the Smithsonian Astrophysical Observatory's Telescope Data
+  Center keeps, read as text. 9,096 stars (the 14 entries without a place left out): J2000 place, proper motion,
+  V, B-V. 310 faint stars have no B-V; it is guessed from the spectral type (the main sequence's colours, the
+  giants' for K and M), moved by the mean difference over the 8,755 stars that have both (within 0.12 mag for 68 in
+  100). The catalogue's own places are good to about an arcsecond.
+- **Where each is**: its J2000 direction moved along the sky by its proper motion (years of TT since J2000.0),
+  leaned by the eye's motion (the Earth's round the Sun, 20.5 arcsec at most, and the island's round the Earth's
+  axis), turned onto the horizon by the clockwork's `horizonMatrix` (precession, nutation, sidereal time) and lifted
+  by the clockwork's refraction. On the GPU: the direction at the epoch is computed once (again if the clock moves
+  half a year), the eye's motion and the turn are uniforms every frame, the lift is worked out per star.
+- **How bright and what colour**: E(V), through the air's own transmittance table along its line (so a low star is
+  dimmed and reddened as the setting Sun is), twinkling; its colour from B-V as a black body of C. A. L.
+  Ballesteros' temperature (EPL 97, 34008, 2012), taken through the CIE 1931 colour-matching functions (the fit of
+  C. Wyman, P.-P. Sloan and P. Shirley, JCGT 2(2), 2013) and balanced to sunlight as white (B-V 0.65 is 5,778 K).
+- **Twinkling**: the air mass to the 1.75th power (A. T. Young's 1967 law); its size for an eye is chosen, since
+  the law and the measurements since (D. Dravins et al., PASP 109, 173, 1997) are for telescopes: a tenth at the
+  zenith, held under a half; low down the three colours flicker apart. The planets do not twinkle.
+- **The planets** are points of the clockwork's apparent place and magnitude (Mallama and Hilton) and of their
+  measured colours (`bodies.js`), placed twice a second; Uranus and Neptune are there for whoever can find them.
+  By the same thresholds Venus can be found by day, as it can: at noon on 21 November 2026, 51 degrees up at V
+  -4.9, it stands 0.4 magnitude over the eye's threshold in that sky, a faint point.
+- **Nothing passes in front of the Moon or the Sun**: a star behind either disc is not drawn.
+
+### The Milky Way and what the eye cannot resolve
+
+NASA/Goddard Space Flight Center Scientific Visualization Studio's Deep Star Maps 2020 (svs.gsfc.nasa.gov/4851,
+Ernie Wright; Gaia DR2: ESA/Gaia/DPAC), credited as the SVS asks. Its two maps (the Hipparcos and Tycho stars; the
+Gaia DR2 stars fainter than those) were put on the catalogue's own photometric scale by measuring 1,249 isolated
+unclipped stars of V 4.5 to 6.5 in them (`calibrate.py`); the catalogue's stars were cut out (they are drawn as
+points); the Gaia layer, which the map draws 2.6 mag too bright against its own bright stars (the Magellanic Clouds'
+known totals say so), was dimmed by that; the faint stars, below what the eye resolves at night, were softened to a
+quarter of a degree and the Gaia grain to 8 arcmin, evenly on the sphere (`texture.py`). The light is kept in S10 in
+three colours, each channel log-encoded in 8 bits (S10 = C0 (exp(byte / 255 LN) - 1)), as a cube map with a 2-texel
+gutter round each face so that a look-up never needs its neighbour (`cube.py`: no pinch at the poles, no seams; within
+1.6% of the floats in the median). On the GPU it is read with its bytes as they are (no colour conversion), decoded,
+and dimmed by the air along each look; a look is taken back to where its light comes from (the air lifted it) before
+it is looked up. Against Leinert et al.'s references the totals are inside their own spread (the high latitudes a
+little faint, the plane a little bright: the map draws a star as its flux to the 0.8th power).
+
+### The zodiacal light, the airglow, and the air's scattering of them
+
+- **The zodiacal light**: Ch. Leinert et al., "The 1997 reference of diffuse night sky brightness" (A&AS 127, 1,
+  1998), Table 16 (Levasseur-Regourd and Dumont's measurements, brought up to date): S10 at 500 nm by the difference
+  of ecliptic longitude from the Sun and the ecliptic latitude, 60 at the ecliptic pole, the Gegenschein opposite
+  the Sun. Its blanks within 15 degrees of the Sun are carried on along their rows (only ever under the horizon or in
+  twilight). Its colour is sunlight a little reddened (their equation 22). On the GPU, a 37 x 19 table of 5 degrees.
+- **The airglow**: the upper air's own light, from about 90 km. Its zenith brightness and its colour are both worked
+  out from the typical nightglow of Leinert's Table 13 ([OI] 557.7 nm 250 R, Na D 65 R, [OI] 630.0 and 636.4 nm 80 R,
+  a pseudo-continuum of 0.3 R/Å from 400 to 700 nm): photons to watts to lumens, 139 S10 at the zenith, a faint green.
+  Edge-on it is brighter as P. J. van Rhijn has it (Leinert's equation 13); it is seen through the air under it.
+- **The air's scattering of them**: the air scatters the night's own glow as it scatters sunlight, and toward the
+  horizon this outshines what comes straight through (Leinert's section 5: 10 to 100 S10). Worked out as their
+  section 5.1 does for the airglow: a source of unit radiance over the whole sky above the air, scattered once by the
+  same air (Rayleigh, haze and ozone, the same phase functions), times their factor for scattering more than once
+  (Table 7), kept for 32 heights of a look; the light that comes is that times the glow's mean over the dome.
+
+### The Moon's light, and the key light
+
+- The Moon's light is its magnitude (the clockwork's phase law, within 0.02 mag of Horizons) on the zero above, its
+  colour sunlight reddened (B-V 0.92, as a black body), through the air along its line, by how much of its disc
+  clears the horizon. Its light in the air is the Sun's method with the Moon as the light: a sky table of its own
+  where its light in the air counts, made again when it has moved a hundredth of a degree; its light in the air
+  between the eye and the land; its sky's light on level ground from the same kept irradiance as the Sun's.
+- **The key light** is whichever light that comes straight gives most: the Sun, else the Moon, else a planet (Venus
+  or Jupiter on a moonless night, a faint key). The island turns its one directional light that way, the rooms'
+  patches of light follow it, the sea's glitter is its, and the eye's veil is round it (by how much of its disc is in
+  sight: the seven marks are now the key's).
+- **The Moon's disc**, until its sphere is made (the next part): a plain disc of its true size and place (with its
+  parallax: up to a degree), lit on the side toward the Sun as a sphere is (the terminator from the true direction
+  of the Sun as seen from the Moon), its lit part of the mean luminance its light gives over that part. It hides what
+  lies beyond the air (the Milky Way, the zodiacal light, the stars); the air's own light lies over it.
+
+### The eye at night
+
+- **The adaptation** is the first part's (Krawczyk's key, the meter of fifteen looks, a brighter scene followed
+  half-way in 0.35 s and a darker in 1.7 s), now reading the whole sky: the Moon's, the night's glow. The real eye
+  takes twenty to thirty minutes to the dark; a game cannot leave a player blind for that long after a lit room, so
+  the times are a game's: the eye is felt adjusting for a few seconds. Under a moonless sky the eye is adapted to about
+  2.5e-4 cd/m2, which Krawczyk's key shows at 3% of the screen's white: the night stays night, the land a silhouette
+  against a sky a little brighter than it, as it is.
+- **The Purkinje shift**: under rod vision colour goes and what is left leans blue. H. W. Jensen, S. Premoze, P.
+  Shirley, W. B. Thompson, J. A. Ferwerda and M. M. Stark, "Night rendering" (University of Utah, UUCS-00-016, 2000),
+  the method their SIGGRAPH 2001 "A physically-based night sky model" is tone-mapped with: the scotopic luminance
+  V = Y (1.33 (1 + (Y + Z) / X) - 1.68) (G. W. Larson, H. Rushmeier and C. Piatko, 1997), a rod saturation running
+  from 0 at 10^-2 cd/m2 to 1 at 10^0.6, the chromaticity moved toward x, y = 0.25, 0.25 and the luminance toward
+  Y / V of white times V. Each pixel is judged at its own luminance but never below the eye's adaptation (an eye
+  adapted to day sees no dark corner with rods). It is the first step of the curve every material ends with: by day
+  it does nothing.
+- **How a point is shown**: a star cannot be drawn as its light in its pixel. A pixel is two arcminutes; an eye at
+  night gathers a point's light over a third of a degree (Ricco's area), so a sixth-magnitude star drawn as its light
+  stands thirty times above the sky in its pixel and every star of the catalogue glares alike (`&stars=light` shows
+  it). So each star is shown by how many of the eye's thresholds it stands above the sky behind it (J. A. Ferwerda, S.
+  N. Pattanaik, P. Shirley and D. P. Greenberg, "A model of visual adaptation for realistic image synthesis",
+  SIGGRAPH 1996, match thresholds the same way): the threshold is B. E. Schaefer's fit to H. R. Blackwell's
+  measurements (J. Opt. Soc. Am. 36, 624, 1946), from his program for the visual limiting magnitude (Sky & Telescope,
+  May 1998), I = c1 (1 + sqrt(c2 B))^2, against the sky's true luminance at the star (the twilight's, the Moon's, the
+  night's, a veil's), never below the eye's adaptation; a star at k thresholds is drawn at k of the screen's own
+  thresholds for a point (a chosen 1.2% of white in its middle pixel on a dark screen, 12% of what is round it on a
+  bright one: the viewer's, not the world's). So in twilight the stars come out one by one in the order the eye finds
+  them, the brightest first; a bright Moon or a lit torch puts the faint ones out; and the count and the spread of
+  brightness at night are the eye's. The cones see a point's colour only well above the rods' threshold: a star's
+  colour comes in between ten and a hundred thresholds, and fully in day vision (a faint star is white, Antares red).
+- **The splat**: each point's light is a Gaussian of 0.65 pixels laid over the pixels round its exact place, each
+  pixel taking what falls on its own square (an error function), so its total does not change as it moves across
+  them: it neither swims nor flickers as the eye turns. What it adds is worked out on the screen's own numbers (the
+  sky there as drawn, and the same with the point in it), so it adds to the picture as light adds to the sky.
+- **The veils**: the key light's, as the Sun's in the first part (to 60 degrees, or where it falls under a
+  two-hundredth of the sky's brightness as shown); and the eight brightest points' (the planets, the brightest
+  stars), from 0.1 degree (the equation's domain) out, in the sky only.
+
+### On the GPU
+
+- What changes slowly across the sky (where each look's light comes from on the J2000 equator, with the air's lift
+  undone by G. G. Bennett's formula, and the zodiacal light there) is worked out at the dome's 10,242 corners, two
+  degrees apart; what does not (the Milky Way's texture, the air's transmittance, the airglow's growth) per pixel.
+- The dome is drawn after everything solid (it lies at the far end of the depth), so the GPU skips every pixel the
+  land covers. The first part drew it first; at the pixel cap the night's per-pixel work made it the whole cost of a
+  frame (a moonless night took 19.3 ms a frame with it drawn first and every part per pixel, 16.7 without the dome).
+- The stars and planets are one set of 9,103 points; each point's vertex works out the sky behind it (the same
+  functions as the dome's), its thresholds and its colour; its pixels only lay the light.
+- The night's glow is skipped where the exposure makes it a hundred-thousandth of white (by day), the Moon's table
+  where its light in the air is under a thousandth of the sky's, the Sun's table at night.
+
+### What was measured
+
+`node test/night.test.mjs` measures and prints these (no GPU), and fails if a line here stops being true.
+
+- One zero: a light of V = 0 gives 2.684e-6 lux above the air, one S10 is 8.81e-7 cd/m2, a full Moon (V -12.7) 0.323 lux
+- The catalogue: 9,096 stars, 8,404 of them V 6.5 or brighter; all of them together V -4.96
+- Star places against ERFA (atco13, IAU 2006/2000A), 49 places of Sirius, Canopus, Acrux and Achernar above the horizon on four nights: worst 0.047 arcsec; with the air's lift above 10 degrees, 9.5 arcsec (two models of refraction); Sirius' proper motion since 2000, 36 arcsec; the Earth's motion, 20.7 arcsec
+- The Milky Way's texture: 411 KB, six faces of 512 texels; its brightest texel (RA 270.1, Dec -28.9) decodes to 1240 S10, 0.00109 cd/m2 (20.0 V mag/arcsec2); the north galactic pole's cell 16 S10
+- The zodiacal light (V): 61.5 S10 at the ecliptic pole, 207 on the ecliptic 90 degrees from the Sun, 184 opposite it (the Gegenschein), 1987 30 degrees from it
+- The airglow from Leinert's Table 13 lines: 1.23e-4 cd/m2 at the zenith, 139 S10, colour 0.93, 1.07, 0.55 (red, green, blue over its luminance); 6.0 times brighter edge-on
+- The air scatters the night's glow toward the eye: 0.081, 0.099, 0.151 of its mean at the zenith (red, green, blue), 0.29, 0.32, 0.37 at 5.7 degrees
+- 15 December 2026, 00:00 (UTC+11): the zenith 2.14e-4 cd/m2 (243 S10, 21.81 V mag/arcsec2): the Milky Way 27 S10 (5-degree cells), the zodiacal light 72, the airglow 139 (83% of each through the air), scattered 45; on level ground 9.68e-4 lux, 6% of it from the catalogue's stars
+- 15 July 2026, 22:12 (UTC+10:30): the zenith 5.83e-4 cd/m2 (661 S10, 20.73 V mag/arcsec2): the Milky Way 459 S10 (5-degree cells), the zodiacal light 140, the airglow 139 (83% of each through the air), scattered 47; on level ground 0.00106 lux, 5% of it from the catalogue's stars
+- 15 December: 4,758 of the catalogue's stars above the horizon; under the zenith's sky the eye's limit is V 6.52, and about 3,276 stand over it
+- 15 July: 4,555 of the catalogue's stars above the horizon; under the zenith's sky the eye's limit is V 5.93, and about 1,650 stand over it
+- The faintest point seen (Schaefer): V 6.60 under a sky of 22 mag/arcsec2, 3.56 at the end of civil twilight (0.42 cd/m2), -0.44 at sunset (158 cd/m2)
+- Stars coming out on the evening of 15 April 2026 (UTC+10:30), each with the Sun's height when it does: Sirius (V -1.46) 0.4°, Canopus (V -0.72) -0.1°, Rigel (V 0.12) -2.1°, Procyon (V 0.38) -2.1°, Betelgeuse (V 0.5) -2.8°, Alpha Centauri (V -0.01) -2.8°, Achernar (V 0.46) -3.2°, Hadar (V 0.61) -3.5°
+- The Purkinje shift (Jensen et al.): rod vision under 0.01 cd/m2, cone vision over 3.98; a white under rods goes to x, y = 0.29, 0.28 (their paintings' mean), its luminance kept (k = 0.389, Y over V for sunlight)
+- Twinkling (its spread in the light's logarithm): 10% at the zenith, 34% at 30 degrees, 50% at 10
+- A point at the eye's limit is shown 2.5% of white over a dark sky in its middle pixel, at ten thresholds 3.16 times that (the power 0.5), Sirius at night (1147 thresholds) at 85%; its light is a Gaussian of 0.65 pixels, 31% of it in the middle pixel when centred, its total the same wherever it falls
+- The full Moon of 24 November 2026, 13:00 UTC (32.4 degrees up): V -12.77, 0.344 lux above the air, 0.245 facing it through the air, 0.162 on level ground (its sky 0.0303 of that); colour 1.10, 0.99, 0.82
+
+**On the GPU** (the M2's own chip, headless Chromium on Metal; not in `npm test`):
+
+(the GPU's numbers are being measured again after the changes of 22 November; they follow.)
+
+### What is approximated at night
+
+- **The Milky Way's last half magnitude**: the faint layer runs a little faint at high galactic latitudes and a
+  little bright in the plane (the map draws a star as its flux to the 0.8th power). No diffuse galactic light (the
+  dust's scattered starlight, a fifth of the plane's light) and no light from beyond the Galaxy.
+- **The zodiacal light** is the yearly mean (it changes a few percent as the Earth crosses the dust's plane, and with
+  its distance from the Sun), and reddened as at 90 degrees from the Sun everywhere.
+- **The airglow** is the typical night's, uniform: no solar cycle (it varies by a third either way), no patches, no
+  waves, no fading through the night; the OH bands' share of the visible red is not in it.
+- **The air's scattering of the night's glow** takes that glow as uniform over the sky (Leinert's own approximation
+  for the airglow), for an eye on the beach; in front of the land it is the horizon's, by how much of the way's light
+  the air takes.
+- **The eye's threshold** is the average observer's who knows where to look (Blackwell's 50% detection), for any
+  colour of star; the screen's threshold for a point is chosen; no averted vision, no loss of acuity at night (the
+  rods' blur, Jensen's edge-keeping blur) and no star spikes.
+- **Twinkling** is chosen in size (above), and drawn as smooth noise of a few hertz per star.
+- **The Moon's disc** is plain, as said; no earthshine on its dark part; its veil and its sky are right in the mean.
+- **Venus' light** is the key light when it is the brightest, with no shadow (nothing casts one yet).
+- **Refraction** is the clockwork's Saemundsson formula, which differs from ERFA's model by up to 9.5 arcsec above 10
+  degrees (both far under a pixel).
+
+### What the Moon's part needs from here
+
+- **The disc** is drawn in `sky.js` `DOME_FRAG` ("THE MOON, for now a plain disc"): its place (`uMoonTrue`), size
+  (`uMoonRad`), the direction of its light (`uMoonLit`) and its mean luminance (`uMoonDisc`) are there; the face
+  wants `subLon`, `subLat` (its librations), `axis - zenith` and the LRO maps, a lunar reflectance law in place of
+  the plain mean, and earthshine from the Earth's phase seen from the Moon.
+- **Its light** is done: its sky table, its light in the air between eye and land, on level ground, as the key, its
+  veil, its glitter on the sea (the sea's mirror is the fourth part's).
+- **The switch**: the true sky comes out from behind `?sky=true` when the Moon's face is made and looked at.
 
 ## What the tests cannot check, and what is rough
 
@@ -593,7 +814,8 @@ Named so that nothing unmeasured is taken for done:
 - **Magnitudes** of the moons and dwarf planets; Mars' markings.
 - **Atmospheres** of Titan and Triton (not on NASA's fact sheets; not typed from memory).
 - **Haumea's shape and ring; the three outer dwarfs' rotation; their moons.**
-- **The stars.** `horizonMatrix()` is ready to turn a catalogue; there is no catalogue yet (step 2).
+- **The stars past the eye's reach.** The catalogue's 9,096 are drawn (step 2's second part); a point layer of
+  Tycho-2 or Gaia for a telescope's view, and the stars' names, are owed.
 - **UT1.** A short table of UT1 - UTC for recent years would take the last 11" out of the sky for the present.
 - **Relativity's small things**: the planets' own bending of light, TDB - TT.
 
@@ -644,12 +866,27 @@ node scripts/solar/light.mjs
 `series.mjs` and `orbits.mjs write` were run again from the repository's own copies and gave the committed files
 byte for byte; `orbits.mjs fit` was run again for three orbits and gave the same numbers.
 
+**The night's data** (step 2's second part), from downloads kept in folders of their own and only read (Python:
+numpy, pyerfa, OpenEXR, Pillow; run with `python -I`):
+
+| what | from | how |
+|---|---|---|
+| the stars (`stars.js`) | D. Hoffleit and W. H. Warren Jr., The Bright Star Catalogue, 5th revised edition (Yale, 1991; CDS V/50), the copy at tdc-www.harvard.edu/catalogs/bsc5.dat.gz | `node scripts/solar/stars.mjs <bsc5.dat> src/game/solar/stars.js`: made again, byte for byte |
+| the Milky Way (`milkyway-cube.jpg`) | NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (svs.gsfc.nasa.gov/4851; Gaia DR2: ESA/Gaia/DPAC): `hiptyc_2020_4k.exr`, `milkyway_2020_4k.exr` | `calibrate.py`, then `texture.py`, then `cube.py` (which gives the committed JPEG byte for byte from the floats `texture.py` writes) |
+| its numbers (`milkyway.js`), the texel fixture | the same | `python -I scripts/solar/milkyway.py <milkyway-s10.npy> <milkyway-cube.json> src/game/solar/milkyway-cube.jpg src/game/solar/milkyway.js test/fixtures/solar/milkyway.json` |
+| the star places' fixture | ERFA (pyerfa), the IAU's SOFA library | `python -I scripts/solar/stars-erfa.py src/game/solar/stars.js test/fixtures/solar/stars.json` |
+| the zodiacal light, the airglow | Ch. Leinert et al., A&AS 127, 1 (1998), Tables 16 and 13 | typed into `night.js`, each beside its source |
+| the eye's threshold | B. E. Schaefer's program for the visual limiting magnitude (Sky & Telescope, May 1998), fitted to H. R. Blackwell's measurements | its constants, typed into `night.js` |
+
 **Licences.** This repository is MIT. What it carries from elsewhere is measurement and published theory, with
 its source named where it sits. IMCCE's VSOP87 and ELP directories name the papers and give no licence; the
 series here are cut from them and say so. JPL's Horizons, NAIF's kernels and NASA's fact sheets are public
 services and documents of NASA and JPL/Caltech, credited above; nothing from them is redistributed whole, only
 the numbers used and, in the fixtures, the answers to the questions written beside them. The two papers by
-Mallama and others are cited for their published numbers and equations. If a holder of any of these asks for a
+Mallama and others are cited for their published numbers and equations. The Bright Star Catalogue is carried as
+the numbers the game uses (seven a star), credited where it sits. The Milky Way's texture is NASA SVS's Deep Star
+Maps 2020, reduced to a 411 KB cube map in true units and credited as the SVS asks ("NASA/Goddard Space Flight
+Center Scientific Visualization Studio. Gaia DR2: ESA/Gaia/DPAC."). If a holder of any of these asks for a
 different credit or for removal, it is one file each.
 
 ## What step 2 needs from here

@@ -119,6 +119,75 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The true sky over the island, its second part: the night (22 November 2026)
+
+Colin, 22 November, as the first part was looked at:
+
+> the ultimate goal is the most realistic game ever made
+
+with Jedi: Fallen Order's detail as the floor, and "i would FAR prefer quality over quantity". The night is the
+second of the true sky's four parts ([`SOLAR.md`](SOLAR.md) "Step 2, second part" has the method, the sources and
+the numbers); this is what it is in the game.
+
+**It is behind the same switch, and off.** `?sky=true` as before; without it nothing has changed for anyone, and the
+page fetches none of the night's files either (the catalogue, the Milky Way's texture, the numbers): they come with
+the sky's own file, and only when the island is come to with the switch on. `&stars=light` beside it draws the stars
+as a camera would record them, for comparing.
+
+- **The stars**: all 9,096 of the Yale Bright Star Catalogue (D. Hoffleit and W. H. Warren Jr., 1991), every star
+  the eye can see, where they stand over Lord Howe Island at the world's clock's instant (within 0.05 arcsec of the
+  IAU's own library, ERFA, before the screen's pixel of two arcminutes), as bright and as coloured as they are,
+  dimmed and reddened toward the horizon by the same air as the Sun, twinkling more the lower they are. Crux, the
+  Pointers, Canopus and Achernar are where they are; the planets too, where the clockwork has them, steady.
+- **How they are shown**: by the eye. A star is drawn by how far above the eye's own threshold it stands against the
+  sky behind it (Schaefer's fit to Blackwell's measurements), so in twilight they come out one by one in the order
+  an eye finds them, the brightest first (on 15 April 2026 Sirius with the Sun 0.4 degrees up, Canopus as it sets,
+  then Rigel, Procyon, Betelgeuse); a bright Moon or a lit torch puts the faint ones out; faint stars are white and
+  only the bright ones show their colour. Each is laid over the pixels round its true place so that it neither
+  swims nor flickers as the eye turns.
+- **The Milky Way and what the eye cannot resolve**: NASA's Deep Star Maps 2020 (NASA/Goddard Space Flight Center
+  Scientific Visualization Studio; Gaia DR2: ESA/Gaia/DPAC), put on the catalogue's own scale, so its clouds, its
+  dark lanes, the Coalsack and both Magellanic Clouds stand as bright against the sky as they do.
+- **The night's own glow**: the zodiacal light (Leinert's measured table; the Gegenschein opposite the Sun), the
+  airglow (its brightness and its faint green worked out from the lines the upper air gives), and the air's
+  scattering of both, which brightens the sky toward the horizon. A moonless sky is never black: 2.2e-4 cd/m2 at the
+  zenith at midnight on 15 December 2026 (21.8 mag/arcsec2, a natural dark sky), and a thousandth of a lux on the
+  ground, enough for silhouettes.
+- **The Moon's light**: from its phase and magnitude (the clockwork's), on the land (it is the key light whenever it
+  is up and the Sun is not), in the air (the moonlit sky, by the Sun's own method with the Moon as the light, its
+  aureole round it), on the sea (its glitter), with the eye's glare round it. Its disc is plain for now: its true size,
+  place and phase, lit as a sphere; its face and earthshine are the next part.
+- **The eye at night**: as it darkens, rod vision: colour goes and a blue stays (the Purkinje shift, Jensen et al.'s
+  method). It adapts to the night in a few seconds, as the first part's eye does (the real eye takes twenty minutes,
+  which a game cannot ask).
+
+**What changed in the look under the switch, and why**:
+
+1. **After twilight there is a night**: where the first part went black, the sky is now a deep blue-grey with the
+   stars and the Milky Way in it, the land a silhouette against it.
+2. **Everything under the switch passes through the Purkinje shift** as it darkens: by day it does nothing; at dusk
+   the colours fade toward blue-grey (the twilight arch keeps some of its orange, the land loses its green).
+3. **Under the Moon** the island is lit from where the Moon is (the rooms' patches of light too), bluish-grey, and the
+   sky is a lighter blue; the Moon wears a glare.
+4. **The key light can be a planet** on a moonless night (Venus or Jupiter): faint, a few percent of the sky's.
+5. **Venus can be found by day**, as it can in life: at noon on 21 November 2026 it stands just over the eye's
+   daylight threshold, a faint point 51 degrees up, where the first part's noon had nothing.
+
+**What is rough, seen in the pictures:**
+
+- **A moonless night is dark**: the eye's key (Krawczyk's) shows the sky at 3% of white, the sand under starlight a
+  little below it. `&ev=1` shows one stop brighter, for judging; the land's own colours (painted for the old light,
+  brighter than real) are unchanged.
+- **The Milky Way is subtle** at that key, its brightest clouds three or four times the sky's own light: there, but not
+  the long-exposure photograph people remember.
+- **The faintest stars are a few steps over the sky** on a dark screen: chosen so (the screen's threshold for a point,
+  SOLAR.md), and lost on a bright screen in a lit room.
+- **The Moon's disc is a plain lit shape** (the next part makes its face); no earthshine on its dark part.
+- **The ring and the body stand in front of the sky**: the eye comes no closer than 2 m behind the body.
+- **Nothing casts a shadow**, under the Moon as under the Sun.
+
+**Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the Mac's own chip): (the GPU's numbers are being measured again after the changes of 22 November; they follow.)
+
 ### The true sky over the island, its first part: the air and the Sun (22 November 2026)
 
 Colin, 20 November:
@@ -139,8 +208,9 @@ it is in the game.
 the island stands under the true sky; without it nothing has changed for
 anyone, and the void is not touched either way. It stays behind the switch
 until the night (the stars, the Milky Way, the planets) and the Moon are made
-and looked at: for now, after the end of twilight there is nothing in the sky
-and the picture goes black. Three more words for whoever is looking:
+and looked at: as this part first shipped, after the end of twilight there
+was nothing in the sky and the picture went black (the night is the second
+part, above). Three more words for whoever is looking:
 `&at=2026-11-21T07:10:00Z` holds the world's clock at an instant, `&ev=1`
 adds stops to the exposure, and `&curve=none` (or `agx`, `aces`) draws the
 picture with another curve than the one chosen. A page without the switch
@@ -234,7 +304,7 @@ in the same framing, at noon and with the Sun 20 and 5 degrees high):
   horizon, or through the probe's dark glass.
 - **Things drawn in the screen's own terms keep their brightness** whatever
   the hour: the ring's glow at dusk lies on the sand like a lamp's.
-- **After twilight, black.** The night is the next part.
+- **After twilight, black** (as this part shipped): the night is the second part, above.
 
 **Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the
 Mac's own chip): at 2940 x 1912 (a full window at two pixels a point) a frame

@@ -373,7 +373,7 @@ void main() {
   float B = dot(vSky, N_LUMA) / max(uAirExp, 1.0e-30);
   float k = El / nightThreshold(max(B, uAirAdapt)), peak;
   if (uShowLight > 0.5) peak = El * uAirExp;                          // &stars=light: its light as it falls (the splat spreads it)
-  else { if (k < 0.05) return; peak = k * max(N_PFLOOR, N_PWEBER * dot(airShow(vSky), N_LUMA)) / N_PMID; }
+  else { if (k < 0.05) return; peak = nightPointScale(k) * max(N_PFLOOR, N_PWEBER * dot(airShow(vSky), N_LUMA)) / N_PMID; }
   // its colour: none to the rods; the cones' from ten thresholds to a hundred, and all of it in day vision
   float sat = max(nightRods(uAirAdapt), smoothstep(N_PCOLOUR.x, N_PCOLOUR.y, log(max(k, 1.0e-6)) * 0.434294482));
   vInc = mix(N_RODWHITE, E / max(El, 1.0e-30), sat) * peak;
@@ -537,7 +537,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
 
   function update({ camera, t, key, fill, sea = null, scene, indoor = 1 }) {
     const began = performance.now();
-    const dt = Number.isFinite(lastT) ? Math.min(0.1, Math.max(0, t - lastT)) : 0; lastT = t; frame += 1;
+    const dt = Number.isFinite(lastT) ? Math.min(0.1, Math.max(0, t - lastT)) : 0; lastT = t; frame += 1; api.parts.eye.camera = camera;
     const now = when(), L = day.at(now, Math.max(0.5, camera.position.y)), s = L.sun, M = L.moon, K = L.key, N = day.night.state;
     // the eye's axes, and a pixel's ray in them
     camera.matrixWorld.extractBasis(R, Uu, B);
@@ -674,7 +674,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   }
   const api = {
     dome, fog, day, state, update, peek, cost, nightOnGpu, tables: { sky: [SW, SH], air: [AN, AW], made },
-    parts: { stars, dome, uniforms: { dome: U.dome, stars: STAR_U, ap: U.ap } },      // a probe's handles (nothing in the game reads them)
+    parts: { stars, dome, uniforms: { dome: U.dome, stars: STAR_U, ap: U.ap }, eye: { camera: null } },      // a probe's handles (nothing in the game reads them)
     debug: { night: true, veils: true, rods: true },      // a probe's switches, to measure what each part costs
     // stops added to the exposure. Nothing in the game sets it: a probe does (a dark glass, to look at the Sun's own
     // disc), and `&ev=1` in the address beside ?sky=true, for whoever is judging how bright the picture should be
