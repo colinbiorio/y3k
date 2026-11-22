@@ -19,7 +19,7 @@
 export const MOON_MAPS = Object.freeze({
   albedo: Object.freeze({"file": "moon-albedo.jpg", "w": 2048, "h": 1024, "bytes": 687178, "sha256": "5ee4992da840d1598c0e6c287e2dfba12fb4e437351e122d2a0a21f55317abf3"}),
   relief: Object.freeze({"file": "moon-relief.png", "w": 1024, "h": 512, "bytes": 842708, "sha256": "fd1d0bded92fad9c643801a12de48d918478795df858878676abe0c3b7f438ed"}),
-  RHO_MAX: 0.297376,
+  RHO_MAX: 0.2973756035324602,
   rhoMean: Object.freeze([0.138078, 0.121081, 0.0969362]),
   bright: 1.4158,
   H0: -8.5, H1: 10.0, radius: 1737.4,
