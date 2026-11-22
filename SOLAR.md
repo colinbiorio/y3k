@@ -63,7 +63,7 @@ error has not been measured; what cannot yet be done well is written under "What
 air and the Sun: its own section below): three more plain modules beside the clockwork, one that draws, and
 `test/sky.test.mjs` (18 checks). **Its second part, the night, is built behind the same switch** (its own section
 below): the stars, the Milky Way, the zodiacal light, the airglow, the planets, the Moon's light and the eye at
-night, in `night.js` and two generated files, and `test/night.test.mjs` (18 checks). The world tab uses them only
+night, in `night.js` and two generated files, and `test/night.test.mjs` (20 checks). The world tab uses them only
 when the page's address says `?sky=true`.
 
 | file | what it is |
@@ -757,7 +757,33 @@ little faint, the plane a little bright: the map draws a star as its flux to the
 
 **On the GPU** (the M2's own chip, headless Chromium on Metal; not in `npm test`):
 
-(the GPU's numbers are being measured again after the changes of 22 November; they follow.)
+- The night's glow as the dome draws it, against night.js, at twenty directions from the zenith to 5 degrees up:
+  within 1% away from the Milky Way, up to 12% on it (night.js reads the Milky Way in 5-degree cells, the GPU its
+  texture).
+- The chain from the night's light to the screen (the exposure, the Purkinje shift, the curve), point by point
+  against what the pixels hold: 0.98 to 1.02 wherever the sky is seen.
+- 15 July 2026, 22:12 (UTC+10:30), the galactic centre 87 degrees up. The brightest place within 15 degrees of it
+  (l 1.5, b -2.5: the Sagittarius cloud by Baade's window) is 1,299 S10 in the sky, the darkest sky 25 to 45 degrees
+  from it (l -20, b -35, 53 degrees up) 288 S10, of which the zodiacal light (96 to 147 S10 here: July's midnight
+  sky lies near the Gegenschein) and the airglow (140 to 186) are most: 4.5 times. Drawn 3.97 times (2.6% and 0.65%
+  of white, sRGB 46 and 20): the rods see the Milky Way's yellower light a tenth less, as they should. The centre's
+  own direction lies in dust: 417 S10, 1.45 times the dark sky.
+- A moonless night on the beach (15 December, midnight): the meter reads 3.0 to 3.3e-4 cd/m2 and the key is 0.92%
+  of white; the sky 38 degrees up is drawn at 1.0% of white (sRGB 26, 24, 32), the white sand (it gives back 65%)
+  at 0.45%, the basalt at 0.13%. The same place under the full Moon of 24 November: the sky 2.1%, the sand 6.1%.
+  With Krawczyk's flat key the moonless sky had been drawn at 3.5%, brighter than the moonlit one.
+- Stars in the picture toward the south celestial pole (2940 by 1912 pixels, the ring left out): 573 points stand 8
+  or more sRGB steps over the sky round them, 390 by 20 or more, 35 by 50 or more. With `&stars=light` 547, 542 and
+  536 (314 by 100 or more): as many seen, every one of them bright.
+- Frames at the pixel cap (2940 by 1912, vsync on): 16.7 ms with the switch on and off, standing, walking, turning,
+  looking up and facing the full Moon; at dusk under a gibbous Moon 17.9 ms in the mean, 33 ms at the 95th
+  percentile. Without vsync, standing at moonless midnight: 20.3 ms on, 13.4 off. The lighter path (1470 by 956)
+  and a phone's size (390 by 844 at 2): 16.7 ms on and off. On battery (68%), not throttled, and measured before
+  the key under rods and the points' scale were set (they change constants, not work). The passes: the sky's table
+  0.48 ms, the wrapped sky 0.30, the air 0.03, the Moon's table 0.03.
+- With the switch off: no file of the sky's is fetched and no true sky is drawn. Walked under the night (the
+  beach, a house built and walked into, a ship called and sailed, the full Moon from its deck, the body flown at
+  dusk, the void and back): no error.
 
 ### What is approximated at night
 
@@ -769,11 +795,19 @@ little faint, the plane a little bright: the map draws a star as its flux to the
 - **The airglow** is the typical night's, uniform: no solar cycle (it varies by a third either way), no patches, no
   waves, no fading through the night; the OH bands' share of the visible red is not in it.
 - **The air's scattering of the night's glow** takes that glow as uniform over the sky (Leinert's own approximation
-  for the airglow), for an eye on the beach; in front of the land it is the horizon's, by how much of the way's light
-  the air takes.
+  for the airglow), at its mean with each direction weighted by how much of its light gets down to the low air, for
+  an eye on the beach; in front of the land it is the horizon's, by how much of the way's light the air takes.
 - **The eye's threshold** is the average observer's who knows where to look (Blackwell's 50% detection), for any
   colour of star; the screen's threshold for a point is chosen; no averted vision, no loss of acuity at night (the
   rods' blur, Jensen's edge-keeping blur) and no star spikes.
+- **The points' scale**: a point is drawn by its thresholds to the 0.5th power from 2.5% of white (Stevens' exponent
+  for points), so the whole range from the faintest star to Sirius fits on the screen without white-clipping; but a
+  screen's point is seen by the same law, so the bright end looks flatter than in life (Acrux at night is 30% of
+  white in its middle pixel). The points are sharp (a Gaussian of 0.65 pixels) with the eye's veil for the eight
+  brightest only; an eye sees a bright star larger, by the scatter in it: a halo for every bright star, by the same
+  glare function, is owed.
+- **The eye's key under rods** is my reading (T-II): Hunt's rods are measured; taking their response to a screen's
+  lightness by the cube root is mine.
 - **Twinkling** is chosen in size (above), and drawn as smooth noise of a few hertz per star.
 - **The Moon's disc** is plain, as said; no earthshine on its dark part; its veil and its sky are right in the mean.
 - **Venus' light** is the key light when it is the brightest, with no shadow (nothing casts one yet).

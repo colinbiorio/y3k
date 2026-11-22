@@ -159,12 +159,13 @@ as a camera would record them, for comparing.
   place and phase, lit as a sphere; its face and earthshine are the next part.
 - **The eye at night**: as it darkens, rod vision: colour goes and a blue stays (the Purkinje shift, Jensen et al.'s
   method). It adapts to the night in a few seconds, as the first part's eye does (the real eye takes twenty minutes,
-  which a game cannot ask).
+  which a game cannot ask), and not completely: rods never adapt all the way (Hunt's model), so a moonless night is
+  drawn darker than a moonlit one, its level at 0.9% of white where a full Moon's is at 3.5%.
 
 **What changed in the look under the switch, and why**:
 
-1. **After twilight there is a night**: where the first part went black, the sky is now a deep blue-grey with the
-   stars and the Milky Way in it, the land a silhouette against it.
+1. **After twilight there is a night**: where the first part went black, the sky is now a dark grey leaning blue with
+   the stars and the Milky Way in it, the land a silhouette against it.
 2. **Everything under the switch passes through the Purkinje shift** as it darkens: by day it does nothing; at dusk
    the colours fade toward blue-grey (the twilight arch keeps some of its orange, the land loses its green).
 3. **Under the Moon** the island is lit from where the Moon is (the rooms' patches of light too), bluish-grey, and the
@@ -175,18 +176,20 @@ as a camera would record them, for comparing.
 
 **What is rough, seen in the pictures:**
 
-- **A moonless night is dark**: the eye's key (Krawczyk's) shows the sky at 3% of white, the sand under starlight a
-  little below it. `&ev=1` shows one stop brighter, for judging; the land's own colours (painted for the old light,
-  brighter than real) are unchanged.
-- **The Milky Way is subtle** at that key, its brightest clouds three or four times the sky's own light: there, but not
-  the long-exposure photograph people remember.
+- **A moonless night is dark**: the sky at about 1% of white, a dark grey leaning blue-violet (the rods' colour, the
+  mean of Jensen et al.'s ten paintings), the white sand under starlight half that, the forest and the rock nearly
+  black. `&ev=1` shows one stop brighter, for judging. The sand's painted colour gives back 65% of the light, a little
+  more than coral sand's 50 to 60%.
+- **The Milky Way is as bright as it is**: its brightest cloud four times the darkest sky (4.5 in the light, 3.97 drawn,
+  the rods seeing its yellow light a tenth less). There, but not the long-exposure photograph people remember: the
+  sky away from it holds the airglow and the zodiacal light, which a photograph of it usually takes out.
 - **The faintest stars are a few steps over the sky** on a dark screen: chosen so (the screen's threshold for a point,
   SOLAR.md), and lost on a bright screen in a lit room.
 - **The Moon's disc is a plain lit shape** (the next part makes its face); no earthshine on its dark part.
 - **The ring and the body stand in front of the sky**: the eye comes no closer than 2 m behind the body.
 - **Nothing casts a shadow**, under the Moon as under the Sun.
 
-**Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the Mac's own chip): (the GPU's numbers are being measured again after the changes of 22 November; they follow.)
+**Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the Mac's own chip): the pixels hold what the chain says to within 2%; on 15 July at 22:12 the Sagittarius cloud by the galactic centre is 4.5 times the darkest sky 25 to 45 degrees from it and is drawn 3.97 times (sRGB 46 against 20); a moonless sky on the beach at 1.0% of white, the white sand at 0.45%, the same place under the full Moon 2.1% and 6.1%; toward the south celestial pole 573 stars stand 8 or more sRGB steps over the sky; frames 16.7 ms at the pixel cap with the switch on and off (33 ms at the 95th percentile at dusk under a gibbous Moon), the lighter path and a phone's size 16.7 ms; with the switch off no file of the sky's is fetched. SOLAR.md has the rest.
 
 ### The true sky over the island, its first part: the air and the Sun (22 November 2026)
 
