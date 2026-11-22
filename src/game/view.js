@@ -67,14 +67,16 @@ import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
 import { trunksNear } from './island/life.js';
 import { SHAPE } from './island/lordhowe-shape.js';
-import { skyAsked } from './solar/clock.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
 const POSE = { pitch: -0.05, every: 200 };     // the body sheet: how the eye is tipped while it looks at the body, and how often (ms) the page is asked where the sheet is      // the body sheet: the eye nearly level; a body is this much taller than its eyes; where on it the eye looks; how wide it is taken to be
 const FOV = 55;
 const ISLAND_URL = 'src/game/island/lordhowe.bin';
-const TRUE_SKY = skyAsked(globalThis.location?.search);      // ?sky=true: the island under the true sky (sky.js; SOLAR.md step 2), not yet the island's own
+// ?sky=true (exactly) in the address: the island under the true sky (sky.js; SOLAR.md step 2), not yet the island's own.
+// The question is asked here, in the view's own lines, so that a page without the switch reads no file of the sky's.
+const skyAsked = (search) => { try { return new URLSearchParams(search || '').get('sky') === 'true'; } catch { return false; } };
+const TRUE_SKY = skyAsked(globalThis.location?.search);
 let SKY = null;                         // sky.js itself, fetched the first time the island is come to with the switch on: a page without the switch never reads it
 const FAR = { void: 20000, island: 45000 };   // how far the eye sees: the island's needs Ball's Pyramid, 28 km off
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));

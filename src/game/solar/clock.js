@@ -22,11 +22,8 @@ export function pinOf(search) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// Is the true sky asked for? Only by `?sky=true` in the page's address: until the night and the Moon are made and
-// looked at, a place keeps the sky it had, so that nobody meets a half-made one. The question is asked here because
-// this is the one file of the sky's that a page without the switch reads: sky.js and all it leans on (the air, the
-// daylight, the clockwork) are fetched only when the answer is yes (view.js).
-export function skyAsked(search) { try { return new URLSearchParams(search || '').get('sky') === 'true'; } catch { return false; } }
+// Whether the true sky is asked for (`?sky=true`) is not asked here: view.js asks it in its own lines, so that a page
+// without the switch reads no file of the sky's, this one included. sky.js reads the clock when it is fetched.
 
 export function createClock({ now = () => Date.now(), search = '' } = {}) {
   let offset = 0, pin = pinOf(search);

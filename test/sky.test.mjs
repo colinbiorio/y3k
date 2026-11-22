@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as A from '../src/game/solar/air.js';
-import { createClock, pinOf, skyAsked } from '../src/game/solar/clock.js';
+import { createClock, pinOf } from '../src/game/solar/clock.js';
 import { createDaylight } from '../src/game/solar/daylight.js';
 import { sky, refraction, AU, BODIES } from '../src/game/solar/ephemeris.js';
 
@@ -337,16 +337,18 @@ ok('no page and no three in the numbers; the clockwork still asks no clock; the 
 });
 
 ok('behind a switch, and off: only ?sky=true in the address asks for the true sky; the island and the void are otherwise as they were', () => {
+  const view = read('src/game/view.js'), island = read('src/game/island/island.js'), sky = read('src/game/sky.js');
+  // the view asks the question in its own lines (so that a page without the switch reads no file of the sky's, the
+  // clock's included): that very line, taken out of the file and tried
+  const asks = view.match(/^const skyAsked = (\(search\) => \{[^\n]*\});$/m); assert.ok(asks, 'the view asks the question itself');
+  const skyAsked = new Function('return ' + asks[1])();
   assert.equal(skyAsked('?sky=true'), true); assert.equal(skyAsked('?at=2026-11-21T07:10:00Z&sky=true'), true);
   for (const no of ['', '?', '?sky', '?sky=', '?sky=1', '?sky=TRUE', '?sky=false', '?sky=yes', '?skyx=true', undefined, null]) assert.equal(skyAsked(no), false, 'not asked: ' + no);
-  const view = read('src/game/view.js'), island = read('src/game/island/island.js'), sky = read('src/game/sky.js');
-  assert.match(view, /const TRUE_SKY = skyAsked\(globalThis\.location\?\.search\);/);
-  // a page without the switch does not even read the sky's files: the view asks the clock's file (which imports
-  // nothing) whether the sky is asked for, fetches sky.js only then, and hands it to the island, which imports none of it
-  assert.match(view, /import \{ skyAsked \} from '\.\/solar\/clock\.js';/);
-  assert.ok(!/^\s*import\b/m.test(read('src/game/solar/clock.js')), 'the clock\'s file imports nothing');
+  assert.match(view, /^const TRUE_SKY = skyAsked\(globalThis\.location\?\.search\);$/m);
+  // it fetches sky.js only then, and hands it to the island, which imports none of it
   assert.match(view, /if \(name === 'island' && TRUE_SKY && !SKY\) \{ try \{ SKY = await import\('\.\/sky\.js'\); \} catch/, 'fetched only when asked for, and the island still comes if it cannot be');
-  for (const [name, text] of [['view.js', view], ['island.js', island]]) assert.ok(!/^\s*import\b[^\n]*(sky|daylight|air|ephemeris)\.js/m.test(text), name + ' imports none of the sky\'s files outright');
+  for (const [name, text] of [['view.js', view], ['island.js', island]]) assert.ok(!/^\s*import\b[^\n]*(sky\.js|solar\/)/m.test(text), name + ' imports none of the sky\'s files outright');
+  assert.ok(!/^\s*import\b/m.test(read('src/game/solar/clock.js')), 'the clock\'s file imports nothing');
   assert.equal((view.match(/createIsland\(\{[^}]*sky: SKY \}\)/g) || []).length, 2, 'both places the island is made hand the sky on, where there is one');
   assert.match(island, /export function createIsland\(\{ renderer, lite = false, light = 'pale', ground, shape, sky = null \}\)/, 'the island is not under the true sky unless handed it');
   assert.match(island, /const air = sky && sky\.canDrawTrueSky\(renderer\) \? sky\.createTrueSky\(/, 'nor on a machine that cannot draw it');
