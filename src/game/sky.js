@@ -34,7 +34,7 @@
 import * as THREE from 'three';
 import { AIR, LUT, AIR_GLSL, SUN, GLARE, EYE, CURVES, luminance, transmittance, transmittanceLUT, multiScatteringLUT, exposureFor, adapt, shownColour, veil } from './solar/air.js';
 import { createDaylight, GROUND, MATTERS } from './solar/daylight.js';
-import { NIGHT_GLSL, NIGHT_EYE_GLSL, SCAT_N, glowScatter, zodiacalGrid, ZL_GRID, starField, yearsOf, aberration } from './solar/night.js';
+import { NIGHT_GLSL, NIGHT_EYE_GLSL, SCAT_N, glowScatter, zodiacalGrid, ZL_GRID, starField, yearsOf, aberration, starPlace } from './solar/night.js';
 import { horizonMatrix } from './solar/ephemeris.js';
 import { STARS, STAR_FIELDS } from './solar/stars.js';
 import { when } from './solar/clock.js';
@@ -242,7 +242,7 @@ void main() {
   gl_FragColor = vec4(mix(uUnder, sky, smoothstep(-0.06, 0.03, d.y)), 1.0);
 }`;
 // the brightest points' veils in the sky (the eight that give most): each a direction, and its light at the eye times
-// the exposure; a point's own veil is not part of the sky it is seen against (`self`: leave out any within a fiftieth
+// the exposure; a point's own veil is not part of the sky it is seen against (`self`: leave out any within a twentieth
 // of a degree of it)
 const BRIGHT = 8;
 const POINT_VEILS_GLSL = `
@@ -252,7 +252,7 @@ vec3 pointVeils(vec3 d, bool self) {
   for (int i = 0; i < ${BRIGHT}; i++) {
     if (float(i) >= uBrightN) break;
     vec4 b = uBright[i]; float gap = length(d - b.xyz);
-    if (gap > uBrightReach[i] || (self && gap < 3.5e-4)) continue;     // past where it falls under a two-hundredth of the sky's light
+    if (gap > uBrightReach[i] || (self && gap < 8.7e-4)) continue;     // past where it falls under a two-hundredth of the sky's light; or its own (within a twentieth of a degree)
     v += b.w * airVeilAt(degrees(2.0 * asin(min(1.0, 0.5 * gap))), ${f(POINT_HELD)});
   }
   return vec3(v);
@@ -264,7 +264,7 @@ uniform float uGain; uniform float uMoonGain; uniform float uNightGain; uniform 
 // T: what the air lets through along d (needed only at night)
 vec3 skyAir(vec3 d, vec3 T) { vec3 c = uGain > 1.0e-9 ? skyLook(d) * uGain : vec3(0.0); if (uMoonGain > 0.0) c += moonLook(d) * uMoonGain; if (uNightGain > 0.0) c += nightFront(d, T) * uNightGain; return c; }
 vec3 skyBeyond(vec3 d, vec3 T) { return uNightGain > 0.0 ? nightBack(d, T) * uNightGain : vec3(0.0); }
-vec3 skyVeils(vec3 d, bool self) { return (self && length(d - uAirKey) < 3.5e-4 ? vec3(0.0) : airVeil(d, uAirKey, uGlare)) + pointVeils(d, self); }`;
+vec3 skyVeils(vec3 d, bool self) { return (self && length(d - uAirKey) < 8.7e-4 ? vec3(0.0) : airVeil(d, uAirKey, uGlare)) + pointVeils(d, self); }`;
 // the dome's corners (10,242 of them, two degrees apart) work out what changes slowly across the sky: where each
 // look's light comes from on the J2000 equator (the air's lift undone), and the zodiacal light there
 const DOME_VERT = `
@@ -533,7 +533,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     return false;
   }
   const moved = (was, alt, h, eps) => !was || Math.abs(was.alt - alt) > eps || Math.abs(was.h - h) > Math.max(0.001, 0.02 * was.h);
-  const HZ = new Array(9), AB = [0, 0, 0], v3 = [0, 0, 0], T3 = [0, 0, 0];
+  const HZ = new Array(9), AB = [0, 0, 0], v3 = [0, 0, 0], T3 = [0, 0, 0], SP = {};
 
   function update({ camera, t, key, fill, sea = null, scene, indoor = 1 }) {
     const began = performance.now();
@@ -617,11 +617,13 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       L.planets.forEach((p, i) => { pos.set(p.j2000, 3 * (NS + i)); lux[NS + i] = p.lux; col.set(p.colour, 3 * (NS + i)); });
       starGeo.attributes.position.needsUpdate = starGeo.attributes.aLux.needsUpdate = starGeo.attributes.aCol.needsUpdate = true;
       planetsAt = day.planetsAt;
+      // (each where it is seen, the air's lift and the eye's motion in it, as its point is drawn: a point's own veil is
+      // left out of the sky it is seen against by its place, so the two places must be one)
       const list = [];
       for (const p of L.planets) if (p !== K && p.dir[1] > 0 && p.lux > 0) list.push([p.dir[0], p.dir[1], p.dir[2], luminance(p.direct)]);
       for (const i of brightStars) {
-        const x = field.dir[3 * i], y = field.dir[3 * i + 1], z = field.dir[3 * i + 2], e = HZ[0] * x + HZ[1] * y + HZ[2] * z, n = HZ[3] * x + HZ[4] * y + HZ[5] * z, u = HZ[6] * x + HZ[7] * y + HZ[8] * z;
-        if (u > 0) list.push([e, u, -n, field.lux[i] * luminance(transmittance(L.height, u, T3))]);
+        const k = i * STAR_FIELDS, q = starPlace([STARS[k], STARS[k + 1], STARS[k + 2], STARS[k + 3], STARS[k + 4]], lat, lon, now, SP);
+        if (q.up > 0) list.push([q.east, q.up, -q.north, field.lux[i] * luminance(transmittance(L.height, q.up, T3))]);
       }
       brightList = list.sort((a, b) => b[3] - a[3]).slice(0, BRIGHT);
     }
