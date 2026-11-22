@@ -243,11 +243,14 @@ export const thresholdLux = (B) => magLux(limitingMagnitude(B));
 // adaptation for realistic image synthesis", SIGGRAPH 1996, match thresholds the same way): a star at k thresholds is
 // drawn at k of the screen's own thresholds for a point, which is POINTS.floor of white in its middle pixel on a dark
 // screen and POINTS.weber of what is round it on a bright one. Where it stands under one threshold it fades as it is.
+// The screen's threshold is the viewer's, not the world's, and is chosen: a point of a pixel or two on a screen's dark
+// grey is hard to see under about a hundredth of white (4 to 10 of the 255 steps there), and the first pictures, drawn
+// with a third of that, showed the sixth-magnitude stars as three steps over the sky: there, but lost to the eye.
 // Its light is laid over the pixels round its true place as a Gaussian of POINTS.sigma pixels, each pixel taking what
 // falls on its own square (so its total does not change as it moves across them, and it neither swims nor flickers).
 // The cones see a point's colour only well above the rods' threshold: its colour comes in between 10 and 100 thresholds
 // (POINTS.colour, in their logarithm; the "photochromatic interval"), and fully where the eye is in day vision.
-export const POINTS = Object.freeze({ sigma: 0.65, floor: 0.0035, weber: 0.03, colour: Object.freeze([1, 2]) });
+export const POINTS = Object.freeze({ sigma: 0.65, floor: 0.012, weber: 0.12, colour: Object.freeze([1, 2]) });
 export function pointShown(lux, B, shownBg = 0) {
   const k = lux / thresholdLux(B), step = Math.max(POINTS.floor, POINTS.weber * shownBg);
   return { thresholds: k, peak: k * step };
@@ -440,10 +443,10 @@ const float N_OBC = ${f(OB_C)};
 const float N_OBS = ${f(OB_S)};
 // degrees the air lifts what stands at a true height of alt degrees (Saemundsson's formula, as ephemeris.js has it)
 float nightLift(float alt) { float hh = max(alt, -1.0), r = 1.02 / tan(radians(hh + 10.3 / (hh + 5.11))) / 60.0 * uLiftK; return alt < -1.0 ? r * exp((alt + 1.0) / 0.7) : r; }
-// a direction as seen, back to where its light comes from (the air lifted it): world frame
+// a direction as seen, back to where its light comes from (the air lifted it): world frame. The lift from the height
+// as seen is G. G. Bennett's formula (1982, as J. Meeus gives it beside Saemundsson's, which it undoes to 4 arcsec)
 vec3 nightTrue(vec3 d) {
-  float seen = degrees(asin(clamp(d.y, -1.0, 1.0))), was = seen - nightLift(seen);
-  was = seen - nightLift(was); was = seen - nightLift(was);
+  float seen = degrees(asin(clamp(d.y, -1.0, 1.0))), hh = max(seen, -0.9), was = seen - 1.0 / tan(radians(hh + 7.31 / (hh + 4.4))) / 60.0 * uLiftK;
   vec2 hz = normalize(d.xz + vec2(1.0e-9, 0.0)); float cw = cos(radians(was));
   return vec3(hz.x * cw, sin(radians(was)), hz.y * cw);
 }
@@ -466,14 +469,64 @@ float nightZL(vec3 j) {
   return texture2D(uZL, (uv + 0.5) / vec2(${f(ZL_GRID.w)}, ${f(ZL_GRID.h)})).r;
 }
 vec3 nightScat(float mu) { float x = sqrt(clamp(mu, 0.0, 1.0)) * ${f(SCAT_N - 1)}; int i = int(min(floor(x), ${f(SCAT_N - 2)})); float k = x - float(i); return mix(uScat[i], uScat[i + 1], k); }
-// the night's own glow along a world direction as seen (cd/m2, three colours): what comes through the air of the
-// Milky Way, the zodiacal light and the airglow, and the air's own scattering of them. Nothing under the horizon.
-vec3 nightGlow(vec3 d) {
+// the night's own glow along a world direction as seen (cd/m2, three colours), nothing under the horizon: what lies
+// beyond the air (the Milky Way and the zodiacal light, through it: the Moon hides these), and what is in it (the
+// airglow, 90 km up, through the air under it, and the air's own scattering of the whole night's glow)
+// T: what the air lets through along d (airT(uNightH, d.y)), worked out once by the caller. nightBackAt takes the
+// J2000 direction and the zodiacal light already worked out (the dome does both at its corners: they change slowly)
+vec3 nightBackAt(vec3 j, float zl, vec3 T) { return (nightMW(j) + zl * N_ZLT) * N_S10 * T; }
+vec3 nightBack(vec3 d, vec3 T) {
   if (d.y <= 0.0) return vec3(0.0);
   vec3 j = uW2J * nightTrue(d);
-  float k = (${f(AIR.ground)} + uNightH) / (${f(AIR.ground)} + N_AGH), vr = inversesqrt(max(1.0e-6, 1.0 - k * k * (1.0 - d.y * d.y)));
-  vec3 src = nightMW(j) * N_S10 + nightZL(j) * N_S10 * N_ZLT + N_AG * vr;
-  return src * airT(uNightH, d.y) + uGlowMean * nightScat(d.y);
+  return nightBackAt(j, nightZL(j), T);
 }
+vec3 nightFront(vec3 d, vec3 T) {
+  if (d.y <= 0.0) return vec3(0.0);
+  float k = (${f(AIR.ground)} + uNightH) / (${f(AIR.ground)} + N_AGH), vr = inversesqrt(max(1.0e-6, 1.0 - k * k * (1.0 - d.y * d.y)));
+  return N_AG * vr * T + uGlowMean * nightScat(d.y);
+}
+vec3 nightGlow(vec3 d) { vec3 T = airT(uNightH, d.y); return nightBack(d, T) + nightFront(d, T); }
 `;
 export { SCAT_N };
+// The eye's part for the GPU (no uniforms of its own): the Purkinje shift, the threshold for a point, and how much of
+// a point's light falls on one pixel's square. Written from PURKINJE, SCHAEFER and POINTS above.
+const colm = (m) => `mat3(${[m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]].map(f).join(', ')})`;
+export const PIXEL_MIDDLE = (() => { const erf = (x) => { const s = Math.sign(x), a = Math.abs(x), t = 1 / (1 + 0.3275911 * a); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a)); }; const e = erf(0.5 / (POINTS.sigma * Math.SQRT2)); return e * e; })();
+export const NIGHT_EYE_GLSL = `
+const mat3 N_RGB2XYZ = ${colm(RGB_XYZ)};
+const mat3 N_XYZ2RGB = ${colm(XYZ_RGB)};
+const vec3 N_LUMA = vec3(0.2126, 0.7152, 0.0722);
+const vec3 N_RODWHITE = ${v3(ROD_WHITE)};
+// how much the rods are saturated at a luminance: 0, night vision; 1, day vision (PURKINJE)
+float nightRods(float Y) { float lg = log(max(Y, 1.0e-12)) * 0.434294482; return smoothstep(${f(PURKINJE.lo)}, ${f(PURKINJE.hi)}, lg); }
+// a colour (any scale) whose luminance stands for 'level' cd/m2, seen by an eye adapted to 'adapted': the Purkinje shift
+vec3 nightPurkinje(vec3 c, float level, float adapted) {
+  float s = nightRods(max(level, adapted));
+  if (s >= 1.0) return c;
+  vec3 X = N_RGB2XYZ * max(c, 0.0); float W = X.x + X.y + X.z;
+  if (W <= 1.0e-30) return c;
+  float V = X.x > 1.0e-30 ? max(0.0, X.y * (1.33 * (1.0 + (X.y + X.z) / X.x) - 1.68)) : 0.0;
+  vec2 xy = mix(vec2(${f(PURKINJE.blue[0])}, ${f(PURKINJE.blue[1])}), X.xy / W, s);
+  float Yn = mix(${f(PURKINJE.white)} * V, X.y, s);
+  return max(N_XYZ2RGB * vec3(xy.x * Yn / xy.y, Yn, (1.0 - xy.x - xy.y) * Yn / xy.y), 0.0);
+}
+// the faintest point seen against a background of B cd/m2, as lux (SCHAEFER, on the game's zero)
+float nightThreshold(float B) {
+  float nl = max(B, 0.0) * ${f(1 / SCHAEFER.nL)};
+  vec2 c = nl < ${f(SCHAEFER.split)} ? vec2(${f(SCHAEFER.night[0])}, ${f(SCHAEFER.night[1])}) : vec2(${f(SCHAEFER.day[0])}, ${f(SCHAEFER.day[1])});
+  float q = 1.0 + sqrt(c.y * nl);
+  return ${f(E0 * 10 ** (-0.4 * SCHAEFER.m0))} * c.x * q * q;
+}
+float nightErf(float x) { float a = abs(x), t = 1.0 / (1.0 + 0.3275911 * a); return sign(x) * (1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-a * a)); }
+// the share of a point's light, spread as a Gaussian of POINTS.sigma pixels, that falls on the pixel 'o' pixels from it
+float nightPixel(vec2 o) {
+  const float k = ${f(1 / (POINTS.sigma * Math.SQRT2))};
+  return 0.25 * (nightErf((o.x + 0.5) * k) - nightErf((o.x - 0.5) * k)) * (nightErf((o.y + 0.5) * k) - nightErf((o.y - 0.5) * k));
+}
+const float N_PMID = ${f(PIXEL_MIDDLE)};
+const float N_PFLOOR = ${f(POINTS.floor)};
+const float N_PWEBER = ${f(POINTS.weber)};
+const vec2 N_PCOLOUR = vec2(${f(POINTS.colour[0])}, ${f(POINTS.colour[1])});
+// twinkling (TWINKLE): its spread, in the logarithm of the light, by the look's height
+float nightTwinkle(float up) { float s = max(up, 0.0), X = 1.0 / (s + 0.025 * exp(-11.0 * s)); return min(${f(TWINKLE.most)}, ${f(TWINKLE.zenith)} * pow(X, ${f(TWINKLE.power)})); }
+`;

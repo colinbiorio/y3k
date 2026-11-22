@@ -10,7 +10,7 @@
 // `sky`, `direct` and `level` (and `toward()`) are the Sun's alone, as they were for the first part: what the day's
 // tests measure. What the picture is lit by is in `fill` (the whole sky on level ground), `key` (the brightest light
 // that comes straight) and `ground` (everything on level ground), and `towardAll()` is the whole sky along a look.
-import { sky as skyOf } from './ephemeris.js';
+import { sky as skyOf, horizonMatrix } from './ephemeris.js';
 import { BODIES } from './bodies.js';
 import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter, keyFor, skyHold, EYE } from './air.js';
 import { createNight, magLux, bvColour, planetColour, MOON_BV } from './night.js';
@@ -46,7 +46,7 @@ export function createDaylight({ lat, lon, stars = null }) {
     // the Moon: as the Sun, and its phase (the lit fraction), phase angle, the bright limb's position angle and the
     // zenith's (degrees), and its sky's light on level ground
     moon: { ...light(), id: 'moon', phase: 0, phaseAngle: 0, limb: 0, zenith: 0, sky: [0, 0, 0] },
-    planets: PLANETS.map((id) => ({ ...light(), id, colour: planetColour(id, [0, 0, 0]) })),
+    planets: PLANETS.map((id) => ({ ...light(), id, colour: planetColour(id, [0, 0, 0]), j2000: [1, 0, 0] })),      // and where each is on the J2000 equator, as seen
     night: night.state,                        // the night's own glow (night.js): on level ground, its mean, the Sun's ecliptic longitude
     fill: [0, 0, 0],                           // the whole sky's light on level ground: the Sun's sky, the Moon's, the night's own glow and the stars
     key: null,                                 // the light that comes straight and gives the most: the Sun, the Moon, or a planet (one of the records above)
@@ -75,11 +75,12 @@ export function createDaylight({ lat, lon, stars = null }) {
     sunThrough(km, r.up, Math.max(rec.radius, 1e-4), rec.direct);
     for (let c = 0; c < 3; c += 1) { rec.colour[c] = colour[c]; rec.direct[c] *= lux * colour[c]; }
   }
-  const WHITE = [1, 1, 1];
+  const WHITE = [1, 1, 1], HZ = new Array(9);
   let planetsAt = NaN, glowAt = NaN, starsAt = NaN;
   return {
     light: L,
     night,
+    get planetsAt() { return planetsAt; },     // the instant the planets were last placed (they are, twice a second)
     // the sky's place and light at `when` (UTC ms) for an eye `metres` above the sea. Cheap: every frame.
     at(when, metres = 0) {
       opts.height = Math.max(0, metres); optsP.height = opts.height;
@@ -104,7 +105,13 @@ export function createDaylight({ lat, lon, stars = null }) {
       // the planets, twice a second
       if (!(Math.abs(ms - planetsAt) < EVERY.planets * 1000)) {
         const P = skyOf(lat, lon, ms, seenP, optsP);
-        for (const rec of L.planets) { const q = P[rec.id]; place(rec, q, km, Number.isFinite(q.magnitude) ? magLux(q.magnitude) : 0, rec.colour); }
+        horizonMatrix(lat, lon, ms, HZ);
+        for (const rec of L.planets) {
+          const q = P[rec.id]; place(rec, q, km, Number.isFinite(q.magnitude) ? magLux(q.magnitude) : 0, rec.colour);
+          // its seen direction before the air lifted it, back onto the J2000 equator (the horizon matrix's rows are east, north, up there)
+          const e = rec.trueDir[0], n = -rec.trueDir[2], u = rec.trueDir[1];
+          for (let c = 0; c < 3; c += 1) rec.j2000[c] = HZ[c] * e + HZ[3 + c] * n + HZ[6 + c] * u;
+        }
         planetsAt = ms;
       }
       // the night's own glow, every few seconds (and the stars' light on the ground, every minute)
