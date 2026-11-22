@@ -32,7 +32,7 @@ export function createDaylight({ lat, lon, stars = null }) {
   const seen = {}, opts = { ids: ['sun', 'moon'], height: 0 }, seenP = {}, optsP = { ids: PLANETS, height: 0 };
   const kept = new Map(), ray = [0, 0, 0, 1, 1, 1], d = [0, 0, 0], a = [0, 0, 0], b = [0, 0, 0], night = createNight({ lat, lon, stars });
   const moonCol = bvColour(MOON_BV, [0, 0, 0]);
-  const light = () => ({ id: '', alt: 0, az: 0, lifted: 0, radius: 0, dir: [0, 1, 0], trueDir: [0, 1, 0], lux: 0, colour: [1, 1, 1], magnitude: NaN, distance: 0, direct: [0, 0, 0] });
+  const light = () => ({ id: '', alt: 0, az: 0, lifted: 0, radius: 0, dir: [0, 1, 0], trueDir: [0, 1, 0], lux: 0, colour: [1, 1, 1], magnitude: NaN, distance: 0, lightTime: 0, direct: [0, 0, 0] });
   const L = {
     when: NaN, height: 0,                      // the instant (UTC ms) and the eye's height (km above the sea)
     alt: 0, az: 0, lifted: 0, radius: 0.2666,  // the Sun as seen: degrees above the horizon (lifted by the air, by `lifted`), from north through east; its disc's radius
@@ -68,7 +68,7 @@ export function createDaylight({ lat, lon, stars = null }) {
   }
   // a body's place from sky()'s record, into one of the records above
   function place(rec, r, km, lux, colour) {
-    rec.alt = r.alt; rec.az = r.az; rec.lifted = r.lifted; rec.radius = r.diameter / 2; rec.magnitude = r.magnitude; rec.distance = r.distance; rec.lux = lux;
+    rec.alt = r.alt; rec.az = r.az; rec.lifted = r.lifted; rec.radius = r.diameter / 2; rec.magnitude = r.magnitude; rec.distance = r.distance; rec.lightTime = r.lightTime; rec.lux = lux;
     rec.dir[0] = r.east; rec.dir[1] = r.up; rec.dir[2] = -r.north;
     const t = (r.alt - r.lifted) * D2R, z = r.az * D2R, ct = Math.cos(t);
     rec.trueDir[0] = ct * Math.sin(z); rec.trueDir[1] = Math.sin(t); rec.trueDir[2] = -ct * Math.cos(z);
