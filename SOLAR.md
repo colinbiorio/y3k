@@ -373,7 +373,8 @@ Where it departs from the reference, and why:
 - **The eye, in two steps**, both from G. Krawczyk, K. Myszkowski and H.-P. Seidel, "Perceptual effects in
   real-time tone mapping" (SCCG 2005). **The key**: the eye is adapted to a luminance L (what the meter reads,
   eased in time), and that level is given the scene value 1.03 - 2 / (2 + log10(L + 1)): 0.69 in full day, 0.16
-  at the end of civil twilight, 0.03 at night. A bright scene is drawn bright and a dark one dark, as vision
+  at the end of civil twilight, 0.032 at 0.01 cd/m2 (under that, where rods alone see, the night's part carries it
+  on down: "The eye at night", below). A bright scene is drawn bright and a dark one dark, as vision
   takes them. The exposure is that value over L, one number for everything, and every light is multiplied by
   it before it is used (so the picture is still drawn straight to the screen, once). **The curve**: a scene value
   x is shown as x (1 + x / 64) / (1 + x) (Reinhard's curve, the one their method uses: half-way up at x = 1 and
@@ -672,12 +673,22 @@ little faint, the plane a little bright: the map draws a star as its flux to the
 
 ### The eye at night
 
-- **The adaptation** is the first part's (Krawczyk's key, the meter of fifteen looks, a brighter scene followed
-  half-way in 0.35 s and a darker in 1.7 s), now reading the whole sky: the Moon's, the night's glow. The real eye
-  takes twenty to thirty minutes to the dark; a game cannot leave a player blind for that long after a lit room, so
-  the times are a game's: the eye is felt adjusting for a few seconds. Under a moonless sky the eye is adapted to about
-  2.5e-4 cd/m2, which Krawczyk's key shows at 3% of the screen's white: the night stays night, the land a silhouette
-  against a sky a little brighter than it, as it is.
+- **The adaptation** is the first part's (the meter of fifteen looks, a brighter scene followed half-way in 0.35 s
+  and a darker in 1.7 s), now reading the whole sky: the Moon's, the night's glow. The real eye takes twenty to
+  thirty minutes to the dark; a game cannot leave a player blind for that long after a lit room, so the times are a
+  game's: the eye is felt adjusting for a few seconds. Under a moonless sky the meter reads 3.0 to 3.3e-4 cd/m2.
+- **The key under rods alone.** Krawczyk's key is flat below about 0.1 cd/m2: it drew every night, moonless or
+  under a full Moon, at about 3% of white, and a moonless sky came out brighter on the screen than a moonlit one
+  (measured on the GPU at the same place, 38 degrees up: 3.5% of white against 2.1%; under the Moon the eye is
+  adapted to the lit land, and the sky is darker than the land). Rods do not adapt completely: in Hunt's model of
+  colour vision (R. W. G. Hunt, The Reproduction of Colour, 6th ed., 2004; M. D. Fairchild, Color Appearance Models,
+  2nd ed., 2005, ch. 12) their adaptation factor in the dark grows as the sixth root of the light and their response
+  as its 0.73th power, so their response to the level they are adapted to goes as L^0.12: a night thirty times
+  darker is a third less bright to an eye wholly used to it. A screen's lightness goes as the cube root of its
+  light (CIE L*), so the key below 10^-2 cd/m2 (rods alone: Jensen's rod share is 0 there) is Krawczyk's value at
+  10^-2 times (L / 10^-2)^0.365. A moonless night's level is drawn at 0.93% of white (it was 3.0%), a full Moon's
+  night keeps 3.5%. My reading of the model (T-II): Hunt's numbers are measured, putting them to a screen's
+  lightness is mine.
 - **The Purkinje shift**: under rod vision colour goes and what is left leans blue. H. W. Jensen, S. Premoze, P.
   Shirley, W. B. Thompson, J. A. Ferwerda and M. M. Stark, "Night rendering" (University of Utah, UUCS-00-016, 2000),
   the method their SIGGRAPH 2001 "A physically-based night sky model" is tone-mapped with: the scotopic luminance
@@ -739,6 +750,7 @@ little faint, the plane a little bright: the map draws a star as its flux to the
 - The faintest point seen (Schaefer): V 6.60 under a sky of 22 mag/arcsec2, 3.56 at the end of civil twilight (0.42 cd/m2), -0.44 at sunset (158 cd/m2)
 - Stars coming out on the evening of 15 April 2026 (UTC+10:30), each with the Sun's height when it does: Sirius (V -1.46) 0.4°, Canopus (V -0.72) -0.1°, Rigel (V 0.12) -2.1°, Procyon (V 0.38) -2.1°, Betelgeuse (V 0.5) -2.8°, Alpha Centauri (V -0.01) -2.8°, Achernar (V 0.46) -3.2°, Hadar (V 0.61) -3.5°
 - The Purkinje shift (Jensen et al.): rod vision under 0.01 cd/m2, cone vision over 3.98; a white under rods goes to x, y = 0.29, 0.28 (their paintings' mean), its luminance kept (k = 0.389, Y over V for sunlight)
+- The eye's key (the scene value of the level it is adapted to): 3.2% of white at 0.01 cd/m2, below which rods alone see and it falls as the light to the 0.365 (Hunt's rods: their response to their own level as its 0.12th power, taken to the screen's lightness, the cube root); a moonless night (3.3e-4 cd/m2) 0.93% where Krawczyk's flat key gave 3.0%, a full Moon's (0.025) 3.5%; the floor 2e-4 cd/m2 at 0.77%
 - Twinkling (its spread in the light's logarithm): 10% at the zenith, 34% at 30 degrees, 50% at 10
 - A point at the eye's limit is shown 2.5% of white over a dark sky in its middle pixel, at ten thresholds 3.16 times that (the power 0.5), Sirius at night (1147 thresholds) at 85%; its light is a Gaussian of 0.65 pixels, 31% of it in the middle pixel when centred, its total the same wherever it falls
 - The full Moon of 24 November 2026, 13:00 UTC (32.4 degrees up): V -12.77, 0.344 lux above the air, 0.245 facing it through the air, 0.162 on level ground (its sky 0.0303 of that); colour 1.10, 0.99, 0.82

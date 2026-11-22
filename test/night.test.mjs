@@ -25,6 +25,7 @@ import { STARS, STAR_FIELDS } from '../src/game/solar/stars.js';
 import { CUBE, MAP, MAP_CELL, TINT, CREDIT } from '../src/game/solar/milkyway.js';
 import { createDaylight } from '../src/game/solar/daylight.js';
 import { sunIlluminance, luminance, transmittance, AIR } from '../src/game/solar/air.js';
+import * as A from '../src/game/solar/air.js';
 import { sky, AU } from '../src/game/solar/ephemeris.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -224,6 +225,18 @@ ok('the Purkinje shift: nothing by day; under rod vision colour goes and a blue 
   assert.ok(blue / red > 5 * (0.0722 / 0.2126), 'blue light seen by rods gains on red');
   near(N.rodShare(0.01), 0, 1e-12); near(N.rodShare(10 ** 0.6), 1, 1e-12); within(N.rodShare(0.1), 0.2, 0.5, 'mesopic');
   measured.push(`the Purkinje shift (Jensen et al.): rod vision under ${sig(0.01)} cd/m2, cone vision over ${sig(10 ** 0.6)}; a white under rods goes to x, y = ${N.PURKINJE.blue.join(', ')} (their paintings' mean), its luminance kept (k = ${N.PURKINJE.white.toFixed(3)}, Y over V for sunlight)`);
+});
+
+ok('the eye under rods alone: its key goes on falling where Krawczyk\'s stops, so a moonless night is drawn darker than a moonlit one', () => {
+  // where rods alone see (Jensen's rod share 0) the two keys meet; below, the rods' own response to their level
+  near(N.rodShare(A.RODS.top), 0, 1e-12); near(A.keyFor(A.RODS.top * (1 - 1e-9)), A.krawczyk(A.RODS.top), 1e-9);
+  // the levels the meter read on the GPU: a moonless night over the island 3.0 to 3.3e-4 cd/m2; a full Moon's, the lit
+  // land in view, about 0.025
+  const moonless = A.keyFor(3.3e-4), moon = A.keyFor(0.025), was = A.krawczyk(3.3e-4);
+  assert.ok(moonless < moon / 3, 'a moonless night under a third of a moonlit one');
+  // the floor: under it the exposure holds, and the scene is drawn darker than its key
+  near(A.exposureFor(1e-5) * 1e-5, A.keyFor(A.EYE.floor) * 1e-5 / A.EYE.floor, 1e-12);
+  measured.push(`the eye's key (the scene value of the level it is adapted to): ${(A.krawczyk(A.RODS.top) * 100).toFixed(1)}% of white at ${sig(A.RODS.top)} cd/m2, below which rods alone see and it falls as the light to the ${A.RODS.power.toFixed(3)} (Hunt's rods: their response to their own level as its 0.12th power, taken to the screen's lightness, the cube root); a moonless night (3.3e-4 cd/m2) ${(moonless * 100).toFixed(2)}% where Krawczyk's flat key gave ${(was * 100).toFixed(1)}%, a full Moon's (0.025) ${(moon * 100).toFixed(1)}%; the floor ${sig(A.EYE.floor)} cd/m2 at ${(A.keyFor(A.EYE.floor) * 100).toFixed(2)}%`);
 });
 
 ok('twinkling: strongest low down, held under 50%; planets are drawn without it', () => {

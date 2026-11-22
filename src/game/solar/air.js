@@ -299,8 +299,20 @@ export function sunThrough(h0, sunUp, radius = 0.2666, out = [0, 0, 0]) {
 //
 //   · THE KEY. The eye is adapted to a luminance L (cd/m2: what the meter reads, eased in time). A scene is drawn
 //     bright or dark by that level, as vision takes it: the adapted level itself is given the scene value
-//     a(L) = 1.03 - 2 / (2 + log10(L + 1)): 0.68 in full day, 0.16 at the end of civil twilight, 0.03 at night.
+//     a(L) = 1.03 - 2 / (2 + log10(L + 1)): 0.68 in full day, 0.16 at the end of civil twilight, 0.032 at 0.01 cd/m2.
 //     So exposure = a(L) / L, and every light is multiplied by it before it is used.
+//   · UNDER RODS ALONE the key goes on falling. Krawczyk's a(L) was fitted to pictures of lit scenes and is flat
+//     below about 0.1 cd/m2 (0.030 to 0.035 for every night there is), so a moonless night was drawn as bright as
+//     a full Moon's, and its sky brighter than the moonlit sky (measured on the GPU: 3.5% of white against 2.1% at
+//     the same place; under the Moon the eye is adapted to the lit land, and the sky is a fifth of that). But rods
+//     do not adapt completely. In Hunt's model of colour vision (R. W. G. Hunt, The Reproduction of Colour, 6th ed.,
+//     2004; M. D. Fairchild, Color Appearance Models, 2nd ed., 2005, ch. 12) the rods' adaptation factor in the dark
+//     grows as the sixth root of the light (F_LS = 0.2 (5 L / 2.26)^(1/6)) and their response as its 0.73th power,
+//     so their response to the adapted level itself goes as L^(0.73 / 6) = L^0.12: a night thirty times darker is a
+//     third less bright to an eye wholly used to it. A screen's lightness goes as the cube root of its light (CIE
+//     L*), so to look that much less bright it is drawn with (L^0.12)^3 = L^0.365 of the light. Below 10^-2 cd/m2
+//     (where Jensen's rod share is 0: rods alone, see night.js) the key is a(10^-2) (L / 10^-2)^0.365: 0.0093 for a
+//     moonless night (3.3e-4 cd/m2) where it was 0.030, while a full Moon's night (0.025: the lit land) keeps 0.035.
 //   · THE CURVE. What the screen can show ends at white; the world does not. A scene value x is shown as
 //     x (1 + x / W^2) / (1 + x) (Reinhard's curve, the one their method uses), on the luminance, the colour's own
 //     hue kept: half-way up at x = 1, white at x = W = 8, so white sand in the Sun stays under white and keeps
@@ -314,13 +326,17 @@ export function sunThrough(h0, sunUp, radius = 0.2666, out = [0, 0, 0]) {
 // that can be seen (`&curve=none`), with the grey card's key it was tried with (12.7%: ISO 12232). 'agx' and
 // 'aces' are three.js's own curves, for comparing.
 //
-// `floor` is the least the eye is ever adapted to: the night sky's own glow. Nothing draws that glow yet (the
-// night is the next step); the number is here so that the exposure does not run away after dusk. The eye follows
+// `floor` is the least the eye is ever adapted to: the night sky's own glow, a little under what a moonless night's
+// meter reads (3.0 to 3.3e-4 cd/m2 over the island). Under a darker sky (cloud, a roof) the exposure holds where
+// the floor puts it, and the scene is drawn darker than its key instead of being lifted to it. The eye follows
 // a scene that brightens in half a second and one that darkens in two and a half (the real eye takes minutes to
 // the dark; a game cannot wait that long).
 export const EYE = Object.freeze({ curve: 'reinhard', white: 8, grey: 0.18 / Math.SQRT2, day: 4000, floor: 2e-4, toLight: 0.5, toDark: 2.5 });
 export const CURVES = Object.freeze(['none', 'reinhard', 'agx', 'aces']);
 export const krawczyk = (L) => 1.03 - 2 / (2 + Math.log10(Math.max(L, 0) + 1));
+export const RODS = Object.freeze({ top: 1e-2, power: 3 * 0.73 / 6 });
+// the scene value of the adapted level: Krawczyk's, and under rods alone falling as their response does (above)
+export const eyeKey = (L) => (L >= RODS.top ? krawczyk(L) : krawczyk(RODS.top) * (Math.max(L, 0) / RODS.top) ** RODS.power);
 // what the screen shows (0..1, in light) for a grey of scene value x, by each curve
 const agx = (x) => { const v = clamp((Math.log2(Math.max(x, 1e-10)) + 12.47393) / 16.5, 0, 1), v2 = v * v, v4 = v2 * v2; return Math.pow(Math.max(0, 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232), 2.2); };
 const aces = (x) => { const v = x / 0.6; return clamp((v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081), 0, 1); };
@@ -340,15 +356,15 @@ export function shownColour(c, out = [0, 0, 0], curve = EYE.curve) {
   out[0] = Math.min(1, r); out[1] = Math.min(1, g); out[2] = Math.min(1, b);
   return out;
 }
-// THE KEY: the scene value given to the luminance the eye is adapted to. For Reinhard's curve it is Krawczyk's own;
-// for the others, the value their curve shows as bright as Reinhard's shows that (so the curves can be compared);
-// with no curve, a grey card's place, dimmed toward night in the same proportion
+// THE KEY: the scene value given to the luminance the eye is adapted to. For Reinhard's curve it is the eye's own
+// (Krawczyk's, and the rods' below); for the others, the value their curve shows as bright as Reinhard's shows that
+// (so the curves can be compared); with no curve, a grey card's place, dimmed toward night in the same proportion
 const KEYS = new Map();
 export function keyFor(L, curve = EYE.curve) {
-  const a = krawczyk(L);
+  const a = eyeKey(L);
   if (curve === 'reinhard') return a;
-  if (curve === 'none') return EYE.grey * (a / (1 + a)) / (krawczyk(EYE.day) / (1 + krawczyk(EYE.day)));
-  const k = curve + Math.round(a * 2000); let v = KEYS.get(k);
+  if (curve === 'none') return EYE.grey * (a / (1 + a)) / (eyeKey(EYE.day) / (1 + eyeKey(EYE.day)));
+  const k = curve + Math.round(Math.log(a) * 1000); let v = KEYS.get(k);         // (in steps of a thousandth of itself: night keys are small)
   if (v === undefined) { v = sceneValue(shown(a, 'reinhard'), curve); if (KEYS.size > 5000) KEYS.clear(); KEYS.set(k, v); }
   return v;
 }
