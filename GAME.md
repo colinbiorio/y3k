@@ -140,9 +140,11 @@ the island stands under the true sky; without it nothing has changed for
 anyone, and the void is not touched either way. It stays behind the switch
 until the night (the stars, the Milky Way, the planets) and the Moon are made
 and looked at: for now, after the end of twilight there is nothing in the sky
-and the picture goes black. Two more words for whoever is looking:
-`&at=2026-11-21T07:10:00Z` holds the world's clock at an instant, and `&ev=1`
-adds stops to the exposure.
+and the picture goes black. Three more words for whoever is looking:
+`&at=2026-11-21T07:10:00Z` holds the world's clock at an instant, `&ev=1`
+adds stops to the exposure, and `&curve=none` (or `agx`, `aces`) draws the
+picture with another curve than the one chosen. A page without the switch
+fetches none of the true sky's files.
 
 - **The clock** (`solar/clock.js`): the island runs on the real UTC clock, so in
   an American evening it is day there. One clock, read by everything; a later
@@ -153,10 +155,12 @@ adds stops to the exposure.
   thinning, a clean sea haze, the ozone layer. The Sun is 136,572 lux above
   the air on 21 November; on the beach at noon 113,000 lux arrive from the Sun
   and 14,800 from the sky; at the end of civil twilight, 2.8.
-- **The Sun**: a disc of its true size (half a degree: about 18 pixels across
+- **The Sun**: a disc of its true size (half a degree: about 17 pixels across
   in a full window at two pixels a point) where the clockwork sees it, darker toward its limb, dimmed
   and reddened by the air it is seen through, and flattened on the horizon (27
-  arcminutes high and 32 wide when it stands a fifth of a degree up). Round it,
+  arcminutes high and 32 wide when it stands a fifth of a degree up; measured
+  in the picture through a telescope view, its height over its width is within
+  0.002 of what the refraction predicts from 20 degrees up to 0.2). Round it,
   the eye's own veil, by how much of the disc is in sight: a palm's trunk or
   the body takes the glare away as it takes the disc.
 - **The island lit by it** (`island/island.js`, asked with `sky: true`): the
@@ -192,9 +196,10 @@ in the same framing, at noon and with the Sun 20 and 5 degrees high):
    and clear. Reinhard's was chosen, by those pictures.
 2. **The noon sky is the measured blue**, paler toward the horizon and
    whitish round a Sun that stands almost overhead: as played on the beach,
-   sRGB 121, 141, 180 high in the picture and 155, 168, 187 at the horizon,
-   where the painted sky was 171, 200, 234 and 204, 223, 243. A little deeper
-   than the painted one, and it changes with the hour.
+   facing south, the sky twenty degrees up is sRGB 118, 138, 177 in the
+   picture (the model's own number for that look, to the unit), where the
+   painted sky was 168, 198, 234; three degrees up the model gives 155, 170,
+   191. A little deeper than the painted one, and it changes with the hour.
 3. **The land is brighter than it was, and its shade deeper beside its
    light.** The lawn in the noon Sun is shown about twice as bright as under
    the painted light, because the eye's key draws a bright scene bright. The

@@ -372,8 +372,9 @@ Where it departs from the reference, and why:
   at the end of civil twilight, 0.03 at night. A bright scene is drawn bright and a dark one dark, as vision
   takes them. The exposure is that value over L, one number for everything, and every light is multiplied by
   it before it is used (so the picture is still drawn straight to the screen, once). **The curve**: a scene value
-  x is shown as x (1 + x / 64) / (1 + x) (Reinhard's curve, the one their method uses, with white at eight
-  times the adapted level's own value), on the luminance, the colour's hue kept; a colour the screen cannot
+  x is shown as x (1 + x / 64) / (1 + x) (Reinhard's curve, the one their method uses: half-way up at x = 1 and
+  white at x = 8, which in full day is about twelve times the luminance the eye is adapted to, and at the end of
+  civil twilight fifty), on the luminance, the colour's hue kept; a colour the screen cannot
   reach at that brightness gives up saturation, not hue. So white sand in the noon Sun is shown at two thirds
   of white and keeps its detail, while the sky, a sixth as bright, is a luminous blue.
 - **Why a curve, when the game had none.** The game drew what was past the screen's white as white, and its
@@ -395,7 +396,11 @@ Where it departs from the reference, and why:
 - **The eye's veil round the Sun** (glare): the CIE's general disability glare equation (CIE 146:2002, after
   J. J. Vos), for a 30-year-old eye, added in light to the sky and to whatever stands in front of it, by how
   much of the Sun's disc is in sight: seven marks on the disc, which the GPU is asked about each frame (an
-  occlusion query), so a palm's trunk, a ship or the body takes the glare away as it takes the disc.
+  occlusion query), so a palm's trunk, a ship or the body takes the glare away as it takes the disc. The equation
+  is for a point and is not defined under 0.1 degrees: nearer the Sun's middle than its limb the veil is held at
+  its value at the limb (held at 0.1 degrees, it rose 17.5 times inside the disc and showed through a dark
+  glass as a bright spot a fifth of a degree across in the disc's middle; as played the disc is past white either
+  way).
 - **The sea** under the true sky reads the sky itself where each ripple throws the eye's line. (Its mirror of
   the Sun and the Moon is the fourth part's.)
 
@@ -424,9 +429,12 @@ The light on level ground and the zenith, from the island on 21 November 2026 (U
 | the end of civil twilight | 19:32:15 | -6.00° | 0.0 | 2.80 | 2.80 | 3.41 | 0.42 |
 | the end of nautical twilight | 20:04:52 | -12.00° | 0.0 | 0.0050 | 0.0050 | 0.0081 | 0.00092 |
 
-Opposite the Sun as it goes down (the Earth's shadow and the band over it, the Belt of Venus): the sky's
-luminance (cd/m2) and its colour (the CIE's x, y; a white is 0.313, 0.329, and a smaller x and y is bluer) at
-four heights above the horizon:
+Opposite the Sun as it goes down (the Earth's shadow and the band over it, the Belt of Venus), seen from the
+beach (the eye 2 m up) on 21 November: the sky's luminance (cd/m2) and its colour (the CIE's x, y, from the
+screen's three colours; a white is 0.313, 0.329, and a smaller x and y is bluer) at four heights above the
+horizon, by `air.js`'s own march (48 steps a look). The GPU's own table of the sky as seen, read back where the
+dome reads it at the game's eye on the beach (5.3 m up), gives the same sixteen cells within 0.6% in luminance
+and 0.001 in x and y (22 November, the M2's chip):
 
 | the Sun | 2° up | 6° up | 12° up | 30° up |
 |---|---|---|---|---|
@@ -456,17 +464,28 @@ direction and leaves the second out.
 - **The GPU's sky is the model's.** The table of the sky as seen, read back and set against `air.js`'s own march
   at 555 of its entries, at seven heights of the Sun from noon to 10 degrees down: the worst entry is 0.25% off,
   the mean under 0.15%.
-- **The Sun's disc, measured in the picture** (through a probe's dark glass, from edge to edge where the
-  brightness changes fastest; a window 1912 pixels high): 17.0 to 17.5 pixels wide at every height (its 0.541
-  degrees are 17.4 there), and its height over its width
+- **The Sun's disc, measured in the picture** (22 November, after the veil was held inside the disc: below;
+  through a probe's dark glass of 12 to 19 stops, so that its middle is short of white; the eye turned 5 degrees
+  aside, so that the body is not in front of it). As played, in a window 1912 pixels high (32.05 pixels a degree
+  at its middle), it is 16.4 to 16.6 pixels wide from edge to edge where its light falls fastest; its true 0.5394
+  degrees on 21 November are 17.3 pixels there, and a disc that small, darkened to its limb, loses most of a pixel
+  to that way of finding an edge. Drawn again with the view ten times narrower (a telescope: 320.5 pixels a
+  degree), it is 0.5348 to 0.5350 degrees wide by where its light falls fastest and 0.5408 by where its light
+  crosses a fifth of the way up from the sky round it: the true 0.5394 lies between the two, within 1% of each.
+  Its height over its width:
 
   | the Sun as seen | 20° | 5° | 2° | 1° | 0.5° | 0.2° |
   |---|---|---|---|---|---|---|
-  | measured in the picture | 1.02 | 0.98 | 0.94 | 0.86 | 0.85 | 0.80 |
-  | the clockwork's refraction predicts | 1.00 | 0.98 | 0.93 | 0.88 | 0.86 | 0.84 |
+  | through the telescope (the sky alone) | 0.999 | 0.976 | 0.926 | 0.886 | 0.855 | 0.841 |
+  | as played (17 pixels across) | 0.99 | 0.96 | 0.93 | 0.88 | 0.85 | 0.81 |
+  | the clockwork's refraction predicts | 0.998 | 0.975 | 0.926 | 0.884 | 0.856 | 0.840 |
 
-  (a third of a pixel either way is 2%; at 0.2 degrees the lower limb is a third as bright as the upper and its
-  edge reads a little inside). Its middle goes from sRGB 136, 132, 121 at 20 degrees to 211, 136, 31 at 0.2.
+  As played, at 0.2 degrees the sea takes the lowest 0.02 degrees of the disc (0.806 through the telescope with
+  the land and sea drawn): its lower limb is seen 0.025 degrees under the level, above the round Earth's horizon
+  (0.05 degrees under it from the beach) but under the edge of the flat sea (below, "A round Earth under a flat
+  island"). Its middle goes from sRGB 113, 110, 101 at 20 degrees (through 19 stops) to 191, 124, 29 at 0.2
+  (through 12); low down its upper half is the brighter (at 0.2 degrees 213, 140, 36 a fifth of the way in from
+  its top, 133, 81, 13 from its bottom), its light coming through less air.
 - **The glare is cut with the disc.** With the eye swept across the Sun behind the body, the share of the disc
   in sight reads 1 in the clear and 0 behind the body or a palm's trunk.
 - **Frames.** At the game's pixel cap (a window of 1470 x 956 points at two pixels a point: 2940 x 1912 drawn),
@@ -499,7 +518,9 @@ direction and leaves the second out.
 - **No cast shadows.** The island never had them: a surface turned from the Sun is dark and a room's patch of
   sunlight turns with the hour, but a palm throws no shadow on the sand. Owed; a low Sun wants it most.
 - **The glare** is the eye's veil only (no lens, no lashes); its equation is typed from the published form
-  (the search confirmed its domain and its factors, not each coefficient); it is cut off at 60 degrees.
+  (the search confirmed its domain and its factors, not each coefficient); it is cut off at 60 degrees, and inside
+  the Sun's disc it is held at its value at the limb (the equation is for a point; in the disc's middle its own
+  light is thirty times the veil's).
 - **The adaptation times** (0.35 s and 1.7 s) are a game's: the real eye takes minutes to the dark.
 - **The curve is a screen's, not the whole of vision**: one curve for the whole picture (the eye adapts place
   by place), no change of colour with brightness (that belongs with the night). And the land's own colours
@@ -515,10 +536,15 @@ direction and leaves the second out.
   add it to the dome's light and to `daylight.js` `sky` (the light on level ground), and the meter and the
   tables follow. Stars go on the dome behind the air: `airT(h, d.y)` in `sky.js` is the extinction and the
   reddening a star's light takes, the same call the Sun's disc makes. The tables are kept over the sky's light
-  on level ground: once the Sun's part is gone that number must be the night's.
+  on level ground: once the Sun's part is gone that number must be the night's. The eye at night is the rest of
+  Krawczyk's method, not drawn yet: colour lost under rod vision, and less acuity. And
+  the switch: the true sky comes out from behind `?sky=true` only when the night and the Moon are drawn and
+  looked at (`view.js`, the one line that asks).
 - **The Moon**: a second light through the same tables (the table of the sky as seen is for one light: a
   second table, or the same one made for the Moon after the Sun is 18 degrees down); `daylight.js` `at()` is
-  where its lux and place come in; the key light is then whichever is up.
+  where its lux and place come in; the key light is then whichever is up. Its disc is the Sun's drawing with
+  its phase; its glare, if it has one, is held at its own limb, and its share in sight needs marks of its own
+  (the seven in `sky.js` are the Sun's).
 - **The clock's dial**: `clock.set(ms)`, `clock.shift(ms)`, `clock.back()` are there; only creative mode may call them.
 - **The sea**: `SKY_OVER_GLSL` already gives its surface the sky; the Sun's and the Moon's own glitter want the disc.
 - **Phones**: the lighter path (smaller tables: 128 x 72 and 16 slices of 16 x 16) is drawn and measured on the
@@ -656,3 +682,12 @@ different credit or for removal, it is one file each.
 - **A JavaScript engine boxes numbers** that cross a call it did not inline; "no allocation" can honestly mean
   no arrays and no objects, and the bytes left are measured and said.
 - **The records `sky()` fills are the same objects every call.** What is kept from one call must be copied.
+- **A picture of the Sun says whether the Sun was in sight.** The true sky's first contact sheet had the Sun 5, 1
+  and 0.2 degrees up black through the dark glass. Its whole pictures show no disc anywhere, so it was not drawn in
+  that run; but the code committed four minutes before draws it in the same looks, in the same order, through the
+  same glasses (tried again on 22 November), and so does every version since, so that run cannot be had again.
+  The probes since keep the share of the disc in sight beside every picture of it, and turn the eye 5 degrees
+  aside: looking straight at a low Sun, it stands a shoulder's width from the body.
+- **A formula's domain is a place in the picture.** The glare equation is defined from 0.1 degrees out; held
+  there, its flat top was a bright spot a fifth of a degree across in the middle of the Sun, seen only through a
+  dark glass. It is held at the limb now.
