@@ -13,7 +13,9 @@
 //   · THE SUN: a disc of its true size where the clockwork sees it, darkened to its limb, dimmed and reddened by
 //     the air it is seen through, and flattened near the horizon because the air lifts its lower limb more;
 //   · THE EYE: one exposure for everything (air.js), following the scene; and the eye's own veil round the Sun
-//     (the CIE's disability glare), added in light to the sky and to whatever stands in front of it.
+//     (the CIE's disability glare), added in light to the sky and to whatever stands in front of it, by how much of
+//     the Sun is in sight: seven marks on its disc, which the GPU is asked about each frame (were any of their
+//     pixels in front of everything solid?), so a palm's trunk or a ship takes the glare away as it takes the disc.
 // The picture is drawn straight to the screen as before: every light is multiplied by the exposure before it is
 // used, so no material had to change, and nothing is drawn twice.
 //
@@ -200,6 +202,7 @@ function table(lut, whole = false) {
 }
 const target = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
 
+const evOf = (search) => { try { const v = parseFloat(new URLSearchParams(search || '').get('ev')); return Number.isFinite(v) ? Math.max(-14, Math.min(6, v)) : 0; } catch { return 0; } };
 // can this machine draw it? (WebGL 2, and tables of half floats it can draw into)
 export function canDrawTrueSky(renderer) {
   try { return !!renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float')); } catch { return false; }
@@ -237,11 +240,48 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   const dome = new THREE.Mesh(domeGeo, domeMat); dome.frustumCulled = false; dome.renderOrder = -10; dome.scale.setScalar(50000);
   ADOPTED.add(domeMat);
   const fog = new THREE.Fog(0x000000, 1e9, 2e9);
+  // the Sun in sight: seven marks on its disc (its middle, and six round it), far off along the way to it. They
+  // are drawn after everything solid, writing nothing; each asks the GPU whether any of it showed
+  const gl = renderer.getContext(), marks = new THREE.Group(), markGeo = new THREE.CircleGeometry(1, 6);
+  const markMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: true, transparent: true, fog: false });
+  ADOPTED.add(markMat);
+  const MARKS = [[0, 0], ...[0, 1, 2, 3, 4, 5].map((k) => [0.6 * Math.cos(k * Math.PI / 3), 0.6 * Math.sin(k * Math.PI / 3)])].map(([a, b]) => {
+    const mesh = new THREE.Mesh(markGeo, markMat), q = { a, b, mesh, query: gl.createQuery(), open: false, asked: false, shows: 1 };
+    mesh.renderOrder = 45; mesh.frustumCulled = false;
+    mesh.onBeforeRender = () => { if (!q.asked && !q.open && q.query) { gl.beginQuery(gl.ANY_SAMPLES_PASSED, q.query); q.open = true; } };
+    mesh.onAfterRender = () => { if (q.open) { gl.endQuery(gl.ANY_SAMPLES_PASSED); q.open = false; q.asked = true; } };
+    marks.add(mesh);
+    return q;
+  });
+  marks.visible = false;
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
 
   const R = new THREE.Vector3(), Uu = new THREE.Vector3(), B = new THREE.Vector3(), buf = new THREE.Vector2(), fwd = [0, 0, -1], rgt = [1, 0, 0], upv = [0, 1, 0];
-  let lastT = NaN, frame = 0, adapted = 0, sceneL = 0, exposure = 0, sight = 1, skyAt = null, wrapAt = null, seen = 0;
+  const S3 = new THREE.Vector3(), E1 = new THREE.Vector3(), E2 = new THREE.Vector3(), P3 = new THREE.Vector3();
+  // how much of the Sun's disc is in sight of the eye: the marks' answers while it is in the picture (they are a
+  // frame or two old); out of the picture, only whether the land stands in the way
+  function inSight(camera, L) {
+    const s = L.sun; S3.set(s[0], s[1], s[2]);
+    P3.copy(S3).multiplyScalar(1000).add(camera.position).project(camera);
+    const framed = S3.dot(camera.getWorldDirection(E1)) > 0 && Math.abs(P3.x) < 0.98 && Math.abs(P3.y) < 0.98;
+    marks.visible = framed;
+    let shows = 0;
+    for (const q of MARKS) {
+      if (q.asked && gl.getQueryParameter(q.query, gl.QUERY_RESULT_AVAILABLE)) { q.shows = gl.getQueryParameter(q.query, gl.QUERY_RESULT) ? 1 : 0; q.asked = false; }
+      shows += q.shows;
+    }
+    if (!framed) return hidden(camera.position, s) ? 0 : 1;
+    // the marks stand most of the way to the far end of the eye's reach, each on its place of the disc, facing the eye
+    const far = camera.far * 0.8, rad = L.radius * D2R;
+    E1.set(-s[2], 0, s[0]); if (E1.lengthSq() < 1e-8) E1.set(1, 0, 0); E1.normalize(); E2.crossVectors(S3, E1).normalize();
+    for (const q of MARKS) {
+      q.mesh.position.copy(S3).addScaledVector(E1, q.a * rad).addScaledVector(E2, q.b * rad).normalize().multiplyScalar(far).add(camera.position);
+      q.mesh.quaternion.copy(camera.quaternion); q.mesh.scale.setScalar(far * rad * 0.25);
+    }
+    return shows / MARKS.length;
+  }
+  let lastT = NaN, frame = 0, adapted = 0, sceneL = 0, exposure = 0, sight = 1, skyAt = null, wrapAt = null, seen = 0, cpu = 0;
   const state = { sunCol: new THREE.Color(), skyCol: new THREE.Color(), night: 0, env: 1, exposure: 0 };
   // is the land between the eye and the Sun? (a walk out along the Sun's way, the steps growing)
   function hidden(p, s) {
@@ -252,6 +292,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   const moved = (was, L) => !was || Math.abs(was.alt - L.alt) > was.eps || Math.abs(was.h - L.height) > Math.max(0.001, 0.02 * was.h);
 
   function update({ camera, t, key, fill, sea = null, scene, indoor = 1 }) {
+    const began = performance.now();
     const dt = Number.isFinite(lastT) ? Math.min(0.1, Math.max(0, t - lastT)) : 0; lastT = t; frame += 1;
     const L = day.at(when(), Math.max(0.5, camera.position.y)), s = L.sun;
     // the eye's axes, and a pixel's ray in them
@@ -271,7 +312,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     const per = Math.max(luminance(L.sky) / L.lux, 1e-12), gain = per * L.lux * exposure;
     SHARED.uAirGain.value = gain; SHARED.uAirEnv.value = gain; U.dome.uSunGain.value = L.lux * exposure;
     // the Sun's light at the eye, and whether the land or a wall hides it
-    const want = (hidden(camera.position, s) ? 0 : 1) * (indoor < 0.999 ? Math.max(0, (indoor - 0.12) / 0.88) : 1);
+    const want = inSight(camera, L);
     sight += (want - sight) * (dt ? 1 - Math.exp(-dt / 0.12) : 1);
     SHARED.uAirGlare.value.set(L.direct[0] * exposure * sight, L.direct[1] * exposure * sight, L.direct[2] * exposure * sight);
     // the tables: the sky as seen when the Sun or the eye's height has moved; the air to the land every frame
@@ -283,7 +324,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       const g = GROUND / Math.PI / (L.lux * per); U.wrap.uUnder.value.set(L.level[0] * g, L.level[1] * g, L.level[2] * g);
       run(mWrap, wrapRT); envRT = pmrem.fromEquirectangular(wrapRT.texture, envRT || null); wrapAt = { alt: L.alt, h: L.height, eps: 0.2 };
     }
-    if (scene) { if (scene.environment !== envRT.texture) scene.environment = envRT.texture; if (scene.fog !== fog) scene.fog = fog; }
+    if (scene) { if (scene.environment !== envRT.texture) scene.environment = envRT.texture; if (scene.fog !== fog) scene.fog = fog; if (marks.parent !== scene) scene.add(marks); }
     // the dome
     U.dome.uSunTrue.value.set(L.trueSun[0], L.trueSun[1], L.trueSun[2]); U.dome.uSunRad.value = L.radius * D2R; U.dome.uRefr.value = L.refraction;
     dome.position.copy(camera.position);
@@ -304,20 +345,30 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     }
     // whatever has come into the scene since stands in the same air
     if (scene) { let n = 0; scene.traverse((o) => { const m = o.material; if (!m) return; n += 1; if (Array.isArray(m)) m.forEach(adopt); else adopt(m); }); seen = n; }
+    cpu += (performance.now() - began - cpu) * 0.05;       // what this cost the page's own thread, lately (ms)
     return L;
+  }
+  // what the passes cost the GPU: each drawn n times and waited for (a probe's question; nothing in the game asks it)
+  function cost(n = 60) {
+    const gl = renderer.getContext(), wait = () => { renderer.readRenderTargetPixels(skyRT, 0, 0, 1, 1, px); gl.finish(); }, out = {};
+    for (const [name, m, rt] of [['air', mAp, apRT], ['sky', mSky, skyRT], ['wrap', mWrap, wrapRT]]) { wait(); const a = performance.now(); for (let i = 0; i < n; i += 1) run(m, rt); wait(); out[name] = (performance.now() - a) / n; }
+    return out;
   }
   // a texel of the sky as seen, as the GPU made it (for a Sun of 1 lux): the probes compare it with air.js's own
   const px = new Uint16Array(4);
   function peek(i, j) { renderer.readRenderTargetPixels(skyRT, i, j, 1, 1, px); return [0, 1, 2].map((c) => THREE.DataUtils.fromHalfFloat(px[c]) * (skyAt ? skyAt.per : 1)); }
   const api = {
-    dome, fog, day, state, update, peek, tables: { sky: [SW, SH], air: [AN, AW], made },
-    bias: 0,      // stops added to the exposure: nothing sets it but a probe (a dark glass, to look at the Sun's own disc)
+    dome, fog, day, state, update, peek, cost, tables: { sky: [SW, SH], air: [AN, AW], made },
+    // stops added to the exposure. Nothing in the game sets it: a probe does (a dark glass, to look at the Sun's own
+    // disc), and `&ev=1` in the address beside ?sky=true, for whoever is judging how bright the picture should be
+    bias: evOf(typeof location === 'undefined' ? '' : location.search),
     // the uniforms SKY_OVER_GLSL reads: the table of the sky as seen, its size, the eye's height, what brings it to the picture's units
     seaSky: { uSkyView: U.look.uSkyView, uSkySize: U.look.uSkySize, uSkyH: U.look.uH, uSkyGain: SHARED.uAirGain },
-    read() { const L = day.light; return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, sight, materials: seen, zenith: luminance(day.toward([0, 1, 0])), tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } }; },
+    read() { const L = day.light; return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, sight, materials: seen, cpu: Math.round(cpu * 1000) / 1000, zenith: luminance(day.toward([0, 1, 0])), tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } }; },
     dispose() {
       SHARED.uAirEnv.value = 1; SHARED.uAirAP.value = null;
-      for (const x of [tT, tM, skyRT, apRT, wrapRT, mSky, mAp, mWrap, quadGeo, domeGeo, domeMat, pmrem]) x.dispose();
+      marks.removeFromParent(); for (const q of MARKS) { if (q.open) gl.endQuery(gl.ANY_SAMPLES_PASSED); gl.deleteQuery(q.query); q.query = null; }
+      for (const x of [tT, tM, skyRT, apRT, wrapRT, mSky, mAp, mWrap, quadGeo, domeGeo, domeMat, pmrem, markGeo, markMat]) x.dispose();
       envRT?.dispose();
     },
   };
