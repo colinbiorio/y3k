@@ -67,7 +67,7 @@ import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
 import { trunksNear } from './island/life.js';
 import { SHAPE } from './island/lordhowe-shape.js';
-import { skyAsked } from './solar/daylight.js';
+import { skyAsked } from './solar/clock.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
@@ -75,6 +75,7 @@ const POSE = { pitch: -0.05, every: 200 };     // the body sheet: how the eye is
 const FOV = 55;
 const ISLAND_URL = 'src/game/island/lordhowe.bin';
 const TRUE_SKY = skyAsked(globalThis.location?.search);      // ?sky=true: the island under the true sky (sky.js; SOLAR.md step 2), not yet the island's own
+let SKY = null;                         // sky.js itself, fetched the first time the island is come to with the switch on: a page without the switch never reads it
 const FAR = { void: 20000, island: 45000 };   // how far the eye sees: the island's needs Ball's Pyramid, 28 km off
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
@@ -375,7 +376,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // one that cannot be made leaves what was.
   function plain() {
     let v = null, made = null;
-    try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE, sky: TRUE_SKY }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
+    try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE, sky: SKY }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
     K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
     K.arts.clear(); dropGround();
@@ -517,8 +518,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         K.island = { ground: createGround(head, hts) }; K.worlds.island.ground = K.island.ground;
         K.worlds.island.trunks = (x, z) => trunksNear(K.island.ground, x, z);
       }
+      // the true sky's own files are read only where the address asks for it; if they cannot be, the island keeps the sky it had
+      if (name === 'island' && TRUE_SKY && !SKY) { try { SKY = await import('./sky.js'); } catch (e) { console.error('[island] the true sky could not be fetched', e); } }
       if (!root) return;
-      const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE, sky: TRUE_SKY }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
+      const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE, sky: SKY }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
       if (K.aboard) { leave(K.aboard, K.body); K.aboard = null; }
       K.at[K.place] = { p: [...K.body.p], yaw: K.body.yaw };
       K.void.scene.remove(K.figure.group, K.hearth);

@@ -13,16 +13,16 @@
 // takes the distance, so Ball's Pyramid, 28 km off, stands faint in it.
 // Three lights, as the void's are named: pale (a clear day), dusk, night.
 //
-// Asked for (`sky: true`; view.js asks when the page's address says ?sky=true), the sky is the true one instead
-// (../sky.js): the air and the Sun over the island at the world's clock's instant, the land and sea lit by them and
-// standing in that air. Then the three named lights are not used here, and the sea takes its colours from the sky.
+// Asked for (`sky`: ../sky.js itself, which view.js fetches and hands in when the page's address says ?sky=true;
+// nothing here imports it, so a page without the switch never reads it), the sky is the true one instead: the air
+// and the Sun over the island at the world's clock's instant, the land and sea lit by them and standing in that
+// air. Then the three named lights are not used here, and the sea takes its colours from the sky.
 import * as THREE from 'three';
 import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
 import { SEA_FLOOR, seaSheet } from './ground.js';
 import { vnoise } from './life.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
-import { createTrueSky, canDrawTrueSky, SKY_OVER_GLSL } from '../sky.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -108,11 +108,11 @@ function heightTexture(a, w, h) {
 }
 
 const FLATS = 5;                          // levellings drawn at once (one building of each kind stands at a time)
-export function createIsland({ renderer, lite = false, light = 'pale', ground, shape, sky = false }) {
+export function createIsland({ renderer, lite = false, light = 'pale', ground, shape, sky = null }) {
   const scene = new THREE.Scene(), head = ground.head, S = head.spacing, geos = [], mats = [], texs = [];
   const time = { value: 0 }, drops = createDrops(DROPS);
   // the true sky, where it is asked for and this machine can draw it
-  const air = sky && canDrawTrueSky(renderer) ? createTrueSky({ renderer, lite, lat: shape.lat, lon: shape.lon, ground }) : null;
+  const air = sky && sky.canDrawTrueSky(renderer) ? sky.createTrueSky({ renderer, lite, lat: shape.lat, lon: shape.lon, ground }) : null;
   // ---- the sky
   const skyU = { uZenith: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uSun: { value: new THREE.Vector3() }, uSunCol: { value: new THREE.Color() }, uStars: { value: 0 } };
   const skyGeo = new THREE.IcosahedronGeometry(1, 5); geos.push(skyGeo);
@@ -248,7 +248,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       }`,
     fragmentShader: `
       uniform float uTime; uniform sampler2D uH; uniform sampler2D uP; uniform vec4 uGrid; uniform vec4 uPGrid; uniform vec4 uDrops[${DROPS}];
-      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' + SKY_OVER_GLSL : ''}
+      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' + sky.SKY_OVER_GLSL : ''}
       varying vec3 vW;
       #include <fog_pars_fragment>
       float sh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }

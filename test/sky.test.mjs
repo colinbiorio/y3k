@@ -19,8 +19,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as A from '../src/game/solar/air.js';
-import { createClock, pinOf } from '../src/game/solar/clock.js';
-import { createDaylight, skyAsked } from '../src/game/solar/daylight.js';
+import { createClock, pinOf, skyAsked } from '../src/game/solar/clock.js';
+import { createDaylight } from '../src/game/solar/daylight.js';
 import { sky, refraction, AU, BODIES } from '../src/game/solar/ephemeris.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -341,9 +341,15 @@ ok('behind a switch, and off: only ?sky=true in the address asks for the true sk
   for (const no of ['', '?', '?sky', '?sky=', '?sky=1', '?sky=TRUE', '?sky=false', '?sky=yes', '?skyx=true', undefined, null]) assert.equal(skyAsked(no), false, 'not asked: ' + no);
   const view = read('src/game/view.js'), island = read('src/game/island/island.js'), sky = read('src/game/sky.js');
   assert.match(view, /const TRUE_SKY = skyAsked\(globalThis\.location\?\.search\);/);
-  assert.equal((view.match(/createIsland\(\{[^}]*sky: TRUE_SKY \}\)/g) || []).length, 2, 'both places the island is made hand the switch on');
-  assert.match(island, /export function createIsland\(\{ renderer, lite = false, light = 'pale', ground, shape, sky = false \}\)/, 'the island is not under the true sky unless asked');
-  assert.match(island, /const air = sky && canDrawTrueSky\(renderer\) \? createTrueSky\(/, 'nor on a machine that cannot draw it');
+  // a page without the switch does not even read the sky's files: the view asks the clock's file (which imports
+  // nothing) whether the sky is asked for, fetches sky.js only then, and hands it to the island, which imports none of it
+  assert.match(view, /import \{ skyAsked \} from '\.\/solar\/clock\.js';/);
+  assert.ok(!/^\s*import\b/m.test(read('src/game/solar/clock.js')), 'the clock\'s file imports nothing');
+  assert.match(view, /if \(name === 'island' && TRUE_SKY && !SKY\) \{ try \{ SKY = await import\('\.\/sky\.js'\); \} catch/, 'fetched only when asked for, and the island still comes if it cannot be');
+  for (const [name, text] of [['view.js', view], ['island.js', island]]) assert.ok(!/^\s*import\b[^\n]*(sky|daylight|air|ephemeris)\.js/m.test(text), name + ' imports none of the sky\'s files outright');
+  assert.equal((view.match(/createIsland\(\{[^}]*sky: SKY \}\)/g) || []).length, 2, 'both places the island is made hand the sky on, where there is one');
+  assert.match(island, /export function createIsland\(\{ renderer, lite = false, light = 'pale', ground, shape, sky = null \}\)/, 'the island is not under the true sky unless handed it');
+  assert.match(island, /const air = sky && sky\.canDrawTrueSky\(renderer\) \? sky\.createTrueSky\(/, 'nor on a machine that cannot draw it');
   // with the switch off every line that draws is the line it was: the old sky's dome, its fog, its three lights, its sea
   assert.match(island, /scene\.add\(air \? air\.dome : dome\);/); assert.match(island, /scene\.fog = air \? air\.fog : new THREE\.FogExp2\(0xffffff, 3\.6e-5\);/);
   assert.match(island, /if \(air\) return lightName;/); assert.match(island, /const seaLit = air \? 'uBodyAmt' : 'uSkyAmt', seaSky = air \? 'skyOver\(r, normalize\(uSun\)\)' : 'mix\(uHorizon, uZenith, pow\(r\.y, 0\.55\)\) \* uSkyAmt'/);

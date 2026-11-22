@@ -10,9 +10,6 @@ import { BODIES } from './bodies.js';
 import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter, keyFor, skyHold, EYE } from './air.js';
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
-// Is the true sky asked for? Only by `?sky=true` in the page's address: until the night and the Moon are made and
-// looked at, a place keeps the sky it had, so that nobody meets a half-made one.
-export function skyAsked(search) { try { return new URLSearchParams(search || '').get('sky') === 'true'; } catch { return false; } }
 const STEP = 0.25;                            // degrees of the Sun's height between two workings of the sky's irradiance
 const GROUND = 0.18;                          // how much of the light the land and sea give back, taken together (the photographer's average scene)
 // the heights the sky's irradiance is kept for (km): it changes little with height near the ground
