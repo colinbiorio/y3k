@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as A from '../src/game/solar/air.js';
 import { createClock, pinOf } from '../src/game/solar/clock.js';
-import { createDaylight } from '../src/game/solar/daylight.js';
+import { createDaylight, skyAsked } from '../src/game/solar/daylight.js';
 import { sky, refraction, AU, BODIES } from '../src/game/solar/ephemeris.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -234,19 +234,49 @@ ok('the Earth\'s shadow rises opposite a set Sun, with the pink band over it (th
   // twice as many samples along each look change nothing: the shadow's edge is found, not stepped over
   for (const alt of [2, 5, 12]) { const c = Math.cos(alt * D2R), d = [away[0] * c, Math.sin(alt * D2R), away[2] * c]; near(A.luminance(A.skyRay(L.height, d, L.sun, 32)) / A.luminance(A.skyRay(L.height, d, L.sun, 64)), 1, 0.02, 'samples at ' + alt); }
   measured.push(`opposite a Sun 2° down: the Earth's shadow 2° up ${fig(low)} cd/m2, the band 12° up ${fig(band)}, the sky 40° up ${fig(high)}; red over blue ${(grey[0] / grey[2]).toFixed(2)} in the shadow, ${(pink[0] / pink[2]).toFixed(2)} in the band, ${(blue[0] / blue[2]).toFixed(2)} above it`);
+  // the same, as a table: luminance and colour (the CIE's x, y) at four heights opposite the Sun, as it goes down
+  const xy = (c) => { const X = 0.4124 * c[0] + 0.3576 * c[1] + 0.1805 * c[2], Y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2], Z = 0.0193 * c[0] + 0.1192 * c[1] + 0.9505 * c[2]; return [X / (X + Y + Z), Y / (X + Y + Z)]; };
+  const rows = {};
+  for (const down of [1, 2, 3, 4]) {
+    const Lq = D.at(find(-down, NOON, NOON + 9 * 3600e3), 2), m = Math.hypot(Lq.sun[0], Lq.sun[2]), opp = [-Lq.sun[0] / m, 0, -Lq.sun[2] / m], cells = [];
+    rows[down] = [2, 6, 12, 30].map((alt) => { const c = D.toward([opp[0] * Math.cos(alt * D2R), Math.sin(alt * D2R), opp[2] * Math.cos(alt * D2R)], [0, 0, 0], 48), q = xy(c); cells.push(`${fig(A.luminance(c))}; ${q[0].toFixed(3)}, ${q[1].toFixed(3)}`); return { Y: A.luminance(c), x: q[0], y: q[1] }; });
+    measured.push(`| ${down}° down | ${cells.join(' | ')} |`);
+  }
+  // a degree and two degrees down, the shadow is half as bright as the band over it and bluer (x and y both lower), and
+  // the band is the warmest thing in that sky; three degrees down the two have run together (within a quarter), and
+  // at four the sky only darkens upward: the model's band is gone a little sooner than the sky's own
+  for (const down of [1, 2]) { const [a, b, c, d] = rows[down]; assert.ok(c.Y > 1.9 * a.Y, 'the band over the shadow, ' + down); assert.ok(b.x > a.x + 0.015 && b.y > a.y + 0.008, 'the band is warmer than the shadow, ' + down); assert.ok(b.x > d.x + 0.02, 'and than the blue above it, ' + down); }
+  { const [a, b, c, d] = rows[3]; assert.ok(Math.max(a.Y, b.Y, c.Y, d.Y) / Math.min(a.Y, b.Y, c.Y, d.Y) < 1.3, 'three degrees down the band has run into the shadow'); }
+  { const [a, b, c, d] = rows[4]; assert.ok(a.Y > b.Y && b.Y > c.Y && c.Y > d.Y, 'four degrees down the sky only darkens upward'); }
 });
 
 // ------------------------------------------------------------------------------------------------- the eye
-ok('the eye: noon is shown as it was, a dim scene dimmer; it follows the light in half a second, the dark in seconds', () => {
-  // noon on the beach, looking along it: the Sun's light on what faces it comes to the 2.4 the island's own
-  // noon light has always been
-  const L = D.at(NOON, 2), scene = D.scene([1, 0, 0], [0, 0, 1], [0, 1, 0], 0.8, 0.52), key = A.luminance(L.direct) * A.exposureFor(scene);
-  within(scene, 3000, 9000, 'the scene at noon, cd/m2'); within(key, 2.0, 2.9, 'the noon Sun in the picture\'s own units');
-  near(A.keyFor(A.EYE.day), 0.18 / Math.SQRT2, 1e-12, 'by day the average is shown at 12.7%');
-  let was = Infinity; for (const l of [1e4, 1e3, 100, 10, 1, 0.1, 0.01, 1e-3]) { const k = A.keyFor(l); assert.ok(k < was, 'a dimmer scene is shown dimmer'); was = k; }
-  within(A.keyFor(1) / A.keyFor(4000), 0.15, 0.4, 'civil twilight is shown at a quarter of day\'s brightness');
-  assert.equal(A.exposureFor(0), A.exposureFor(A.EYE.floor), 'below the night sky\'s own glow the exposure holds');
-  assert.equal(A.exposureFor(1e-9), A.exposureFor(A.EYE.floor));
+const srgb = (x) => Math.round(255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.min(1, x), 1 / 2.4) - 0.055));
+ok('the eye: a bright scene is drawn bright and a dark one dark (Krawczyk\'s key), and a curve holds what the screen cannot reach', () => {
+  // the key: the scene value given to the level the eye is adapted to
+  near(A.krawczyk(0), 0.03, 1e-12); within(A.keyFor(6000), 0.67, 0.70, 'full day'); within(A.keyFor(1), 0.15, 0.17, 'the end of civil twilight'); within(A.keyFor(1e-3), 0.03, 0.031, 'night');
+  let was = Infinity; for (const l of [1e5, 1e4, 1e3, 100, 10, 1, 0.1, 0.01, 1e-3]) { const k = A.keyFor(l); assert.ok(k < was, 'a dimmer scene is shown dimmer'); was = k; }
+  assert.equal(A.exposureFor(0), A.exposureFor(A.EYE.floor), 'below the night sky\'s own glow the exposure holds'); assert.equal(A.exposureFor(1e-9), A.exposureFor(A.EYE.floor));
+  // the curve: Reinhard's, on the luminance; half-way up at 1, white at W and never past it, rising all the way
+  assert.equal(A.EYE.curve, 'reinhard'); near(A.shown(1), 0.5 * (1 + 1 / 64), 1e-12); near(A.shown(A.EYE.white), 1, 1e-12); assert.equal(A.shown(1e6), 1); assert.equal(A.shown(0), 0);
+  was = -1; for (let x = 0; x <= 8; x += 0.05) { const y = A.shown(x); assert.ok(y > was && y <= 1); was = y; }
+  for (const y of [0.05, 0.3, 0.8, 0.99]) near(A.shown(A.sceneValue(y)), y, 1e-9, 'there and back');
+  // a colour keeps its hue; what the screen cannot reach gives up saturation, not hue; the heart of a glare is white
+  const sky = A.shownColour([0.28, 0.42, 0.89]); near(sky[0] / sky[1], 0.28 / 0.42, 1e-9); near(sky[2] / sky[1], 0.89 / 0.42, 1e-9);
+  const glow = A.shownColour([2.5, 0.9, 0.1]); near(glow[0], 1, 1e-9); assert.ok(glow[0] > glow[1] && glow[1] > glow[2], 'an orange past the screen\'s reach is still orange'); near((glow[0] - glow[1]) / (glow[1] - glow[2]), (2.5 - 0.9) / (0.9 - 0.1), 1e-6, 'the same hue');
+  assert.deepEqual(A.shownColour([40, 14, 1.5]), [1, 1, 1]); assert.deepEqual(A.shownColour([0, 0, 0]), [0, 0, 0]);
+  for (const c of A.CURVES) { assert.ok(A.keyFor(6000, c) > A.keyFor(1, c)); within(A.skyHold(c), 0.5, 4, 'the sky held under white by ' + c); }
+  near(A.shown(A.keyFor(6000, 'agx'), 'agx'), A.shown(A.keyFor(6000, 'reinhard'), 'reinhard'), 2e-3, 'the curves are compared at the same brightness of the adapted level');
+  // NOON ON THE BEACH, as played (looking along it, a little down): what the screen shows
+  const L = D.at(NOON, 2), fwd = [0, -Math.sin(0.1), Math.cos(0.1)], scene = D.scene(fwd, [-1, 0, 0], [0, Math.cos(0.1), Math.sin(0.1)], 0.8, 0.52), e = A.exposureFor(scene);
+  within(scene, 3000, 9000, 'the scene at noon, cd/m2');
+  const at = (alt) => A.shownColour(D.toward([0, Math.sin(alt * D2R), Math.cos(alt * D2R)], [0, 0, 0], 32).map((x) => x * e)).map(srgb);      // the sky to the south, away from the Sun
+  const high = at(20), low = at(3);
+  within(high[0], 100, 130, 'the sky 20 degrees up: red'); within(high[1], 125, 155, 'green'); within(high[2], 165, 215, 'blue: a luminous blue');
+  assert.ok(low[0] > high[0] + 15 && low[1] > high[1] + 10 && low[2] > high[2], 'the horizon is clearly paler than the sky above it');
+  // white sand in that Sun (it gives back 40% of the light: 16,000 cd/m2) is bright and under white; a white sheet too
+  const sand = A.shown(0.4 * A.luminance(L.level) / Math.PI * e), sheet = A.shown(A.luminance(L.level) / Math.PI * e);
+  within(sand, 0.55, 0.8, 'sand'); within(sheet, 0.8, 0.95, 'a white sheet lying in the Sun'); assert.ok(sheet < 1);
   // adaptation: half the way (in stops) to a scene a hundred times brighter, and to one a hundred times darker
   const half = (from, to) => { let a = from, t = 0; while (Math.abs(Math.log(a / to)) > Math.abs(Math.log(from / to)) / 2) { a = A.adapt(a, to, 1 / 60); t += 1 / 60; } return t; };
   const up = half(10, 1000), down = half(1000, 10);
@@ -261,15 +291,16 @@ ok('the eye: noon is shown as it was, a dim scene dimmer; it follows the light i
   const tip = (p) => [[f[0] * Math.cos(p), Math.sin(p), f[2] * Math.cos(p)], r, [-f[0] * Math.sin(p), Math.cos(p), -f[2] * Math.sin(p)]];
   const atFeet = D.scene(...tip(-0.35), 0.8, 0.52), atSky = D.scene(...tip(0.16), 0.8, 0.52);
   assert.ok(atFeet < atSky, 'the ground at its feet reads darker than the sunset');
-  // and facing a low Sun it is never so open that the sky in view is, taken together, past the screen's white
+  // and facing a low Sun it is never so open that the sky in view is, taken together, shown past seven tenths of white
   for (const alt of [20, 5, 1]) {
     const ms = find(alt, NOON, NOON + 8 * 3600e3), Lq = D.at(ms, 2), m = Math.hypot(Lq.sun[0], Lq.sun[2]), ff = [Lq.sun[0] / m, 0, Lq.sun[2] / m], rr = [-ff[2], 0, ff[0]], p = -0.1;
     const F = [ff[0] * Math.cos(p), Math.sin(p), ff[2] * Math.cos(p)], Uv = [-ff[0] * Math.sin(p), Math.cos(p), -ff[2] * Math.sin(p)], sc = D.scene(F, rr, Uv, 0.8, 0.52);
     let sum = 0, cnt = 0;
     for (let j = -1; j <= 1; j += 1) for (let i = -2; i <= 2; i += 1) { const d = [F[0] + rr[0] * i * 0.32 + Uv[0] * j * 0.312, F[1] + Uv[1] * j * 0.312, F[2] + rr[2] * i * 0.32 + Uv[2] * j * 0.312], k = Math.hypot(...d); if (d[1] / k > 0.004) { sum += A.luminance(D.toward(d.map((x) => x / k), [0, 0, 0], 10)); cnt += 1; } }
-    assert.ok(cnt > 0 && sum / cnt * A.exposureFor(sc) <= 1.02, `facing a Sun ${alt} degrees up, the sky in view is shown at ${sum / cnt * A.exposureFor(sc)}`);
+    assert.ok(cnt > 0 && A.shown(sum / cnt * A.exposureFor(sc)) <= 0.73, `facing a Sun ${alt} degrees up, the sky in view is shown at ${A.shown(sum / cnt * A.exposureFor(sc))}`);
   }
-  measured.push(`noon on the beach: the scene reads ${fig(scene)} cd/m2, exposure ${sig(A.exposureFor(scene))} per cd/m2, the Sun's light in the picture's units ${key.toFixed(2)} (the island's own noon light was 2.4); half-way to a brighter scene in ${up.toFixed(2)} s, to a darker in ${down.toFixed(2)} s`);
+  D.at(NOON, 2);
+  measured.push(`noon on the beach, as played: the scene reads ${fig(scene)} cd/m2 and is given the scene value ${A.keyFor(scene).toFixed(2)} (exposure ${sig(e)} per cd/m2); the sky to the south is shown at sRGB ${high.join(', ')} 20° up and ${low.join(', ')} at 3°; sand that gives back 40% of the light at ${(sand * 100).toFixed(0)}% of white, a white sheet at ${(sheet * 100).toFixed(0)}%; half-way to a brighter scene in ${up.toFixed(2)} s, to a darker in ${down.toFixed(2)} s`);
 });
 
 ok('the eye\'s own veil round the Sun (the CIE\'s disability glare) falls off as it should', () => {
@@ -301,8 +332,47 @@ ok('no page and no three in the numbers; the clockwork still asks no clock; the 
   const air = read('src/game/solar/air.js');
   assert.match(air, /Hillaire[^]*EGSR 2020[^]*github\.com\/sebh\/UnrealEngineSkyAtmosphere/);
   assert.match(air, /MIT License\n\/\/\n\/\/ Copyright \(c\) 2020 Epic Games, Inc\.[^]*Permission is hereby granted[^]*THE SOFTWARE IS PROVIDED "AS IS"/);
-  for (const src of ['Hansen', 'Standard Atmosphere', 'Smirnov', 'Bruneton', 'Bremen', 'Darula', 'Hestroffer', 'Krawczyk', 'CIE 146:2002', 'ISO 12232']) assert.ok(air.includes(src), 'the source is named: ' + src);
+  for (const src of ['Hansen', 'Standard Atmosphere', 'Smirnov', 'Bruneton', 'Bremen', 'Darula', 'Hestroffer', 'Krawczyk', 'Reinhard', 'CIE 146:2002', 'ISO 12232']) assert.ok(air.includes(src), 'the source is named: ' + src);
   assert.equal(BODIES.earth.atmosphere.pressure, 101400, 'the pressure the depth is scaled to is the Earth\'s own record');
+});
+
+ok('behind a switch, and off: only ?sky=true in the address asks for the true sky; the island and the void are otherwise as they were', () => {
+  assert.equal(skyAsked('?sky=true'), true); assert.equal(skyAsked('?at=2026-11-21T07:10:00Z&sky=true'), true);
+  for (const no of ['', '?', '?sky', '?sky=', '?sky=1', '?sky=TRUE', '?sky=false', '?sky=yes', '?skyx=true', undefined, null]) assert.equal(skyAsked(no), false, 'not asked: ' + no);
+  const view = read('src/game/view.js'), island = read('src/game/island/island.js'), sky = read('src/game/sky.js');
+  assert.match(view, /const TRUE_SKY = skyAsked\(globalThis\.location\?\.search\);/);
+  assert.equal((view.match(/createIsland\(\{[^}]*sky: TRUE_SKY \}\)/g) || []).length, 2, 'both places the island is made hand the switch on');
+  assert.match(island, /export function createIsland\(\{ renderer, lite = false, light = 'pale', ground, shape, sky = false \}\)/, 'the island is not under the true sky unless asked');
+  assert.match(island, /const air = sky && canDrawTrueSky\(renderer\) \? createTrueSky\(/, 'nor on a machine that cannot draw it');
+  // with the switch off every line that draws is the line it was: the old sky's dome, its fog, its three lights, its sea
+  assert.match(island, /scene\.add\(air \? air\.dome : dome\);/); assert.match(island, /scene\.fog = air \? air\.fog : new THREE\.FogExp2\(0xffffff, 3\.6e-5\);/);
+  assert.match(island, /if \(air\) return lightName;/); assert.match(island, /const seaLit = air \? 'uBodyAmt' : 'uSkyAmt', seaSky = air \? 'skyOver\(r, normalize\(uSun\)\)' : 'mix\(uHorizon, uZenith, pow\(r\.y, 0\.55\)\) \* uSkyAmt'/);
+  for (const f of ['src/game/void.js', 'src/game/lights.js', 'src/game/figure.js', 'src/game/world.js']) assert.ok(!/sky\.js|solar\//.test(read(f)), f + ' knows nothing of the true sky');
+  // what the drawing leans on: materials adopted once, the wrapped sky's level put back when the sky is let go, the
+  // tables over the sky's own light, the GPU asked about the Sun's disc
+  assert.match(sky, /const ADOPTED = new WeakSet\(\);/); assert.match(sky, /material\.customProgramCacheKey = \(\) => key \+ '\|air:' \+ kind;/);
+  assert.match(sky, /SHARED\.uAirEnv\.value = 1; SHARED\.uAirAP\.value = null;/, 'a body that leaves for the void takes no trace of the sky with it');
+  assert.match(sky, /U\.sky\.uNorm\.value = 1 \/ per;/); assert.match(sky, /gl\.beginQuery\(gl\.ANY_SAMPLES_PASSED, q\.query\)/);
+  assert.match(sky, /from '\.\/solar\/air\.js'/); assert.match(sky, /from '\.\/solar\/daylight\.js'/); assert.match(sky, /from '\.\/solar\/clock\.js'/);
+  assert.ok(!/Date\.now\(|new Date\(/.test(sky.replace(/^\s*\/\/.*$/gm, '')), 'the sky asks the world\'s clock, not its own');
+  assert.match(read('package.json'), /node test\/solar\.test\.mjs && node test\/sky\.test\.mjs"/);
+});
+
+// `node test/sky.test.mjs --measured` prints only the lines measured so far, for writing them into SOLAR.md
+if (process.argv.includes('--measured')) { for (const line of measured) console.log(line); process.exit(0); }
+
+ok('SOLAR.md, GAME.md and the README say what was built, in Colin\'s words and in the numbers these checks just measured', () => {
+  const md = read('SOLAR.md'), game = read('GAME.md'), readme = read('README.md');
+  assert.match(md, /## Step 2, first part: the air and the Sun \(22 November 2026\)/);
+  for (const words of ['model the solar system as accurately as possible and make it explorable', 'ultra-high quality experience rather than quantity of output']) { assert.ok(md.includes(words)); assert.ok(game.includes(words), 'GAME.md quotes: ' + words); }
+  for (const part of ['It is behind a switch, and off', '?sky=true', 'Hillaire', 'EGSR 2020', 'github.com/sebh/UnrealEngineSkyAtmosphere', 'MIT', 'Epic', 'U.S. Standard Atmosphere, 1976', 'Hansen', 'Smirnov', 'Bruneton', 'Bremen', 'Darula', 'Hestroffer', 'Saemundsson', 'Krawczyk', 'Reinhard', 'CIE 146:2002', 'Explanatory Supplement', '&curve=none',
+    '### What is approximated', 'No cast shadows', 'Three wavelengths', 'Straight rays', '### What the next parts need from here', 'EYE.floor']) assert.ok(md.includes(part), 'SOLAR.md says: ' + part);
+  // every line and row these checks measured is in the file: it cannot say more than was found
+  for (const line of measured) assert.ok(md.includes(line.startsWith('|') ? line : line[0].toUpperCase() + line.slice(1)), 'SOLAR.md is behind the measurement: ' + line);
+  assert.match(game, /### The true sky over the island, its first part: the air and the Sun \(22 November 2026\)/);
+  for (const part of ['It is behind a switch, and off', '?sky=true', 'What changed in the look under the switch, and why', 'What is rough, seen in the pictures', 'Nothing casts a shadow', 'Krawczyk', '| `sky.js` |']) assert.ok(game.includes(part), 'GAME.md says: ' + part);
+  assert.match(readme, /- \*\*2026-11-22\*\* — \*\*The true sky over the island, its first part: the air and\n  the Sun, behind a switch\*\*/);
+  assert.ok(readme.indexOf('2026-11-22** — **The true sky') < readme.indexOf('**Landing gear**'), 'newest first');
 });
 
 console.log('\n  what was measured (SOLAR.md keeps these):');

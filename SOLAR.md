@@ -44,6 +44,8 @@ error has not been measured; what cannot yet be done well is written under "What
 2. **The true sky from the island.** A real star catalogue with true colours and magnitudes, the Milky Way, the
    Sun, the Moon with its phase and its face, the planets where they are and as bright as they are, for the real
    clock, seen from Lord Howe Island (31.55 S, 159.08 E); the eye's adaptation from noon to a moonless night.
+   In four parts, each looked at before the next: **the air and the Sun** (built, 22 November 2026, behind a
+   switch: below); the night (stars, the Milky Way, the planets); the Moon; the clock's dial, the sea's mirror, phones.
 3. **The seamless rise.** The air's scattering from the beach to space; the Earth as a globe under the island
    (his clean Earth: no city lights), the island at its real place; numerical precision at planetary scale, so
    that a metre on the sand and the distance to the Moon live in one picture without a seam.
@@ -55,8 +57,10 @@ error has not been measured; what cannot yet be done well is written under "What
 
 ## Where it stands
 
-**Step 1 is built.** `src/game/solar/` is the clockwork: five plain modules with no page and no three in them,
-used by nothing in the world tab yet. `test/solar.test.mjs` (22 checks) holds it to the sky.
+**Step 1 is built.** `src/game/solar/` is the clockwork: five plain modules with no page and no three in them.
+`test/solar.test.mjs` (22 checks) holds it to the sky. **Step 2's first part is built behind a switch** (the
+air and the Sun: its own section below): three more plain modules beside the clockwork, one that draws, and
+`test/sky.test.mjs` (18 checks). The world tab uses them only when the page's address says `?sky=true`.
 
 | file | what it is |
 |---|---|
@@ -257,6 +261,268 @@ a frame at 60 a second, if everything is asked every frame, which nothing needs 
 asks for a few). No array or object is made; about 0.7 KB of the engine's own boxed numbers are left per such frame
 (two for each body asked about), which is 40 KB a second: nothing a collector notices. The series are 112.5 KB of
 source (VSOP87B 72.5, ELP 20.2, the orbits 19.8), with `bodies.js` 22 KB and `ephemeris.js` 43 KB beside them.
+
+## Step 2, first part: the air and the Sun (22 November 2026)
+
+Standing on the island's beach, the sky is the sky over that beach at the world's clock's instant: the Sun where
+the clockwork sees it, the air lit by it in real units from noon through sunset to the end of twilight, and the
+land, the sea, the buildings, the ships and the bodies lit by the two and standing in that air.
+
+**It is behind a switch, and off.** `?sky=true` in the page's address draws the island under the true sky; without
+it nothing has changed, for anyone. It stays so until the night and the Moon are made and looked at, so that nobody
+meets a half-made sky (after sunset there is, for now, nothing in it). Three more words in the address, for pictures
+and for judging: `&at=2026-11-21T07:10:00Z` holds the world's clock at an instant, `&ev=1` adds stops to the
+exposure, and `&curve=none` (or `agx`, or `aces`) draws the picture with another curve than the one chosen. The
+void is not touched.
+
+| file | what it is |
+|---|---|
+| `solar/clock.js` | the world's clock: the real UTC instant, read by everything; an offset (for a later dial); a pin from the address |
+| `solar/air.js` | the air as numbers: the medium, the two tables, the light down a line of sight, the Sun above the air, the eye's exposure; and the same written out for the GPU from the same constants |
+| `solar/daylight.js` | what the Sun and the air give a place at an instant: where the Sun is seen (the clockwork's `sky()`), what arrives of it, the sky's light on level ground, how bright the scene is to an eye |
+| `../sky.js` (`src/game/sky.js`; it draws, with three.js) | the tables on the GPU, the dome and the Sun's disc, the air between the eye and every material, the lights, the exposure |
+
+### The method, and what was ported
+
+S. Hillaire, "A Scalable and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020), from the paper
+and from his reference implementation (github.com/sebh/UnrealEngineSkyAtmosphere; MIT, Copyright (c) 2020 Epic
+Games, Inc.; its notice is kept at the foot of `air.js`). Ported from `RenderSkyCommon.hlsl`,
+`RenderSkyRayMarching.hlsl` and `SkyAtmosphereCommon.hlsl`: the medium's three parts and their profiles; the
+transmittance table and its layout (E. Bruneton's); the multiple-scattering table (64 directions, the second
+order's light and the share scattered on, every later order as a geometric series); the march along a line of
+sight, each step's light integrated against its own extinction; the two phase functions; the table of the sky as
+seen (192 x 108, finest at the horizon and toward the Sun) and the way a direction is turned into a place in it;
+the air between the eye and the land as 32 slices of the view out to 128 km, squared in depth.
+
+Where it departs from the reference, and why:
+
+- **Heights, not radii.** A ray is followed in the observer's own frame and only heights above the ground are
+  formed, by differences that keep their figures in a GPU's single precision (a metre in 6,371 km is its seventh
+  figure). The eye's height is a number handed in each frame: 2 m on the beach, 875 m on Mount Gower, and (to
+  100 km, the top of the air) whatever a later stage raises it to.
+- **The Earth's shadow is found, not sampled.** The reference asks each sample whether the ground hides the Sun.
+  Here the stretch of each ray that lies in the cylinder behind the planet is worked out once, and the samples
+  are laid on either side of its edge. Twice the samples change a twilight look by under 2% (the test holds this);
+  stepped across, the shadow's edge bands.
+- **The two tables that depend only on the air are made once, in doubles, in JavaScript** (about 300 ms on the
+  M2), and handed to the GPU as they are: what the tests measure is what the picture reads. The transmittance
+  table's first and last entries stand exactly on the zenith and the horizon (Bruneton's mapping; the reference
+  lets it go, which costs 2% of the depth straight up). The multiple-scattering table's lowest row is at the
+  ground (the reference's is 1 km up, by a slip of units).
+- **The tables the GPU makes are kept over the sky's own light.** They hold half floats (three figures between
+  6e-5 and 65,000), and the sky runs through eight powers of ten from noon to the end of twilight; so each holds
+  luminance over the sky's light on level ground at that moment, a number near 1 at any hour.
+- **The air between eye and land is one picture** (32 squares side by side, read twice and mixed), drawn in one
+  pass a frame. Every material that took fog takes this instead, in light (before the screen's own encoding), and
+  what is itself added light (a flame, a glow) is only dimmed by it.
+- **A ray into the sea** carries the Sun's light off the water in the sky table too, as the reference has it for
+  the multiple scattering only.
+
+### The medium: what is physical
+
+- **The Earth**: a sphere of its mean radius, 6,371.008 km (`bodies.js`); the air ends 100 km up.
+- **The clear air (Rayleigh)**: its depth straight up is the measured one, 0.008569 λ^-4 (1 + 0.0113 λ^-2 +
+  0.00013 λ^-4) at 1013.25 hPa (J. E. Hansen and L. D. Travis, Space Sci. Rev. 16, 527, 1974), at the 1014 hPa
+  `bodies.js` carries. Its thinning with height is the **U.S. Standard Atmosphere, 1976**: seven layers of
+  temperature, the density following from each (within 0.002% of the standard's own table at nine heights). The
+  paper has one exponential of 8 km, and NASA's fact sheet gives 8.5: either is right near the ground and for
+  the whole column, and two to three times too dense from 30 to 50 km, which is the air twilight is made of.
+  With one exponential the end of civil twilight came out at 8.4 lux; with the standard atmosphere, 2.8 (the
+  Explanatory Supplement: 3.4).
+- **Three wavelengths, the screen's own**: 611, 549 and 464 nm, the dominant wavelengths of sRGB's red, green
+  and blue. The paper, after Bruneton, has 680, 550 and 440. That pair of ends scatters six times apart where
+  the screen's colours scatter three: its day was bluer than the sky is, and its red sat beyond the ozone
+  layer's absorption, so twilight came out purple. With the screen's own, the zenith by day is red : green :
+  blue = 0.73 : 1 : 1.75 (a blue sky of 15,000 to 25,000 K on the CIE's daylight locus is 0.73 to 0.67 : 1 :
+  1.67 to 1.89), and twilight is the blue hour.
+- **The haze (Mie)**: a clean sea air. Depth 0.06 at 550 nm: what ships far from land measure over the open
+  ocean (0.06 to 0.07 at 500 nm: A. Smirnov et al., J. Atmos. Sci. 59, 501, 2002, and J. Geophys. Res. 114,
+  D06204, 2009, the Maritime Aerosol Network; island stations, which today's continents reach, average 0.11).
+  Single-scattering albedo 0.99 (sea salt hardly absorbs); grey; scale height 1.2 km and Cornette-Shanks with
+  g = 0.8, as the paper has them. Level with the sea a hill 28 km off keeps 18% of its contrast: Ball's Pyramid
+  stands faint, as it did.
+- **Ozone**: 300 Dobson units in one layer, a tent from 10 to 40 km with its peak at 25 (Bruneton's 2017 model,
+  which the paper takes); its cross-sections are that model's table (the University of Bremen's measurements at
+  233 K, in bins of 10 nm), read at the three wavelengths.
+- **The sea under it** gives back 6% of what falls on it.
+- **The Sun above the air**: 1361 W/m2 (the IAU's nominal solar constant, 2015 Resolution B3) times 97.94 lm/W
+  (133.8 klx over 1366.1 W/m2: the luminous solar constant of S. Darula, R. Kittler and C. Gueymard, Solar
+  Energy 79, 559, 2005, as Kittler and Darula quote it, over the solar constant it was worked out with):
+  133,300 lux at one astronomical unit, by the inverse square of the true distance (136,572 lux on 21 November).
+  It is taken as white there, as the clockwork takes it.
+- **The Sun's disc**: its true angular size where `sky()` sees it; its mean luminance is its lux over its solid
+  angle (1.96e9 cd/m2 above the air); darkened to the limb as I(µ) = µ^a, a = -0.023 + 0.292 / λ (D. Hestroffer
+  and C. Magnan, Astron. Astrophys. 333, 338, 1998), which keeps the mean; dimmed and reddened by the
+  transmittance table along each pixel's own line; and flattened near the horizon by the clockwork's own
+  refraction (Saemundsson's formula, undone for each pixel to find where its light really comes from).
+- **Units**: lux and cd/m2 throughout. Each colour's number is "lux, were the light white", and the luminance
+  is 0.2126 R + 0.7152 G + 0.0722 B.
+
+### The world lit by it, and the eye
+
+- **The key light** is the Sun through the air: its direction where it is seen, its colour and strength the
+  transmittance table's, by how much of the disc clears the horizon. **The fill** is the sky's own light on level
+  ground (an integral of the sky over the dome, kept for each quarter degree of the Sun's height and read
+  between): half of it by a light from above and below (below, what the ground gives back), half by the sky
+  wrapped round whatever stands in it (the same table, unrolled and blurred, made again when the Sun has moved
+  a fifth of a degree), at each material's own share of it. Torches and plasma keep their own light.
+- **The eye, in two steps**, both from G. Krawczyk, K. Myszkowski and H.-P. Seidel, "Perceptual effects in
+  real-time tone mapping" (SCCG 2005). **The key**: the eye is adapted to a luminance L (what the meter reads,
+  eased in time), and that level is given the scene value 1.03 - 2 / (2 + log10(L + 1)): 0.69 in full day, 0.16
+  at the end of civil twilight, 0.03 at night. A bright scene is drawn bright and a dark one dark, as vision
+  takes them. The exposure is that value over L, one number for everything, and every light is multiplied by
+  it before it is used (so the picture is still drawn straight to the screen, once). **The curve**: a scene value
+  x is shown as x (1 + x / 64) / (1 + x) (Reinhard's curve, the one their method uses, with white at eight
+  times the adapted level's own value), on the luminance, the colour's hue kept; a colour the screen cannot
+  reach at that brightness gives up saturation, not hue. So white sand in the noon Sun is shown at two thirds
+  of white and keeps its detail, while the sky, a sixth as bright, is a luminous blue.
+- **Why a curve, when the game had none.** The game drew what was past the screen's white as white, and its
+  painted sky stood far above the land's own brightness. The true sky's light spans more than a screen holds:
+  with no curve and the land exposed as it was, noon came out as a camera with no film curve records it, a
+  dark slate sky over a bright beach, a stop and a half under what an eye standing there sees (`&curve=none`
+  shows it: the first pictures were made so). Three curves were then drawn side by side at six moments from
+  noon to the end of civil twilight (three.js's AgX and ACES beside Reinhard's, each given the adapted level at
+  the same brightness): AgX came out flat and grey (it gives up colour early by design), ACES dark and hard in
+  the land with the Sun's glare spreading wide, Reinhard's bright and clear with the blue kept. Reinhard's was
+  chosen, by those pictures. Things drawn in the screen's own terms (a flame, a glow, the inside of a room,
+  a thing with no light on it) are not passed through it: they keep their own brightness, and a room is handed
+  the Sun's and the sky's light as the screen shows them.
+- **The meter** reads the model, not the picture: fifteen looks across the view (the sky where a look clears
+  the horizon, an average scene on the ground where it does not: one that gives back 18% of the light, lit as
+  its best-lit face is), weighted to the middle as a camera's is; and the eye is never so open that the sky in
+  view is, taken together, shown past seven tenths of white (facing a low Sun the land goes dark rather than the
+  sunset white). It follows a brighter scene half-way in 0.35 s and a darker one in 1.7 s.
+- **The eye's veil round the Sun** (glare): the CIE's general disability glare equation (CIE 146:2002, after
+  J. J. Vos), for a 30-year-old eye, added in light to the sky and to whatever stands in front of it, by how
+  much of the Sun's disc is in sight: seven marks on the disc, which the GPU is asked about each frame (an
+  occlusion query), so a palm's trunk, a ship or the body takes the glare away as it takes the disc.
+- **The sea** under the true sky reads the sky itself where each ripple throws the eye's line. (Its mirror of
+  the Sun and the Moon is the fourth part's.)
+
+### What was measured
+
+`node test/sky.test.mjs` measures and prints these (no GPU), and fails if a line here stops being true.
+
+- The standard atmosphere's density, nine heights from 5 to 80 km against its own table: within 0.002%; its column 8.454 km of sea-level air.
+- Depth straight up (611, 549, 464 nm): 0.1605, 0.1843, 0.2581; a Sun overhead arrives with 83.2% of its light.
+- Grazing the sea: 35.2 times the overhead air (Kasten and Young measure 38.1, with the air's bending); the table is within 0.2% of a slow sum there; what is left of the Sun on the horizon: 2.9e-4, 9.8e-5, 4.2e-6.
+- Of the light sent to level ground, what arrives (Sun and sky): 90°: 94%, 60°: 93%, 30°: 87%, 10°: 64%, 5°: 49%, 2°: 46%; the most of a uniform glow scattered on: 0.309.
+- The Sun above the air at 1 au: 133,300 lux; its disc's mean luminance 1.96e9 cd/m2; limb darkening exponents (611, 549, 464 nm) 0.455, 0.509, 0.606.
+- The Sun seen 0.2° up is 27.2' high and 32.4' wide.
+- The Sun's own colour at the ground (red and blue over green): noon 1.02, 0.93; seen half a degree up 2.43, 0.08; the zenith by day 0.73, 1.75 (a blue sky of 15,000 to 25,000 K on the CIE's daylight locus is 0.73 to 0.67, 1.67 to 1.89), at the end of civil twilight 0.62, 2.75.
+- Opposite a Sun 2° down: the Earth's shadow 2° up 49.2 cd/m2, the band 12° up 112, the sky 40° up 78.7; red over blue 0.59 in the shadow, 0.93 in the band, 0.53 above it.
+- Noon on the beach, as played: the scene reads 6,427 cd/m2 and is given the scene value 0.69 (exposure 1.07e-4 per cd/m2); the sky to the south is shown at sRGB 118, 138, 177 20° up and 155, 170, 191 at 3°; sand that gives back 40% of the light at 65% of white, a white sheet at 86%; half-way to a brighter scene in 0.35 s, to a darker in 1.73 s.
+
+The light on level ground and the zenith, from the island on 21 November 2026 (UTC+11):
+
+| when | local time | the Sun as seen | the Sun's light, facing it (lux) | the sky's, on level ground (lux) | both, on level ground (lux) | the Explanatory Supplement's fit (lux) | the zenith (cd/m2) |
+|---|---|---|---|---|---|---|---|
+| noon | 12:09:25 | 78.33° | 113,190 | 14,762 | 125,611 | 120,608 | 13,635 |
+| the Sun 20° up | 17:22:32 | 20.00° | 80,266 | 9,952 | 37,405 | 27,242 | 1,077 |
+| the Sun 5° up | 18:36:29 | 5.00° | 21,322 | 4,014 | 5,872 | 4,334 | 524 |
+| sunset (the Sun seen on the horizon) | 19:03:55 | 0.00° | 12.1 | 938 | 938 | 536 | 158 |
+| the end of civil twilight | 19:32:15 | -6.00° | 0.0 | 2.80 | 2.80 | 3.41 | 0.42 |
+| the end of nautical twilight | 20:04:52 | -12.00° | 0.0 | 0.0050 | 0.0050 | 0.0081 | 0.00092 |
+
+Opposite the Sun as it goes down (the Earth's shadow and the band over it, the Belt of Venus): the sky's
+luminance (cd/m2) and its colour (the CIE's x, y; a white is 0.313, 0.329, and a smaller x and y is bluer) at
+four heights above the horizon:
+
+| the Sun | 2° up | 6° up | 12° up | 30° up |
+|---|---|---|---|---|
+| 1° down | 123; 0.293, 0.307 | 243; 0.326, 0.338 | 312; 0.301, 0.317 | 220; 0.278, 0.288 |
+| 2° down | 49.2; 0.284, 0.296 | 67.4; 0.303, 0.305 | 112; 0.299, 0.307 | 95.5; 0.276, 0.282 |
+| 3° down | 34.5; 0.283, 0.294 | 31.8; 0.268, 0.274 | 38.9; 0.274, 0.277 | 38.4; 0.265, 0.265 |
+| 4° down | 20.0; 0.282, 0.292 | 17.9; 0.265, 0.271 | 15.6; 0.256, 0.257 | 14.1; 0.251, 0.248 |
+
+The method gives the shadow and the band: a degree and two degrees down, the sky 2 degrees up is half as bright
+as the sky 12 degrees up and bluer, and between them, about 6 degrees up, is the warmest colour in that sky (the
+light there has come a long way through the air and lost its blue; under it the air is in the planet's shadow).
+Three degrees down the two have run together to within a quarter, and at four the sky only darkens upward. In
+the real sky the band can still be made out a little later than that: the shadow's edge here is the single
+scattering's, and the light scattered more than once, which the method spreads evenly, fills it in. Nothing is
+painted in to make up the difference.
+
+The last column but one is the fit in the Explanatory Supplement to the Astronomical Almanac (P. K.
+Seidelmann, ed., 1992, section 9.33, after Brown 1952), typed from memory and held by its own published figures
+(759 lux for a Sun on the horizon, 3.41 at 6 degrees down, 0.0081 at 12). It is for an average clear sky; the
+island's sea air is cleaner, so a low Sun comes through it a third brighter, and at sunset nearly twice. From 6
+degrees down the model falls short of it (0.82 at the end of civil twilight, 0.62 at the end of nautical): the
+light there has been scattered more than twice, and bent, and the method takes the first as the same in every
+direction and leaves the second out.
+
+**On the GPU** (measured by a probe on the M2's own chip, headless Chromium on Metal; not in `npm test`):
+
+- **The GPU's sky is the model's.** The table of the sky as seen, read back and set against `air.js`'s own march
+  at 555 of its entries, at seven heights of the Sun from noon to 10 degrees down: the worst entry is 0.25% off,
+  the mean under 0.15%.
+- **The Sun's disc, measured in the picture** (through a probe's dark glass, from edge to edge where the
+  brightness changes fastest; a window 1912 pixels high): 17.0 to 17.5 pixels wide at every height (its 0.541
+  degrees are 17.4 there), and its height over its width
+
+  | the Sun as seen | 20° | 5° | 2° | 1° | 0.5° | 0.2° |
+  |---|---|---|---|---|---|---|
+  | measured in the picture | 1.02 | 0.98 | 0.94 | 0.86 | 0.85 | 0.80 |
+  | the clockwork's refraction predicts | 1.00 | 0.98 | 0.93 | 0.88 | 0.86 | 0.84 |
+
+  (a third of a pixel either way is 2%; at 0.2 degrees the lower limb is a third as bright as the upper and its
+  edge reads a little inside). Its middle goes from sRGB 136, 132, 121 at 20 degrees to 211, 136, 31 at 0.2.
+- **The glare is cut with the disc.** With the eye swept across the Sun behind the body, the share of the disc
+  in sight reads 1 in the clear and 0 behind the body or a palm's trunk.
+- **Frames.** At the game's pixel cap (a window of 1470 x 956 points at two pixels a point: 2940 x 1912 drawn),
+  standing, walking and turning at noon, facing a Sun 5 degrees high, and at dusk: 16.7 ms a frame, sixty a second (the 99th percentile 16.8; one frame of 50 ms in twenty seconds) with the true sky,
+  and the same without it. The sky's own share: 0.07 to 0.15 ms of the page's thread a frame; on the GPU, the air
+  between eye and land 0.01 to 0.07 ms every frame, the sky as seen 0.7 ms when the Sun has moved a hundredth of
+  a degree (every two seconds or so of the real clock), the wrapped sky 0.05 to 0.09 ms and its blurring when the
+  Sun has moved a fifth of a degree. The two tables made once, as the island opens: about 300 ms.
+- **The lighter path** (`?gfx=smooth`: one pixel a point, the sky table 128 x 72, 16 slices of 16 x 16):
+  16.7 ms a frame with the true sky and without; its passes 0.03, 0.2 and 0.06 ms. At a phone's size (390 x 844 points, 780 x 1688 drawn): 16.7 ms a frame with it and without. All of this is on the Mac's
+  chip: no phone has drawn it yet.
+- **Back in the void** after the island under the true sky, and on the island again: no error, sixty frames a
+  second, the void as it was (a body's materials carry the sky's lines with them, and those do nothing where
+  there is no air).
+
+### What is approximated
+
+- **Three wavelengths** stand for the spectrum, and sunlight is white above the air.
+- **A round Earth under a flat island.** The air is a sphere's; the island's sea is a plane to 45 km. At the eye's
+  2 m the two horizons are 0.06 degrees apart. The globe is step 3.
+- **Straight rays.** The Sun's seen place is used for its light, so the air's lift is in the direct beam; the
+  bending of twilight's long paths is not in the scattering.
+- **One ozone layer, one haze, no weather.** No clouds; no dust high up; the haze grey.
+- **Multiple scattering the same in every direction** (the paper's): right by day, 40% dim by the end of
+  nautical twilight.
+- **Nothing on the ground shadows the air or the sky**: a mountain throws no shadow into the haze.
+- **The air's dimming of what is behind it is one number for the three colours** (the paper's default).
+- **The fill** reaches a surface half by a light and half by the wrapped sky at that material's own share:
+  within about 15% of the model's irradiance for the land and the buildings, not exact.
+- **No cast shadows.** The island never had them: a surface turned from the Sun is dark and a room's patch of
+  sunlight turns with the hour, but a palm throws no shadow on the sand. Owed; a low Sun wants it most.
+- **The glare** is the eye's veil only (no lens, no lashes); its equation is typed from the published form
+  (the search confirmed its domain and its factors, not each coefficient); it is cut off at 60 degrees.
+- **The adaptation times** (0.35 s and 1.7 s) are a game's: the real eye takes minutes to the dark.
+- **The curve is a screen's, not the whole of vision**: one curve for the whole picture (the eye adapts place
+  by place), no change of colour with brightness (that belongs with the night). And the land's own colours
+  were painted for the old light: its grass gives back 42% of what falls on it and its sand 65%, where real
+  grass gives back 20 to 25% and coral sand about 40%, so the land stands higher against the sky than a real
+  island does.
+- **After the end of twilight there is nothing**: no stars, no airglow, no Moon. The exposure holds at the
+  night sky's own level (2e-4 cd/m2, `EYE.floor`) and the picture goes black. That is the next part.
+
+### What the next parts need from here
+
+- **The night**: `EYE.floor` is the place for the sky's own glow (airglow, zodiacal light, unresolved stars):
+  add it to the dome's light and to `daylight.js` `sky` (the light on level ground), and the meter and the
+  tables follow. Stars go on the dome behind the air: `airT(h, d.y)` in `sky.js` is the extinction and the
+  reddening a star's light takes, the same call the Sun's disc makes. The tables are kept over the sky's light
+  on level ground: once the Sun's part is gone that number must be the night's.
+- **The Moon**: a second light through the same tables (the table of the sky as seen is for one light: a
+  second table, or the same one made for the Moon after the Sun is 18 degrees down); `daylight.js` `at()` is
+  where its lux and place come in; the key light is then whichever is up.
+- **The clock's dial**: `clock.set(ms)`, `clock.shift(ms)`, `clock.back()` are there; only creative mode may call them.
+- **The sea**: `SKY_OVER_GLSL` already gives its surface the sky; the Sun's and the Moon's own glitter want the disc.
+- **Phones**: the lighter path (smaller tables: 128 x 72 and 16 slices of 16 x 16) is drawn and measured on the
+  Mac's chip, not yet on a phone's.
 
 ## What the tests cannot check, and what is rough
 

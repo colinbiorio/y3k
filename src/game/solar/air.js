@@ -294,22 +294,67 @@ export function sunThrough(h0, sunUp, radius = 0.2666, out = [0, 0, 0]) {
 }
 
 // ------------------------------------------------------------------------------------------- the eye
-// How bright the scene is shown. The picture has no tone curve of its own (what is brighter than the screen is
-// simply white), so exposure is the whole of it: shown = luminance * exposure. By day the scene's average is shown
-// where a camera's meter puts a grey card: 18% / sqrt(2) = 12.7% of the brightest the screen can show (the
-// saturation-based speed of ISO 12232: half a stop kept for the highlights), which is also where the island's
-// own noon stood before any of this. A dimmer scene is shown dimmer, as the eye sees it, by the key of
-// G. Krawczyk, K. Myszkowski and H.-P. Seidel ("Perceptual effects in real-time tone mapping", SCCG 2005):
-// a(L) = 1.03 - 2 / (2 + log10(L + 1)), carried through the curve their method shows it with (a / (1 + a)) and
-// taken relative to full day: a scene of 1 cd/m2 (the end of civil twilight) is shown a third as bright as day.
+// How the scene is shown, in two steps. Both are the eye's, and both are the method of G. Krawczyk, K. Myszkowski
+// and H.-P. Seidel, "Perceptual effects in real-time tone mapping" (SCCG 2005):
+//
+//   · THE KEY. The eye is adapted to a luminance L (cd/m2: what the meter reads, eased in time). A scene is drawn
+//     bright or dark by that level, as vision takes it: the adapted level itself is given the scene value
+//     a(L) = 1.03 - 2 / (2 + log10(L + 1)): 0.68 in full day, 0.16 at the end of civil twilight, 0.03 at night.
+//     So exposure = a(L) / L, and every light is multiplied by it before it is used.
+//   · THE CURVE. What the screen can show ends at white; the world does not. A scene value x is shown as
+//     x (1 + x / W^2) / (1 + x) (Reinhard's curve, the one their method uses), on the luminance, the colour's own
+//     hue kept: half-way up at x = 1, white at x = W = 8, so white sand in the Sun stays under white and keeps
+//     its detail while the sky, a sixth as bright, is still a luminous blue. A colour the screen cannot reach at
+//     that brightness gives up saturation, not hue (the Sun's glare goes white-hot at its heart and stays orange
+//     round it).
+//
+// The game had no curve (what was past the screen's white was white), and its painted sky stood far above the
+// land's own brightness. With the true sky, a picture without a curve shows noon as a camera with no film curve
+// records it: the sky a dark slate, a stop and a half under what an eye standing there sees. 'none' is kept so
+// that can be seen (`&curve=none`), with the grey card's key it was tried with (12.7%: ISO 12232). 'agx' and
+// 'aces' are three.js's own curves, for comparing.
+//
 // `floor` is the least the eye is ever adapted to: the night sky's own glow. Nothing draws that glow yet (the
 // night is the next step); the number is here so that the exposure does not run away after dusk. The eye follows
 // a scene that brightens in half a second and one that darkens in two and a half (the real eye takes minutes to
 // the dark; a game cannot wait that long).
-export const EYE = Object.freeze({ grey: 0.18 / Math.SQRT2, day: 4000, floor: 2e-4, toLight: 0.5, toDark: 2.5 });
-const krawczyk = (L) => { const a = 1.03 - 2 / (2 + Math.log10(L + 1)); return a / (1 + a); };
-export function keyFor(L) { return EYE.grey * krawczyk(Math.max(L, 0)) / krawczyk(EYE.day); }
-export function exposureFor(L) { const l = Math.max(L, EYE.floor); return keyFor(l) / l; }
+export const EYE = Object.freeze({ curve: 'reinhard', white: 8, grey: 0.18 / Math.SQRT2, day: 4000, floor: 2e-4, toLight: 0.5, toDark: 2.5 });
+export const CURVES = Object.freeze(['none', 'reinhard', 'agx', 'aces']);
+export const krawczyk = (L) => 1.03 - 2 / (2 + Math.log10(Math.max(L, 0) + 1));
+// what the screen shows (0..1, in light) for a grey of scene value x, by each curve
+const agx = (x) => { const v = clamp((Math.log2(Math.max(x, 1e-10)) + 12.47393) / 16.5, 0, 1), v2 = v * v, v4 = v2 * v2; return Math.pow(Math.max(0, 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232), 2.2); };
+const aces = (x) => { const v = x / 0.6; return clamp((v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081), 0, 1); };
+export function shown(x, curve = EYE.curve) {
+  x = Math.max(x, 0);
+  return curve === 'reinhard' ? Math.min(1, x * (1 + x / (EYE.white * EYE.white)) / (1 + x)) : curve === 'agx' ? Math.min(1, agx(x)) : curve === 'aces' ? aces(x) : Math.min(1, x);
+}
+// the scene value a curve shows at a given brightness (its inverse, by halving)
+export function sceneValue(y, curve = EYE.curve) { let lo = 0, hi = 64; for (let i = 0; i < 48; i += 1) { const m = (lo + hi) / 2; if (shown(m, curve) < y) lo = m; else hi = m; } return (lo + hi) / 2; }
+// a colour of scene values as the screen shows it (hue kept, saturation given up where the screen cannot reach)
+export function shownColour(c, out = [0, 0, 0], curve = EYE.curve) {
+  const Y = luminance(c);
+  if (!(Y > 1e-12)) { out[0] = out[1] = out[2] = 0; return out; }
+  const Yd = shown(Y, curve), k = Yd / Y; let r = c[0] * k, g = c[1] * k, b = c[2] * k;
+  const top = Math.max(r, g, b);
+  if (top > 1) { const t = clamp((top - 1) / Math.max(top - Yd, 1e-9), 0, 1); r += (Yd - r) * t; g += (Yd - g) * t; b += (Yd - b) * t; }
+  out[0] = Math.min(1, r); out[1] = Math.min(1, g); out[2] = Math.min(1, b);
+  return out;
+}
+// THE KEY: the scene value given to the luminance the eye is adapted to. For Reinhard's curve it is Krawczyk's own;
+// for the others, the value their curve shows as bright as Reinhard's shows that (so the curves can be compared);
+// with no curve, a grey card's place, dimmed toward night in the same proportion
+const KEYS = new Map();
+export function keyFor(L, curve = EYE.curve) {
+  const a = krawczyk(L);
+  if (curve === 'reinhard') return a;
+  if (curve === 'none') return EYE.grey * (a / (1 + a)) / (krawczyk(EYE.day) / (1 + krawczyk(EYE.day)));
+  const k = curve + Math.round(a * 2000); let v = KEYS.get(k);
+  if (v === undefined) { v = sceneValue(shown(a, 'reinhard'), curve); if (KEYS.size > 5000) KEYS.clear(); KEYS.set(k, v); }
+  return v;
+}
+export function exposureFor(L, curve = EYE.curve) { const l = Math.max(L, EYE.floor); return keyFor(l, curve) / l; }
+// the most the sky in view may come to, taken together, in scene value: seven tenths of the way to white
+export function skyHold(curve = EYE.curve) { return curve === 'none' ? 1 : sceneValue(0.7, curve); }
 // the luminance the eye is adapted to, dt seconds on, toward the scene's
 export function adapt(was, scene, dt) {
   const to = Math.max(scene, EYE.floor);

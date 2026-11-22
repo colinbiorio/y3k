@@ -7,7 +7,7 @@
 // each as three numbers (red, green, blue: "were the light white"); air.js `luminance()` makes one of the three.
 import { sky as skyOf } from './ephemeris.js';
 import { BODIES } from './bodies.js';
-import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter, keyFor } from './air.js';
+import { sunIlluminance, sunThrough, skyIrradiance, skyRay, luminance, meter, keyFor, skyHold, EYE } from './air.js';
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 // Is the true sky asked for? Only by `?sky=true` in the page's address: until the night and the Moon are made and
@@ -78,9 +78,9 @@ export function createDaylight({ lat, lon }) {
     // axes, tanX and tanY the half-width and half-height of its view), the sky where a look clears the horizon and
     // the ground where it does not, read as a camera's centre-weighted meter reads them: what the eye looks at counts
     // most, so looking at the land shows the land, and looking up shows the sky. And the eye is never so open that
-    // the sky it has in view is, taken together, past the screen's white: facing a low Sun it narrows, as eyes do,
-    // and the land in front goes dark rather than the sunset white.
-    scene(forward, right, up, tanX, tanY) {
+    // the sky it has in view is, taken together, shown past seven tenths of the screen's white: facing a low Sun it
+    // narrows, as eyes do, and the land in front goes dark rather than the sunset white.
+    scene(forward, right, up, tanX, tanY, curve = EYE.curve) {
       const g = this.groundLuminance(forward); let k = 0, sky = 0, n = 0;
       for (let j = -1; j <= 1; j += 1) for (let i = -2; i <= 2; i += 1) {
         const x = i * 0.4, y = j * 0.6;
@@ -90,7 +90,7 @@ export function createDaylight({ lat, lon }) {
         WEIGHTS[k] = Math.exp(-(x * x + y * y) / 0.5); k += 1;
       }
       const read = meter(READS, WEIGHTS);
-      return n ? Math.max(read, keyFor(read) * sky / n) : read;
+      return n ? Math.max(read, keyFor(read, curve) * sky / n / skyHold(curve)) : read;
     },
   };
 }

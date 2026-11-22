@@ -238,7 +238,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   // it is the sky itself, read where each ripple throws the eye's line (sky.js skyOver): these lines of its drawing
   // are written for the one or the other
   if (air) Object.assign(seaU, { uBodyAmt: { value: new THREE.Color(1, 1, 1) } }, air.seaSky);
-  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? 'skyOver(r, normalize(uSun))' : 'mix(uHorizon, uZenith, pow(r.y, 0.55)) * uSkyAmt', seaFoam = air ? '(0.12 + 0.88 * uBodyAmt)' : '(0.12 + 0.88 * uSkyAmt)';
+  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? 'skyOver(r, normalize(uSun))' : 'mix(uHorizon, uZenith, pow(r.y, 0.55)) * uSkyAmt', seaFoam = air ? 'uBodyAmt' : '(0.12 + 0.88 * uSkyAmt)';
   const seaMat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]), transparent: true, depthWrite: false, fog: true,
     vertexShader: `varying vec3 vW;

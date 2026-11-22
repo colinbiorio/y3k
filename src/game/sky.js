@@ -12,19 +12,21 @@
 //     bodies stand in the same air as the sky;
 //   · THE SUN: a disc of its true size where the clockwork sees it, darkened to its limb, dimmed and reddened by
 //     the air it is seen through, and flattened near the horizon because the air lifts its lower limb more;
-//   · THE EYE: one exposure for everything (air.js), following the scene; and the eye's own veil round the Sun
+//   · THE EYE: one exposure for everything (air.js), following the scene, and one curve that brings the world's
+//     range to the screen's (Reinhard's, on the luminance, the hue kept: `airShow`, below); and the eye's own veil round the Sun
 //     (the CIE's disability glare), added in light to the sky and to whatever stands in front of it, by how much of
 //     the Sun is in sight: seven marks on its disc, which the GPU is asked about each frame (were any of their
 //     pixels in front of everything solid?), so a palm's trunk or a ship takes the glare away as it takes the disc.
 // The picture is drawn straight to the screen as before: every light is multiplied by the exposure before it is
-// used, so no material had to change, and nothing is drawn twice.
+// used, and each adopted material ends with the air and the curve, so nothing is drawn twice. What is drawn in
+// the screen's own terms (a glow, a flame, a thing with no light on it) keeps its own brightness.
 //
 // The tables the GPU makes hold half floats, which keep three figures between 6e-5 and 65,000 and little below. The
 // sky from noon to the end of twilight runs through eight powers of ten, so each table holds the sky's luminance
 // over the sky's own light on level ground at that moment (a number near 1 at any hour), and the reader multiplies
 // that light back in.
 import * as THREE from 'three';
-import { AIR, LUT, AIR_GLSL, SUN, GLARE, luminance, transmittanceLUT, multiScatteringLUT, exposureFor, adapt } from './solar/air.js';
+import { AIR, LUT, AIR_GLSL, SUN, GLARE, EYE, CURVES, luminance, transmittanceLUT, multiScatteringLUT, exposureFor, adapt, shownColour } from './solar/air.js';
 import { createDaylight, GROUND } from './solar/daylight.js';
 import { when } from './solar/clock.js';
 
@@ -42,7 +44,34 @@ const SHARED = {
   uAirSun: { value: new THREE.Vector3(0, 1, 0) },                   // toward the Sun as seen
   uAirGlare: { value: new THREE.Vector3() },                        // its light at the eye (lux in three colours) times the exposure, by how much of it is in sight
   uAirEnv: { value: 1 },                                            // the same, for the wrapped sky (1 where no true sky is drawn)
+  uAirCurve: { value: CURVES.indexOf(EYE.curve) },                  // which curve brings the scene to the screen (air.js CURVES)
 };
+// THE CURVE (air.js says why): a scene value, as the screen shows it. three.js's own curves are here beside it for
+// comparing (its chunk, under names of our own, its exposure taken as 1: ours is already in the light).
+const TONE = THREE.ShaderChunk.tonemapping_pars_fragment.replace('uniform float toneMappingExposure;', '').replace(/toneMappingExposure/g, '1.0')
+  .replace(/\b(LinearToneMapping|ReinhardToneMapping|OptimizedCineonToneMapping|RRTAndODTFit|ACESFilmicToneMapping|agxDefaultContrastApprox|AgXToneMapping|CustomToneMapping|LINEAR_REC2020_TO_LINEAR_SRGB|LINEAR_SRGB_TO_LINEAR_REC2020)\b/g, 'air$1');
+const EYE_GLSL = `
+uniform float uAirCurve;
+${TONE}
+vec3 airShow(vec3 c) {
+  c = max(c, 0.0);
+  if (uAirCurve < 0.5) return c;                                      // none: what is past white is white
+  if (uAirCurve > 2.5) return airACESFilmicToneMapping(c);
+  if (uAirCurve > 1.5) return clamp(airAgXToneMapping(c), 0.0, 1.0);
+  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  if (Y <= 1.0e-9) return c;
+  float Yd = min(1.0, Y * (1.0 + Y / ${f(EYE.white * EYE.white)}) / (1.0 + Y)), top;
+  c *= Yd / Y; top = max(c.r, max(c.g, c.b));
+  if (top > 1.0) c = mix(c, vec3(Yd), clamp((top - 1.0) / max(top - Yd, 1.0e-6), 0.0, 1.0));      // out of the screen's reach: less colour, the same hue
+  return c;
+}
+// the other way, for a thing drawn in the screen's own terms: what light it stands for (Reinhard's curve undone)
+vec3 airUnshow(vec3 c) {
+  float Yd = min(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.995);
+  if (uAirCurve < 0.5 || Yd <= 1.0e-9) return c;
+  float b = 1.0 - Yd;
+  return c * ((sqrt(b * b + Yd * ${f(4 / (EYE.white * EYE.white))}) - b) * ${f(EYE.white * EYE.white / 2)} / Yd);
+}`;
 // the eye's veil round the Sun: luminance per lux at the eye, by the angle from it (air.js veil(), the CIE's equation)
 const VEIL_GLSL = `
 vec3 airVeil(vec3 d, vec3 sun, vec3 glare) {
@@ -55,10 +84,13 @@ const AIR_PARS = `
 #ifdef USE_FOG
 uniform sampler2D uAirAP; uniform vec4 uAirPx; uniform vec4 uAirProj; uniform vec3 uAirCam[3]; uniform float uAirGain; uniform vec3 uAirSun; uniform vec3 uAirGlare;
 ${VEIL_GLSL}
+${EYE_GLSL}
 #endif`;
-// the air applied to a fragment (in light, before it is made into the screen's own numbers). `add`: a thing that
-// is itself added light (a flame, a glow) is only dimmed by the air in front of it.
-const airFog = (add) => `
+// The air applied to a fragment, in light, and then the curve, before it is made into the screen's own numbers.
+// `kind`: 'lit' (a thing the lights fall on: its colour is the scene's light already); 'own' (a thing drawn in the
+// screen's own terms, with no light on it: it is taken back to light, given the air, and shown again); 'add' (a
+// thing that is itself added light, a flame or a glow: only dimmed by the air in front of it).
+const airFog = (kind) => `
 #ifdef USE_FOG
 {
   vec2 airUv = gl_FragCoord.xy * uAirPx.xy, airRay = (airUv * 2.0 - 1.0) * uAirProj.xy + uAirProj.zw;
@@ -68,7 +100,8 @@ const airFog = (add) => `
   float airI = min(floor(airS), airN - 2.0), airF = clamp(airS - airI, 0.0, 1.0);
   vec2 airAt = vec2((airI + clamp(airUv.x, 0.5 / airW, 1.0 - 0.5 / airW)) / airN, airUv.y);
   vec4 airA = mix(texture2D(uAirAP, airAt), texture2D(uAirAP, airAt + vec2(1.0 / airN, 0.0)), airF) * airNear;
-  ${add ? 'gl_FragColor.rgb *= 1.0 - airA.a;' : 'gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - airA.a) + airA.rgb * uAirGain + airVeil(normalize(uAirCam[0] * airRay.x + uAirCam[1] * airRay.y + uAirCam[2]), uAirSun, uAirGlare);'}
+  ${kind === 'add' ? 'gl_FragColor.rgb *= 1.0 - airA.a;'
+    : `gl_FragColor.rgb = airShow(${kind === 'own' ? 'airUnshow(gl_FragColor.rgb)' : 'gl_FragColor.rgb'} * (1.0 - airA.a) + airA.rgb * uAirGain + airVeil(normalize(uAirCam[0] * airRay.x + uAirCam[1] * airRay.y + uAirCam[2]), uAirSun, uAirGlare));`}
 }
 #endif`;
 const ADOPTED = new WeakSet();
@@ -77,15 +110,17 @@ const ADOPTED = new WeakSet();
 function adopt(material) {
   if (!material || ADOPTED.has(material) || !material.isMaterial) return;
   ADOPTED.add(material);
-  const before = material.onBeforeCompile, key = material.customProgramCacheKey(), add = material.blending === THREE.AdditiveBlending;
+  const before = material.onBeforeCompile, key = material.customProgramCacheKey();
+  // a thing the lights fall on (and the sea, which is lit by the same numbers in its own drawing); a glow; or a thing of its own brightness
+  const kind = material.blending === THREE.AdditiveBlending ? 'add' : material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial || material.isMeshToonMaterial || material.isShaderMaterial ? 'lit' : 'own';
   material.onBeforeCompile = function (shader, renderer) {
     before.call(this, shader, renderer);
     let fs = shader.fragmentShader;
     if (fs.includes('#include <fog_fragment>') && fs.includes('#include <fog_pars_fragment>')) {
-      Object.assign(shader.uniforms, { uAirAP: SHARED.uAirAP, uAirPx: SHARED.uAirPx, uAirProj: SHARED.uAirProj, uAirCam: SHARED.uAirCam, uAirGain: SHARED.uAirGain, uAirSun: SHARED.uAirSun, uAirGlare: SHARED.uAirGlare });
+      Object.assign(shader.uniforms, { uAirAP: SHARED.uAirAP, uAirPx: SHARED.uAirPx, uAirProj: SHARED.uAirProj, uAirCam: SHARED.uAirCam, uAirGain: SHARED.uAirGain, uAirSun: SHARED.uAirSun, uAirGlare: SHARED.uAirGlare, uAirCurve: SHARED.uAirCurve });
       fs = fs.replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\n' + AIR_PARS);
-      if (fs.includes('#include <colorspace_fragment>')) fs = fs.replace('#include <fog_fragment>', '').replace('#include <colorspace_fragment>', airFog(add) + '\n#include <colorspace_fragment>');
-      else fs = fs.replace('#include <fog_fragment>', 'gl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(2.2));' + airFog(add) + '\ngl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(1.0 / 2.2));');
+      if (fs.includes('#include <colorspace_fragment>')) fs = fs.replace('#include <fog_fragment>', '').replace('#include <colorspace_fragment>', airFog(kind) + '\n#include <colorspace_fragment>');
+      else fs = fs.replace('#include <fog_fragment>', 'gl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(2.2));' + airFog(kind) + '\ngl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(1.0 / 2.2));');
     }
     if (fs.includes('#include <envmap_physical_pars_fragment>')) {
       shader.uniforms.uAirEnv = SHARED.uAirEnv;
@@ -93,7 +128,7 @@ function adopt(material) {
     }
     shader.fragmentShader = fs;
   };
-  material.customProgramCacheKey = () => key + '|air' + (add ? '+' : '');
+  material.customProgramCacheKey = () => key + '|air:' + kind;
   material.needsUpdate = true;
 }
 
@@ -164,6 +199,7 @@ varying vec3 vDir;
 ${AIR_GLSL}
 ${SKYLOOK_GLSL}
 ${VEIL_GLSL}
+${EYE_GLSL}
 uniform vec3 uSunTrue; uniform float uGain; uniform float uSunGain; uniform float uSunRad; uniform float uRefr; uniform vec3 uGlare; uniform vec3 uLimb;
 // degrees the air lifts what stands at a true height of alt degrees (Saemundsson's formula, as ephemeris.js has it)
 float lift(float alt) { float hh = max(alt, -1.0), r = 1.02 / tan(radians(hh + 10.3 / (hh + 5.11))) / 60.0 * uRefr; return alt < -1.0 ? r * exp((alt + 1.0) / 0.7) : r; }
@@ -187,7 +223,7 @@ void main() {
     }
   }
   c += airVeil(d, uSun, uGlare);
-  gl_FragColor = vec4(c, 1.0);
+  gl_FragColor = vec4(airShow(c), 1.0);
   #include <colorspace_fragment>
   #include <dithering_fragment>
 }`;
@@ -202,6 +238,7 @@ function table(lut, whole = false) {
 }
 const target = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
 
+const curveOf = (search) => { try { const c = new URLSearchParams(search || '').get('curve'); return CURVES.includes(c) ? c : EYE.curve; } catch { return EYE.curve; } };
 const evOf = (search) => { try { const v = parseFloat(new URLSearchParams(search || '').get('ev')); return Number.isFinite(v) ? Math.max(-14, Math.min(6, v)) : 0; } catch { return 0; } };
 // can this machine draw it? (WebGL 2, and tables of half floats it can draw into)
 export function canDrawTrueSky(renderer) {
@@ -228,7 +265,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     look: { uSkyView: { value: skyRT.texture }, uSkySize: { value: new THREE.Vector2(SW, SH) }, uH: { value: 0.002 }, uSun: SHARED.uAirSun },
   };
   U.wrap = { ...common, ...U.look, uSize: { value: new THREE.Vector2(256, 128) }, uUnder: { value: new THREE.Vector3() } };
-  U.dome = { ...common, ...U.look, uSunTrue: { value: new THREE.Vector3(0, 1, 0) }, uGain: SHARED.uAirGain, uSunGain: { value: 0 }, uSunRad: { value: 0.00465 }, uRefr: { value: 1 }, uGlare: SHARED.uAirGlare, uLimb: { value: new THREE.Vector3(...SUN.limb) } };
+  U.dome = { ...common, ...U.look, uSunTrue: { value: new THREE.Vector3(0, 1, 0) }, uGain: SHARED.uAirGain, uSunGain: { value: 0 }, uSunRad: { value: 0.00465 }, uRefr: { value: 1 }, uGlare: SHARED.uAirGlare, uLimb: { value: new THREE.Vector3(...SUN.limb) }, uAirCurve: SHARED.uAirCurve };
   const pass = (fragmentShader, uniforms) => new THREE.ShaderMaterial({ uniforms, vertexShader: QUAD_VERT, fragmentShader, depthTest: false, depthWrite: false, fog: false, toneMapped: false });
   const mSky = pass(SKYVIEW_FRAG, U.sky), mAp = pass(AP_FRAG, U.ap), mWrap = pass(WRAP_FRAG, U.wrap);
   const quadGeo = new THREE.BufferGeometry(); quadGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -258,7 +295,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   let envRT = null;
 
   const R = new THREE.Vector3(), Uu = new THREE.Vector3(), B = new THREE.Vector3(), buf = new THREE.Vector2(), fwd = [0, 0, -1], rgt = [1, 0, 0], upv = [0, 1, 0];
-  const S3 = new THREE.Vector3(), E1 = new THREE.Vector3(), E2 = new THREE.Vector3(), P3 = new THREE.Vector3();
+  const S3 = new THREE.Vector3(), E1 = new THREE.Vector3(), E2 = new THREE.Vector3(), P3 = new THREE.Vector3(), col3 = [0, 0, 0];
   // how much of the Sun's disc is in sight of the eye: the marks' answers while it is in the picture (they are a
   // frame or two old); out of the picture, only whether the land stands in the way
   function inSight(camera, L) {
@@ -305,9 +342,10 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     // the eye: how bright the scene is, and the exposure that follows it
     if (frame % 2 === 1 || !sceneL) {
       fwd[0] = -B.x; fwd[1] = -B.y; fwd[2] = -B.z; rgt[0] = R.x; rgt[1] = R.y; rgt[2] = R.z; upv[0] = Uu.x; upv[1] = Uu.y; upv[2] = Uu.z;
-      sceneL = day.scene(fwd, rgt, upv, 1 / pe[0], 1 / pe[5]);
+      sceneL = day.scene(fwd, rgt, upv, 1 / pe[0], 1 / pe[5], api.curve);
     }
-    adapted = adapt(adapted, sceneL, dt); exposure = exposureFor(adapted) * Math.pow(2, api.bias);
+    SHARED.uAirCurve.value = Math.max(0, CURVES.indexOf(api.curve));
+    adapted = adapt(adapted, sceneL, dt); exposure = exposureFor(adapted, api.curve) * Math.pow(2, api.bias);
     // the sky's own light on level ground, per lux of the Sun: what every table is kept over
     const per = Math.max(luminance(L.sky) / L.lux, 1e-12), gain = per * L.lux * exposure;
     SHARED.uAirGain.value = gain; SHARED.uAirEnv.value = gain; U.dome.uSunGain.value = L.lux * exposure;
@@ -333,9 +371,11 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     const d0 = L.direct[0] * exposure, d1 = L.direct[1] * exposure, d2 = L.direct[2] * exposure, top = Math.max(d0, d1, d2, 1e-9);
     if (key) { key.color.setRGB(d0 / top, d1 / top, d2 / top); key.intensity = top * indoor; }
     if (fill) { fill.color.setRGB(0.5 * L.sky[0] * exposure, 0.5 * L.sky[1] * exposure, 0.5 * L.sky[2] * exposure); fill.groundColor.setRGB(0.5 * GROUND * L.level[0] * exposure, 0.5 * GROUND * L.level[1] * exposure, 0.5 * GROUND * L.level[2] * exposure); fill.intensity = indoor; }
-    // what the rooms and the ships ask after, in the picture's own units (a room's sun patch was 1.5 where the key was 2.4)
-    state.sunCol.setRGB(d0 * 0.625, d1 * 0.625, d2 * 0.625);
-    const k = exposure / Math.PI * 3.4; state.skyCol.setRGB(L.sky[0] * k, L.sky[1] * k, L.sky[2] * k);
+    // What the rooms ask after. A room draws its own inside in the screen's own terms, so it is handed what the
+    // screen shows: the Sun's light on a white thing facing it (a room's patch of sunlight was always drawn twice as
+    // bright as the same stone outside: 1.5 where the key gave 0.76), and the sky's mean brightness
+    shownColour([d0 / Math.PI, d1 / Math.PI, d2 / Math.PI], col3, api.curve); state.sunCol.setRGB(2 * col3[0], 2 * col3[1], 2 * col3[2]);
+    const k = exposure / Math.PI; shownColour([L.sky[0] * k, L.sky[1] * k, L.sky[2] * k], col3, api.curve); state.skyCol.setRGB(col3[0], col3[1], col3[2]);
     state.night = Math.min(1, Math.max(0, (-L.alt - 2) / 8)); state.exposure = exposure;
     // the sea's own few numbers: where the Sun is, its glitter, how lit the water's own colour is (the sky in it, it
     // reads from the table: seaSky)
@@ -362,9 +402,11 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     // stops added to the exposure. Nothing in the game sets it: a probe does (a dark glass, to look at the Sun's own
     // disc), and `&ev=1` in the address beside ?sky=true, for whoever is judging how bright the picture should be
     bias: evOf(typeof location === 'undefined' ? '' : location.search),
+    // which curve brings the scene to the screen (air.js CURVES): Reinhard's unless `&curve=none|agx|aces` asks for another, to compare
+    curve: curveOf(typeof location === 'undefined' ? '' : location.search),
     // the uniforms SKY_OVER_GLSL reads: the table of the sky as seen, its size, the eye's height, what brings it to the picture's units
     seaSky: { uSkyView: U.look.uSkyView, uSkySize: U.look.uSkySize, uSkyH: U.look.uH, uSkyGain: SHARED.uAirGain },
-    read() { const L = day.light; return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, sight, materials: seen, cpu: Math.round(cpu * 1000) / 1000, zenith: luminance(day.toward([0, 1, 0])), tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } }; },
+    read() { const L = day.light; return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, curve: api.curve, sight, materials: seen, cpu: Math.round(cpu * 1000) / 1000, zenith: luminance(day.toward([0, 1, 0])), tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } }; },
     dispose() {
       SHARED.uAirEnv.value = 1; SHARED.uAirAP.value = null;
       marks.removeFromParent(); for (const q of MARKS) { if (q.open) gl.endQuery(gl.ANY_SAMPLES_PASSED); gl.deleteQuery(q.query); q.query = null; }

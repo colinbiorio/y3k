@@ -119,6 +119,130 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The true sky over the island, its first part: the air and the Sun (22 November 2026)
+
+Colin, 20 November:
+
+> model the solar system as accurately as possible and make it explorable
+
+and 21 November:
+
+> ultra-high quality experience rather than quantity of output
+
+The clockwork ([`SOLAR.md`](SOLAR.md)) says where the Sun is; this is the
+first thing in the world tab drawn from it: the sky over Lord Howe Island at
+the world's clock's instant, in real units, and the island lit by it. SOLAR.md
+"Step 2, first part" has the method, the sources and the numbers; this is what
+it is in the game.
+
+**It is behind a switch, and off.** Add `?sky=true` to the page's address and
+the island stands under the true sky; without it nothing has changed for
+anyone, and the void is not touched either way. It stays behind the switch
+until the night (the stars, the Milky Way, the planets) and the Moon are made
+and looked at: for now, after the end of twilight there is nothing in the sky
+and the picture goes black. Two more words for whoever is looking:
+`&at=2026-11-21T07:10:00Z` holds the world's clock at an instant, and `&ev=1`
+adds stops to the exposure.
+
+- **The clock** (`solar/clock.js`): the island runs on the real UTC clock, so in
+  an American evening it is day there. One clock, read by everything; a later
+  creative-mode dial will set it, survival never.
+- **The air** (`solar/air.js`, `sky.js`): S. Hillaire's method (EGSR 2020),
+  ported from the paper and his reference implementation, with the real air's
+  numbers: the clear air to its measured depth and the standard atmosphere's
+  thinning, a clean sea haze, the ozone layer. The Sun is 136,572 lux above
+  the air on 21 November; on the beach at noon 113,000 lux arrive from the Sun
+  and 14,800 from the sky; at the end of civil twilight, 2.8.
+- **The Sun**: a disc of its true size (half a degree: about 18 pixels across
+  in a full window at two pixels a point) where the clockwork sees it, darker toward its limb, dimmed
+  and reddened by the air it is seen through, and flattened on the horizon (27
+  arcminutes high and 32 wide when it stands a fifth of a degree up). Round it,
+  the eye's own veil, by how much of the disc is in sight: a palm's trunk or
+  the body takes the glare away as it takes the disc.
+- **The island lit by it** (`island/island.js`, asked with `sky: true`): the
+  key light is the Sun through the air, the fill is the sky's own light on
+  level ground, the haze is the air between the eye and each thing (every
+  material that took fog takes it instead), and the sea shows the sky that is
+  over it. The rooms' patches of sunlight, the ships' lit ports and the bodies
+  take the same light (`view.js` hands it on). Torches and plasma keep their
+  own.
+- **The eye** (`solar/air.js`, `solar/daylight.js`), in two steps, both from
+  Krawczyk, Myszkowski and Seidel's "Perceptual effects in real-time tone
+  mapping" (2005). The eye is adapted to the brightness of what it looks at
+  (a meter reads the scene: fifteen looks across the view, the middle counting
+  most; it follows a brighter scene half-way in a third of a second and a
+  darker one in under two), and a bright scene is drawn bright and a dark one
+  dark, as vision takes them. Then one curve (Reinhard's, on the brightness,
+  the hue kept) brings the world's range to the screen's: white sand in the
+  noon Sun is held under white with its detail, and the sky, a sixth as
+  bright, is still a luminous blue.
+
+**What changed in the look under the switch, and why** (the pictures are in
+the scratch folder's contact sheets; the painted sky is beside the true one,
+in the same framing, at noon and with the Sun 20 and 5 degrees high):
+
+1. **The picture has a curve now, under the switch.** The game drew what was
+   past the screen's white as white, and painted its sky far above the land's
+   own brightness. The true sky's light spans more than a screen holds: drawn
+   with no curve and the land exposed as it was, noon came out a dark slate
+   sky over a bright beach, as a camera with no film curve records it (the
+   first pictures were made so; `&curve=none` still shows it). Three curves
+   were drawn side by side from noon to dusk (three.js's AgX and ACES beside
+   Reinhard's): AgX was flat and grey, ACES dark and hard, Reinhard's bright
+   and clear. Reinhard's was chosen, by those pictures.
+2. **The noon sky is the measured blue**, paler toward the horizon and
+   whitish round a Sun that stands almost overhead: as played on the beach,
+   sRGB 121, 141, 180 high in the picture and 155, 168, 187 at the horizon,
+   where the painted sky was 171, 200, 234 and 204, 223, 243. A little deeper
+   than the painted one, and it changes with the hour.
+3. **The land is brighter than it was, and its shade deeper beside its
+   light.** The lawn in the noon Sun is shown about twice as bright as under
+   the painted light, because the eye's key draws a bright scene bright. The
+   sky's real light is an eighth of the Sun's where the old fill was about
+   half of it: a palm's trunk has a dark side now.
+4. **The haze is the air's own.** Mount Gower from the lagoon's beach is a
+   little bluer; Ball's Pyramid, 28 km off, keeps 18% of its contrast.
+5. **The hour is the island's hour.** Dusk comes when it comes there, the Sun
+   sets where it sets (west-south-west in November, over the lagoon), the
+   twilight arch is orange under a deepening blue, and opposite the Sun, for
+   the first quarter of an hour after it sets, the Earth's shadow stands
+   blue-grey on the horizon with the pink band over it. Facing a low Sun the
+   land goes dark against the sky, as it does.
+6. **The three named lights (pale, dusk, night) do nothing on the island under
+   the switch.** The sheet still shows them; the void still uses them.
+7. **The sea is the colour of the sky over it**, gold toward a setting Sun.
+
+**What is rough, seen in the pictures:**
+
+- **Nothing casts a shadow.** The island never had cast shadows; under a low
+  Sun their absence shows. Owed, as its own piece of work.
+- **One curve for the whole picture.** With the Sun low and the eye on the
+  land, the sky is pale: the land is then a tenth as bright as the sky, and
+  the eye, which adapts place by place, is drawn here with one exposure.
+- **The land's colours were painted for the old light.** Its grass gives back
+  42% of what falls on it and its sand 65% (real grass 20 to 25%, coral sand
+  about 40%), so in full Sun the lawn stands near the top of the curve and
+  higher against the sky than a real island's does. Repainting it is a piece
+  of work of its own.
+- **The Sun's heart is white** well beyond its disc when it is high (the eye's
+  veil): light, not a sprite, but the disc itself is only seen near the
+  horizon, or through the probe's dark glass.
+- **Things drawn in the screen's own terms keep their brightness** whatever
+  the hour: the ring's glow at dusk lies on the sand like a lamp's.
+- **After twilight, black.** The night is the next part.
+
+**Measured** (22 November 2026, the M2 MacBook Air, headless Chromium on the
+Mac's own chip): at 2940 x 1912 (a full window at two pixels a point) a frame
+takes 16.7 ms with the true sky and without it, standing, walking, turning,
+facing a low Sun and at dusk; on the lighter path and at a phone's size the
+same. The sky's own share is about a tenth of a millisecond of the page's
+thread a frame and less of the GPU's, and 0.7 ms more when the Sun has moved
+(every two seconds or so); the two tables it reads are made once, in a third
+of a second, as the island opens. Back in the void after the island nothing
+of the sky remains. No phone's own chip has drawn it yet. The contact sheets
+(day, twilight, rooms, phone, the Sun's disc, the three curves) are in the
+scratch folder `solar/sky1`, with a note of what each picture is.
+
 ### Colin's round of 19 November 2026
 
 Having played it, in his words (the parts given to this session): "it'd be
@@ -1347,6 +1471,8 @@ suite runs them; those that draw are read as text and looked at.
 | `drape.js` | how a point of cloth leaves a limb it has got into |
 | `state.js`, `gate.js` | what is kept between visits; the door between the void and the societies |
 | `lights.js` | pale, dusk, night |
+| `solar/` | the solar system as numbers ([`SOLAR.md`](SOLAR.md)): the clockwork (`ephemeris.js` and its tables); `clock.js`, the world's clock; `air.js`, the air and the eye's exposure; `daylight.js`, what the Sun and the air give a place at an instant |
+| `sky.js` | the true sky drawn (asked for with `?sky=true`): the air's tables on the GPU, the dome and the Sun's disc, the air between the eye and every material, the lights, the exposure (draws) |
 | `shelter.js` | the shelter as numbers: its shell, what of it is solid, where a body may go and stand, where the eye may stand, where the sun gets in, how it goes up |
 | `world.js` | what stands in the void: the buildings, the build key, and what they ask of the body, the eye and the light |
 | `plinth.js` | ground made fit to build on, as numbers: each kind's pad, a levelling (the ground eased to a level round it) and a platform (a slab and its steps), how each grows and goes |
@@ -1514,4 +1640,4 @@ For stage 7, already in hand and kept outside the repository until then:
   astronomical unit fit in one picture; the ground as a cube of quadtrees
   wrapped on a sphere; a light-speed trip as a record of two clock times.
 
-**21 November 2026: begun.** The solar system has a working memory of its own now, [`SOLAR.md`](SOLAR.md): Colin's words for it, the plan (depth first), and its first brick, the clockwork in `src/game/solar/`: where every body is and how it is turned for any date, and the sky as it is seen from the island, measured against JPL (the plan above said Keplerian elements and Meeus; what was built is closer than that, and SOLAR.md says by how much). Nothing in the world tab uses it yet.
+**21 November 2026: begun.** The solar system has a working memory of its own now, [`SOLAR.md`](SOLAR.md): Colin's words for it, the plan (depth first), and its first brick, the clockwork in `src/game/solar/`: where every body is and how it is turned for any date, and the sky as it is seen from the island, measured against JPL (the plan above said Keplerian elements and Meeus; what was built is closer than that, and SOLAR.md says by how much). **22 November 2026:** the first thing drawn from it, the true sky over the island (the air and the Sun; "Where it stands", above), behind `?sky=true` until the night and the Moon are made.
