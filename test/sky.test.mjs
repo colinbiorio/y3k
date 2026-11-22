@@ -254,8 +254,12 @@ ok('the Earth\'s shadow rises opposite a set Sun, with the pink band over it (th
 const srgb = (x) => Math.round(255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.min(1, x), 1 / 2.4) - 0.055));
 ok('the eye: a bright scene is drawn bright and a dark one dark (Krawczyk\'s key), and a curve holds what the screen cannot reach', () => {
   // the key: the scene value given to the level the eye is adapted to
-  near(A.krawczyk(0), 0.03, 1e-12); within(A.keyFor(6000), 0.67, 0.70, 'full day'); within(A.keyFor(1), 0.15, 0.17, 'the end of civil twilight'); within(A.keyFor(1e-3), 0.03, 0.031, 'night');
-  let was = Infinity; for (const l of [1e5, 1e4, 1e3, 100, 10, 1, 0.1, 0.01, 1e-3]) { const k = A.keyFor(l); assert.ok(k < was, 'a dimmer scene is shown dimmer'); was = k; }
+  near(A.krawczyk(0), 0.03, 1e-12); within(A.keyFor(6000), 0.67, 0.70, 'full day'); within(A.keyFor(1), 0.15, 0.17, 'the end of civil twilight');
+  // under rods alone it goes on falling (as their response to their own level does, taken to the screen's lightness),
+  // from where Krawczyk's leaves off: a full Moon's night keeps its key, a moonless one is drawn darker than it
+  near(A.keyFor(A.RODS.top * (1 - 1e-9)), A.krawczyk(A.RODS.top), 1e-9); near(A.RODS.power, 0.365, 1e-12);
+  within(A.keyFor(0.025), 0.035, 0.036, 'a full Moon\'s night'); within(A.keyFor(3.3e-4), 0.0090, 0.0096, 'a moonless night');
+  let was = Infinity; for (const l of [1e5, 1e4, 1e3, 100, 10, 1, 0.1, 0.01, 1e-3, 3e-4, A.EYE.floor]) { const k = A.keyFor(l); assert.ok(k < was, 'a dimmer scene is shown dimmer'); was = k; }
   assert.equal(A.exposureFor(0), A.exposureFor(A.EYE.floor), 'below the night sky\'s own glow the exposure holds'); assert.equal(A.exposureFor(1e-9), A.exposureFor(A.EYE.floor));
   // the curve: Reinhard's, on the luminance; half-way up at 1, white at W and never past it, rising all the way
   assert.equal(A.EYE.curve, 'reinhard'); near(A.shown(1), 0.5 * (1 + 1 / 64), 1e-12); near(A.shown(A.EYE.white), 1, 1e-12); assert.equal(A.shown(1e6), 1); assert.equal(A.shown(0), 0);
@@ -367,7 +371,7 @@ ok('behind a switch, and off: only ?sky=true in the address asks for the true sk
   assert.match(sky, /U\.sky\.uNorm\.value = 1 \/ per;/); assert.match(sky, /gl\.beginQuery\(gl\.ANY_SAMPLES_PASSED, q\.query\)/);
   assert.match(sky, /from '\.\/solar\/air\.js'/); assert.match(sky, /from '\.\/solar\/daylight\.js'/); assert.match(sky, /from '\.\/solar\/clock\.js'/);
   assert.ok(!/Date\.now\(|new Date\(/.test(sky.replace(/^\s*\/\/.*$/gm, '')), 'the sky asks the world\'s clock, not its own');
-  assert.match(read('package.json'), /node test\/solar\.test\.mjs && node test\/sky\.test\.mjs"/);
+  assert.match(read('package.json'), /node test\/solar\.test\.mjs && node test\/sky\.test\.mjs( && node test\/night\.test\.mjs)?"/);
 });
 
 // `node test/sky.test.mjs --measured` prints only the lines measured so far, for writing them into SOLAR.md

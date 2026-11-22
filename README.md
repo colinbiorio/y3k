@@ -263,6 +263,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-22** (later) — **The true sky over the island, its second part: the night, behind the
+  switch** (`src/game/solar/night.js`, `stars.js`, `milkyway.js`, `milkyway-cube.jpg`, new; `daylight.js`, `air.js`,
+  `src/game/sky.js`; `scripts/solar/stars.mjs`, `calibrate.py`, `texture.py`, `cube.py`, `milkyway.py`,
+  `stars-erfa.py`; `test/night.test.mjs`, 20 checks). Colin: "the ultimate goal is the most realistic game ever
+  made ... i would FAR prefer quality over quantity". With `?sky=true`, after twilight Lord Howe Island's night is
+  the night over it at that instant: the Yale Bright Star Catalogue's 9,096 stars where they stand (within 0.05
+  arcsec of ERFA), coloured, dimmed and reddened by the air, twinkling low down, shown by the eye's own thresholds so
+  that in twilight they come out one by one, the brightest first; the Milky Way, the Coalsack and both Magellanic
+  Clouds in true units from NASA's Deep Star Maps 2020 (NASA/Goddard Space Flight Center Scientific Visualization
+  Studio; Gaia DR2: ESA/Gaia/DPAC); the zodiacal light and the airglow from Leinert et al.'s measurements, so a
+  moonless sky is a natural dark sky (21.8 mag/arcsec2 at the zenith) and never black; the planets; the Moon's light
+  on the land, in the air and on the sea, its disc plain until its face is made; and the eye's Purkinje shift. Without
+  the switch nothing has changed and none of it is fetched. Measured on the M2's own chip: the pixels hold what the chain says to within 2%; the Sagittarius cloud 4.5 times the darkest sky and drawn 3.97 times; a moonless sky at 1% of white and a moonlit one at 2.1% (under rods alone the eye's key goes on falling, after Hunt's model, so a darker night is drawn darker); 573 stars visible toward the south celestial pole; 16.7 ms frames at the pixel cap with the switch on and off. [`SOLAR.md`](SOLAR.md) "Step 2,
+  second part" has the method, the sources and what is approximated; GAME.md says what changed in the look and why.
+
 - **2026-11-22** — **The true sky over the island, its first part: the air and
   the Sun, behind a switch** (`src/game/sky.js`, `src/game/solar/clock.js`,
   `air.js`, `daylight.js`, new; `island/island.js`, `view.js`;
