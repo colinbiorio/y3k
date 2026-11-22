@@ -67,12 +67,14 @@ import { createIsland } from './island/island.js';
 import { loadIsland, createGround } from './island/ground.js';
 import { trunksNear } from './island/life.js';
 import { SHAPE } from './island/lordhowe-shape.js';
+import { skyAsked } from './solar/daylight.js';
 
 const PITCH = [-1.25, 1.2];             // how far down and up the eye may look
 const SHOULDER = 0.3;                   // the eye stands this far to the body's right (and looks at it as high as its own eyes: figure.look)
 const POSE = { pitch: -0.05, every: 200 };     // the body sheet: how the eye is tipped while it looks at the body, and how often (ms) the page is asked where the sheet is      // the body sheet: the eye nearly level; a body is this much taller than its eyes; where on it the eye looks; how wide it is taken to be
 const FOV = 55;
 const ISLAND_URL = 'src/game/island/lordhowe.bin';
+const TRUE_SKY = skyAsked(globalThis.location?.search);      // ?sky=true: the island under the true sky (sky.js; SOLAR.md step 2), not yet the island's own
 const FAR = { void: 20000, island: 45000 };   // how far the eye sees: the island's needs Ball's Pyramid, 28 km off
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
@@ -373,7 +375,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   // one that cannot be made leaves what was.
   function plain() {
     let v = null, made = null;
-    try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
+    try { v = K.place === 'island' ? createIsland({ renderer: K.renderer, lite: true, light: st.light, ground: K.island.ground, shape: SHAPE, sky: TRUE_SKY }) : createVoid({ renderer: K.renderer, lite: true, light: st.light }); made = createFigure({ kind: st.kind, look: st.looks[st.kind], lite: true }); } catch (e) { console.error('[void] the plain picture could not be made', e); v?.dispose(); return; }
     K.figure.dispose(); K.fight.dispose(); K.void.dispose();
     for (const art of K.arts.values()) art.dispose();
     K.arts.clear(); dropGround();
@@ -516,7 +518,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         K.worlds.island.trunks = (x, z) => trunksNear(K.island.ground, x, z);
       }
       if (!root) return;
-      const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
+      const made = name === 'island' ? createIsland({ renderer: K.renderer, lite: K.lite, light: st.light, ground: K.island.ground, shape: SHAPE, sky: TRUE_SKY }) : createVoid({ renderer: K.renderer, lite: K.lite, light: st.light });
       if (K.aboard) { leave(K.aboard, K.body); K.aboard = null; }
       K.at[K.place] = { p: [...K.body.p], yaw: K.body.yaw };
       K.void.scene.remove(K.figure.group, K.hearth);
@@ -680,7 +682,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       let art = K.shipArts.get(sh);
       if (!art) { art = (SHIP_ARTS[sh.kind] || createSkiffArt)({ lite: K.lite }); K.shipArts.set(sh, art); V.scene.add(art.group); }
       seen.add(sh);
-      art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard, night: LIGHTS[V.light].stars });
+      art.update(sh, { t: K.clock, dt, aboard: sh === K.aboard, night: V.air ? V.air.state.night : LIGHTS[V.light].stars });
       // low and quick over the water, it drags a wake from its stern
       const v = Math.hypot(sh.v[0], sh.v[2]), lowOver = sh.p[1] - floorAt(sh.p[0], sh.p[2]);
       if (sh === K.aboard && v > 4 && lowOver < 2.4 && (shipWake -= dt) <= 0) {
@@ -729,10 +731,10 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
   const SUN = new THREE.Vector3(), skyCol = new THREE.Color(), sunCol = new THREE.Color(), hearthCol = new THREE.Color(0.5, 0.62, 1.0);
   const ARTS = { shelter: createShelterArt, house: createHouseArt, workshop: createWorkshopArt, tower: createTowerArt, hall: createHallArt };
   function builds(dt) {
-    const V = K.void, L = LIGHTS[V.light], seen = new Set();
+    const V = K.void, L = LIGHTS[V.light], seen = new Set(), A = V.air ? V.air.state : null;      // A: the true sky's own light, where it is drawn
     SUN.copy(V.key.position).sub(V.key.target.position).normalize();
-    sunCol.set(L.key).multiplyScalar(L.keyAmt);
-    skyCol.set(L.horizon).lerp(new THREE.Color(L.zenith), 0.5).multiplyScalar(0.55 * L.env);
+    if (A) { sunCol.copy(A.sunCol); skyCol.copy(A.skyCol); }
+    else { sunCol.set(L.key).multiplyScalar(L.keyAmt); skyCol.set(L.horizon).lerp(new THREE.Color(L.zenith), 0.5).multiplyScalar(0.55 * L.env); }
     let flame = 0, flameAt = null, fireCol = hearthCol, best = Infinity;
     for (const b of K.world.buildings) {
       let art = K.arts.get(b);
@@ -740,7 +742,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       seen.add(b);
       const k = KINDS[b.kind], [dx, dz] = k.door(b), inIt = K.world.within(b, K.body.p);
       const near = k.opens ? k.opens(b, K.body.p) : Math.hypot(K.body.p[0] - dx, K.body.p[2] - dz) < 2.6 || inIt;
-      const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol, night: L.stars });
+      const r = art.update(b, { t: K.clock, dt, sun: [SUN.x, SUN.y, SUN.z], sunCol, sky: skyCol, near, hearthCol, night: A ? A.night : L.stars });
       // the light of the fire nearest the body (one light for all of them: a light that came and went would make every material again)
       const at = art.flameAt.clone().applyMatrix4(art.group.matrixWorld), d = at.distanceTo(new THREE.Vector3(K.body.p[0], K.body.p[1], K.body.p[2])) - (inIt ? 100 : 0);
       if (r.flame > 0 && d < best) { best = d; flame = r.flame; flameAt = at; fireCol = art.fireCol || hearthCol; }
@@ -757,7 +759,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     const want = inside ? 0.12 + 0.88 * K.world.sunAt(head, [SUN.x, SUN.y, SUN.z]) : 1;
     K.indoor += (want - K.indoor) * ease(5, dt);
     V.setIndoor(K.indoor);
-    K.figure.setEnv(LIGHTS[V.light].env * (0.3 + 0.7 * K.indoor));
+    K.figure.setEnv((A ? A.env : LIGHTS[V.light].env) * (0.3 + 0.7 * K.indoor));
   }
 
   function size() {
@@ -1116,6 +1118,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       dashing: K.body.dashT > 0, lightspeed: K.body.light ? { phase: K.body.light.phase, v: K.body.light.v, dist: K.body.light.dist, frac: Math.round(K.body.light.frac * 1000) / 1000, veil: Math.round(K.body.light.veil * 1000) / 1000, line: $('.game-light')?.textContent || '' } : null, yaw: K.eye.yaw, pitch: K.eye.pitch, zoom: st.zoom, light: st.light, device: input.device, open: !!root, ms: Math.round(K.ms * 10) / 10,
       fine: K.rs ? { ratio: K.rs[Math.min(K.fine.level, K.rs.length - 1)], level: K.fine.level, steps: K.rs.length, plain: K.lite, trying: K.fine.why, trials: K.fine.trials, mean: Math.round(K.fine.mean * 10) / 10, px: [K.renderer.domElement.width, K.renderer.domElement.height] } : null,
       kind: st.kind, look: { ...st.looks[st.kind] }, posing: !!chooser?.isOpen(), facing: K.body.yaw, seen: seen(), gauge: !$('.game-throttle')?.hidden,
+      sky: K.void.air ? K.void.air.read() : null,                 // the true sky's numbers, where it is drawn (sky.js)
       plan: plan ? { kind: plan.kind, did: plan.r?.did, choice: plan.choice, turn: plan.turn, at: plan.at && { x: Math.round(plan.at.x * 100) / 100, z: Math.round(plan.at.z * 100) / 100, yaw: Math.round(plan.at.yaw * 1000) / 1000 },
         y: plan.r?.b ? Math.round((plan.r.b.y || 0) * 100) / 100 : 0, level: !!plan.r?.level, platform: !!plan.r?.platform, shown: K.blue?.shown || null, panel: !$('.game-plan')?.hidden } : null,
       world: { buildings: K.world.buildings.map((b) => ({ kind: b.kind, x: b.x, y: b.y || 0, z: b.z, yaw: b.yaw, t: b.t, down: b.down, base: b.base || null,
@@ -1128,6 +1131,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
       fight: { weapon: K.combat.weapon, bow: K.combat.bow.mode, draw: Math.round(K.combat.bow.draw * 100) / 100, bell: K.combat.bell.mode,
         thread: K.combat.thread.mode, spin: Math.round(K.combat.thread.power * 100) / 100, snare: K.combat.thread.snare, torch: K.combat.torch.mode, reach: K.combat.torch.mode === 'flame' ? Math.round(K.combat.torch.reach * 10) / 10 : 0, fires: K.combat.fires.length, flared: K.combat.flared, embers: K.combat.bolts.filter((x) => x.kind === 'ember').length, power: Math.round(K.combat.bell.power * 100) / 100, tones: K.combat.tones.length, rang: K.combat.bell.rang, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, heat: Math.round(b.heat * 100) / 100, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
+    globalThis.Y3K.game.sky = () => K?.void?.air || null;      // the true sky itself, where it is drawn: the probes read its tables
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     root.dataset.place = K.place;

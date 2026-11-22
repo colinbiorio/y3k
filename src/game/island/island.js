@@ -12,12 +12,17 @@
 // in it at a slant, the sun's glitter, and the rings a body makes. A haze
 // takes the distance, so Ball's Pyramid, 28 km off, stands faint in it.
 // Three lights, as the void's are named: pale (a clear day), dusk, night.
+//
+// Asked for (`sky: true`; view.js asks when the page's address says ?sky=true), the sky is the true one instead
+// (../sky.js): the air and the Sun over the island at the world's clock's instant, the land and sea lit by them and
+// standing in that air. Then the three named lights are not used here, and the sea takes its colours from the sky.
 import * as THREE from 'three';
 import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
 import { SEA_FLOOR, seaSheet } from './ground.js';
 import { vnoise } from './life.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
+import { createTrueSky, canDrawTrueSky } from '../sky.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -103,19 +108,21 @@ function heightTexture(a, w, h) {
 }
 
 const FLATS = 5;                          // levellings drawn at once (one building of each kind stands at a time)
-export function createIsland({ renderer, lite = false, light = 'pale', ground, shape }) {
+export function createIsland({ renderer, lite = false, light = 'pale', ground, shape, sky = false }) {
   const scene = new THREE.Scene(), head = ground.head, S = head.spacing, geos = [], mats = [], texs = [];
   const time = { value: 0 }, drops = createDrops(DROPS);
+  // the true sky, where it is asked for and this machine can draw it
+  const air = sky && canDrawTrueSky(renderer) ? createTrueSky({ renderer, lite, lat: shape.lat, lon: shape.lon, ground }) : null;
   // ---- the sky
   const skyU = { uZenith: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uSun: { value: new THREE.Vector3() }, uSunCol: { value: new THREE.Color() }, uStars: { value: 0 } };
   const skyGeo = new THREE.IcosahedronGeometry(1, 5); geos.push(skyGeo);
   const skyMat = new THREE.ShaderMaterial({ uniforms: skyU, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: THREE.BackSide, depthWrite: false, fog: false }); mats.push(skyMat);
   const dome = new THREE.Mesh(skyGeo, skyMat); dome.frustumCulled = false; dome.renderOrder = -10; dome.scale.setScalar(50000);
-  scene.add(dome);
+  scene.add(air ? air.dome : dome);
   // ---- the light: the sun (the key a building's room asks after), and the sky and ground round everything
   const key = new THREE.DirectionalLight(0xffffff, 2), fill = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
   scene.add(key, key.target, fill);
-  scene.fog = new THREE.FogExp2(0xffffff, 3.6e-5);
+  scene.fog = air ? air.fog : new THREE.FogExp2(0xffffff, 3.6e-5);
   // ---- the land and the shallows round it, and Ball's Pyramid
   const landMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, envMapIntensity: 0.35 }); mats.push(landMat);
   // ground levelled for a building (../plinth.js levelFor, ground.flats): the land's own triangles are let go of where
@@ -227,6 +234,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     uGrid: { value: new THREE.Vector4(head.x0, head.z0, (head.w - 1) * S, (head.h - 1) * S) }, uPGrid: { value: new THREE.Vector4(head.px0, head.pz0, (head.pw - 1) * S, (head.ph - 1) * S) },
     uSun: skyU.uSun, uSunCol: skyU.uSunCol, uZenith: skyU.uZenith, uHorizon: skyU.uHorizon, uSunAmt: { value: 1 }, uSkyAmt: { value: 1 },
   };
+  // under the true sky the sea's own colour is lit by what falls on level water (in three colours), and the sky in
+  // it is the sky's own brightness: these three lines of its drawing are written for the one or the other
+  if (air) seaU.uBodyAmt = { value: new THREE.Color(1, 1, 1) };
+  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? '' : ' * uSkyAmt', seaFoam = air ? '(0.12 + 0.88 * uBodyAmt)' : '(0.12 + 0.88 * uSkyAmt)';
   const seaMat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]), transparent: true, depthWrite: false, fog: true,
     vertexShader: `varying vec3 vW;
@@ -236,7 +247,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       }`,
     fragmentShader: `
       uniform float uTime; uniform sampler2D uH; uniform sampler2D uP; uniform vec4 uGrid; uniform vec4 uPGrid; uniform vec4 uDrops[${DROPS}];
-      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;
+      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' : ''}
       varying vec3 vW;
       #include <fog_pars_fragment>
       float sh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -277,10 +288,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
         vec3 shallow = vec3(0.12, 0.62, 0.62), mid = vec3(0.03, 0.34, 0.47), deep = vec3(0.012, 0.075, 0.17);
         vec3 body = mix(shallow, mid, smoothstep(1.5, 9.0, depth));
         body = mix(body, deep, smoothstep(9.0, 34.0, depth));
-        body *= uSkyAmt;
+        body *= ${seaLit};
         // the sky in it, at a slant; the sun's glitter
         vec3 r = reflect(-v, n); r.y = abs(r.y);
-        vec3 sky = mix(uHorizon, uZenith, pow(r.y, 0.55)) * uSkyAmt;
+        vec3 sky = mix(uHorizon, uZenith, pow(r.y, 0.55))${seaSky};
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
         vec3 c = mix(body, sky, fres);
         c += uSunCol * uSunAmt * pow(max(dot(r, normalize(uSun)), 0.0), 420.0) * 3.0 * step(0.0, uSun.y);
@@ -289,7 +300,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
         float near = smoothstep(0.7, 0.18, depth) * smoothstep(-0.05, 0.06, depth);
         float lines = smoothstep(0.82, 0.97, sin(depth * 26.0 - t * 1.9 + 3.0 * sn(p * 0.02)) * 0.5 + 0.5);
         float lace = near * (lines * (0.45 + 0.55 * sn(p * 0.6 + vec2(t * 0.3, 0.0))) + 0.25 * smoothstep(0.3, 0.12, depth) * sn(p * 2.3 + vec2(-t * 0.4, t * 0.3)));
-        c = mix(c, vec3(0.95, 0.97, 0.97) * (0.12 + 0.88 * uSkyAmt), clamp(lace, 0.0, 1.0) * 0.85);
+        c = mix(c, vec3(0.95, 0.97, 0.97) * ${seaFoam}, clamp(lace, 0.0, 1.0) * 0.85);
         // the water's clearness: shallow water shows the floor drawn under it, deep water does not
         float alpha = mix(0.62, 0.97, smoothstep(0.3, 7.0, depth));
         alpha = max(alpha, fres * 0.9 + lace);
@@ -316,6 +327,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   function setLight(name) {
     const L = ISLAND_LIGHTS[name] || ISLAND_LIGHTS.pale;
     lightName = ISLAND_LIGHTS[name] ? name : 'pale';
+    if (air) return lightName;                       // the true sky is lit by the clock, not by a name
     skyU.uZenith.value.setRGB(...L.zenith); skyU.uHorizon.value.setRGB(...L.horizon);
     skyU.uSun.value.set(...L.sun).normalize(); skyU.uSunCol.value.setRGB(...L.sunCol); skyU.uStars.value = L.stars;
     key.color.setRGB(...L.sunCol); key.intensity = L.sunAmt * indoor;
@@ -336,7 +348,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     scene, drops, place: 'island', ground, shape, life,
     get light() { return lightName; },
     setLight,
-    setIndoor(k) { indoor = k; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; },
+    setIndoor(k) { indoor = k; if (air) return; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; },
+    // the true sky, where it is drawn: what the rooms and ships ask after (air.state), and its numbers (air.read())
+    get air() { return air; },
     get key() { return key; },
     drop(x, z, amp = 0.1) { if (ground.height(x, z) < 0) drops.add(x, z, time.value, amp); },
     rebase() {},
@@ -344,6 +358,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     update(t, camera) {
       time.value = t;
       flats();
+      if (air) air.update({ camera, t, key, fill, sea: seaU, scene, indoor });      // the tables, the lights, the exposure; skyU.uSun is the Sun as seen
       dome.position.copy(camera.position);
       sea.position.set(camera.position.x, 0, camera.position.z);
       key.target.position.set(camera.position.x, 0, camera.position.z);
@@ -353,6 +368,6 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     live(dt, t, body, world) { life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
     renderMirror() {},
     setScale() {},
-    dispose() { for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
+    dispose() { air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
   };
 }
