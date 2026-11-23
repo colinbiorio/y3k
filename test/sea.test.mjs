@@ -65,17 +65,23 @@ ok('Fresnel\'s equations for seawater: 2.1% straight down, all of it at a graze;
   within(SEA.underCos(0), Math.sqrt(1 - 1 / SEA.SEA.n ** 2) - 1e-9, Math.sqrt(1 - 1 / SEA.SEA.n ** 2) + 1e-9, 'a grazing line enters at the critical angle');
 });
 
-ok('the FFT the GPU runs (Stockham\'s radix 2, natural order in and out) is the plain sum of its waves', () => {
+ok('the inverse transform: Stockham\'s radix 2 is the plain sum of its waves, and the GPU sums each row and each column of its bands outright with the same sign', () => {
   for (const N of [8, 16, 128]) {
     const re = Array.from({ length: N }, (_, i) => Math.sin(i * 1.3) + 0.2 * i), im = Array.from({ length: N }, (_, i) => Math.cos(i * 0.7));
     const [r, i2] = SEA.inverseFFT(re, im); let err = 0;
     for (let x = 0; x < N; x++) { let sr = 0, si = 0; for (let k = 0; k < N; k++) { const a = (2 * Math.PI * k * x) / N; sr += re[k] * Math.cos(a) - im[k] * Math.sin(a); si += re[k] * Math.sin(a) + im[k] * Math.cos(a); } err = Math.max(err, Math.abs(sr - r[x]), Math.abs(si - i2[x])); }
     assert.ok(err < 1e-9 * N, `N = ${N}: ${err}`);
   }
-  // the shader's stage is the same lines (water.js FFT_FRAG): its index, its pair half a row apart, its twiddle's sign
+  // the GPU sums each row and then each column outright (water.js ROWS_FRAG, COLS_FRAG): every one of the N waves turned by
+  // e^{+i 2 pi k x / N} (the inverse transform's sign, as here), the phasor stepped round the circle
   const water = read('src/game/island/water.js');
-  assert.match(water, /int r = \( o - \( o \/ \( 2 \* uNs \) \) \* 2 \* uNs \) >= uNs \? 1 : 0, m = o - \( o \/ uNs \) \* uNs, j = \( o \/ \( 2 \* uNs \) \) \* uNs \+ m;/);
-  assert.match(water, /float a = 6\.28318530718 \* float\( m \) \/ float\( 2 \* uNs \);/);
+  for (const pass of ['ROWS_FRAG', 'COLS_FRAG']) {
+    const src = water.match(new RegExp(`const ${pass} = \`([^]*?)\`;`))[1];
+    assert.match(src, /float a = 6\.28318530718 \* float\( (x|p\.y) \) \/ float\( N \); vec2 w = vec2\( cos\( a \), sin\( a \) \), e = vec2\( 1\.0, 0\.0 \);/, pass);
+    assert.match(src, /for \( int k = 0; k < N; k \+\+ \) \{/, pass); assert.match(src, /e = cmul\( e, w \);/, pass);
+  }
+  // and the phasor stepped 128 times stays on the circle to a part in a million
+  { let e = [1, 0]; const a = (2 * Math.PI * 37) / 128, w = [Math.fround(Math.cos(a)), Math.fround(Math.sin(a))]; for (let k = 0; k < 128; k++) e = [Math.fround(e[0] * w[0] - e[1] * w[1]), Math.fround(e[0] * w[1] + e[1] * w[0])]; assert.ok(Math.abs(Math.hypot(...e) - 1) < 1e-5); }
 });
 
 ok('the wind\'s sea (JONSWAP for 6.5 m/s, spread by Donelan and Banner): its three bands carry the spectrum\'s energy; the spreading sums to one; what they cannot draw is Cox and Munk\'s remainder', () => {

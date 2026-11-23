@@ -199,7 +199,8 @@ const DIR_LOOP = '#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )\n\tDirectio
 const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	DirectionalLight directionalLight;
 	#ifdef ISLE_WATER
-	float isleShade = isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) ) * seaCaustic;
+	isleShadeK = isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) );
+	float isleShade = isleShadeK * seaCaustic;
 	#else
 	float isleShade = isleKey( geometryPosition, geometryNormal, ISLE_OVER );
 	#endif
@@ -342,7 +343,7 @@ const LAND_NORMAL = 'vWN = normalize( mat3( modelMatrix ) * objectNormal );';
 const LAND_PLACE = 'vW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n#ifdef ISLE_FLAT\nvEarth = aEarth;\n#endif';
 
 function landFrag({ lite }) {
-  const FACE = LAYERS.indexOf('face'), CLIFF = LAYERS.indexOf('cliff'), ROCK = LAYERS.indexOf('rock');
+  const FACE = LAYERS.indexOf('face'), CLIFF = LAYERS.indexOf('cliff'), ROCK = LAYERS.indexOf('rock'), SHORE = LAYERS.indexOf('shore'), SAND = LAYERS.indexOf('sand');
   return {
     pars: `
 varying vec3 vW; varying vec3 vWN;
@@ -547,9 +548,15 @@ if ( isleCrowns > 0.001 ) {
 // porous each is (Lekner and Dorf), smooth and glossy, the water filling its small relief. Under the water (the sea's
 // own drawing, and the film) the floor has the water in its pores, not a film on it: a little darker (0.78), not glossy;
 // the water's own light is the sea's.
-vec4 seaM = seaMapAt( isleW.xz );
-float seaRise = 0.0, isleFilm = uIsleOn > 0.5 ? seaSwash( isleW.xz, seaM, seaRise ) - ( isleH + 0.06 * ( isleColA.a - 0.5 ) ) : -1.0;
-float isleWetLine = seaReach( seaM ) + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+// (worked out only on ground low enough for the swash to reach: the rest of the island pays nothing for it)
+float seaRise = 0.0, isleFilm = -1.0, isleWetLine = 0.2 + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+#ifndef SEA_NO_SWASH
+if ( isleH < 1.2 && uIsleOn > 0.5 ) {
+  vec4 seaM = seaMapAt( isleW.xz );
+  isleFilm = seaSwash( isleW.xz, seaM, seaRise ) - ( isleH + 0.06 * ( isleColA.a - 0.5 ) );
+  isleWetLine = seaReach( seaM ) + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+}
+#endif
 float isleWet = max( smoothstep( isleWetLine + 0.1, isleWetLine - 0.05, isleH ), isleSea );
 isleWet = max( isleWet, ( wCliff + wRock + wShore ) * smoothstep( 2.6, 0.4, isleH ) * 0.85 );
 float isleWetK = isleFilm > 0.0 ? 0.78 : mix( uIsleLayer[ isleB ].z, uIsleLayer[ isleA ].z, isleK );
@@ -567,6 +574,81 @@ diffuseColor.rgb = isleAlb * uIsleLook.y;
 #ifdef ISLE_FLATCOL
 diffuseColor.rgb = vec3( 0.2 ); isleNw = isleN0;
 #endif
+`,
+    // THE SEA'S OWN DRAWING (terrain.js's sea material: the water's surface, moved by the waves, with the floor seen through
+    // it). Before the light: where the eye's line, bent by the surface's larger waves, meets the floor, and the floor there,
+    // plainer than the land's splat (it is seen through the water): coral sand, its patches of rubble and coral heads, the
+    // reef's crest and outer face in rubble, steep floors (the feet of the cliffs) in rock, each as the land reads it, the
+    // two it is most made of blended by their heights; the water in its pores. The surface's own shading is after the light
+    // (SEA_AFTER): kept out of here, so the drawing never holds the splat and the surface at once.
+    seabed: `
+isleW = vW;
+vec3 seaV = normalize( cameraPosition - vW );
+vec4 seaM = seaMapAt( vW.xz );
+float seaRise, seaLevel = max( vW.y, seaSwash( vW.xz, seaM, seaRise ) );
+float seaD0 = max( 0.0, seaLevel - seaGround( vW.xz ) );
+vec2 seaDx = dFdx( vW.xz ), seaDy = dFdy( vW.xz );
+// the open sea (from a little way outside the crest); the lagoon's short fetch, calmer near the land the wind leaves, but
+// never glassy: the bands' weights
+float seaOpen = smoothstep( -40.0, 40.0, seaM.x ), seaFetch = smoothstep( 20.0, 700.0, seaM.z );
+vec3 seaWt = vec3( seaOpen * smoothstep( 1.5, 8.0, seaD0 ), mix( 0.3 * ( 0.5 + 0.5 * seaFetch ), 1.0, seaOpen ), mix( 0.6 + 0.4 * seaFetch, 1.0, seaOpen ) );
+vec2 seaSw; seaSwell( vW.xz, seaSw ); seaSw *= seaOpen * ( 1.0 - smoothstep( 650.0, 300.0, seaM.x ) );
+// the eye's line into the water, bent by the waves as large as a few pixels (the finest, read a few levels up, only blur
+// the floor, as they do an eye's view through rippled water; read sharp, they scatter its grain into speckle)
+float seaSp2; vec2 seaSm = seaSlope( vW.xz, seaDx * 6.0, seaDy * 6.0, seaWt, seaSp2 ).xy + seaSw;
+vec3 seaT = refract( -seaV, normalize( vec3( -seaSm.x, 1.0, -seaSm.y ) ), 1.0 / SEA_N ); seaT = normalize( vec3( seaT.x, min( seaT.y, -0.05 ), seaT.z ) );
+vec3 seaFN, seaP = vW + seaT * ( seaD0 / -seaT.y );
+seaP = vW + seaT * ( max( 0.0, seaLevel - seaFloorAt( seaP.xz, seaFN ) ) / -seaT.y );
+seaP.y = seaFloorAt( seaP.xz, seaFN );
+float seaH = max( 0.0, seaLevel - seaP.y ), seaMuV = clamp( -seaT.y, 0.05, 1.0 ), isleFilm = seaH, isleShadeK = 1.0;
+isleW = seaP;
+// THE LIGHT'S DANCE ON THE FLOOR (caustics): where the light that falls on the floor came into the water, the short waves'
+// curvature (the slope's divergence) gathers it or spreads it: 1 / (1 + (1 - 1/n) H div). A floor under a pixel that
+// spans several of them sees their mean (one); deep, the dance blurs out
+float seaCaustic = 1.0;
+#if defined( SEA_FFT ) && NUM_DIR_LIGHTS > 0
+{
+  vec3 kl = inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix ), lt = refract( -kl, vec3( 0.0, 1.0, 0.0 ), 1.0 / SEA_N );
+  float px = max( length( dFdx( seaP.xz ) ), length( dFdy( seaP.xz ) ) ), fade = smoothstep( 0.16, 0.05, px ) * smoothstep( 7.0, 2.5, seaH ) * smoothstep( 0.03, 0.25, seaH ) * step( 0.0, kl.y );
+  if ( fade > 0.0 ) {
+    vec2 e = ( seaP.xz - lt.xz * ( seaH / max( -lt.y, 0.3 ) ) ) / uSeaL.z; float q = 0.1 / uSeaL.z, lod = max( 1.5, log2( px * ${SEA.N}.0 / uSeaL.z ) );
+    float div = ( textureLod( uSeaB2, e + vec2( q, 0.0 ), lod ).x - textureLod( uSeaB2, e - vec2( q, 0.0 ), lod ).x + textureLod( uSeaB2, e + vec2( 0.0, q ), lod ).y - textureLod( uSeaB2, e - vec2( 0.0, q ), lod ).y ) / 0.2;
+    seaCaustic = mix( 1.0, clamp( 1.0 / max( abs( 1.0 + 0.254 * seaH * div * seaWt.z ), 0.33 ), 0.25, 3.0 ), fade );
+  }
+}
+#endif
+vec3 isleN0 = seaFN;
+vec3 isleDpx = dFdx( isleW ), isleDpy = dFdy( isleW );
+float isleDist = length( isleW - cameraPosition );
+isleFar = isleDist > 140.0;
+vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
+isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
+float isleSkySeen = 1.0;
+// sand, rubble or rock: the rock where the floor is steep, the rubble in the lagoon's patches and on the reef's crest
+float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
+float wR = smoothstep( 0.35, 0.6, isleSlope ), wRub = max( smoothstep( 0.64, 0.7, isleCtl.b ) * smoothstep( -4.0, -0.6, isleW.y ), smoothstep( 70.0, 15.0, abs( seaM.x + 12.0 ) + 25.0 * gn( isleW.xz * 0.05 ) ) );
+float wS = ( 1.0 - wR ) * wRub, wD = ( 1.0 - wR ) * ( 1.0 - wRub );
+int isleA = wR >= wS && wR >= wD ? ${ROCK} : wS >= wD ? ${SHORE} : ${SAND};
+float isleWa = max( wR, max( wS, wD ) ), isleWb = wR + wS + wD - isleWa - min( wR, min( wS, wD ) );
+int isleB = isleA == ${ROCK} ? ( wS >= wD ? ${SHORE} : ${SAND} ) : isleA == ${SHORE} ? ( wR >= wD ? ${ROCK} : ${SAND} ) : ( wR >= wS ? ${ROCK} : ${SHORE} );
+vec4 isleColA = vec4( uIsleMean[ isleA ], 0.5 ), isleSrfA = vec4( 0.5, 0.5, 0.9, 1.0 ), isleColB = isleColA, isleSrfB = isleSrfA; vec3 isleNA = isleN0, isleNB = isleN0;
+float isleK = 1.0;
+// (twenty metres down the floor's own light is a twentieth of itself in blue, nothing in red: its mean is enough)
+if ( seaH < 22.0 ) {
+  isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, false, isleColA, isleSrfA, isleNA );
+  if ( isleWb > 0.06 ) {
+    isleLayer( isleB, isleDist, isleDpx, isleDpy, isleN0, false, isleColB, isleSrfB, isleNB );
+    float ha = isleWa / ( isleWa + isleWb ) + isleColA.a * uIsleLayer[ isleA ].w * 0.5, hb = isleWb / ( isleWa + isleWb ) + isleColB.a * uIsleLayer[ isleB ].w * 0.5, top = max( ha, hb ) - 0.12;
+    float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); isleK = ba / max( ba + bb, 1.0e-5 );
+  }
+}
+vec3 isleAlb = mix( mix( uIsleMean[ isleB ], uIsleMean[ isleA ], isleK ), mix( isleColB.rgb, isleColA.rgb, isleK ), uIsleLook.x );
+vec4 isleSrf = mix( isleSrfB, isleSrfA, isleK );
+vec3 isleNw = normalize( mix( isleN0, normalize( mix( isleNB, isleNA, isleK ) ), uIsleLook.x ) );
+float isleRough = max( mix( 0.85, isleSrf.b, uIsleLook.x ), mix( uIsleFloor[ isleB ], uIsleFloor[ isleA ], isleK ) ), isleOcc = mix( 1.0, isleSrf.a, uIsleLook.x );
+isleAlb *= ( 0.84 + 0.32 * isleCtl.g ) * 0.78;
+isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), 0.3 );     // in the water, a little deeper in colour
+diffuseColor.rgb = isleAlb * uIsleLook.y;
 `,
     rough: 'float roughnessFactor = isleRough;',
     // the wrapped sky's light: three reads it twice (once about the normal for the diffuse light, once along the
@@ -615,24 +697,33 @@ void seaKey( out vec3 l, out vec3 e ) {
 const SEA_AFTER = `
 #if defined( ISLE_WATER ) && ! defined( SEA_NO_WATER )
 {
+  // THE SURFACE over the floor just lit: its slope (the wind's sea, the swell, the swell at the reef, the rings) and the
+  // spread of the slopes under the pixel, the white water; then what leaves the water toward the eye (Lee et al.), the sky
+  // in the surface, the key light's glitter where the land, a palm or a ship does not shade the water, the white water
+  float spread, white; vec2 sh; vec4 b = seaSlope( vW.xz, seaDx, seaDy, seaWt, spread );
+  vec2 s = b.xy + seaSw;
+  seaShore( vW.xz, seaM, seaD0, sh, white ); s += sh;
+  s += seaRipples( vW.xz );
+  float thin = smoothstep( 0.0, 0.3, seaD0 ); s *= 0.2 + 0.8 * thin; spread *= 0.15 + 0.85 * thin;      // water a few centimetres deep lies almost flat
+  // the facets an eye sees most of lean toward it: of a Gaussian sea's facets, weighted by the area each turns to the eye,
+  // the mean leans toward it by sg Phi(x) / (phi(x) + x Phi(x)), x the look's cotangent over sg (sg: the slopes' spread
+  // along the look under the pixel), 1.25 sg at a graze. So from a beach the sea a few hundred metres out reflects the sky
+  // well above the horizon, and much less of it, and shows the water's own blue (B. Smith's shadowing for a Gaussian
+  // surface; E. Bruneton, F. Neyret and N. Holzschuch's ocean lighting, 2010, takes its mean the same way)
+  float hl = max( length( seaV.xz ), 1.0e-5 ), sg = sqrt( 0.5 * spread + 1.0e-6 ), x = ( seaV.y / hl ) / sg;
+  float Phi = 0.5 * ( 1.0 + tanh( 0.7978846 * ( x + 0.044715 * x * x * x ) ) ), phi = 0.3989423 * exp( -0.5 * x * x );
+  vec2 sv = s - ( seaV.xz / hl ) * ( sg * Phi / ( phi + x * Phi ) );
+  vec3 nv = normalize( vec3( -sv.x, 1.0, -sv.y ) );
   vec3 kl, ke; seaKey( kl, ke );
   vec3 up = seaOut( uSeaE, outgoingLight, seaH, uSeaLight.x, seaMuV );
-  #ifdef SEA_NO_SURFKEY
-  float F = seaFresnel( dot( seaN, seaV ) ), lit = 1.0;
-  #else
-  float F = seaFresnel( dot( seaN, seaV ) ), lit = isleKeyW( vW, vec3( 0.0, 1.0, 0.0 ), seaD0, length( vW - cameraPosition ) );
-  #endif
-  vec3 glint = seaGlitter( seaV, kl, ke * uSeaLight.y, seaSlopeV, seaSpread ) * lit;
-  // the white water: the surf's, and the whitecaps where the wind's sea folds (its Jacobian under about 0.3), as lace;
-  // it gives back about 0.6 of the light on level water (shaded, the sky's share of it)
-  float foam = seaLace( vW.xz, clamp( seaWhite + smoothstep( 0.42, 0.08, seaB.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 ), max( length( seaDx ), length( seaDy ) ) );
-  vec3 white = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - lit ), vec3( 0.0 ) );
-  outgoingLight = mix( up, seaSkyIn( seaV, seaN, seaSpread ), F ) + glint * ( 1.0 - foam );
-  outgoingLight = mix( outgoingLight, white, foam );
-  if ( uSeaDebug > 0.5 ) {
-    vec3 dbg = uSeaDebug < 1.5 ? vec3( 1.0, 0.0, 1.0 ) : uSeaDebug < 2.5 ? up / max( max( up.r, up.g ), max( up.b, 1.0e-6 ) ) : uSeaDebug < 3.5 ? seaN * 0.5 + 0.5 : uSeaDebug < 4.5 ? seaSkyIn( seaV, seaN, seaSpread ) * 20.0 : uSeaDebug < 5.5 ? vec3( foam ) : uSeaDebug < 6.5 ? vec3( seaH / 10.0, seaD0 / 10.0, F ) : uSeaDebug < 7.5 ? uSeaE * 0.0001 : uSeaDebug < 8.5 ? vec3( isnan( glint.r ) || isinf( glint.r ) ? 1.0 : 0.0, isnan( foam ) || isinf( foam ) ? 1.0 : 0.0, isnan( lit ) ? 1.0 : 0.0 ) : uSeaDebug < 9.5 ? vec3( isnan( seaSpread ) ? 1.0 : 0.0, isnan( white.r ) ? 1.0 : 0.0, isnan( F ) ? 1.0 : 0.0 ) : vec3( isnan( seaWhite ) ? 1.0 : 0.0, isnan( seaB.z ) ? 1.0 : 0.0, isnan( kl.y + ke.r ) ? 1.0 : 0.0 );
-    outgoingLight = dbg;
-  }
+  float F = seaFresnel( dot( nv, seaV ) );
+  vec3 glint = seaGlitter( seaV, kl, ke * uSeaLight.y, s, spread ) * isleShadeK;
+  float foam = seaLace( vW.xz, clamp( white + smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 ), max( length( seaDx ), length( seaDy ) ) );
+  vec3 wc = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - isleShadeK ), vec3( 0.0 ) );
+  vec3 sky = seaSkyIn( seaV, nv, spread );
+  outgoingLight = mix( up, sky, F ) + glint * ( 1.0 - foam );
+  outgoingLight = mix( outgoingLight, wc, foam );
+  if ( uSeaDebug > 0.5 ) outgoingLight = uSeaDebug < 1.5 ? vec3( 1.0, 0.0, 1.0 ) : uSeaDebug < 2.5 ? up * ( 1.0 - F ) : uSeaDebug < 3.5 ? sky * F : uSeaDebug < 4.5 ? glint : uSeaDebug < 5.5 ? vec3( foam ) : uSeaDebug < 6.5 ? vec3( F ) : nv * 0.5 + 0.5;
 }
 #elif ! defined( ISLE_WATER ) && ! defined( SEA_NO_FILM )
 if ( isleFilm > 0.0 ) {
@@ -640,7 +731,10 @@ if ( isleFilm > 0.0 ) {
   vec3 kl, ke; seaKey( kl, ke );
   vec3 v = normalize( cameraPosition - vW ), n = vec3( 0.0, 1.0, 0.0 );
   vec3 up = seaOut( uSeaE, outgoingLight, isleFilm, uSeaLight.x, seaUnder( v.y ) );
-  float F = seaFresnel( v.y ), lit = isleKeyW( vW, n, 0.0, length( vW - cameraPosition ) );
+  float F = seaFresnel( v.y ), lit = 1.0;
+  #if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
+  lit = isleShade;
+  #endif
   float foam = seaLace( vW.xz * 1.6, smoothstep( 0.035, 0.0, isleFilm ) * ( 0.25 + 0.6 * seaRise ), 1.6 * max( length( dFdx( vW.xz ) ), length( dFdy( vW.xz ) ) ) );
   vec3 white = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - lit ), vec3( 0.0 ) );
   outgoingLight = mix( up, seaSkyIn( v, n, 0.002 ), F ) + seaGlitter( v, kl, ke * uSeaLight.y, vec2( 0.0 ), 0.004 ) * lit * ( 1.0 - foam );
@@ -688,7 +782,7 @@ function landMaterial(base, { lite, flat, uniforms, cut = null, water = false })
     let fs = sh.fragmentShader;
     fs = fs.replace('#include <common>', '#include <common>\n' + f.pars + (cut?.pars || ''))
       .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS + SEA_LATE)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.body || '') + f.body)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.body || '') + (water ? f.seabed : f.body))
       .replace('#include <roughnessmap_fragment>', f.rough)
       .replace('#include <normal_fragment_maps>', f.normal)
       .replace('#include <aomap_fragment>', f.ao)
@@ -697,7 +791,7 @@ function landMaterial(base, { lite, flat, uniforms, cut = null, water = false })
       .replace('#include <opaque_fragment>', SEA_AFTER + '#include <opaque_fragment>');
     // the land's own height over the ground is 0 (its fragments are the grid's triangles); the levelled ground's is not;
     // the sea's floor is where its refracted line meets it
-    sh.fragmentShader = head + (flat ? '#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + (water ? '#define ISLE_N0 seaFN\n' : '#define ISLE_N0 normalize( vWN )\n') + fs;
+    sh.fragmentShader = head + (flat ? '#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + fs;
   };
   m.customProgramCacheKey = () => `isle-land|${lite ? 1 : 0}|${flat ? 1 : 0}|${water ? 1 : 0}`;
   ADOPTED.add(m);

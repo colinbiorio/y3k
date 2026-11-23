@@ -16,7 +16,7 @@
 // and the Sun over the island at the world's clock's instant, the land and sea lit by them and standing in that
 // air. Then the three named lights are not used here, and the sea takes its light from the sky.
 import * as THREE from 'three';
-import { DROPS, createDrops } from '../rings.js';
+import { DROPS, RING, createDrops } from '../rings.js';
 import { seaSheet } from './ground.js';
 import { createWater } from './water.js';
 import { underCos } from './sea.js';
@@ -192,7 +192,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   // (the water's surface and the floor seen through it). It follows the eye (its colour is the world's: nothing in it is
   // the mesh's own); it is drawn after the land, so the GPU skips its pixels under the land, and not over what stands
   // in the water (each shows its own submerged part)
-  const seaMat = look.sea(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), { uDrops: { value: drops.data } }); mats.push(seaMat);
+  // (the rings still moving, first: the sea's drawing reads only those)
+  const live = { uDrops: { value: new Float32Array(DROPS * 4) }, uDropsN: { value: 0 } };
+  const seaMat = look.sea(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), live); mats.push(seaMat);
   const seaGeo = seaRings(); geos.push(seaGeo);
   const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = 2; sea.frustumCulled = false; sea.userData = { isleSea: true, isleShadow: false };
   scene.add(sea);
@@ -257,6 +259,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       flats();
       if (air) air.update({ camera, t, key, fill, sea: { ...look.seaLight, uSun: skyU.uSun }, scene, indoor });      // the tables, the lights, the exposure, the light on the sea; skyU.uSun is the key light as seen
       water.update(t);                                  // the wind's sea at this instant (its FFTs), the swell's time
+      let n = 0; const d = drops.data, out = live.uDrops.value, tw = water.clock, t0 = t;
+      for (let i = 0; i < DROPS; i++) { const age = t0 - d[i * 4 + 2]; if (age >= 0 && age <= RING.oldest) { out[n * 4] = d[i * 4]; out[n * 4 + 1] = d[i * 4 + 1]; out[n * 4 + 2] = tw - age; out[n * 4 + 3] = d[i * 4 + 3]; n++; } }
+      live.uDropsN.value = n;
       dome.position.copy(camera.position);
       sea.position.set(camera.position.x, 0, camera.position.z);
       key.target.position.set(camera.position.x, 0, camera.position.z);

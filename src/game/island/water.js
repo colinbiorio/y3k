@@ -1,8 +1,8 @@
 // water.js — THE SEA ROUND THE ISLAND, MOVING (three.js), from sea.js's numbers. What it makes, and what terrain.js and
 // island.js draw with it:
-//   · THE WIND'S SEA, each frame: Tessendorf's spectrum turned to its height, its lean and its slopes by inverse FFTs on
-//     the GPU (Stockham's radix 2: a spectrum pass, seven passes along the rows and seven down the columns, for the three
-//     bands at once, side by side), then each band's own two textures: what moves the water's surface (its lean, height
+//   · THE WIND'S SEA, each frame: Tessendorf's spectrum turned to its height, its lean and its slopes by inverse Fourier
+//     transforms on the GPU (a spectrum pass, one pass summing the rows of the three bands at once, side by side, and one
+//     down each band's columns), into each band's own two textures: what moves the water's surface (its lean, height
 //     and the Jacobian, where the lean folds it and it whitens) and what shades it (its slope and the slope's square,
 //     with their smaller levels: a pixel far off reads the mean slope and how much the slopes it covers spread, which is
 //     what spreads the Sun's glitter into a path). Without float targets (and on the lighter path) one band of it, made
@@ -44,32 +44,45 @@ void main() {
   o0 = vec4( h.x - hx.y, h.y + hx.x, hz.x - dx.y, hz.y + dx.x );
   o1 = vec4( dz.x - dxx.y, dz.y + dxx.x, dzz.x - dxz.y, dzz.y + dxz.x );
 }`;
-// ONE STAGE OF THE INVERSE FFT (sea.js stockhamStage, the same lines): along the rows within each band (uDir 0), or
-// down the columns (1); two textures of two complex numbers each
-const FFT_FRAG = `
-uniform highp sampler2D uI0; uniform highp sampler2D uI1; uniform int uNs; uniform int uDir;
+// THE INVERSE TRANSFORM IN TWO PASSES. A tile-based GPU pays for every pass it is asked for (each one a trip of the
+// whole target through memory and a pause between): fourteen of Stockham's radix-2 stages over the three bands took
+// 4.4 ms a frame on the M2, where the arithmetic is a tenth of that. So each pass does a whole direction at once: every
+// texel sums its row's (then its column's) 128 waves outright, each turned by a phasor stepped round the circle (the same
+// sum sea.js inverseFFT does fast: the tests hold the two together). Along the rows, within each band:
+const ROWS_FRAG = `
+uniform highp sampler2D uI0; uniform highp sampler2D uI1;
 layout( location = 0 ) out highp vec4 o0; layout( location = 1 ) out highp vec4 o1;
 ${CMUL}
 void main() {
   ivec2 p = ivec2( gl_FragCoord.xy ); const int N = ${SEA.N};
-  int o = uDir == 0 ? p.x - ( p.x / N ) * N : p.y, base = uDir == 0 ? p.x - o : 0;
-  int r = ( o - ( o / ( 2 * uNs ) ) * 2 * uNs ) >= uNs ? 1 : 0, m = o - ( o / uNs ) * uNs, j = ( o / ( 2 * uNs ) ) * uNs + m;
-  float a = 6.28318530718 * float( m ) / float( 2 * uNs ); vec2 tw = vec2( cos( a ), sin( a ) );
-  ivec2 pa = uDir == 0 ? ivec2( base + j, p.y ) : ivec2( p.x, j ), pb = uDir == 0 ? ivec2( base + j + N / 2, p.y ) : ivec2( p.x, j + N / 2 );
-  vec4 a0 = texelFetch( uI0, pa, 0 ), b0 = texelFetch( uI0, pb, 0 ), a1 = texelFetch( uI1, pa, 0 ), b1 = texelFetch( uI1, pb, 0 );
-  vec4 t0 = vec4( cmul( b0.xy, tw ), cmul( b0.zw, tw ) ), t1 = vec4( cmul( b1.xy, tw ), cmul( b1.zw, tw ) );
-  float s = r == 0 ? 1.0 : -1.0;
-  o0 = a0 + s * t0; o1 = a1 + s * t1;
+  int x = p.x - ( p.x / N ) * N, base = p.x - x;
+  float a = 6.28318530718 * float( x ) / float( N ); vec2 w = vec2( cos( a ), sin( a ) ), e = vec2( 1.0, 0.0 );
+  vec4 s0 = vec4( 0.0 ), s1 = vec4( 0.0 );
+  for ( int k = 0; k < N; k ++ ) {
+    vec4 a0 = texelFetch( uI0, ivec2( base + k, p.y ), 0 ), a1 = texelFetch( uI1, ivec2( base + k, p.y ), 0 );
+    s0 += vec4( cmul( a0.xy, e ), cmul( a0.zw, e ) ); s1 += vec4( cmul( a1.xy, e ), cmul( a1.zw, e ) );
+    e = cmul( e, w );
+  }
+  o0 = s0; o1 = s1;
 }`;
-// EACH BAND'S OWN TEXTURES: A, what moves the surface (lean x, height, lean z, the Jacobian: under about 0.3 the lean has
-// crowded the surface into a fold, a breaking crest); B, what shades it (the slope of the moved surface over its own
-// ground, its square, the Jacobian)
-const ASSEMBLE_FRAG = `
+// …then down the columns of one band, and from the four packed fields its own two textures: A, what moves the surface
+// (lean x, height, lean z, the Jacobian: under about 0.3 the lean has crowded the surface into a fold, a breaking crest);
+// B, what shades it (the slope of the moved surface over its own ground, its square, the Jacobian)
+const COLS_FRAG = `
 uniform highp sampler2D uI0; uniform highp sampler2D uI1; uniform int uC; uniform float uChop;
 layout( location = 0 ) out highp vec4 oA; layout( location = 1 ) out highp vec4 oB;
+${CMUL}
 void main() {
-  ivec2 p = ivec2( gl_FragCoord.xy ), q = ivec2( uC * ${SEA.N} + p.x, p.y );
-  vec4 f0 = texelFetch( uI0, q, 0 ), f1 = texelFetch( uI1, q, 0 );
+  ivec2 p = ivec2( gl_FragCoord.xy ); const int N = ${SEA.N}; int col = uC * N + p.x;
+  float a = 6.28318530718 * float( p.y ) / float( N ); vec2 w = vec2( cos( a ), sin( a ) ), e = vec2( 1.0, 0.0 );
+  vec4 f0 = vec4( 0.0 ), f1 = vec4( 0.0 );
+  for ( int k = 0; k < N; k ++ ) {
+    vec4 a0 = texelFetch( uI0, ivec2( col, k ), 0 ), a1 = texelFetch( uI1, ivec2( col, k ), 0 );
+    f0 += vec4( cmul( a0.xy, e ), cmul( a0.zw, e ) ); f1 += vec4( cmul( a1.xy, e ), cmul( a1.zw, e ) );
+    e = cmul( e, w );
+  }
+  // the packed pairs' real and imaginary parts: f0 = (height, its slope along x | along z, lean x), f1 = (lean z, its change
+  // along x | along z, across)
   float jxx = 1.0 + uChop * f1.y, jzz = 1.0 + uChop * f1.z, jxz = uChop * f1.w, J = jxx * jzz - jxz * jxz, Jc = max( J, 0.15 );
   vec2 s = vec2( jzz * f0.y - jxz * f0.z, jxx * f0.z - jxz * f0.y ) / Jc;
   oA = vec4( uChop * f0.w, f0.x, uChop * f1.x, J );
@@ -126,12 +139,21 @@ vec4 seaSlope( vec2 xz, vec2 dx, vec2 dy, vec3 wt, out float spread ) {
 export const SEA_SURFACE_GLSL = `
 uniform vec3 uSeaE;          // the light falling on level water: lux in three colours times the exposure (the picture's units)
 uniform vec4 uSeaLight;      // x: that light's cosine under the water (the Sun's beam and the sky's light as they share it); y: the glitter's scale (1 under the true sky; the present sky's painted Sun is brighter than its light)
-uniform vec4 uDrops[ ${DROPS} ];
+uniform vec4 uDrops[ ${DROPS} ]; uniform float uDropsN;     // the rings bodies make (rings.js): those still moving first, and how many
 // the floor under a point (m): the island's grid, else the shelf beyond it
 float seaGround( vec2 xz ) {
   vec2 g = ( xz - uIsleGrid.xy ) / uIsleGrid.z;
   if ( any( lessThan( g, vec2( 0.0 ) ) ) || any( greaterThan( g, uIsleN - 1.0 ) ) ) return ${f(SEA_FLOOR)};
   return isleGround( uIsleHt, uIsleN, g );
+}
+// the same, and the normal of the cell's triangle there (ground.js onGrid's two triangles), from the cell's four heights
+float seaFloorAt( vec2 xz, out vec3 n ) {
+  vec2 g = ( xz - uIsleGrid.xy ) / uIsleGrid.z; n = vec3( 0.0, 1.0, 0.0 );
+  if ( any( lessThan( g, vec2( 0.0 ) ) ) || any( greaterThan( g, uIsleN - 1.0 ) ) ) return ${f(SEA_FLOOR)};
+  vec2 c = clamp( floor( g ), vec2( 0.0 ), uIsleN - 2.0 ), q = g - c; ivec2 i = ivec2( c );
+  float h00 = texelFetch( uIsleHt, i, 0 ).r, h10 = texelFetch( uIsleHt, i + ivec2( 1, 0 ), 0 ).r, h01 = texelFetch( uIsleHt, i + ivec2( 0, 1 ), 0 ).r, h11 = texelFetch( uIsleHt, i + ivec2( 1, 1 ), 0 ).r;
+  if ( q.x + q.y <= 1.0 ) { n = normalize( vec3( h00 - h10, uIsleGrid.z, h00 - h01 ) ); return h00 + ( h10 - h00 ) * q.x + ( h01 - h00 ) * q.y; }
+  n = normalize( vec3( h01 - h11, uIsleGrid.z, h10 - h11 ) ); return h11 + ( h01 - h11 ) * ( 1.0 - q.x ) + ( h10 - h11 ) * ( 1.0 - q.y );
 }
 // THE SWELL AT THE REEF (sea.js): where the map says a point is m (how far outside the crest, the phase reached there,
 // how far from dry land, how square it faces the swell), over water d deep: how high the surface stands (m), its slope,
@@ -166,6 +188,7 @@ float seaShore( vec2 xz, vec4 m, float d, out vec2 slope, out float white ) {
 vec2 seaRipples( vec2 p ) {
   vec2 grad = vec2( 0.0 );
   for ( int i = 0; i < ${DROPS}; i ++ ) {
+    if ( float( i ) >= uDropsN ) break;
     vec4 d = uDrops[ i ]; float age = uSeaClock.x - d.z;
     if ( age < 0.0 || age > ${f(RING.oldest)} ) continue;
     vec2 q = p - d.xy; float r = length( q ), s = r - ${f(RIPPLE_SPEED * 2)} * age;
@@ -287,8 +310,8 @@ export function createWater({ renderer, lite = false, ground, shape = null }) {
     bands = SEA.cascades.map(() => pairTarget(N, N, THREE.HalfFloatType, true));
     disposables.push(h0, ping, pong, ...bands);
     mSpec = pass(SPECTRUM_FRAG, { uH0: { value: h0 }, uL: { value: uniforms.uSeaL.value }, uT: { value: 0 }, uW0: { value: (2 * Math.PI) / SEA.loop } });
-    mFFT = pass(FFT_FRAG, { uI0: { value: null }, uI1: { value: null }, uNs: { value: 1 }, uDir: { value: 0 } });
-    mAsm = pass(ASSEMBLE_FRAG, { uI0: { value: null }, uI1: { value: null }, uC: { value: 0 }, uChop: { value: 1 } });
+    mFFT = pass(ROWS_FRAG, { uI0: { value: ping.texture[0] }, uI1: { value: ping.texture[1] } });
+    mAsm = pass(COLS_FRAG, { uI0: { value: pong.texture[0] }, uI1: { value: pong.texture[1] }, uC: { value: 0 }, uChop: { value: 1 } });
     uniforms.uSeaA0.value = bands[0].texture[0]; uniforms.uSeaA1.value = bands[1].texture[0];
     uniforms.uSeaB0.value = bands[0].texture[1]; uniforms.uSeaB1.value = bands[1].texture[1]; uniforms.uSeaB2.value = bands[2].texture[1];
   } else {
@@ -297,30 +320,27 @@ export function createWater({ renderer, lite = false, ground, shape = null }) {
     // (a texture of the sea's map stands in for the moving surface's: it is never read without the bands)
     uniforms.uSeaA0.value = uniforms.uSeaA1.value = mapTex;
   }
-  const stages = Math.log2(N);
+  // the spectrum at t, its rows summed, then each band's columns summed into its own two textures: five passes a frame
   function bandsAt(t) {
     mSpec.uniforms.uT.value = t; run(mSpec, ping);
-    let src = ping, dst = pong;
-    for (const dir of [0, 1]) for (let s = 0; s < stages; s++) {
-      const u = mFFT.uniforms; u.uI0.value = src.texture[0]; u.uI1.value = src.texture[1]; u.uNs.value = 1 << s; u.uDir.value = dir;
-      run(mFFT, dst); [src, dst] = [dst, src];
-    }
-    for (let c = 0; c < C; c++) { const u = mAsm.uniforms; u.uI0.value = src.texture[0]; u.uI1.value = src.texture[1]; u.uC.value = c; u.uChop.value = SEA.cascades[c].chop; run(mAsm, bands[c]); }
+    run(mFFT, pong);
+    for (let c = 0; c < C; c++) { const u = mAsm.uniforms; u.uC.value = c; u.uChop.value = SEA.cascades[c].chop; run(mAsm, bands[c]); }
   }
   let clock = 0;
-  return {
+  const api = {
     uniforms, gpu, defines: gpu ? { SEA_FFT: '' } : {},
+    debug: { bands: true },             // a probe's switch: the bands not made again (to measure what they cost)
     // the time the sea is at (s, within SEA.loop): the swell's phase, for whatever floats on it (nothing yet)
     get clock() { return clock; },
     update(t) {
       clock = ((t % SEA.loop) + SEA.loop) % SEA.loop; uniforms.uSeaClock.value.x = clock;
-      if (gpu) bandsAt(clock);
+      if (gpu && api.debug.bands) bandsAt(clock);
       else { const L = SEA.cascades[1].L, v = 1.1, s = uniforms.uSeaSlide.value; s.set((-v * clock) % L, (0.4 * v * clock) % L, (0.7 * v * clock) % L, (-0.9 * v * clock) % L); }
     },
     // what each band and pass costs the GPU (n times, waited for: a probe's question)
     cost(n = 30) {
       if (!gpu) return null;
-      const gl = renderer.getContext(), px = new Float32Array(4), wait = () => { renderer.readRenderTargetPixels(ping, 0, 0, 1, 1, px); gl.finish(); };
+      const gl = renderer.getContext(), wait = () => gl.finish();
       wait(); const a = performance.now(); for (let i = 0; i < n; i++) bandsAt((clock + i * 0.016) % SEA.loop); wait();
       return { bands: (performance.now() - a) / n };
     },
@@ -329,4 +349,5 @@ export function createWater({ renderer, lite = false, ground, shape = null }) {
     peek(i, j) { const k = j * head.w + i; return [0, 1, 2, 3].map((c) => THREE.DataUtils.fromHalfFloat(data[4 * k + c])); },
     dispose() { for (const x of disposables) x.dispose(); },
   };
+  return api;
 }
