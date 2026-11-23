@@ -36,8 +36,8 @@ export const KENTIA = {
     rachis: [2.0, 2.45],                           // m that bears leaflets
     leaflets: 46,                                  // a side
     long: 0.78,                                    // m: the longest leaflets (near the middle of the rachis)
-    wide: 0.036,                                   // m: their width
-    insertDeg: [52, 34],                           // degrees from the rachis, toward its tip, that a leaflet leaves it at: at its base, at its tip
+    wide: 0.029,                                   // m: their width (the narrow end of 2 to 5 cm: a frond is a comb, light between its leaflets)
+    insertDeg: [62, 40],                           // degrees from the rachis, toward its tip, that a leaflet leaves it at: at its base, at its tip
     roofDeg: [36, 56],                             // degrees below the frond's own plane a leaflet leaves it at (the ^): a young frond, an old one
     droop: [0.5, 1.15],                            // how far (of its length) a leaflet's tip hangs below its straight line: young, old
     foldDeg: 17,                                   // the leaflet's fold along its midrib (each half off the flat)

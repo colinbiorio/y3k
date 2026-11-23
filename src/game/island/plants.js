@@ -12,25 +12,34 @@
 // the trunks, lifts and pushes the fronds, more toward their tips, and flutters the leaflets; the shadow maps are drawn
 // with the same sway (each part has a twin drawn into them only).
 //
-// HOW FAR, HOW FINE. Near the eye (within PLANTS.hero m) each palm is drawn whole, its leaflets as blades.
+// HOW FAR, HOW FINE (by each palm's distance from the eye; at each change the pixels are shared out between the two ways
+// by a fixed pattern over a few metres, so nothing jumps):
+//   · within PLANTS.hero m, WHOLE: every leaflet a blade (the palms round the eye, chosen again as it moves);
+//   · to PLANTS.near m, its fronds as CARDS: a picture of a frond's leaflets (made once on the GPU, leaflet by leaflet,
+//     from the same numbers) laid on a surface that hangs as the leaflets hang, with its petiole; to PLANTS.mid m the
+//     same, coarser; the trunk of six sides (the palms round the body, planted again as it goes);
+//   · further, the far forest (far.js).
 import * as THREE from 'three';
-import { KENTIA, crownOf, spineOf, leafletsOf, leafletAt, leafletWidth, LEAFLET_RINGS, hash } from './kentia.js';
+import { KENTIA, crownOf, spineOf, leafletsOf, leafletAt, leafletWidth, leafletLength, LEAFLET_RINGS, hash } from './kentia.js';
 import { SEA, toward } from './sea.js';
 
 // the bands each way of drawing a palm keeps to (m from the eye), and how wide the hand-over between two is
 export const PLANTS = {
   hero: 22,                   // whole, leaflet by leaflet
+  near: 50,                   // cards, fine (six steps along a frond, two across its leaflets, its petiole)
+  mid: 120,                   // cards, coarse (four steps, one across); the far forest past this
   band: 3,                    // the hand-over's half-width
   heroAgain: 4,               // m the eye may move before the whole palms round it are chosen again
   variants: 4,                // crowns made, each palm wearing one of them (turned its own way)
+  lite: { hero: 0, near: 40, mid: 100 },
 };
 // a leaf's colours (linear: what it reflects of each of the sky's three wavelengths), from the island's photographs and
 // leaves' measured spectra (a dark leaf gives back about a tenth of the green light falling on it, half that of the red and
-// blue; the Kentia's upper side is darker and glossier than its under side; a leaf lets through about as much green as it
-// gives back, little red or blue)
+// blue; the Kentia's upper side is darker and glossier than its under side; a thick leaflet lets through about half the
+// green it gives back, little red or blue)
 export const LEAF = {
-  up: [0.032, 0.066, 0.022], down: [0.062, 0.098, 0.044], through: [0.03, 0.085, 0.012], rib: [0.16, 0.16, 0.06],
-  rachis: [0.075, 0.09, 0.032], fibre: [0.13, 0.085, 0.05], spear: [0.1, 0.12, 0.045], dead: [0.2, 0.135, 0.075],
+  up: [0.032, 0.066, 0.022], down: [0.062, 0.098, 0.044], through: [0.017, 0.048, 0.006], rib: [0.16, 0.16, 0.06],
+  rachis: [0.075, 0.09, 0.032], fibre: [0.13, 0.085, 0.05], spear: [0.1, 0.12, 0.045], dead: [0.13, 0.1, 0.068],
   roughUp: 0.4, roughDown: 0.62,
 };
 export const BARK = { grey: [0.2, 0.2, 0.185], lichen: [0.34, 0.35, 0.31], ring: [0.09, 0.09, 0.085], green: [0.07, 0.1, 0.045], moss: [0.06, 0.07, 0.035] };
@@ -83,9 +92,13 @@ if ( vPlantFade.x > 0.0 || vPlantFade.y < 1.0 ) { float h = plantH(); if ( h < v
 
 // ---- THE CROWN: its vertex (the sway) and its look
 const CROWN_VERT = `
-attribute vec4 aLeaf;     // what it is (0 a leaflet, 1 the rachis and petiole, 2 the fibres, 3 the spear), across it (-1..1), along it (0..1), its own number
+attribute vec4 aLeaf;     // what it is (0 a leaflet or a card's leaflets, 1 the rachis and petiole, 2 the fibres, 3 the spear), across it (-1..1), along it (0..1), its own number
 attribute vec4 aSway;     // its frond's own number, how far out along the frond (0..1), how far along its leaflet (0..1), how open to the sky
-varying vec4 vLeaf; varying float vAo;`;
+varying vec4 vLeaf; varying float vAo;
+#ifdef PALM_CARD
+attribute vec3 aAcross;   // across the leaflets (their width's way), for their fold
+varying vec2 vCardUv; varying vec3 vAcross;
+#endif`;
 const CROWN_MOVE = `
 {
   // the wind's way and the top's push, in the crown's own frame (it is turned and scaled: M = sR, so M^-1 = M^T / s^2)
@@ -99,35 +112,67 @@ const CROWN_MOVE = `
   float fl = lu * lu * uWind.z * ( 0.012 + 0.03 * g ) * sin( uTime * 10.0 + aLeaf.w * 37.0 + fph );
   transformed += top + push + vec3( 0.0, lift + fl, 0.0 ) + wl * fl * 0.6;
 }
-vLeaf = aLeaf; vAo = aSway.w;`;
+vLeaf = aLeaf; vAo = aSway.w;
+#ifdef PALM_CARD
+vCardUv = uv; vAcross = normalize( normalMatrix * ( mat3( instanceMatrix ) * aAcross ) );
+#endif`;
 const CROWN_FRAG_PARS = `
 uniform vec3 uLeafUp; uniform vec3 uLeafDown; uniform vec3 uRib; uniform vec3 uRachis; uniform vec3 uFibre; uniform vec3 uSpear;
 varying vec4 vLeaf; varying float vAo;
-float plantRough;`;
+float plantRough; float plantAcross;
+#ifdef PALM_CARD
+uniform sampler2D uCard;
+varying vec2 vCardUv; varying vec3 vAcross;
+#endif`;
 // what a pixel of the crown is made of: a leaflet's two sides, its midrib and veins (put away where it is under a few
 // pixels across), each leaflet a little its own; the rachis; the fibres; the spear. (diffuseColor's own colour is the
-// vertex's tint: a frond's age, a dead frond's brown)
+// vertex's tint: a frond's age, a dead frond's brown.) A card reads its leaflets from the frond's picture: where a pixel
+// is on which leaflet (along it, across it, its own number) and how much of the pixel is leaf; its edge is sharpened to
+// the pixel and the GPU's coverage draws it (alpha to coverage: an edge a pixel wide, no shimmer), and the coverage is
+// kept as the picture is read smaller (a leaflet does not thin away into the distance)
 const CROWN_COLOR = `
 {
-  vec3 alb; float part = vLeaf.x;
+  vec3 alb; float part = vLeaf.x; vec4 lf = vLeaf;
+  plantAcross = 0.0;
+  #ifdef PALM_CARD
   if ( part < 0.5 ) {
-    float a = abs( vLeaf.y ), fw = fwidth( vLeaf.y ), seen = clamp( 1.2 - fw * 4.0, 0.0, 1.0 );
+    vec4 ct = texture2D( uCard, vCardUv );
+    vec2 ts = vec2( textureSize( uCard, 0 ) ), tx = dFdx( vCardUv * ts ), ty = dFdy( vCardUv * ts );
+    float lod = max( 0.0, 0.5 * log2( max( dot( tx, tx ), dot( ty, ty ) ) ) ), cov = ct.a * ( 1.0 + 0.15 * lod );
+    // (sharpened only where the picture is read at its own size or larger: read smaller, its texels already hold the
+    // share of each pixel that is leaf, and that share is what the coverage should be)
+    cov = mix( clamp( ( cov - 0.5 ) / max( fwidth( cov ), 1.0e-4 ) + 0.5, 0.0, 1.0 ), clamp( cov, 0.0, 1.0 ), smoothstep( 0.5, 1.5, lod ) );
+    diffuseColor.a = cov;
+    if ( ct.b < 0.04 ) part = 1.0;                                  // the rachis, drawn in the picture
+    lf = vec4( part, ct.g * 2.0 - 1.0, ct.r, ct.b );
+    plantAcross = lf.y;
+  }
+  #endif
+  if ( part < 0.5 ) {
+    float a = abs( lf.y ), fw = fwidth( lf.y ), seen = clamp( 1.2 - fw * 4.0, 0.0, 1.0 );
     alb = gl_FrontFacing ? uLeafUp : uLeafDown;
     alb = mix( alb, uRib, ( 1.0 - smoothstep( 0.07, 0.07 + 1.5 * fw, a ) ) * 0.75 * seen );
-    alb *= 1.0 + 0.08 * sin( vLeaf.y * 23.0 ) * seen;
-    alb *= ( 0.84 + 0.32 * vLeaf.w ) * ( 1.0 + 0.12 * vLeaf.z );
+    alb *= 1.0 + 0.08 * sin( lf.y * 23.0 ) * seen;
+    alb *= ( 0.84 + 0.32 * lf.w ) * ( 1.0 + 0.12 * lf.z );
     plantRough = gl_FrontFacing ? ${LEAF.roughUp.toFixed(3)} : ${LEAF.roughDown.toFixed(3)};
-  } else if ( part < 1.5 ) { alb = uRachis * ( 0.8 + 0.4 * vLeaf.z ); plantRough = 0.55; }
-  else if ( part < 2.5 ) { alb = uFibre * ( 0.7 + 0.6 * fract( vLeaf.y * 13.7 + vLeaf.w ) ); plantRough = 0.9; }
+  } else if ( part < 1.5 ) { alb = uRachis * ( 0.8 + 0.4 * lf.z ); plantRough = 0.55; }
+  else if ( part < 2.5 ) { alb = uFibre * ( 0.7 + 0.6 * fract( lf.y * 13.7 + lf.w ) ); plantRough = 0.9; }
   else { alb = uSpear; plantRough = 0.5; }
   diffuseColor.rgb *= alb;
+  vLeafPart = part;
 }`;
+// a card's leaflet is folded down along its midrib as a blade is: its normal leans out to the side of its own half
+const CARD_NORMAL = `
+#ifdef PALM_CARD
+if ( vLeafPart < 0.5 ) normal = normalize( normal + vAcross * faceDirection * plantAcross * ${Math.tan((KENTIA.frond.foldDeg * Math.PI) / 180).toFixed(4)} );
+#endif`;
 // THE LIGHT THROUGH A LEAF: what falls on its far side and is let through, to the side the eye sees. The key light's
 // share is after its shadowing (the island's loop shades the key light before it comes here); the sky's is read about the
 // leaf's far side, as dimmed by the crown round it.
 const LEAF_LIGHT = `
 uniform vec3 uThrough;
 vec3 plantThrough;                   // the leaf's transmittance here (none on the rachis, fibres or trunk)
+float vLeafPart;
 void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
   RE_Direct_Physical( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   float back = saturate( - dot( geometryNormal, directLight.direction ) );
@@ -158,10 +203,10 @@ reflectedLight.indirectDiffuse *= vAo;
 reflectedLight.indirectSpecular *= vAo * vAo;`;
 
 // A palm's material: a MeshStandardMaterial (so the island's shadows and the true sky's air take it as they take
-// everything lit), its shaders made the palm's. `kind`: 'crown' or 'trunk'.
-function palmMaterial(kind, { lod, dither = false, extra = {} }) {
+// everything lit), its shaders made the palm's. `kind`: 'crown' or 'trunk'; `card`: the frond's picture (a card crown).
+function palmMaterial(kind, { lod, dither = false, extra = {}, card = null }) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: kind === 'crown', side: kind === 'crown' ? THREE.DoubleSide : THREE.FrontSide, roughness: 0.6, metalness: 0 });
-  const uniforms = { uLod: { value: lod }, ...SHARED, ...extra };
+  const uniforms = { uLod: { value: lod }, ...SHARED, ...extra, ...(card ? { uCard: { value: card } } : {}) };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     let vs = sh.vertexShader.replace('#include <common>', '#include <common>\n' + VERT_PARS + (kind === 'crown' ? CROWN_VERT : TRUNK_VERT + TRUNK_R));
@@ -171,12 +216,16 @@ function palmMaterial(kind, { lod, dither = false, extra = {} }) {
     let fs = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + NOISE + FRAG_PARS + (kind === 'crown' ? CROWN_FRAG_PARS : TRUNK_FRAG_PARS))
       .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + (dither ? FRAG_FADE : ''));
     if (kind === 'crown') {
-      fs = fs.replace('#include <color_fragment>', '#include <color_fragment>\n' + CROWN_COLOR)
+      fs = fs.replace('#include <lights_physical_pars_fragment>', '#include <lights_physical_pars_fragment>\n' + LEAF_LIGHT)
+        .replace('#include <color_fragment>', '#include <color_fragment>\n' + CROWN_COLOR)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = plantRough;')
-        .replace('#include <lights_physical_pars_fragment>', '#include <lights_physical_pars_fragment>\n' + LEAF_LIGHT)
-        .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\nplantThrough = vLeaf.x < 0.5 ? uThrough * vColor : vec3( 0.0 );')
+        .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + CARD_NORMAL)
+        .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\nplantThrough = vLeafPart < 0.5 ? uThrough * vColor : vec3( 0.0 );')
         .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + LEAF_SKY)
         .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n' + LEAF_AO);
+      // (three r160 calls any material that is not transparent opaque and sets its alpha to one before it is written: a
+      // card's alpha is its coverage, which the GPU turns into samples)
+      if (card) fs = fs.replace('#include <opaque_fragment>', '#undef OPAQUE\n#include <opaque_fragment>');
     } else {
       fs = fs.replace('#include <color_fragment>', '#include <color_fragment>\n' + TRUNK_COLOR)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = plantRough;')
@@ -185,25 +234,29 @@ function palmMaterial(kind, { lod, dither = false, extra = {} }) {
     }
     sh.fragmentShader = fs;
   };
-  m.customProgramCacheKey = () => `palm|${kind}|${dither ? 1 : 0}`;
-  // the island's shadows read a leaf's own side toward the light (a leaf lit from behind is not shaded by itself)
-  if (kind === 'crown') m.defines = { ISLE_SHADE_N: '( dot( geometryNormal, directionalLights[ 0 ].direction ) < 0.0 ? - geometryNormal : geometryNormal )' };
+  m.customProgramCacheKey = () => `palm|${kind}|${dither ? 1 : 0}|${card ? 1 : 0}`;
+  if (kind === 'crown') {
+    // the island's shadows read a leaf's own side toward the light (a leaf lit from behind is not shaded by itself)
+    m.defines = { ISLE_SHADE_N: '( dot( geometryNormal, directionalLights[ 0 ].direction ) < 0.0 ? - geometryNormal : geometryNormal )' };
+    if (card) { m.defines.PALM_CARD = ''; m.alphaToCoverage = true; }
+  }
   m.userData.plant = uniforms;
   return m;
 }
 
 // A PART'S TWIN for the shadow maps (terrain.js draws `twins` into them): the same shape and the same instances, drawn
-// with a depth material that sways and hides as the part does (by the eye's distance, not the map's)
-function twinOf(mesh, kind, lod, twins) {
-  const m = new THREE.MeshDepthMaterial({ side: kind === 'crown' ? THREE.DoubleSide : THREE.FrontSide });
+// with a depth material that sways and hides as the part does (by the eye's distance, not the map's); a card's leaflets
+// cast as its picture has them
+function twinOf(mesh, kind, lod, twins, card = null) {
+  const m = new THREE.MeshDepthMaterial({ side: kind === 'crown' ? THREE.DoubleSide : THREE.FrontSide, ...(card ? { map: card, alphaTest: 0.5 } : {}) });
   m.colorWrite = false;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uLod: { value: lod }, ...SHARED });
     let vs = sh.vertexShader.replace('#include <common>', '#include <common>\n' + VERT_PARS + (kind === 'crown' ? CROWN_VERT : TRUNK_VERT + TRUNK_R));
-    vs = kind === 'crown' ? vs.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + CROWN_MOVE) : vs.replace('#include <begin_vertex>', TRUNK_SHAPE);
+    vs = kind === 'crown' ? vs.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + CROWN_MOVE.replace(/#ifdef PALM_CARD[\s\S]*?#endif/, '')) : vs.replace('#include <begin_vertex>', TRUNK_SHAPE);
     sh.vertexShader = vs.replace('#include <project_vertex>', '#include <project_vertex>\n' + VERT_HIDE);
   };
-  m.customProgramCacheKey = () => `palm-depth|${kind}`;
+  m.customProgramCacheKey = () => `palm-depth|${kind}|${card ? 1 : 0}`;
   const t = new THREE.InstancedMesh(mesh.geometry, m, mesh.instanceMatrix.count);
   t.instanceMatrix = mesh.instanceMatrix; t.count = 0; t.frustumCulled = false; t.layers.set(2);
   mesh.userData.isleTwin = t;
@@ -267,72 +320,174 @@ const TRUNK_AO = `
 reflectedLight.indirectDiffuse *= barkAo;`;
 
 // ---- the shapes
-// The crown, whole: every leaflet a blade of LEAFLET_RINGS rings (its width drawn out to a point, its two edges' normals
-// folded down from its midrib), the rachis and petiole a tube of five sides, the fibres a sleeve, the spear a thin cone.
-export function crownGeometry(crown, { leaflets = KENTIA.frond.leaflets } = {}) {
-  const P = [], N = [], C = [], A = [], W = [], I = [];
+// how open to the sky a point of a crown is (its own frame): its middle and its underside see less
+const openAt = (p) => Math.min(1, 0.42 + 0.5 * Math.min(1, Math.hypot(p[0], p[2]) / 2.8) + 0.12 * Math.max(-1, Math.min(1, p[1] / 1.5)));
+const DEAD = LEAF.dead.map((d, i) => d / LEAF.up[i]);
+const tintOf = (f) => (f.dead ? DEAD : [1 + 0.25 * f.age, 1 + 0.12 * f.age, 1]);
+// a shape's arrays, and the triangles between them
+function builder(card = false) {
+  const P = [], N = [], C = [], A = [], W = [], U = [], X = [], I = [];
   let nv = 0;
-  const vert = (p, n, tint, leaf, sway) => { P.push(p[0], p[1], p[2]); N.push(n[0], n[1], n[2]); C.push(tint[0], tint[1], tint[2]); A.push(...leaf); W.push(...sway); return nv++; };
-  // how open to the sky a point of the crown is: its middle and its underside see less
-  const open = (p) => Math.min(1, 0.42 + 0.5 * Math.min(1, Math.hypot(p[0], p[2]) / 2.8) + 0.12 * Math.max(-1, Math.min(1, p[1] / 1.5)));
-  const fold = Math.tan((KENTIA.frond.foldDeg * Math.PI) / 180);
-  const dead = LEAF.dead.map((d, i) => d / LEAF.up[i]);
+  return {
+    I,
+    get n() { return nv; },
+    // which way a triangle (a, b, c) turns, against the normal given at a: +1 toward it
+    turns(a, b, c) { const q = (i) => [P[3 * i], P[3 * i + 1], P[3 * i + 2]], A = q(a), u = q(b).map((v, k) => v - A[k]), w = q(c).map((v, k) => v - A[k]);
+      const x = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]]; return Math.sign(x[0] * N[3 * a] + x[1] * N[3 * a + 1] + x[2] * N[3 * a + 2]); },
+    vert(p, n, tint, leaf, sway, uv = [0, 0], across = [0, 0, 0]) { P.push(p[0], p[1], p[2]); N.push(n[0], n[1], n[2]); C.push(tint[0], tint[1], tint[2]); A.push(...leaf); W.push(...sway); if (card) { U.push(uv[0], uv[1]); X.push(across[0], across[1], across[2]); } return nv++; },
+    geometry() {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setAttribute('aLeaf', new THREE.Float32BufferAttribute(A, 4)); g.setAttribute('aSway', new THREE.Float32BufferAttribute(W, 4));
+      if (card) { g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setAttribute('aAcross', new THREE.Float32BufferAttribute(X, 3)); }
+      g.setIndex(nv > 65535 ? new THREE.Uint32BufferAttribute(I, 1) : new THREE.Uint16BufferAttribute(I, 1));
+      return g;
+    },
+  };
+}
+// a tube along a frond's spine from s0 to s1 (m), `ring` sides, `segs` steps, radius r(s)
+function tube(b, f, sp, s0, s1, ring, segs, r, part, ph, tint) {
+  const L = f.petiole + f.rachis, base = b.n;
+  for (let k = 0; k <= segs; k++) {
+    const s = s0 + ((s1 - s0) * k) / segs, at = sp[Math.min(sp.length - 1, Math.round((s / L) * (sp.length - 1)))], rr = r(s / L);
+    for (let j = 0; j < ring; j++) {
+      const a = (j / ring) * Math.PI * 2, n = [at.b[0] * Math.cos(a) + at.n[0] * Math.sin(a), at.b[1] * Math.cos(a) + at.n[1] * Math.sin(a), at.b[2] * Math.cos(a) + at.n[2] * Math.sin(a)];
+      b.vert([at.p[0] + n[0] * rr, at.p[1] + n[1] * rr, at.p[2] + n[2] * rr], n, tint, [part, Math.cos(a), s / L, ph], [ph, s / L, 0, openAt(at.p)]);
+    }
+  }
+  for (let k = 0; k < segs; k++) for (let j = 0; j < ring; j++) {
+    const a = base + k * ring + j, c = base + k * ring + ((j + 1) % ring), d = a + ring, e = c + ring;
+    b.I.push(a, d, c, c, d, e);
+  }
+}
+const rachisR = (x) => 0.022 * (1 - 0.8 * x) + 0.004;
+// the fibrous leaf bases about the top of the trunk, from 0.6 m under it to a little over, and the spear, furled, straight up
+function sleeveAndSpear(b, crown, ring, spear) {
+  const R = KENTIA.crown.sheathR, H0 = -KENTIA.crown.sheath + 0.12, H1 = 0.14, rows = ring > 6 ? 4 : 2, base = b.n;
+  for (let k = 0; k <= rows; k++) {
+    const t = k / rows, y = H0 + (H1 - H0) * t, r = R * (0.75 + 0.35 * Math.sin(Math.PI * t)) * (1 - 0.35 * t * t);
+    for (let j = 0; j <= ring; j++) { const a = (j / ring) * Math.PI * 2; b.vert([Math.cos(a) * r, y, Math.sin(a) * r], [Math.cos(a), 0.2, Math.sin(a)], [1, 1, 1], [2, j / ring, t, 0.5], [0, 0, 0, 0.55]); }
+  }
+  for (let k = 0; k < rows; k++) for (let j = 0; j < ring; j++) { const a = base + k * (ring + 1) + j, c = a + 1, d = a + ring + 1, e = d + 1; b.I.push(a, d, c, c, d, e); }
+  if (!spear) return;
+  const H = crown.spear, sr = 6, sRows = 6, s0 = b.n;
+  for (let k = 0; k <= sRows; k++) {
+    const t = k / sRows, r = 0.035 * (1 - t) + 0.002, x = 0.05 * t * t;
+    for (let j = 0; j < sr; j++) { const a = (j / sr) * Math.PI * 2; b.vert([x + Math.cos(a) * r, 0.05 + H * t, Math.sin(a) * r], [Math.cos(a), 0.1, Math.sin(a)], [1, 1, 1], [3, 0, t, 0.5], [0.5, 0.3 * t, 0, 0.9]); }
+  }
+  for (let k = 0; k < sRows; k++) for (let j = 0; j < sr; j++) { const a = s0 + k * sr + j, c = s0 + k * sr + ((j + 1) % sr), d = a + sr, e = c + sr; b.I.push(a, d, c, c, d, e); }
+}
+// THE CROWN, WHOLE: every leaflet a blade of LEAFLET_RINGS rings (its width drawn out to a point, its two edges' normals
+// folded down from its midrib), the rachis and petiole a tube of five sides, the fibres a sleeve, the spear a thin cone
+export function crownGeometry(crown, { leaflets = KENTIA.frond.leaflets } = {}) {
+  const b = builder(), fold = Math.tan((KENTIA.frond.foldDeg * Math.PI) / 180);
   for (const f of crown.fronds) {
-    const sp = spineOf(f, 0.04), L = f.petiole + f.rachis, ph = hash(f.seed, 3, 3);
-    // an old frond a little yellower; a dead one brown
-    const tint = f.dead ? dead : [1 + 0.25 * f.age, 1 + 0.12 * f.age, 1];
-    // the rachis and petiole: thick at the base (a channelled stalk), thin at the tip
-    const ring = 5, segs = 16, base = nv;
-    for (let k = 0; k <= segs; k++) {
-      const s = (L * k) / segs, at = sp[Math.min(sp.length - 1, Math.round((s / L) * (sp.length - 1)))], r = 0.022 * (1 - 0.8 * (s / L)) + 0.004;
-      for (let j = 0; j < ring; j++) {
-        const a = (j / ring) * Math.PI * 2, n = [at.b[0] * Math.cos(a) + at.n[0] * Math.sin(a), at.b[1] * Math.cos(a) + at.n[1] * Math.sin(a), at.b[2] * Math.cos(a) + at.n[2] * Math.sin(a)];
-        vert([at.p[0] + n[0] * r, at.p[1] + n[1] * r, at.p[2] + n[2] * r], n, f.dead ? dead : [1, 1, 1], [1, Math.cos(a), s / L, ph], [ph, s / L, 0, open(at.p)]);
-      }
-    }
-    for (let k = 0; k < segs; k++) for (let j = 0; j < ring; j++) {
-      const a = base + k * ring + j, b = base + k * ring + ((j + 1) % ring), c = a + ring, d = b + ring;
-      I.push(a, c, b, b, c, d);
-    }
-    // the leaflets
+    const sp = spineOf(f, 0.04), L = f.petiole + f.rachis, ph = hash(f.seed, 3, 3), tint = tintOf(f);
+    tube(b, f, sp, 0, L, 5, 16, rachisR, 1, ph, f.dead ? DEAD : [1, 1, 1]);
     for (const lf of leafletsOf(f, leaflets)) {
-      const b0 = nv;
+      const b0 = b.n;
       for (const u of LEAFLET_RINGS) {
-        const e = leafletAt(sp, lf, u), w = (lf.wide * leafletWidth(u)) / 2, o = open(e.p);
+        const e = leafletAt(sp, lf, u), w = (lf.wide * leafletWidth(u)) / 2, o = openAt(e.p);
         for (const side of [1, -1]) {
           const p = [e.p[0] + e.w[0] * w * side, e.p[1] + e.w[1] * w * side, e.p[2] + e.w[2] * w * side];
           // folded down from its midrib (reduplicate): each half faces a little out to its own side
           const n = [e.n[0] + e.w[0] * fold * side, e.n[1] + e.w[1] * fold * side, e.n[2] + e.w[2] * fold * side], l = Math.hypot(n[0], n[1], n[2]);
-          vert(p, [n[0] / l, n[1] / l, n[2] / l], tint, [0, side, u, lf.q], [ph, lf.s / L, u, o]);
+          b.vert(p, [n[0] / l, n[1] / l, n[2] / l], tint, [0, side, u, lf.q], [ph, lf.s / L, u, o]);
         }
       }
       // the upper side is the front: (a, c, b) turns toward n = w x d
-      for (let k = 0; k < LEAFLET_RINGS.length - 1; k++) { const a = b0 + 2 * k, b = a + 1, c = a + 2, d = a + 3; I.push(a, c, b, b, c, d); }
+      for (let k = 0; k < LEAFLET_RINGS.length - 1; k++) { const a = b0 + 2 * k, c = a + 1, d = a + 2, e = a + 3; b.I.push(a, d, c, c, d, e); }
     }
   }
-  // the fibrous leaf bases: a sleeve about the top of the trunk, from 0.6 m under it to a little over
-  {
-    const R = KENTIA.crown.sheathR, H0 = -KENTIA.crown.sheath + 0.12, H1 = 0.14, ring = 10, rows = 4, base = nv;
-    for (let k = 0; k <= rows; k++) {
-      const t = k / rows, y = H0 + (H1 - H0) * t, r = R * (0.75 + 0.35 * Math.sin(Math.PI * t)) * (1 - 0.35 * t * t);
-      for (let j = 0; j <= ring; j++) { const a = (j / ring) * Math.PI * 2, n = [Math.cos(a), 0.2, Math.sin(a)]; vert([Math.cos(a) * r, y, Math.sin(a) * r], n, [1, 1, 1], [2, j / ring, t, 0.5], [0, 0, 0, 0.55]); }
-    }
-    for (let k = 0; k < rows; k++) for (let j = 0; j < ring; j++) { const a = base + k * (ring + 1) + j, b = a + 1, c = a + ring + 1, d = c + 1; I.push(a, c, b, b, c, d); }
+  sleeveAndSpear(b, crown, 10, true);
+  return b.geometry();
+}
+
+// THE FROND'S PICTURE for the cards: one row of a frond's leaflets laid flat, as kentia.js lays them (where each leaves the
+// rachis, at what angle, how long and wide, drawn out to a point), x along the rachis and y out from it, both in rachis
+// lengths. Its texels: how far along its leaflet (r), across it (-1..1 as g), the leaflet's own number (b; 0 the
+// rachis), and how much of the texel is leaf (a). Drawn once, on the GPU, with its smaller levels.
+export const CARD = { w: 1024, h: 256, x: 1.32, y: 0.3 };
+function cardLeaflets() {
+  const f = { petiole: 0, rachis: 2.35, age: 0.45, dead: false, seed: 4242 }, out = [];
+  for (const lf of leafletsOf(f).filter((l) => l.side === 1)) out.push([lf.x, lf.len / f.rachis, lf.wide / f.rachis, lf.insert, lf.q]);
+  return out;
+}
+const CARD_FRAG = `
+uniform vec4 uLf[ ${KENTIA.frond.leaflets} ]; uniform float uLq[ ${KENTIA.frond.leaflets} ];
+float lfWidth( float u ) { return u < 0.18 ? 0.45 + 0.55 * sin( 1.5707963 * u / 0.18 ) : max( 0.0, 1.0 - pow( ( u - 0.18 ) / 0.82, 1.35 ) ); }
+void main() {
+  vec2 p = gl_FragCoord.xy / vec2( ${CARD.w}.0, ${CARD.h}.0 ) * vec2( ${CARD.x}, ${CARD.y} ), px = vec2( ${CARD.x / CARD.w}, ${CARD.y / CARD.h} );
+  float best = 0.0; vec4 o = vec4( 0.0, 0.5, 0.0, 0.0 );
+  // the rachis: a strip along the inner edge
+  float rc = clamp( ( 0.0045 - p.y ) / px.y + 0.5, 0.0, 1.0 ) * step( p.x, 1.0 );
+  if ( rc > 0.0 ) { best = rc; o = vec4( p.x, 0.5, 0.0, rc ); }
+  for ( int k = 0; k < ${KENTIA.frond.leaflets}; k ++ ) {
+    vec4 l = uLf[ k ]; vec2 dir = vec2( cos( l.w ), sin( l.w ) ), nr = vec2( - dir.y, dir.x ), r = p - vec2( l.x, 0.0 );
+    float s = dot( r, dir ), c = dot( r, nr );
+    if ( s < 0.0 || s > l.y ) continue;
+    float u = s / l.y, hw = 0.5 * l.z * lfWidth( u ), e = hw - abs( c ), cov = clamp( e / px.y + 0.5, 0.0, 1.0 );
+    if ( cov > best ) { best = cov; o = vec4( u, 0.5 + 0.5 * clamp( c / max( hw, 1.0e-5 ), -1.0, 1.0 ), max( 0.05, uLq[ k ] ), cov ); }
   }
-  // the spear: the next leaf, still furled, straight up from the middle
-  {
-    const H = crown.spear, ring = 6, rows = 6, base = nv;
-    for (let k = 0; k <= rows; k++) {
-      const t = k / rows, r = 0.035 * (1 - t) + 0.002, x = 0.05 * t * t;
-      for (let j = 0; j < ring; j++) { const a = (j / ring) * Math.PI * 2; vert([x + Math.cos(a) * r, 0.05 + H * t, Math.sin(a) * r], [Math.cos(a), 0.1, Math.sin(a)], [1, 1, 1], [3, 0, t, 0.5], [0.5, 0.3 * t, 0, 0.9]); }
+  gl_FragColor = o;
+}`;
+const cards = new WeakMap();
+export function cardPicture(renderer) {
+  if (cards.has(renderer)) return cards.get(renderer);
+  const rt = new THREE.WebGLRenderTarget(CARD.w, CARD.h, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: true, depthBuffer: false, stencilBuffer: false });
+  rt.texture.wrapS = rt.texture.wrapT = THREE.ClampToEdgeWrapping;
+  const lfs = cardLeaflets();
+  const mat = new THREE.ShaderMaterial({ uniforms: { uLf: { value: lfs.map((l) => new THREE.Vector4(l[0], l[1], l[2], l[3])) }, uLq: { value: lfs.map((l) => l[4]) } },
+    vertexShader: 'void main() { gl_Position = vec4( position.xy, 0.0, 1.0 ); }', fragmentShader: CARD_FRAG, depthTest: false, depthWrite: false });
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  const quad = new THREE.Mesh(geo, mat); quad.frustumCulled = false; const sc = new THREE.Scene(); sc.add(quad);
+  const was = renderer.getRenderTarget(); renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); renderer.setRenderTarget(was);
+  geo.dispose(); mat.dispose();
+  rt.texture.userData.target = rt;              // (a probe reads it back)
+  cards.set(renderer, rt.texture);
+  return rt.texture;
+}
+// THE CROWN AS CARDS: each frond's two rows of leaflets a surface ruled by its leaflets (at each step along the rachis, a
+// leaflet's own curve from the rachis out and down, as kentia.js hangs it), the frond's picture laid on it so each
+// leaflet drawn in it lies along one of those curves; its petiole (`petiole`: two crossed strips), the fibres, the spear
+export function cardGeometry(crown, { segs = 6, rows = 2, petiole = true } = {}) {
+  const b = builder(true), F = KENTIA.frond;
+  for (const f of crown.fronds) {
+    const sp = spineOf(f, 0.04), L = f.petiole + f.rachis, ph = hash(f.seed, 3, 3), tint = tintOf(f);
+    for (const side of [1, -1]) {
+      const b0 = b.n;
+      for (let i = 0; i <= segs; i++) {
+        const x = i / segs, len = F.long * leafletLength(Math.min(1, x)) * (f.rachis / 2.35) * (f.dead ? 0.9 : 1), ins = (F.insertDeg[0] + (F.insertDeg[1] - F.insertDeg[0]) * x) * Math.PI / 180;
+        const lf = { s: f.petiole + x * f.rachis, x, side, len, wide: 0, insert: ins, roof: (F.roofDeg[0] + (F.roofDeg[1] - F.roofDeg[0]) * f.age + 8 * x) * Math.PI / 180,
+          droop: Math.min(1.6, F.droop[0] + (F.droop[1] - F.droop[0]) * f.age + 0.3 * x + (f.dead ? 0.25 : 0)) };
+        const ell = len / f.rachis;
+        for (let r = 0; r <= rows; r++) {
+          // (a little past the leaflets' own length: the picture's longer ones reach there)
+          const u = (1.12 * r) / rows, e = leafletAt(sp, lf, u);
+          b.vert(e.p, e.n, tint, [0, side, u, 0.5], [ph, lf.s / L, u, openAt(e.p)], [(x + u * ell * Math.cos(ins)) / CARD.x, (u * ell * Math.sin(ins)) / CARD.y], e.w);
+        }
+      }
+      // (wound so the leaflets' upper side is the front: on one side of the rachis the steps run the other way round)
+      const up = b.turns(b0 + 1, b0 + rows + 2, b0 + 2) >= 0;
+      for (let i = 0; i < segs; i++) for (let r = 0; r < rows; r++) {
+        const a = b0 + i * (rows + 1) + r, c = a + 1, d = a + rows + 1, e = d + 1;
+        if (up) b.I.push(a, d, c, c, d, e); else b.I.push(a, c, d, c, e, d);
+      }
     }
-    for (let k = 0; k < rows; k++) for (let j = 0; j < ring; j++) { const a = base + k * ring + j, b = base + k * ring + ((j + 1) % ring), c = a + ring, d = b + ring; I.push(a, c, b, b, c, d); }
+    if (petiole) {
+      // two strips crossed along the petiole and into the rachis
+      for (const which of [0, 1]) {
+        const b0 = b.n, n = 4, s1 = f.petiole + 0.3 * f.rachis;
+        for (let k = 0; k <= n; k++) {
+          const s = (s1 * k) / n, at = sp[Math.min(sp.length - 1, Math.round((s / L) * (sp.length - 1)))], r = rachisR(s / L) * 1.3, w = which ? at.n : at.b, nn = which ? at.b : at.n;
+          for (const sg of [1, -1]) b.vert([at.p[0] + w[0] * r * sg, at.p[1] + w[1] * r * sg, at.p[2] + w[2] * r * sg], nn, f.dead ? DEAD : [1, 1, 1], [1, sg, s / L, ph], [ph, s / L, 0, openAt(at.p)]);
+        }
+        for (let k = 0; k < n; k++) { const a = b0 + 2 * k, c = a + 1, d = a + 2, e = a + 3; b.I.push(a, d, c, c, d, e); }
+      }
+    }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setAttribute('aLeaf', new THREE.Float32BufferAttribute(A, 4)); g.setAttribute('aSway', new THREE.Float32BufferAttribute(W, 4));
-  g.setIndex(nv > 65535 ? new THREE.Uint32BufferAttribute(I, 1) : new THREE.Uint16BufferAttribute(I, 1));
-  return g;
+  sleeveAndSpear(b, crown, petiole ? 6 : 4, petiole);
+  return b.geometry();
 }
 // the trunk's one shape: a unit cylinder (radius 1, height 1), its rings closer near the foot (where it bends the most)
 export function trunkGeometry(sides = 12, rows = 18) {
@@ -369,56 +524,95 @@ export const variantOf = (p, n) => (p.h < 6 ? n / 2 : 0) + Math.floor(hash(p.id,
 const placeScratch = () => ({ E: new THREE.Euler(), Q: new THREE.Quaternion(), Q2: new THREE.Quaternion(), Q3: new THREE.Quaternion(), V: new THREE.Vector3(), V2: new THREE.Vector3(), V3: new THREE.Vector3(), V4: new THREE.Vector3(), S: new THREE.Vector3(),
   trunk: new THREE.Matrix4(), crown: new THREE.Matrix4(), at: new THREE.Vector4(), trunkNums: new THREE.Vector4() });
 
-// THE PALMS ROUND THE EYE, whole: `variants` crowns, each an instanced mesh, and the trunks; chosen again (nearest first)
-// as the eye moves. `twins`: the scene their shadow-map twins go in (terrain.js draws it into the shadow maps).
-export function createPalms(group, { lite = false, twins = null } = {}) {
-  const geos = [], mats = [], meshes = [];
-  // the crowns: the first half with dead fronds hanging (for palms tall enough to hang them), the rest without
+// THE PALMS ROUND THE EYE AND THE BODY: the whole ones round the eye (chosen again as it moves), the cards and the
+// six-sided trunks round the body (planted again as it goes: life.js's list). `twins`: the scene their shadow-map twins
+// go in (terrain.js draws it into the shadow maps).
+export function createPalms(group, { lite = false, twins = null, renderer }) {
+  const geos = [], mats = [], meshes = [], B = lite ? PLANTS.lite : PLANTS;
   const variants = Array.from({ length: PLANTS.variants }, (_, v) => crownOf(9001 + v * 7, { dead: v < PLANTS.variants / 2 }));
   const colours = { uLeafUp: { value: lin(LEAF.up) }, uLeafDown: { value: lin(LEAF.down) }, uThrough: { value: lin(LEAF.through) }, uRib: { value: lin(LEAF.rib) },
     uRachis: { value: lin(LEAF.rachis) }, uFibre: { value: lin(LEAF.fibre) }, uSpear: { value: lin(LEAF.spear) } };
   const bark = { uBarkGrey: { value: lin(BARK.grey) }, uBarkLichen: { value: lin(BARK.lichen) }, uBarkRing: { value: lin(BARK.ring) }, uBarkGreen: { value: lin(BARK.green) }, uBarkMoss: { value: lin(BARK.moss) } };
-  const heroLod = new THREE.Vector4(-1, lite ? 0 : PLANTS.hero, PLANTS.band, 0);
-  const MAXH = 160;
-  const crownMat = palmMaterial('crown', { lod: heroLod, extra: colours }); mats.push(crownMat);
-  const trunkMat = palmMaterial('trunk', { lod: heroLod, extra: bark }); mats.push(trunkMat);
-  const inst = (geo, mat, n, extra) => {
-    const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (const [name, size] of extra) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size); a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(name, a); }
-    group.add(m); meshes.push(m);
-    if (twins) twinOf(m, geo === trunkGeo ? 'trunk' : 'crown', heroLod, twins);
+  const card = cardPicture(renderer);
+  const lod = {
+    hero: new THREE.Vector4(-1, B.hero, PLANTS.band, 0),
+    near: new THREE.Vector4(B.hero > 0 ? B.hero : -1, B.near, PLANTS.band, 0),
+    mid: new THREE.Vector4(B.near, B.mid, PLANTS.band * 2, 0),
+    trunk: new THREE.Vector4(B.hero > 0 ? B.hero : -1, B.mid, PLANTS.band, 0),
+  };
+  const mat = (kind, l, opts = {}) => { const m = palmMaterial(kind, { lod: l, extra: kind === 'crown' ? colours : bark, ...opts }); mats.push(m); return m; };
+  const heroMat = mat('crown', lod.hero), nearMat = mat('crown', lod.near, { card }), midMat = mat('crown', lod.mid, { card });
+  const heroTrunkMat = mat('trunk', lod.hero), trunkMat = mat('trunk', lod.trunk);
+  // an instanced mesh: its own instances, or another's (`share`: the same matrices and numbers, another shape)
+  const inst = (geo, material, n, extra, kind, l, share = null) => {
+    const m = new THREE.InstancedMesh(geo, material, n); m.count = 0; m.frustumCulled = false;
+    if (share) { m.instanceMatrix = share.instanceMatrix; for (const [name] of extra) geo.setAttribute(name, share.geometry.attributes[name]); }
+    else { m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); for (const [name, size] of extra) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size); a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(name, a); } }
+    group.add(m); meshes.push(m); geos.push(geo);
+    if (twins) twinOf(m, kind, l, twins, kind === 'crown' && material.defines?.PALM_CARD !== undefined ? card : null);
     return m;
   };
-  const trunkGeo = trunkGeometry(12, 18); geos.push(trunkGeo);
-  const crowns = variants.map((c) => { const g = crownGeometry(c); geos.push(g); return inst(g, crownMat, MAXH, [['aAt', 4]]); });
-  const trunks = inst(trunkGeo, trunkMat, MAXH * 1, [['aAt', 4], ['aTrunk', 4]]);
+  const MAXH = 160, MAXN = lite ? 900 : 2000;
+  const heroCrowns = B.hero > 0 ? variants.map((c) => inst(crownGeometry(c), heroMat, MAXH, [['aAt', 4]], 'crown', lod.hero)) : [];
+  const heroTrunks = B.hero > 0 ? inst(trunkGeometry(12, 18), heroTrunkMat, MAXH, [['aAt', 4], ['aTrunk', 4]], 'trunk', lod.hero) : null;
+  const nearCrowns = variants.map((c) => inst(cardGeometry(c, { segs: 6, rows: 2, petiole: true }), nearMat, MAXN, [['aAt', 4]], 'crown', lod.near));
+  const midCrowns = variants.map((c, v) => inst(cardGeometry(c, { segs: 4, rows: 1, petiole: false }), midMat, MAXN, [['aAt', 4]], 'crown', lod.mid, nearCrowns[v]));
+  const trunks = inst(trunkGeometry(6, 8), trunkMat, MAXN, [['aAt', 4], ['aTrunk', 4]], 'trunk', lod.trunk);
   const scratch = placeScratch();
-  let at = null;
-  // the whole palms round the eye (x, z), nearest first; `list`: the palms round the body (life.js), nearest first
-  function choose(list, ex, ez) {
-    const R = heroLod.y + PLANTS.band + PLANTS.heroAgain + 2, counts = crowns.map(() => 0);
+  const put = (m, i, matrix) => { m.setMatrixAt(i, matrix); m.geometry.attributes.aAt.setXYZW(i, scratch.at.x, scratch.at.y, scratch.at.z, scratch.at.w); };
+  const putTrunk = (m, i) => { put(m, i, scratch.trunk); m.geometry.attributes.aTrunk.setXYZW(i, scratch.trunkNums.x, scratch.trunkNums.y, scratch.trunkNums.z, scratch.trunkNums.w); };
+  const done = (list) => { for (const m of list) { if (!m) continue; m.instanceMatrix.needsUpdate = true; for (const k of ['aAt', 'aTrunk']) if (m.geometry.attributes[k]) m.geometry.attributes[k].needsUpdate = true; } };
+  const twinCounts = () => { for (const m of meshes) if (m.userData.isleTwin) { m.userData.isleTwin.count = m.count; m.userData.isleTwin.userData.isleNear = m.userData.isleNear; } };
+  let heroAt = null, list = [];
+  // the cards and trunks round the body: every palm of the list, nearest first, each in its crown's mesh; the fine cards
+  // only as far out as the eye can be from the body before the next planting, plus their band
+  function plantBody(l, cx, cz) {
+    list = l;
+    const counts = variants.map(() => 0), dist = variants.map(() => []), td = [], reach = B.near + PLANTS.band + 22 + 14;
+    let nt = 0;
+    for (const p of list) {
+      if (nt >= MAXN) break;
+      placePalm(p, scratch);
+      const v = variantOf(p, variants.length), i = counts[v]++, d = Math.hypot(p.x - cx, p.z - cz);
+      put(nearCrowns[v], i, scratch.crown); dist[v].push(d);
+      putTrunk(trunks, nt); td.push(d); nt++;
+    }
+    variants.forEach((_, v) => {
+      const d = Float32Array.from(dist[v]), near = { x: cx, z: cz, d, tall: 14.5 };
+      let k = 0; while (k < d.length && d[k] <= reach) k++;
+      nearCrowns[v].count = k; midCrowns[v].count = counts[v];
+      nearCrowns[v].userData.isleNear = midCrowns[v].userData.isleNear = near;
+    });
+    trunks.count = nt; trunks.userData.isleNear = { x: cx, z: cz, d: Float32Array.from(td), tall: 14.5 };
+    done([...nearCrowns, trunks]); twinCounts();
+  }
+  // the whole palms round the eye (x, z), nearest first
+  function plantEye(ex, ez) {
+    heroAt = [ex, ez];
+    if (!heroTrunks) return;
+    const R = B.hero + PLANTS.band + PLANTS.heroAgain + 2, counts = heroCrowns.map(() => 0), dist = heroCrowns.map(() => []), td = [];
     let nt = 0;
     const near = list.map((p) => [p, Math.hypot(p.x - ex, p.z - ez)]).filter((q) => q[1] < R).sort((a, b) => a[1] - b[1]);
-    for (const [p] of near) {
+    for (const [p, d] of near) {
       if (nt >= MAXH) break;
       placePalm(p, scratch);
-      const v = variantOf(p, crowns.length), m = crowns[v], i = counts[v]++;
-      m.setMatrixAt(i, scratch.crown); m.geometry.attributes.aAt.setXYZW(i, scratch.at.x, scratch.at.y, scratch.at.z, scratch.at.w);
-      trunks.setMatrixAt(nt, scratch.trunk); trunks.geometry.attributes.aAt.setXYZW(nt, scratch.at.x, scratch.at.y, scratch.at.z, scratch.at.w);
-      trunks.geometry.attributes.aTrunk.setXYZW(nt, scratch.trunkNums.x, scratch.trunkNums.y, scratch.trunkNums.z, scratch.trunkNums.w);
-      nt++;
+      const v = variantOf(p, heroCrowns.length), i = counts[v]++;
+      put(heroCrowns[v], i, scratch.crown); dist[v].push(d);
+      putTrunk(heroTrunks, nt); td.push(d); nt++;
     }
-    crowns.forEach((m, v) => { m.count = counts[v]; m.instanceMatrix.needsUpdate = true; m.geometry.attributes.aAt.needsUpdate = true; });
-    trunks.count = nt; trunks.instanceMatrix.needsUpdate = true; trunks.geometry.attributes.aAt.needsUpdate = true; trunks.geometry.attributes.aTrunk.needsUpdate = true;
-    for (const m of meshes) if (m.userData.isleTwin) m.userData.isleTwin.count = m.count;
-    at = [ex, ez];
-    return nt;
+    heroCrowns.forEach((m, v) => { m.count = counts[v]; m.userData.isleNear = { x: ex, z: ez, d: Float32Array.from(dist[v]), tall: 14.5 }; });
+    heroTrunks.count = nt; heroTrunks.userData.isleNear = { x: ex, z: ez, d: Float32Array.from(td), tall: 14.5 };
+    done([...heroCrowns, heroTrunks]); twinCounts();
   }
   return {
-    meshes, variants,
-    update(list, eye, moved) { if (moved || !at || Math.hypot(eye.x - at[0], eye.z - at[1]) > PLANTS.heroAgain) choose(list, eye.x, eye.z); },
-    get count() { return trunks.count; },
-    dispose() { for (const m of meshes) { group.remove(m); const t = m.userData.isleTwin; if (t) { t.parent?.remove(t); t.material.dispose(); } } for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); },
+    meshes, variants, lod,
+    // a frame: `l` the palms round the body (newly planted when `moved`), `eye` the camera's place
+    update(l, eye, moved, at) {
+      if (moved) plantBody(l, at[0], at[1]);
+      if (moved || !heroAt || Math.hypot(eye.x - heroAt[0], eye.z - heroAt[1]) > PLANTS.heroAgain) plantEye(eye.x, eye.z);
+    },
+    get count() { return heroTrunks ? heroTrunks.count : 0; },
+    dispose() { for (const m of meshes) { group.remove(m); const t = m.userData.isleTwin; if (t) { t.parent?.remove(t); t.material.dispose(); } } for (const g of new Set(geos)) g.dispose(); for (const m of mats) m.dispose(); },
   };
 }
 

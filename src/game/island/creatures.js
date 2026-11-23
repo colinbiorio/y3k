@@ -81,7 +81,7 @@ export function createLife(scene, { lite = false, ground, shape, look = null }) 
   // ---- the palms (plants.js): the list round the body, nearest first, planted again as the body goes; how each is drawn
   // goes by its distance from the eye (frame, below)
   const NEAR = lite ? 115 : PALM.near;
-  const palms = createPalms(group, { lite, twins: look ? look.twins : null });
+  const palms = createPalms(group, { lite, twins: look ? look.twins : null, renderer: look?.parts?.renderer });
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3(), S = new THREE.Vector3();
   let palmAt = null, sites = '', list = [], planted = false;
   // the palms round (cx, cz), but none where a building stands (skip(x, z))
@@ -121,7 +121,7 @@ export function createLife(scene, { lite = false, ground, shape, look = null }) 
     group, plant, palms,
     // a frame's palms as the eye sees them (island.js, before the shadow maps): the shaders' time and eye, and the whole
     // palms round the eye chosen again as it moves
-    frame(camera) { plantsFrame(time.value, camera.position); palms.update(list, camera.position, planted); planted = false; },
+    frame(camera) { plantsFrame(time.value, camera.position); palms.update(list, camera.position, planted, palmAt); planted = false; },
     // one frame: the palms round the body (planted again as it goes), the birds where they are at t, the hens and
     // turtles a step on; a turtle breaking the surface rings the water
     live(dt, t, body, drop, world = null) {
