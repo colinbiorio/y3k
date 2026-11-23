@@ -200,7 +200,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   scene.add(sea);
 
   // ---- what grows and lives there (creatures.js, from life.js)
-  const life = createLife(scene, { lite, ground, shape });
+  const life = createLife(scene, { lite, ground, shape, look });
 
   // ---- the lights, by name
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -268,6 +268,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
       // the ground's shadows: the land's own lines toward the key light, the shadow maps round the eye; and whatever lit
       // thing has come into the scene takes them (terrain.js adoptAll)
+      life.frame(camera);                               // the palms as the eye sees them (plants.js), before the shadow maps are drawn
       look.update({ camera, dir: skyU.uSun.value, body: bodyAt });
       if (adoptN++ % 10 === 0) look.adoptAll(scene);           // a walk over the whole scene: a sixth of a second is soon enough for a new thing
     },

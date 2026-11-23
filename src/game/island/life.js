@@ -62,7 +62,8 @@ export function palmsNear(ground, x, z, r = PALM.near) {
     if ((px - x) ** 2 + (pz - z) ** 2 > r * r) continue;
     const kind = cover(ground, px, pz);
     if (kind !== 'forest' && !(kind === 'grass' && hash(i, j, 7) < 0.22)) continue;    // the forest; a palm here and there on the flats
-    out.push({ x: px, z: pz, y: ground.height(px, pz), h: 7 + 7 * hash(i, j, 4), lean: 0.12 * hash(i, j, 5), turn: 6.283 * hash(i, j, 6), id: i * 100003 + j });
+    // its trunk 2.5 to 14 m (the forest's palms of every age: many short, a few emergent, as on the island)
+    out.push({ x: px, z: pz, y: ground.height(px, pz), h: 2.5 + 11.5 * Math.pow(hash(i, j, 4), 1.3), lean: 0.12 * hash(i, j, 5), turn: 6.283 * hash(i, j, 6), id: i * 100003 + j });
   }
   return out;
 }

@@ -143,6 +143,9 @@ float isleGround( highp sampler2D hts, vec2 n, vec2 g ) {
 }`;
 // how much of the key light's disc the land leaves in sight at a world point, and the shadow maps' word on it
 const LIGHT_PARS = `
+#ifndef ISLE_SHADE_N
+#define ISLE_SHADE_N geometryNormal
+#endif
 uniform float uIsleOn; uniform mat4 uIsleV2W; uniform highp sampler2D uIsleHt; uniform sampler2D uIsleLines; uniform vec4 uIsleGrid; uniform vec2 uIsleN; uniform vec4 uIsleSplit;
 uniform highp sampler2DShadow uIsleShade0; uniform highp sampler2DShadow uIsleShade1; uniform highp sampler2DShadow uIsleShade2;
 uniform mat4 uIsleShadeM[ 3 ]; uniform vec3 uIsleShadeO; uniform vec3 uIsleShadeT; uniform vec3 uIsleShadeZ;
@@ -202,7 +205,7 @@ const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	isleShadeK = seaH < 22.0 ? isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) ) : ( uIsleOn < 0.5 ? 1.0 : isleLand( vW, seaD0 ) );
 	float isleShade = isleShadeK * seaCaustic;
 	#else
-	float isleShade = isleKey( geometryPosition, geometryNormal, ISLE_OVER );
+	float isleShade = isleKey( geometryPosition, ISLE_SHADE_N, ISLE_OVER );
 	#endif
 	#pragma unroll_loop_start
 	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
@@ -898,6 +901,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   const RIGHT = new THREE.Vector3(), UPV = new THREE.Vector3(), Z = new THREE.Vector3(), CEN = new THREE.Vector3(), FWD = new THREE.Vector3(), UP0 = new THREE.Vector3();
   let frameNo = 0;
   const LAST = new THREE.Vector3(), crowds = [], lastDrawn = [];      // the instanced crowds planted nearest first (adoptAll finds them); what each map last drew
+  const twins = new THREE.Scene();                                    // what draws itself into the maps through a twin (plants.js)
   function drawMaps(camera, dir) {
     const ty = Math.tan((camera.fov * Math.PI) / 360), tx = ty * camera.aspect, k = Math.hypot(tx, ty);
     Z.copy(dir).normalize();
@@ -922,13 +926,17 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
         // an instanced crowd planted nearest first (creatures.js isleNear: the palms) is drawn only as far as its shadows can
         // reach this map: its reach, a tall thing's shadow at this light's height, and how far the planting may lag
         const reach = Math.hypot(CEN.x - camera.position.x, CEN.z - camera.position.z) + r + Math.min(400, 14.5 / Math.max(0.035, Math.tan(Math.asin(Math.min(1, Math.max(0.01, Z.y)))))) + 25;
-        for (const m of crowds) { const nb = m.userData.isleNear; if (!nb || !m.parent) continue; m.userData.isleCount = m.count; const lim = reach + Math.hypot(camera.position.x - nb.x, camera.position.z - nb.z); let lo = 0, hi = Math.min(m.count, nb.d.length); while (lo < hi) { const mid = (lo + hi) >> 1; if (nb.d[mid] <= lim) lo = mid + 1; else hi = mid; } m.count = lo; }
+        for (const m of crowds.concat(twins.children)) { const nb = m.userData.isleNear; if (!nb || !m.parent) continue; m.userData.isleCount = m.count; const lim = reach + Math.hypot(camera.position.x - nb.x, camera.position.z - nb.z); let lo = 0, hi = Math.min(m.count, nb.d.length); while (lo < hi) { const mid = (lo + hi) >> 1; if (nb.d[mid] <= lim) lo = mid + 1; else hi = mid; } m.count = lo; }
         const cam = c.cam, depthRange = 2 * r + CASCADES.margin;
         cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r; cam.near = 0.1; cam.far = depthRange; cam.up.copy(UP0);
         cam.position.copy(CEN).addScaledVector(Z, r + CASCADES.margin); cam.lookAt(CEN); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
         renderer.setRenderTarget(c.target); renderer.clear(false, true, false); renderer.render(scene, cam);
-        lastDrawn[i] = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
-        for (const m of crowds) if (m.userData.isleCount !== undefined) { m.count = m.userData.isleCount; delete m.userData.isleCount; }
+        let calls = renderer.info.render.calls, tris = renderer.info.render.triangles;
+        // what draws itself into the maps through a twin of its own (plants.js: the palms, swaying and handed from one way
+        // of drawing to the next as they are seen)
+        if (twins.children.length) { renderer.autoClear = false; renderer.render(twins, cam); renderer.autoClear = true; calls += renderer.info.render.calls; tris += renderer.info.render.triangles; }
+        lastDrawn[i] = { calls, triangles: tris };
+        for (const m of crowds.concat(twins.children)) if (m.userData.isleCount !== undefined) { m.count = m.userData.isleCount; delete m.userData.isleCount; }
         c.drawn = true; c.frame = frameNo; c.at.copy(CEN);
         SHARED.uIsleShadeM.value[i].multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
         // (the nearest map is read with four comparisons, a soft edge round the body; the others with one: their texels
@@ -965,6 +973,8 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     // a probe's switches, to measure what each part costs (nothing in the game sets them), and its handles
     debug: { shadows: true, lines: true, variant: VARIANT, recompile() { for (const o of landRefs) { o.defines = { ...(o.userData.isleDefines ||= { ...(o.defines || {}) }), ...VARIANT.defines }; o.needsUpdate = true; } } },
     parts: { scene, cascades, renderer, uniforms, water },
+    // the maps' own casters: twins of what is drawn otherwise (plants.js), each put on the maps' layer
+    twins,
     // the land's own material from island.js's (its flats' cut runs first), and the levelled ground's
     land: (base, cut) => { const m = landMaterial(base, { lite, flat: false, uniforms, cut }); landRefs.push(m); return m; },
     flat: (base, cut) => { const m = landMaterial(base, { lite, flat: true, uniforms, cut }); landRefs.push(m); return m; },
@@ -996,7 +1006,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
         }
         if (!lit) return;
         o.userData.isleSeen = true; o.receiveShadow = true;
-        if (!o.userData.isleLand) o.layers.enable(CASCADES.layer);
+        if (!o.userData.isleLand && !o.userData.isleTwin) o.layers.enable(CASCADES.layer);         // (a thing with a twin casts through it)
         if (o.isInstancedMesh && !crowds.includes(o)) crowds.push(o);                 // (whether it is planted nearest first is asked as it is drawn)
       });
     },
