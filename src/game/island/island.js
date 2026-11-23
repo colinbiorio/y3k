@@ -20,9 +20,9 @@
 import * as THREE from 'three';
 import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
 import { SEA_FLOOR, seaSheet } from './ground.js';
-import { vnoise } from './life.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
+import { createGroundLook } from './terrain.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -48,23 +48,6 @@ const SKY_FRAG = `
     #include <colorspace_fragment>
   }`;
 
-// what the ground is, as a colour (sRGB-ish albedo): by height, steepness, and a slow noise
-function groundColour(h, s, n, out) {
-  let r, g, b;
-  // (the beach and the sea's floor are coloured by the fragment, from the true height: see landMat)
-  if (s > 0.95) {                                    // bare basalt
-    r = 0.30 + 0.07 * n; g = 0.27 + 0.06 * n; b = 0.24 + 0.05 * n;
-  } else if (h > 640) {                              // the mist forest's moss on Gower's top
-    r = 0.09; g = 0.18; b = 0.08;
-  } else {
-    const grass = (h < 26 && s < 0.2 ? 1 : 0) * Math.min(1, Math.max(0, (n - 0.35) * 2.2)), steep = Math.min(1, Math.max(0, (s - 0.6) / 0.35));
-    r = 0.07 + 0.3 * grass; g = 0.17 + 0.3 * grass; b = 0.05 + 0.1 * grass;             // palm forest, or grass on the flats
-    r += (0.3 - r) * steep * 0.7; g += (0.28 - g) * steep * 0.7; b += (0.24 - b) * steep * 0.7;   // thinning to rock where it steepens
-  }
-  // to the light's own units (the drawing works in linear light)
-  out[0] = r ** 2.2 * 2.2; out[1] = g ** 2.2 * 2.2; out[2] = b ** 2.2 * 2.2;
-}
-
 // The sea's sheet (ground.js seaSheet: rings round the eye, all at y = 0, facing up), as a mesh.
 function seaRings() {
   const { pos, idx } = seaSheet(), g = new THREE.BufferGeometry();
@@ -73,17 +56,17 @@ function seaRings() {
   return g;
 }
 
-// One grid as a mesh: the cells any corner of which is above `deepest`, as the two triangles ground.js stands on
+// One grid as a mesh: the cells any corner of which is above `deepest`, as the two triangles ground.js stands on. What
+// each point is made of is worked out per pixel by terrain.js (life.js's cover(), the scans), not carried here.
 function gridMesh(a, w, h, x0, z0, S, deepest) {
-  const keep = new Int32Array(w * h).fill(-1), pos = [], nor = [], col = [], idx = [], c = [0, 0, 0];
+  const keep = new Int32Array(w * h).fill(-1), pos = [], nor = [], idx = [];
   const H = (i, j) => a[Math.max(0, Math.min(h - 1, j)) * w + Math.max(0, Math.min(w - 1, i))];
   const vert = (i, j) => {
     const k = j * w + i;
     if (keep[k] >= 0) return keep[k];
-    const y = a[k], dx = (H(i + 1, j) - H(i - 1, j)) / (2 * S), dz = (H(i, j + 1) - H(i, j - 1)) / (2 * S), m = Math.hypot(dx, dz);
+    const y = a[k], dx = (H(i + 1, j) - H(i - 1, j)) / (2 * S), dz = (H(i, j + 1) - H(i, j - 1)) / (2 * S);
     const n = new THREE.Vector3(-dx, 1, -dz).normalize(), x = x0 + i * S, z = z0 + j * S;
-    groundColour(y, m, vnoise(x / 70, z / 70) * 0.7 + vnoise(x / 17, z / 17) * 0.3, c);
-    keep[k] = pos.length / 3; pos.push(x, y, z); nor.push(n.x, n.y, n.z); col.push(c[0], c[1], c[2]);
+    keep[k] = pos.length / 3; pos.push(x, y, z); nor.push(n.x, n.y, n.z);
     return keep[k];
   };
   for (let j = 0; j < h - 1; j++) for (let i = 0; i < w - 1; i++) {
@@ -94,7 +77,7 @@ function gridMesh(a, w, h, x0, z0, S, deepest) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+  g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   g.computeBoundingSphere();
   return g;
 }
@@ -123,85 +106,63 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   const key = new THREE.DirectionalLight(0xffffff, 2), fill = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
   scene.add(key, key.target, fill);
   scene.fog = air ? air.fog : new THREE.FogExp2(0xffffff, 3.6e-5);
-  // ---- the land and the shallows round it, and Ball's Pyramid
-  const landMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, envMapIntensity: 0.35 }); mats.push(landMat);
+  // ---- the ground (terrain.js): what each pixel of it is made of, the land's own shadow and the sky's share, and the
+  // shadow maps round the eye for what stands on it. A phone (a coarse pointer on a small screen) takes the lighter path:
+  // the 512 maps, one scale read from above, two shadow maps.
+  const phone = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches && Math.min(globalThis.screen?.width || 1e4, globalThis.screen?.height || 1e4) < 900;
+  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key });
+  // ---- the land and the shallows round it, and Ball's Pyramid. Under the true sky the land takes the whole of the
+  // wrapped sky's light (the other half of the sky's fill: sky.js); under the present one, as it was painted (0.35).
   // ground levelled for a building (../plinth.js levelFor, ground.flats): the land's own triangles are let go of where
   // they stand above the levelled ground (FLATS_CUT), and a mesh of its own draws it (flatMat, below): at most FLATS
   const flatU = { uFlatN: { value: 0 }, uFlatA: { value: Array.from({ length: FLATS }, () => new THREE.Vector4()) },
     uFlatB: { value: Array.from({ length: FLATS }, () => new THREE.Vector4()) }, uFlatC: { value: Array.from({ length: FLATS }, () => new THREE.Vector4()) } };
-  landMat.defines = { FLATS_CUT: '' };
-  landMat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, flatU);
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-      varying vec3 vW;
-      uniform int uFlatN; uniform vec4 uFlatA[${FLATS}]; uniform vec4 uFlatB[${FLATS}]; uniform vec4 uFlatC[${FLATS}];
-      float gh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-      float gn(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f); return mix(mix(gh(i), gh(i + vec2(1, 0)), u.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), u.x), u.y); }`)
-      .replace('#include <color_fragment>', `#include <color_fragment>
-        #ifdef FLATS_CUT
-        for (int i = 0; i < ${FLATS}; i++) {
-          if (i >= uFlatN) break;
-          vec4 A = uFlatA[i], B = uFlatB[i], C = uFlatC[i];
-          vec2 d = vW.xz - A.xy; float c = cos(A.z), s = sin(A.z);
-          vec2 l = vec2(c * d.x - s * d.y, s * d.x + c * d.y), m = vec2(B.x + B.y, B.z + B.w) * 0.5, hs = vec2(B.y - B.x, B.w - B.z) * 0.5 - C.z;
-          vec2 q = abs(l - m) - hs; float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - C.z;
-          if (C.y * (1.0 - smoothstep(0.0, C.x, sd)) * (vW.y - A.w) > 0.05) discard;
-        }
-        #endif
-        float gd = length(vW - cameraPosition);
-        vec3 nw = normalize(cross(dFdx(vW), dFdy(vW))); float level = clamp(abs(nw.y), 0.0, 1.0);
-        // the forest's canopy from above: crowns of palm a few metres across, light on their tops, dark between
-        float crowns = gn(vW.xz * 0.21) * 0.6 + gn(vW.xz * 0.53 + 9.0) * 0.4;
-        diffuseColor.rgb *= mix(1.0, 0.62 + 0.7 * crowns, smoothstep(0.12, 0.0, abs(diffuseColor.g - 0.075)) * 0.9 + 0.1);
-        // a grain in the ground, finer near the eye: tufts, stones
-        float grain = 0.55 * gn(vW.xz * 0.9) + 0.3 * gn(vW.xz * 3.7) + 0.15 * gn(vW.xz * 13.0);
-        diffuseColor.rgb *= mix(0.8 + 0.4 * grain, 1.0, smoothstep(60.0, 900.0, gd));
-        diffuseColor.rgb *= 0.88 + 0.24 * gn(vW.xz * 0.018);
-        // the beach: pale sand where the ground is low and gentle, its edge wandering, wet and darker at the water
-        float sandy = smoothstep(2.9, 1.7, vW.y + 0.8 * (gn(vW.xz * 0.05) - 0.5)) * smoothstep(0.86, 0.95, level);
-        vec3 sand = vec3(0.74, 0.64, 0.45) * (0.9 + 0.2 * grain);
-        sand *= mix(0.72, 1.0, smoothstep(-0.1, 0.5, vW.y));
-        // under the sea: sand going darker with depth; coral heads on the lagoon's flats
-        float sea = smoothstep(0.05, -0.25, vW.y);
-        vec3 floorCol = vec3(0.64, 0.56, 0.38) * mix(1.0, 0.35, smoothstep(0.0, 16.0, -vW.y)) * vec3(0.86, 0.97, 1.0);
-        floorCol = mix(floorCol, vec3(0.44, 0.38, 0.26), smoothstep(0.62, 0.74, gn(vW.xz * 0.11 + 3.0)) * smoothstep(-3.0, -0.6, vW.y) * sea * 0.7);
-        diffuseColor.rgb = mix(diffuseColor.rgb, sand, max(sandy, sea));
-        diffuseColor.rgb = mix(diffuseColor.rgb, floorCol, sea);`);
+  const cut = {
+    uniforms: flatU,
+    pars: `uniform int uFlatN; uniform vec4 uFlatA[${FLATS}]; uniform vec4 uFlatB[${FLATS}]; uniform vec4 uFlatC[${FLATS}];`,
+    body: `
+      #ifdef FLATS_CUT
+      for (int i = 0; i < ${FLATS}; i++) {
+        if (i >= uFlatN) break;
+        vec4 A = uFlatA[i], B = uFlatB[i], C = uFlatC[i];
+        vec2 d = vW.xz - A.xy; float c = cos(A.z), s = sin(A.z);
+        vec2 l = vec2(c * d.x - s * d.y, s * d.x + c * d.y), m = vec2(B.x + B.y, B.z + B.w) * 0.5, hs = vec2(B.y - B.x, B.w - B.z) * 0.5 - C.z;
+        vec2 q = abs(l - m) - hs; float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - C.z;
+        if (C.y * (1.0 - smoothstep(0.0, C.x, sd)) * (vW.y - A.w) > 0.05) discard;
+      }
+      #endif
+`,
   };
+  // two of it: the land as it is, and the land with the cut, drawn only while a levelling stands (a shader that can
+  // discard a pixel cannot have its hidden pixels dropped before it runs on a tiled GPU: 0.6 ms a frame at 2940 x 1912)
+  const landMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(landMat);
+  const landCutMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(landCutMat);
+  landCutMat.defines = { FLATS_CUT: '' };
   // the levelled ground's own material: the land's, without the cut, a little toward the eye where the two meet
-  const flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, envMapIntensity: 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }); mats.push(flatMat);
-  flatMat.onBeforeCompile = landMat.onBeforeCompile;
+  const flatMat = look.flat(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); mats.push(flatMat);
   const flatMeshes = new Map();
   // one levelling's mesh: a grid in its building's frame over the pad and its eased edge (cells wholly outside it left
-  // out), each point its ground as the tiles have it and how much of the level it takes; its colour that of the ground
-  // it becomes (packed earth on the pad, eased into what was there)
+  // out), each point its ground as the tiles have it and how much of the level it takes, and how much of it is the pad's
+  // packed earth (eased into what was there; terrain.js draws the rest as the ground it becomes)
   function flatMesh(f) {
     const pad = f.pad, m = f.blend + 0.5, cell = lite ? 2 : 1, X0 = pad[0] - m, X1 = pad[1] + m, Z0 = pad[2] - m, Z1 = pad[3] + m;
     const nx = Math.max(2, Math.min(150, Math.ceil((X1 - X0) / cell))), nz = Math.max(2, Math.min(150, Math.ceil((Z1 - Z0) / cell))), n = (nx + 1) * (nz + 1);
-    const pos = new Float32Array(n * 3), base = new Float32Array(n), wt = new Float32Array(n), col = new Float32Array(n * 3), fin = new Float32Array(n), idx = [], c = [0, 0, 0];
+    const pos = new Float32Array(n * 3), base = new Float32Array(n), wt = new Float32Array(n), earth = new Float32Array(n), idx = [];
     for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
       const k = j * (nx + 1) + i, lx = X0 + ((X1 - X0) * i) / nx, lz = Z0 + ((Z1 - Z0) * j) / nz, [x, z] = padWorld(f, lx, lz);
       const t = Math.max(0, Math.min(1, padDistance(pad, lx, lz) / f.blend)), w = 1 - t * t * (3 - 2 * t);
-      base[k] = ground.base(x, z); wt[k] = w; fin[k] = base[k] + w * (f.level - base[k]); pos[k * 3] = x; pos[k * 3 + 2] = z;
+      base[k] = ground.base(x, z); wt[k] = w; pos[k * 3] = x; pos[k * 3 + 2] = z;
     }
-    const sx = (X1 - X0) / nx, sz = (Z1 - Z0) / nz;
-    for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
-      const k = j * (nx + 1) + i, F = (a, b) => fin[Math.max(0, Math.min(nz, b)) * (nx + 1) + Math.max(0, Math.min(nx, a))];
-      const slope = Math.hypot((F(i + 1, j) - F(i - 1, j)) / (2 * sx), (F(i, j + 1) - F(i, j - 1)) / (2 * sz)), x = pos[k * 3], z = pos[k * 3 + 2];
-      groundColour(fin[k], slope, vnoise(x / 70, z / 70) * 0.7 + vnoise(x / 17, z / 17) * 0.3, c);
-      const e = Math.max(0, Math.min(1, (wt[k] - 0.55) / 0.45)), earth = [0.42 ** 2.2 * 2.2, 0.35 ** 2.2 * 2.2, 0.26 ** 2.2 * 2.2];
-      for (let q = 0; q < 3; q++) col[k * 3 + q] = c[q] + (earth[q] - c[q]) * e * (0.85 + 0.15 * vnoise(x / 5, z / 5));
-    }
+    for (let k = 0; k < n; k++) earth[k] = Math.max(0, Math.min(1, (wt[k] - 0.55) / 0.45));
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
       const a = j * (nx + 1) + i, b = a + 1, d = a + nx + 1, e = d + 1;
       if (Math.max(wt[a], wt[b], wt[d], wt[e]) <= 0) continue;
       idx.push(a, d, b, b, d, e);
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aEarth', new THREE.BufferAttribute(earth, 1));
     g.setIndex(n > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
-    const mesh = new THREE.Mesh(g, flatMat); mesh.receiveShadow = true; mesh.userData = { base, wt, k: -1 };
+    const mesh = new THREE.Mesh(g, flatMat); mesh.receiveShadow = true; mesh.userData = { base, wt, k: -1, isleLand: true };
     return mesh;
   }
   // the levellings now on the ground, drawn as far as each is come; asked each frame
@@ -221,11 +182,12 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       flatU.uFlatA.value[i].set(f.x, f.z, f.yaw, f.level); flatU.uFlatB.value[i].set(...f.pad); flatU.uFlatC.value[i].set(f.blend, f.k, 1.0, 0);
     });
     flatU.uFlatN.value = list.length;
+    land.material = list.length ? landCutMat : landMat;
   }
   const landGeo = gridMesh(ground.hts.main, head.w, head.h, head.x0, head.z0, S, lite ? -6 : -16); geos.push(landGeo);
-  const land = new THREE.Mesh(landGeo, landMat); scene.add(land);
+  const land = new THREE.Mesh(landGeo, landMat); land.userData.isleLand = true; land.receiveShadow = true; scene.add(land);
   const pyrGeo = gridMesh(ground.hts.pyramid, head.pw, head.ph, head.px0, head.pz0, S, -16); geos.push(pyrGeo);
-  scene.add(new THREE.Mesh(pyrGeo, landMat));
+  const pyramid = new THREE.Mesh(pyrGeo, landMat); pyramid.userData.isleLand = true; pyramid.receiveShadow = true; scene.add(pyramid);
 
   // ---- the sea
   const hTex = heightTexture(ground.hts.main, head.w, head.h), pTex = heightTexture(ground.hts.pyramid, head.pw, head.ph); texs.push(hTex, pTex);
@@ -328,7 +290,11 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   function setLight(name) {
     const L = ISLAND_LIGHTS[name] || ISLAND_LIGHTS.pale;
     lightName = ISLAND_LIGHTS[name] ? name : 'pale';
-    if (air) return lightName;                       // the true sky is lit by the clock, not by a name
+    // the true sky is lit by the clock, not by a name; under it the ground's colours are its own (terrain.js). The present
+    // light was painted for a ground of brighter colours (its sand reflected 0.65 to 0.74): under it the ground is raised
+    // by 0.15, so the island keeps the brightness it had
+    look.paint = air ? 1 : 1.15;
+    if (air) return lightName;
     skyU.uZenith.value.setRGB(...L.zenith); skyU.uHorizon.value.setRGB(...L.horizon);
     skyU.uSun.value.set(...L.sun).normalize(); skyU.uSunCol.value.setRGB(...L.sunCol); skyU.uStars.value = L.stars;
     key.color.setRGB(...L.sunCol); key.intensity = L.sunAmt * indoor;
@@ -344,6 +310,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     return lightName;
   }
   setLight(light);
+  let bodyAt = null, adoptN = 0;        // where the body is (live): the palms are drawn round it, the canopy beyond them
 
   return {
     scene, drops, place: 'island', ground, shape, life,
@@ -356,6 +323,8 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     drop(x, z, amp = 0.1) { if (ground.height(x, z) < 0) drops.add(x, z, time.value, amp); },
     rebase() {},
     resize() {},
+    // the ground's numbers, for the probes (terrain.js read)
+    get ground() { return look; },
     update(t, camera) {
       time.value = t;
       flats();
@@ -364,11 +333,15 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       sea.position.set(camera.position.x, 0, camera.position.z);
       key.target.position.set(camera.position.x, 0, camera.position.z);
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
+      // the ground's shadows: the land's own lines toward the key light, the shadow maps round the eye; and whatever lit
+      // thing has come into the scene takes them (terrain.js adoptAll)
+      look.update({ camera, dir: skyU.uSun.value, body: bodyAt });
+      if (adoptN++ % 10 === 0) look.adoptAll(scene);           // a walk over the whole scene: a sixth of a second is soon enough for a new thing
     },
     // the island's life, a frame on: the palms round the body, the birds, the woodhens, the turtles
-    live(dt, t, body, world) { life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
+    live(dt, t, body, world) { bodyAt = body.p; life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
     renderMirror() {},
     setScale() {},
-    dispose() { air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
+    dispose() { look.dispose(); air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
   };
 }

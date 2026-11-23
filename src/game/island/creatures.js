@@ -116,7 +116,9 @@ export function createLife(scene, { lite = false, ground, shape }) {
   let palmAt = null, sites = '';
   // the palms round (cx, cz), but none where a building stands (skip(x, z))
   function plant(cx, cz, skip = null) {
-    const list = palmsNear(ground, cx, cz, NEAR).filter((p) => !skip || !skip(p.x, p.z));
+    // nearest first, and their distances kept (userData.isleNear): the island's shadow maps draw only the palms whose
+    // shadows can reach them (terrain.js), and the nearest map is 15 m round the eye
+    const list = palmsNear(ground, cx, cz, NEAR).filter((p) => !skip || !skip(p.x, p.z)).map((p) => [p, Math.hypot(p.x - cx, p.z - cz)]).sort((a, b) => a[1] - b[1]).map(([p]) => p);
     let n = 0;
     for (const p of list) {
       if (n >= MAXP) break;
@@ -128,6 +130,8 @@ export function createLife(scene, { lite = false, ground, shape }) {
     }
     trunks.count = crowns.count = n; trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
     palmAt = [cx, cz];
+    const near = { x: cx, z: cz, d: Float32Array.from(list.slice(0, n), (p) => Math.hypot(p.x - cx, p.z - cz)), tall: 14.5 };
+    trunks.userData.isleNear = crowns.userData.isleNear = near;
     return n;
   }
 
