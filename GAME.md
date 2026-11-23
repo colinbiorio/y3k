@@ -119,6 +119,26 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The true sky over the island, its third part: the Moon (22 November 2026)
+
+The third of the true sky's four parts ([`SOLAR.md`](SOLAR.md) "Step 2, third part" has the method and the numbers).
+**Behind the same switch** (`?sky=true`), and nothing changes without it.
+
+- **The Moon is a sphere with its face**: NASA's CGI Moon Kit (NASA's Scientific Visualization Studio, CGI Moon Kit,
+  svs.gsfc.nasa.gov/4720: LRO LROC WAC and LOLA data, NASA/GSFC/Arizona State University), the albedo on the Moon's own
+  measured scale and LOLA's relief, turned by the IAU's rotation from the clockwork: its librations and tilt are the real
+  ones, and from Lord Howe it is "upside down" to a northern eye (Tycho at the top of the full Moon at midnight).
+- **Lit as the Moon is**: the lunar light law (a full Moon as bright at its limb as at its middle), its whole light the
+  clockwork's magnitude law (within 0.002 mag at full; the waxing Moon a little brighter than the waning, as it is), its
+  craters' floors in long shadow at the terminator and peaks lit past it, the Earth's light on its dark part (the ashen
+  light beside a crescent), dimmed, reddened and flattened low down.
+- **Seen as an eye sees it**: the face, not a white blob; its brightness against the night grows as the cube root of its
+  light (Stevens' law), its face in proportion, its glow a soft ring the disc stands clear of.
+
+**Rough, seen in the pictures**: from 150 m up in civil twilight the island and the sea come out an electric blue (on
+main too: not this part's); the face through a telescope forty times narrower is a little soft (the relief is 10.7 km a
+texel); the ashen light at the first quarter shows faintly through a telescope where the eye's glare hides it as played.
+
 ### The true sky over the island, its second part: the night (22 November 2026)
 
 Colin, 22 November, as the first part was looked at:

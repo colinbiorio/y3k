@@ -15,9 +15,11 @@
 //     air it is seen through, and flattened near the horizon because the air lifts its lower limb more;
 //   · THE NIGHT (solar/night.js): the Milky Way and every star too faint for the catalogue (a cube map in true units),
 //     the zodiacal light, the airglow and the air's scattering of them, in the dome and in the sea; the Moon's light
-//     in the air and on the land, and its disc as a plain lit shape of its true size and phase until its sphere is
-//     made; the catalogue's 9,096 stars and the planets as points where they are, each laid over the pixels round its
-//     true place and shown by how far above the eye's own threshold it stands;
+//     in the air and on the land; the catalogue's 9,096 stars and the planets as points where they are, each laid over
+//     the pixels round its true place and shown by how far above the eye's own threshold it stands;
+//   · THE MOON (solar/moon.js): a sphere of its true size and place, its face (the LRO camera's albedo, LOLA's relief)
+//     turned by the IAU's rotation, lit by the Sun with the lunar light law, its craters' shadows found over LOLA's
+//     heights, the Earth's light on its dark part, and seen as an eye looking at it sees it (moon.js LOOK);
 //   · THE EYE: one exposure for everything (air.js), following the scene, the Purkinje shift as it darkens, and one
 //     curve that brings the world's range to the screen's (Reinhard's, on the luminance, the hue kept: `airShow`,
 //     below); the eye's own veil round the key light (the CIE's disability glare), added in light to the sky and to
@@ -35,6 +37,7 @@ import * as THREE from 'three';
 import { AIR, LUT, AIR_GLSL, SUN, GLARE, EYE, CURVES, luminance, transmittance, transmittanceLUT, multiScatteringLUT, exposureFor, adapt, shownColour, veil } from './solar/air.js';
 import { createDaylight, GROUND, MATTERS } from './solar/daylight.js';
 import { NIGHT_GLSL, NIGHT_EYE_GLSL, SCAT_N, glowScatter, zodiacalGrid, ZL_GRID, starField, yearsOf, aberration, starPlace } from './solar/night.js';
+import { MOON_GLSL, MOON_MAPS, MARCH, LOOK as MOON_LOOK, EARTH_COLOUR, createMoonFace, marchGrowth, adaptedLight, linearShare, faceScale } from './solar/moon.js';
 import { horizonMatrix } from './solar/ephemeris.js';
 import { STARS, STAR_FIELDS } from './solar/stars.js';
 import { when } from './solar/clock.js';
@@ -69,6 +72,9 @@ const SHARED = {
   uAirCurve: { value: CURVES.indexOf(EYE.curve) },                  // which curve brings the scene to the screen (air.js CURVES)
   uAirExp: { value: 1 },                                            // the exposure: a scene value over it is the luminance it stands for (cd/m2)
   uAirAdapt: { value: 1e9 },                                        // the luminance the eye is adapted to (cd/m2): no rod vision under it
+  uAirVeilK: { value: 0 },                                          // when the Moon is the key: the adapted level's own scene value, over which its glare grows as the cube root of its light (moon.js LOOK); else 0
+  uAirVeilS: { value: 1 },                                          // the Moon's own frame's scale (moon.js faceScale): its glare there is shown as its scene value times this
+  uAirVeilW: { value: 0 },                                          // how much of the Moon, and so of its glare, is in its own frame (0 by day, 1 at night)
 };
 // THE CURVE (air.js says why): a scene value, as the screen shows it, after the Purkinje shift (night.js). three.js's
 // own curves are here beside it for comparing (its chunk, under names of our own, its exposure taken as 1: ours is
@@ -104,11 +110,22 @@ vec3 airUnshow(vec3 c) {
 // the eye's veil round a light: luminance per lux at the eye, by the angle from it (air.js veil(), the CIE's equation),
 // held inside the light's own disc (uAirHeld degrees)
 const VEIL_GLSL = `
-uniform float uAirHeld; uniform float uAirReach;
+uniform float uAirHeld; uniform float uAirReach; uniform float uAirVeilK; uniform float uAirVeilS; uniform float uAirVeilW;
 float airVeilAt(float t, float held) { t = max(t, held); return (10.0 / (t * t * t) + (5.0 / (t * t) + ${f(0.1 * GLARE.pigment)} / t) * ${f(1 + (GLARE.age / 62.5) ** 4)} + ${f(0.0025 * GLARE.pigment)}) * (1.0 - smoothstep(40.0, 60.0, t)); }
-vec3 airVeil(vec3 d, vec3 sun, vec3 glare) {
+// the veil as light (what dims a star near the light)
+vec3 airVeilLight(vec3 d, vec3 sun, vec3 glare) {
   if (dot(d, sun) < uAirReach) return vec3(0.0);                      // past where it can be seen (60 degrees for the Sun)
   return glare * airVeilAt(degrees(2.0 * asin(min(1.0, 0.5 * length(d - sun)))), uAirHeld);
+}
+// as the eye sees it, in two parts. The Sun's veil, and a planet's, are part of the scene and go through the curve with
+// it (airVeil). The Moon's (when it is the key) is seen as the Moon is (moon.js LOOK): its light over the adapted level
+// grows as the cube root, and it is shown in the Moon's own frame, after the curve (airVeilFrame), by as much as the
+// Moon itself is (uAirVeilW); the rest of it is part of the scene
+vec3 airVeil(vec3 d, vec3 sun, vec3 glare) { return airVeilLight(d, sun, glare) * (uAirVeilK > 0.0 ? 1.0 - uAirVeilW : 1.0); }
+vec3 airVeilFrame(vec3 d, vec3 sun, vec3 glare) {
+  if (uAirVeilK <= 0.0 || uAirVeilW <= 0.0) return vec3(0.0);
+  vec3 v = airVeilLight(d, sun, glare); float y = dot(v, vec3(0.2126, 0.7152, 0.0722));
+  return (y > uAirVeilK ? v * (uAirVeilK * pow(y / uAirVeilK, ${f(MOON_LOOK.power)}) / y) : v) * (uAirVeilS * uAirVeilW);
 }`;
 const AIR_PARS = `
 #ifdef USE_FOG
@@ -131,7 +148,8 @@ const airFog = (kind) => `
   vec2 airAt = vec2((airI + clamp(airUv.x, 0.5 / airW, 1.0 - 0.5 / airW)) / airN, airUv.y);
   vec4 airA = mix(texture2D(uAirAP, airAt), texture2D(uAirAP, airAt + vec2(1.0 / airN, 0.0)), airF) * airNear;
   ${kind === 'add' ? 'gl_FragColor.rgb *= 1.0 - airA.a;'
-    : `gl_FragColor.rgb = airShow(${kind === 'own' ? 'airUnshow(gl_FragColor.rgb)' : 'gl_FragColor.rgb'} * (1.0 - airA.a) + airA.rgb * uAirGain + airVeil(normalize(uAirCam[0] * airRay.x + uAirCam[1] * airRay.y + uAirCam[2]), uAirKey, uAirGlare));`}
+    : `vec3 airD = normalize(uAirCam[0] * airRay.x + uAirCam[1] * airRay.y + uAirCam[2]);
+  gl_FragColor.rgb = airShow(${kind === 'own' ? 'airUnshow(gl_FragColor.rgb)' : 'gl_FragColor.rgb'} * (1.0 - airA.a) + airA.rgb * uAirGain + airVeil(airD, uAirKey, uAirGlare)) + airVeilFrame(airD, uAirKey, uAirGlare);`}
 }
 #endif`;
 const ADOPTED = new WeakSet();
@@ -147,7 +165,7 @@ function adopt(material) {
     before.call(this, shader, renderer);
     let fs = shader.fragmentShader;
     if (fs.includes('#include <fog_fragment>') && fs.includes('#include <fog_pars_fragment>')) {
-      Object.assign(shader.uniforms, { uAirAP: SHARED.uAirAP, uAirPx: SHARED.uAirPx, uAirProj: SHARED.uAirProj, uAirCam: SHARED.uAirCam, uAirGain: SHARED.uAirGain, uAirKey: SHARED.uAirKey, uAirHeld: SHARED.uAirHeld, uAirReach: SHARED.uAirReach, uAirGlare: SHARED.uAirGlare, uAirCurve: SHARED.uAirCurve, uAirExp: SHARED.uAirExp, uAirAdapt: SHARED.uAirAdapt });
+      Object.assign(shader.uniforms, { uAirAP: SHARED.uAirAP, uAirPx: SHARED.uAirPx, uAirProj: SHARED.uAirProj, uAirCam: SHARED.uAirCam, uAirGain: SHARED.uAirGain, uAirKey: SHARED.uAirKey, uAirHeld: SHARED.uAirHeld, uAirReach: SHARED.uAirReach, uAirVeilK: SHARED.uAirVeilK, uAirVeilS: SHARED.uAirVeilS, uAirVeilW: SHARED.uAirVeilW, uAirGlare: SHARED.uAirGlare, uAirCurve: SHARED.uAirCurve, uAirExp: SHARED.uAirExp, uAirAdapt: SHARED.uAirAdapt });
       fs = fs.replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\n' + AIR_PARS);
       if (fs.includes('#include <colorspace_fragment>')) fs = fs.replace('#include <fog_fragment>', '').replace('#include <colorspace_fragment>', airFog(kind) + '\n#include <colorspace_fragment>');
       else fs = fs.replace('#include <fog_fragment>', 'gl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(2.2));' + airFog(kind) + '\ngl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(1.0 / 2.2));');
@@ -264,7 +282,11 @@ uniform float uGain; uniform float uMoonGain; uniform float uNightGain; uniform 
 // T: what the air lets through along d (needed only at night)
 vec3 skyAir(vec3 d, vec3 T) { vec3 c = uGain > 1.0e-9 ? skyLook(d) * uGain : vec3(0.0); if (uMoonGain > 0.0) c += moonLook(d) * uMoonGain; if (uNightGain > 0.0) c += nightFront(d, T) * uNightGain; return c; }
 vec3 skyBeyond(vec3 d, vec3 T) { return uNightGain > 0.0 ? nightBack(d, T) * uNightGain : vec3(0.0); }
-vec3 skyVeils(vec3 d, bool self) { return (self && length(d - uAirKey) < 8.7e-4 ? vec3(0.0) : airVeil(d, uAirKey, uGlare)) + pointVeils(d, self); }`;
+vec3 skyVeils(vec3 d, bool self) { return (self && length(d - uAirKey) < 8.7e-4 ? vec3(0.0) : airVeil(d, uAirKey, uGlare)) + pointVeils(d, self); }
+// the same as light, before the eye: what a star near the Moon is seen against
+vec3 skyVeilsLight(vec3 d, bool self) { return (self && length(d - uAirKey) < 8.7e-4 ? vec3(0.0) : airVeilLight(d, uAirKey, uGlare)) + pointVeils(d, self); }
+// the Moon's own frame's part of its glare, shown after the curve
+vec3 skyVeilsFrame(vec3 d, bool self) { return self && length(d - uAirKey) < 8.7e-4 ? vec3(0.0) : airVeilFrame(d, uAirKey, uGlare); }`;
 // the dome's corners (10,242 of them, two degrees apart) work out what changes slowly across the sky: where each
 // look's light comes from on the J2000 equator (the air's lift undone), and the zodiacal light there
 const DOME_VERT = `
@@ -290,23 +312,31 @@ ${EYE_GLSL}
 uniform vec3 uAirKey;
 ${TRUE_SKY_GLSL}
 uniform vec3 uSunTrue; uniform float uSunGain; uniform float uSunRad; uniform float uRefr; uniform vec3 uLimb;
-uniform vec3 uMoonTrue; uniform float uMoonRad; uniform vec3 uMoonLit; uniform vec3 uMoonDisc;
+uniform vec3 uMoonTrue; uniform float uMoonRad;
+${MOON_GLSL}
+uniform float uMoonGainS; uniform float uMoonGainE; uniform float uMoonShow; uniform float uMoonLin;
 // degrees the air lifts what stands at a true height of alt degrees (Saemundsson's formula, as ephemeris.js has it)
 float lift(float alt) { float hh = max(alt, -1.0), r = 1.02 / tan(radians(hh + 10.3 / (hh + 5.11))) / 60.0 * uRefr; return alt < -1.0 ? r * exp((alt + 1.0) / 0.7) : r; }
+// out of the screen's reach: less colour, the same hue (as airShow's last step)
+vec3 keepHue(vec3 c) { float Y = min(dot(c, N_LUMA), 1.0), top = max(c.r, max(c.g, c.b)); return top > 1.0 ? mix(c, vec3(Y), clamp((top - 1.0) / max(top - Y, 1.0e-6), 0.0, 1.0)) : c; }
 void main() {
   vec3 d = normalize(vDir);
   float px = length(fwidth(d)), hh = clamp(uH, 0.0, A_HT - 0.001);
   bool overSea = d.y > -sqrt(hh * (2.0 * A_RG + hh)) / (A_RG + hh);
   vec3 T = uNightGain > 0.0 || uMoonRad > 0.0 ? airT(hh, d.y) : vec3(1.0), c = skyAir(d, T), beyond = uNightGain > 0.0 && d.y > 0.0 ? nightBackAt(normalize(vJ), vZL, T) * uNightGain : vec3(0.0);
-  // THE MOON, for now a plain disc of its true size, place and phase, its lit part of the mean luminance its light
-  // gives (its face, its reflectance and its earthshine are the next part's): it hides what lies beyond the air
+  // THE MOON: a sphere of its true size where its light comes from (a look is taken back to where the air lifted it
+  // from, so it is flattened low down as the Sun is), its face turned by its own rotation, through the air it is seen
+  // through. It hides what lies beyond the air. Its light (moonLit: the Sun's and the Earth's on its face, each scaled
+  // by its own gain, so that each face's mean is seen as the eye sees it: moon.js LOOK) is shown in its own frame, below
+  vec3 moonLit = vec3(0.0);
   if (uMoonRad > 0.0 && dot(d, uMoonDir) > cos(uMoonRad + 0.01)) {
     vec3 q = nightTrue(d) - uMoonTrue; float th = length(q);
     float on = 1.0 - smoothstep(uMoonRad - 0.5 * px, uMoonRad + 0.5 * px, th);
     if (on > 0.0 && overSea) {
-      vec3 n = normalize(q / uMoonRad - sqrt(max(0.0, 1.0 - th * th / (uMoonRad * uMoonRad))) * uMoonTrue);       // the sphere's face there, turned to us
-      float lit = smoothstep(-0.5 * px / uMoonRad, 0.5 * px / uMoonRad, dot(n, uMoonLit));
-      beyond = mix(beyond, uMoonDisc * T * lit, on);
+      vec3 nw = normalize(q / uMoonRad - sqrt(max(0.0, 1.0 - th * th / (uMoonRad * uMoonRad))) * uMoonTrue), sl, el;      // the sphere's face there, turned to us
+      moonLight(nw, px, sl, el);
+      beyond *= 1.0 - on;
+      moonLit = (sl * uMoonGainS + el * uMoonGainE) * T * on;
     }
   }
   c += beyond;
@@ -326,7 +356,9 @@ void main() {
     }
   }
   c += skyVeils(d, false);
-  gl_FragColor = vec4(airShow(c), 1.0);
+  // the Moon and its glare: below a third of white simply part of the scene; brighter than that, in the Moon's own
+  // frame, after the curve: in proportion, its Sun-lit face's brightest tenth where the curve puts that (moon.js LOOK)
+  gl_FragColor = vec4(keepHue(airShow(c + (1.0 - uMoonLin) * moonLit) + uMoonLin * uMoonShow * moonLit + skyVeilsFrame(d, false)), 1.0);
   #include <colorspace_fragment>
   #include <dithering_fragment>
 }`;
@@ -347,12 +379,12 @@ uniform vec3 uAirKey;
 ${TRUE_SKY_GLSL}
 attribute float aLux; attribute vec3 aCol; attribute float aKind;     // its light above the air (lux); its colour (unit luminance); 0 a star, 1 a planet
 uniform mat3 uJ2W; uniform vec3 uAb; uniform float uTime; uniform vec2 uView; uniform float uDip; uniform float uMoonCut; uniform float uSunCut; uniform float uShowLight;
-varying vec3 vInc; varying vec2 vAt; varying vec3 vSky;
+varying vec3 vInc; varying vec2 vAt; varying vec3 vSky; varying vec3 vFrame;
 float hash(float n) { return fract(sin(n) * 43758.5453123); }
 float noise(float x) { float i = floor(x), t = fract(x); return mix(hash(i), hash(i + 1.0), t * t * (3.0 - 2.0 * t)) * 2.0 - 1.0; }
 float gauss(float x) { return (noise(x) + 0.5 * noise(x * 2.31 + 17.0)) * 1.72; }     // about one standard deviation
 void main() {
-  vInc = vec3(0.0); vSky = vec3(0.0); vAt = vec2(-1.0e4);
+  vInc = vec3(0.0); vSky = vec3(0.0); vFrame = vec3(0.0); vAt = vec2(-1.0e4);
   vec3 j = normalize(position + uAb * (1.0 - aKind)), w = uJ2W * j;
   // the air's lift, from its true height
   float alt = degrees(asin(clamp(w.y, -1.0, 1.0))), up = radians(alt + nightLift(alt));
@@ -368,12 +400,14 @@ void main() {
   vec3 tw = exp(sig * (rho * g + sqrt(1.0 - rho * rho) * vec3(gauss(uTime * 4.0 + seed + 101.0), gauss(uTime * 4.0 + seed + 203.0), gauss(uTime * 4.0 + seed + 307.0))) - 0.5 * sig * sig);
   vec3 E = aLux * aCol * T * tw;
   float El = dot(E, N_LUMA);
-  // the sky behind it, as drawn, and the luminance that stands for
-  vSky = skyAir(d, T) + skyBeyond(d, T) + skyVeils(d, true);
-  float B = dot(vSky, N_LUMA) / max(uAirExp, 1.0e-30);
+  // the sky behind it, as drawn, and the luminance it is seen against (the veils as light: near the Moon its glare puts
+  // the faint stars out as its light does, whatever the eye makes of the glare itself)
+  vec3 behind = skyAir(d, T) + skyBeyond(d, T);
+  vSky = behind + skyVeils(d, true); vFrame = skyVeilsFrame(d, true);
+  float B = dot(behind + skyVeilsLight(d, true), N_LUMA) / max(uAirExp, 1.0e-30);
   float k = El / nightThreshold(max(B, uAirAdapt)), peak;
   if (uShowLight > 0.5) peak = El * uAirExp;                          // &stars=light: its light as it falls (the splat spreads it)
-  else { if (k < 0.05) return; peak = nightPointScale(k) * max(N_PFLOOR, N_PWEBER * dot(airShow(vSky), N_LUMA)) / N_PMID; }
+  else { if (k < 0.05) return; peak = nightPointScale(k) * max(N_PFLOOR, N_PWEBER * dot(airShow(vSky) + vFrame, N_LUMA)) / N_PMID; }
   // its colour: none to the rods; the cones' from ten thresholds to a hundred, and all of it in day vision
   float sat = max(nightRods(uAirAdapt), smoothstep(N_PCOLOUR.x, N_PCOLOUR.y, log(max(k, 1.0e-6)) * 0.434294482));
   vInc = mix(N_RODWHITE, E / max(El, 1.0e-30), sat) * peak;
@@ -384,11 +418,11 @@ const STAR_FRAG = `
 uniform float uAirCurve; uniform float uAirExp; uniform float uAirAdapt; uniform float uShowLight; uniform float uPixSr;
 ${SHOW_GLSL}
 vec3 encode(vec3 c) { c = clamp(c, 0.0, 1.0); return mix(pow(c, vec3(0.41666)) * 1.055 - vec3(0.055), c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308)))); }
-varying vec3 vInc; varying vec2 vAt; varying vec3 vSky;
+varying vec3 vInc; varying vec2 vAt; varying vec3 vSky; varying vec3 vFrame;
 void main() {
   float w = nightPixel(gl_FragCoord.xy - vAt);
   if (w < 1.0e-4) discard;
-  vec3 s0 = airShow(vSky), s1 = uShowLight > 0.5 ? airShow(vSky + vInc * w / uPixSr) : s0 + vInc * w;
+  vec3 s0 = airShow(vSky) + vFrame, s1 = uShowLight > 0.5 ? airShow(vSky + vInc * w / uPixSr) + vFrame : s0 + vInc * w;
   gl_FragColor = vec4(encode(s1) - encode(s0), 1.0);                // added to what the dome drew there: the sky with the point in it
 }`;
 
@@ -440,11 +474,32 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     mw = new THREE.Texture(bitmap); mw.colorSpace = THREE.NoColorSpace; mw.flipY = false; mw.generateMipmaps = false; mw.magFilter = mw.minFilter = THREE.LinearFilter; mw.wrapS = mw.wrapT = THREE.ClampToEdgeWrapping; mw.needsUpdate = true;
     NIGHT.uMW.value = mw; mwState = 'drawn';
   }, undefined, (e) => { mwState = 'failed'; console.error('[sky] the Milky Way could not be fetched', e); });
+  // the Moon's face (moonmaps.js): its albedo, read as sRGB so that the GPU filters it in light, and its relief, read as
+  // its bytes are; each with its smaller levels, so a face 17 pixels across neither sparkles nor shimmers. Until they
+  // come, a Moon of the near side's mean albedo, smooth.
+  const moonState = { albedo: 'fetching', relief: 'fetching' }, moonTex = { albedo: null, relief: null };
+  const enc = (x) => Math.round(255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055));
+  const albedo0 = new THREE.DataTexture(new Uint8Array([...MOON_MAPS.rhoMean.map((r) => enc(r / MOON_MAPS.RHO_MAX)), 255]), 1, 1, THREE.RGBAFormat);
+  albedo0.colorSpace = THREE.SRGBColorSpace; albedo0.needsUpdate = true;
+  const relief0 = new THREE.DataTexture(new Uint8Array([128, 128, Math.round(255 * -MOON_MAPS.H0 / (MOON_MAPS.H1 - MOON_MAPS.H0)), 255]), 1, 1, THREE.RGBAFormat); relief0.needsUpdate = true;
+  const MOON_U = { uMoonAlbedo: { value: albedo0 }, uMoonRelief: { value: relief0 }, uMoonFrame: { value: new THREE.Matrix3() }, uMoonSun: { value: new THREE.Vector3(0, 0, 1) }, uMoonEarth: { value: new THREE.Vector3(1, 0, 0) },
+    uMoonEye: { value: new THREE.Vector3(1, 0, 0) }, uMoonSunK: { value: 0 }, uMoonEarthK: { value: new THREE.Vector3() }, uMoonKm: { value: 384400 }, uMoonSunR: { value: 0.00465 },
+    uMoonMarch: { value: new THREE.Vector2(lite ? MARCH.lite : MARCH.steps, marchGrowth(lite ? MARCH.lite : MARCH.steps)) } };
+  const moonLoaded = (key, srgb) => (bitmap) => {
+    if (moonState[key] === 'gone') { bitmap.close?.(); return; }
+    const t = new THREE.Texture(bitmap); t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.flipY = false; t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true;
+    moonTex[key] = t; MOON_U[key === 'albedo' ? 'uMoonAlbedo' : 'uMoonRelief'].value = t; moonState[key] = 'drawn';
+  };
+  const moonLoader = new THREE.ImageBitmapLoader().setOptions({ premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  moonLoader.load(new URL('./solar/moon-albedo.jpg', import.meta.url).href, moonLoaded('albedo', true), undefined, (e) => { moonState.albedo = 'failed'; console.error('[sky] the Moon\'s albedo could not be fetched', e); });
+  moonLoader.load(new URL('./solar/moon-relief.png', import.meta.url).href, moonLoaded('relief', false), undefined, (e) => { moonState.relief = 'failed'; console.error('[sky] the Moon\'s relief could not be fetched', e); });
+  const face = createMoonFace(), moonView = { X: 0, gainS: 1, gainE: 1, show: 1, linear: 0, k: 0, through: 0 };
   const common = { uAirT: { value: tT }, uAirMS: { value: tM } };
   const SKYGAIN = { value: 0 }, MOONGAIN = { value: 0 }, NIGHTGAIN = { value: 0 }, GLARE_U = { value: new THREE.Vector3() };
   const LOOK = { uSkyView: { value: skyRT.texture }, uMoonView: { value: moonRT.texture }, uSkySize: { value: new THREE.Vector2(SW, SH) }, uH: { value: 0.002 }, uSun: SHARED.uAirSun, uMoonDir: { value: new THREE.Vector3(0, -1, 0) } };
   const BRIGHT_U = { uBright: { value: Array.from({ length: BRIGHT }, () => new THREE.Vector4()) }, uBrightReach: { value: new Array(BRIGHT).fill(0) }, uBrightN: { value: 0 } };
-  const EYE_U = { uAirCurve: SHARED.uAirCurve, uAirExp: SHARED.uAirExp, uAirAdapt: SHARED.uAirAdapt, uAirHeld: SHARED.uAirHeld, uAirReach: SHARED.uAirReach, uAirKey: SHARED.uAirKey };
+  const EYE_U = { uAirCurve: SHARED.uAirCurve, uAirExp: SHARED.uAirExp, uAirAdapt: SHARED.uAirAdapt, uAirHeld: SHARED.uAirHeld, uAirReach: SHARED.uAirReach, uAirVeilK: SHARED.uAirVeilK, uAirVeilS: SHARED.uAirVeilS, uAirVeilW: SHARED.uAirVeilW, uAirKey: SHARED.uAirKey };
   const TRUE_U = { uGain: SKYGAIN, uMoonGain: MOONGAIN, uNightGain: NIGHTGAIN, uGlare: GLARE_U };
   const U = {
     sky: { ...common, uH: { value: 0.002 }, uSunUp: { value: 1 }, uSize: { value: new THREE.Vector2(SW, SH) }, uSteps: { value: size.STEPS }, uNorm: { value: 1 } },
@@ -453,7 +508,7 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   U.moon = { ...U.sky, uSunUp: { value: 0 }, uNorm: { value: 1 } };
   U.wrap = { ...common, ...NIGHT, ...LOOK, uSize: { value: new THREE.Vector2(256, 128) }, uUnder: { value: new THREE.Vector3() }, uSunAmt: { value: 1 }, uMoonAmt: { value: new THREE.Vector3() }, uNightAmt: { value: 0 } };
   U.dome = { ...common, ...NIGHT, ...LOOK, ...BRIGHT_U, ...EYE_U, ...TRUE_U, uSunTrue: { value: new THREE.Vector3(0, 1, 0) }, uSunGain: { value: 0 }, uSunRad: { value: 0.00465 }, uRefr: NIGHT.uLiftK, uLimb: { value: new THREE.Vector3(...SUN.limb) },
-    uMoonTrue: { value: new THREE.Vector3(0, -1, 0) }, uMoonRad: { value: 0 }, uMoonLit: { value: new THREE.Vector3(0, 1, 0) }, uMoonDisc: { value: new THREE.Vector3() } };
+    uMoonTrue: { value: new THREE.Vector3(0, -1, 0) }, uMoonRad: { value: 0 }, ...MOON_U, uMoonGainS: { value: 1 }, uMoonGainE: { value: 1 }, uMoonShow: { value: 1 }, uMoonLin: { value: 0 } };
   const pass = (fragmentShader, uniforms) => new THREE.ShaderMaterial({ uniforms, vertexShader: QUAD_VERT, fragmentShader, depthTest: false, depthWrite: false, fog: false, toneMapped: false });
   const mSky = pass(SKYVIEW_FRAG, U.sky), mMoon = pass(SKYVIEW_FRAG, U.moon), mAp = pass(AP_FRAG, U.ap), mWrap = pass(WRAP_FRAG, U.wrap);
   const quadGeo = new THREE.BufferGeometry(); quadGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
@@ -534,6 +589,24 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
   }
   const moved = (was, alt, h, eps) => !was || Math.abs(was.alt - alt) > eps || Math.abs(was.h - h) > Math.max(0.001, 0.02 * was.h);
   const HZ = new Array(9), AB = [0, 0, 0], v3 = [0, 0, 0], T3 = [0, 0, 0], SP = {};
+  // THE MOON, each frame (moon.js): its own axes as it is turned, what lights it, and how the eye looking at it sees it
+  function moonFace(L, now) {
+    const M = L.moon, F = face.at(now, L, lat, lon), u = U.dome, fr = F.frame;
+    u.uMoonFrame.value.set(fr[0], fr[1], fr[2], fr[3], fr[4], fr[5], fr[6], fr[7], fr[8]);
+    u.uMoonSun.value.set(F.sun[0], F.sun[1], F.sun[2]); u.uMoonEarth.value.set(F.earth[0], F.earth[1], F.earth[2]); u.uMoonEye.value.set(F.eye[0], F.eye[1], F.eye[2]);
+    u.uMoonSunK.value = F.sunLux * F.phiSun / Math.PI * exposure;
+    const e = F.earthLux * F.phiEarth / Math.PI * exposure; u.uMoonEarthK.value.set(e * EARTH_COLOUR[0], e * EARTH_COLOUR[1], e * EARTH_COLOUR[2]);
+    u.uMoonKm.value = F.distance; u.uMoonSunR.value = F.sunRadius;
+    // each face's mean brightness through the air, over the adapted level's own scene value k, as the eye sees it
+    const k = exposure * Math.max(adapted, EYE.floor), through = M.lux > 0 ? luminance(M.direct) / M.lux : 0;
+    const xs = exposure * through * F.litMean, xe = exposure * through * F.earthMean, X = adaptedLight(xs, k);
+    moonView.k = k; moonView.through = through; moonView.X = X; moonView.gainS = xs > 0 ? X / xs : 1; moonView.gainE = xe > 0 ? adaptedLight(xe, k) / xe : 1;
+    moonView.show = faceScale(X, api.curve); moonView.linear = linearShare(X);
+    u.uMoonGainS.value = moonView.gainS; u.uMoonGainE.value = moonView.gainE; u.uMoonShow.value = moonView.show; u.uMoonLin.value = moonView.linear;
+    // its glare, when it is the key, is seen the same way
+    const moonKey = L.key && L.key.id === 'moon';
+    SHARED.uAirVeilK.value = moonKey ? k : 0; SHARED.uAirVeilS.value = moonView.show; SHARED.uAirVeilW.value = moonKey ? moonView.linear : 0;
+  }
 
   function update({ camera, t, key, fill, sea = null, scene, indoor = 1 }) {
     const began = performance.now();
@@ -565,7 +638,8 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     const want = inSight(camera, K.dir, K.radius);
     if (K.id !== keyWas) { sight = want; keyWas = K.id; }
     sight += (want - sight) * (dt ? 1 - Math.exp(-dt / 0.12) : 1);
-    GLARE_U.value.set(K.direct[0] * exposure * sight, K.direct[1] * exposure * sight, K.direct[2] * exposure * sight);
+    const glare = exposure * sight * (api.debug.glare ? 1 : 0);
+    GLARE_U.value.set(K.direct[0] * glare, K.direct[1] * glare, K.direct[2] * glare);
     SHARED.uAirGlare.value.copy(GLARE_U.value); SHARED.uAirKey.value.set(K.dir[0], K.dir[1], K.dir[2]); SHARED.uAirHeld.value = Math.max(K.radius, POINT_HELD);
     // each veil is drawn out to where it falls under a two-hundredth of the sky's own brightness as shown (at night
     // half of one of the screen's 255 steps; the Sun's, by day, still reaches the 60 degrees it always did)
@@ -594,13 +668,10 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       run(mWrap, wrapRT); envRT = pmrem.fromEquirectangular(wrapRT.texture, envRT || null); wrapAt = { alt: L.alt, h: L.height, moon: M.alt, when: now, fill: fillL };
     }
     if (scene) { if (scene.environment !== envRT.texture) scene.environment = envRT.texture; if (scene.fog !== fog) scene.fog = fog; if (marks.parent !== scene) scene.add(marks); if (stars.parent !== scene) scene.add(stars); }
-    // the dome: the Sun's disc, and the Moon's
+    // the dome: the Sun's disc, and the Moon
     U.dome.uSunTrue.value.set(L.trueSun[0], L.trueSun[1], L.trueSun[2]); U.dome.uSunRad.value = L.radius * D2R;
     const mr = M.radius * D2R; U.dome.uMoonRad.value = M.alt > -2 ? mr : 0; U.dome.uMoonTrue.value.set(M.trueDir[0], M.trueDir[1], M.trueDir[2]);
-    // toward the Sun from the Moon (what lights it), and its lit face's mean luminance: its light over that part's solid angle
-    for (let c = 0; c < 3; c += 1) v3[c] = L.trueSun[c] * L.sunDistance - M.trueDir[c] * M.distance;
-    const vl = Math.hypot(v3[0], v3[1], v3[2]) || 1; U.dome.uMoonLit.value.set(v3[0] / vl, v3[1] / vl, v3[2] / vl);
-    const lit = M.lux / (Math.PI * mr * mr * Math.max(M.phase, 1e-3)) * exposure; U.dome.uMoonDisc.value.set(lit * M.colour[0], lit * M.colour[1], lit * M.colour[2]);
+    moonFace(L, now);
     dome.position.copy(camera.position);
     // the stars: the turn from J2000 to the world, the eye's motion, the time (for twinkling), the screen
     STAR_U.uJ2W.value.copy(NIGHT.uW2J.value).transpose();
@@ -672,10 +743,40 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     run(mProbe, probeRT); renderer.readRenderTargetPixels(probeRT, 0, 0, 64, 1, probePx);
     return Array.from({ length: n }, (_, i) => [0, 1, 2].map((c) => THREE.DataUtils.fromHalfFloat(probePx[4 * i + c]) * 1e-4));
   }
+  // the Moon's light as the GPU works it out (a probe's question; nothing in the game asks it): the disc drawn n by n
+  // pixels by the same chunk the dome reads, with nothing between it and the eye (no air, no eye's curve), in cd/m2,
+  // summed over the pixels' solid angles: the lux it gives above the air, against the clockwork's magnitude law
+  let moonProbe = null;
+  function moonOnGpu(n = 256) {
+    if (!moonProbe || moonProbe.n !== n) {
+      moonProbe?.rt.dispose(); moonProbe?.m.dispose();
+      const rt = new THREE.WebGLRenderTarget(n, n, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+      const u = { ...MOON_U, uMoonSunK: { value: 0 }, uMoonEarthK: { value: new THREE.Vector3() }, uMid: { value: new THREE.Vector3() }, uE1: { value: new THREE.Vector3() }, uE2: { value: new THREE.Vector3() }, uRad: { value: 0 }, uN: { value: n } };
+      const m = pass(`${MOON_GLSL}
+uniform vec3 uMid; uniform vec3 uE1; uniform vec3 uE2; uniform float uRad; uniform float uN;
+void main() {
+  vec2 p = gl_FragCoord.xy / uN * 2.0 - 1.0;
+  if (dot(p, p) >= 1.0) { gl_FragColor = vec4(0.0); return; }
+  vec3 sl, el; moonLight(normalize(p.x * uE1 + p.y * uE2 - sqrt(1.0 - dot(p, p)) * uMid), 2.0 * uRad / uN, sl, el);
+  gl_FragColor = vec4(sl, dot(el, vec3(0.2126, 0.7152, 0.0722)));
+}`, u);
+      moonProbe = { rt, u, m, px: new Float32Array(n * n * 4), n };
+    }
+    const L = day.light, M = L.moon, F = face.face, u = moonProbe.u, rad = M.radius * D2R;
+    u.uMoonSunK.value = F.sunLux * F.phiSun / Math.PI;
+    const e = F.earthLux * F.phiEarth / Math.PI; u.uMoonEarthK.value.set(e * EARTH_COLOUR[0], e * EARTH_COLOUR[1], e * EARTH_COLOUR[2]);
+    const mid = u.uMid.value.set(M.trueDir[0], M.trueDir[1], M.trueDir[2]), e1 = u.uE1.value.set(-mid.z, 0, mid.x).normalize(); u.uE2.value.crossVectors(mid, e1);
+    u.uRad.value = rad;
+    run(moonProbe.m, moonProbe.rt); renderer.readRenderTargetPixels(moonProbe.rt, 0, 0, n, n, moonProbe.px);
+    const p = moonProbe.px, sr = (2 * rad / n) ** 2; let sun = 0, earth = 0, top = 0;
+    for (let i = 0; i < n * n; i += 1) { const y = 0.2126 * p[4 * i] + 0.7152 * p[4 * i + 1] + 0.0722 * p[4 * i + 2]; sun += y; earth += p[4 * i + 3]; if (y > top) top = y; }
+    sun *= sr; earth *= sr;
+    return { n, sunlit: sun, earthlit: earth, law: M.lux, dmag: -2.5 * Math.log10(sun / M.lux), top, phaseAngle: M.phaseAngle, maps: { ...moonState } };
+  }
   const api = {
-    dome, fog, day, state, update, peek, cost, nightOnGpu, tables: { sky: [SW, SH], air: [AN, AW], made },
+    dome, fog, day, state, update, peek, cost, nightOnGpu, moonOnGpu, tables: { sky: [SW, SH], air: [AN, AW], made },
     parts: { stars, dome, uniforms: { dome: U.dome, stars: STAR_U, ap: U.ap }, eye: { camera: null } },      // a probe's handles (nothing in the game reads them)
-    debug: { night: true, veils: true, rods: true },      // a probe's switches, to measure what each part costs
+    debug: { night: true, veils: true, rods: true, glare: true },      // a probe's switches, to measure what each part costs (and `glare`: the key's veil, off for a telescope's view)
     // stops added to the exposure. Nothing in the game sets it: a probe does (a dark glass, to look at the Sun's own
     // disc), and `&ev=1` in the address beside ?sky=true, for whoever is judging how bright the picture should be
     bias: evOf(typeof location === 'undefined' ? '' : location.search),
@@ -690,16 +791,20 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       const L = day.light, M = L.moon, N = day.night.state;
       return { when: L.when, alt: L.alt, az: L.az, lifted: L.lifted, height: L.height, lux: L.lux, direct: luminance(L.direct), sky: luminance(L.sky), level: luminance(L.level), scene: sceneL, adapted, exposure, curve: api.curve, sight, materials: seen, cpu: Math.round(cpu * 1000) / 1000,
         zenith: luminance(day.toward([0, 1, 0])), zenithAll: luminance(day.towardAll([0, 1, 0])), fill: luminance(L.fill), ground: luminance(L.ground), key: L.key.id, keyDirect: luminance(L.key.direct),
-        moon: { alt: M.alt, az: M.az, phase: M.phase, magnitude: M.magnitude, lux: M.lux, direct: luminance(M.direct), sky: luminance(M.sky) },
+        moon: { alt: M.alt, az: M.az, phase: M.phase, magnitude: M.magnitude, lux: M.lux, direct: luminance(M.direct), sky: luminance(M.sky),
+          face: { alpha: face.face.alpha, sunLux: face.face.sunLux, earthLux: face.face.earthLux, earthPhase: face.face.earthPhase, alphaEarth: face.face.alphaEarth, litMean: face.face.litMean, earthMean: face.face.earthMean, subLon: face.face.subLon, subLat: face.face.subLat, maps: { ...moonState } },
+          seen: { ...moonView } },
         night: { level: luminance(N.level), mean: luminance(N.mean), stars: luminance(N.starsLevel), sunLon: N.sunLon }, milkyWay: mwState, points: api.stars, bright: brightList.length,
         tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } };
     },
     dispose() {
-      SHARED.uAirEnv.value = 1; SHARED.uAirAP.value = null; SHARED.uAirExp.value = 1; SHARED.uAirAdapt.value = 1e9; SHARED.uAirKey.value.set(0, 1, 0); SHARED.uAirHeld.value = GLARE.held;
+      SHARED.uAirEnv.value = 1; SHARED.uAirAP.value = null; SHARED.uAirExp.value = 1; SHARED.uAirAdapt.value = 1e9; SHARED.uAirKey.value.set(0, 1, 0); SHARED.uAirHeld.value = GLARE.held; SHARED.uAirVeilK.value = 0; SHARED.uAirVeilW.value = 0;
       marks.removeFromParent(); stars.removeFromParent(); for (const q of MARKS) { if (q.open) gl.endQuery(gl.ANY_SAMPLES_PASSED); gl.deleteQuery(q.query); q.query = null; }
-      mwState = 'gone';
-      for (const x of [tT, tM, skyRT, moonRT, apRT, wrapRT, probeRT, mSky, mMoon, mAp, mWrap, mProbe, quadGeo, domeGeo, domeMat, pmrem, markGeo, markMat, starGeo, starMat, zl, black]) x.dispose();
+      mwState = 'gone'; moonState.albedo = moonState.relief = 'gone';
+      for (const x of [tT, tM, skyRT, moonRT, apRT, wrapRT, probeRT, mSky, mMoon, mAp, mWrap, mProbe, quadGeo, domeGeo, domeMat, pmrem, markGeo, markMat, starGeo, starMat, zl, black, albedo0, relief0]) x.dispose();
       mw?.image?.close?.(); mw?.dispose(); envRT?.dispose();
+      for (const t of [moonTex.albedo, moonTex.relief]) { t?.image?.close?.(); t?.dispose(); }
+      moonProbe?.rt.dispose(); moonProbe?.m.dispose();
     },
   };
   return api;

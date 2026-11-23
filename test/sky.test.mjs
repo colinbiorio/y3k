@@ -371,7 +371,7 @@ ok('behind a switch, and off: only ?sky=true in the address asks for the true sk
   assert.match(sky, /U\.sky\.uNorm\.value = 1 \/ per;/); assert.match(sky, /gl\.beginQuery\(gl\.ANY_SAMPLES_PASSED, q\.query\)/);
   assert.match(sky, /from '\.\/solar\/air\.js'/); assert.match(sky, /from '\.\/solar\/daylight\.js'/); assert.match(sky, /from '\.\/solar\/clock\.js'/);
   assert.ok(!/Date\.now\(|new Date\(/.test(sky.replace(/^\s*\/\/.*$/gm, '')), 'the sky asks the world\'s clock, not its own');
-  assert.match(read('package.json'), /node test\/solar\.test\.mjs && node test\/sky\.test\.mjs( && node test\/night\.test\.mjs)?"/);
+  assert.match(read('package.json'), /node test\/solar\.test\.mjs && node test\/sky\.test\.mjs( && node test\/night\.test\.mjs)?( && node test\/moon\.test\.mjs)?"/);
 });
 
 // `node test/sky.test.mjs --measured` prints only the lines measured so far, for writing them into SOLAR.md

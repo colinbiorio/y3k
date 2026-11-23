@@ -462,6 +462,9 @@ function magnitude(i, r, d, a, subObs, subSun, year) {
     default: return NaN;
   }
 }
+// magnitudeOf(id, r, d, a): the same equations for a body seen from anywhere: r its distance from the Sun and d from the
+// eye (au), a the phase angle (degrees). The Moon's face asks it for the Earth as the Moon sees it (the earthshine).
+export function magnitudeOf(id, r, d, a, subObs = 0, subSun = 0, year = 2026) { return magnitude(index(id), r, d, a, subObs, subSun, year); }
 
 const SKY_DEFAULT = { refraction: true, height: 0, celsius: 10, ids: null };
 const VISIBLE = IDS.filter((id) => id !== 'earth');
