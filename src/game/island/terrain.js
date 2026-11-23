@@ -39,6 +39,10 @@
 // with two shadow maps.
 import * as THREE from 'three';
 import { PALM } from './life.js';
+import { SEA, SEA_OPTICS_GLSL } from './sea.js';
+import { SEA_WAVES_GLSL, SEA_SURFACE_GLSL } from './water.js';
+
+const num = (x) => { const t = Number(x).toPrecision(8); return /[.e]/.test(t) ? t : t + '.0'; };
 
 // ---- the surfaces (ground-textures.py's LAYERS; ground.json says what each was graded from)
 export const LAYERS = ['sand', 'grass', 'litter', 'rock', 'cliff', 'shore', 'face'];
@@ -127,6 +131,8 @@ const SHARED = {
   uIsleShadeO: { value: new THREE.Vector3() },              // each map's offset along the normal (m: a texel and a half)
   uIsleShadeT: { value: new THREE.Vector3() },              // each map's texel (in its own 0..1)
   uIsleShadeZ: { value: new THREE.Vector3() },              // each map's depth bias (2 cm, in its own depth)
+  uSeaE: { value: new THREE.Vector3(1, 1, 1) },            // the light falling on level water (the picture's units): water.js, island.js and sky.js set it
+  uSeaLight: { value: new THREE.Vector4(0.9, 1, 0, 0) },   // its cosine under the water; the glitter's scale
 };
 // a point on the grid's triangles (ground.js onGrid: (00, 10, 01) and (10, 11, 01)), from its heights texel by texel
 const GRID_GLSL = `
@@ -178,18 +184,26 @@ float isleMaps( vec3 w, vec3 n, float d ) {
   }
   return 1.0;
 }
+float isleKeyW( vec3 w, vec3 nw, float over, float d ) {
+  if ( uIsleOn < 0.5 ) return 1.0;
+  float s = isleLand( w, over );
+  if ( s > 0.0 ) s *= isleMaps( w, nw, d );                                  // by distance: the outer maps are spheres round the eye
+  return s;
+}
 float isleKey( vec3 viewPos, vec3 viewN, float over ) {
   if ( uIsleOn < 0.5 || ! receiveShadow ) return 1.0;
-  vec3 w = ( uIsleV2W * vec4( viewPos, 1.0 ) ).xyz;
-  float s = isleLand( w, over );
-  if ( s > 0.0 ) s *= isleMaps( w, normalize( mat3( uIsleV2W ) * viewN ), length( viewPos ) );     // by distance: the outer maps are spheres round the eye
-  return s;
+  return isleKeyW( ( uIsleV2W * vec4( viewPos, 1.0 ) ).xyz, normalize( mat3( uIsleV2W ) * viewN ), over, length( viewPos ) );
 }`;
 // three's own directional loop (r160), and the island's: its key light (the first directional light) shadowed
 const DIR_LOOP = '#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )\n\tDirectionalLight directionalLight;\n\t#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0\n\tDirectionalLightShadow directionalLightShadow;\n\t#endif\n\t#pragma unroll_loop_start\n\tfor ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {\n\t\tdirectionalLight = directionalLights[ i ];\n\t\tgetDirectionalLightInfo( directionalLight, directLight );\n\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )\n\t\tdirectionalLightShadow = directionalLightShadows[ i ];\n\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;\n\t\t#endif\n\t\tRE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\t}\n\t#pragma unroll_loop_end\n#endif\n';
 const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	DirectionalLight directionalLight;
+	#ifdef ISLE_WATER
+	isleShadeK = seaH < 22.0 ? isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) ) : ( uIsleOn < 0.5 ? 1.0 : isleLand( vW, seaD0 ) );
+	float isleShade = isleShadeK * seaCaustic;
+	#else
 	float isleShade = isleKey( geometryPosition, geometryNormal, ISLE_OVER );
+	#endif
 	#pragma unroll_loop_start
 	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
 		directionalLight = directionalLights[ i ];
@@ -232,12 +246,27 @@ function adopt(material) {
     let fs = shader.fragmentShader;
     if (!fs.includes('#include <lights_fragment_begin>') || !fs.includes('#include <shadowmap_pars_fragment>')) return;
     Object.assign(shader.uniforms, SHARED);
-    fs = fs.replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS);
+    fs = fs.replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS + OBJ_PARS);
+    if (fs.includes('#include <opaque_fragment>')) fs = fs.replace('#include <opaque_fragment>', OBJ_UNDER + '#include <opaque_fragment>');
     shader.fragmentShader = '#define ISLE_OVER -1.0e9\n' + fs.replace('#include <lights_fragment_begin>', loop);
   };
   material.customProgramCacheKey = () => keyOf() + '|isle';
   material.needsUpdate = true;
 }
+
+// what stands in the water (a body wading, a ship's hull): its part under the mean water seen through it
+const OBJ_PARS = `
+uniform vec3 uSeaE; uniform vec4 uSeaLight;
+${SEA_OPTICS_GLSL}`;
+const OBJ_UNDER = `
+if ( uIsleOn > 0.5 ) {
+  vec3 ow = ( uIsleV2W * vec4( geometryPosition, 1.0 ) ).xyz;
+  if ( ow.y < -0.01 ) {
+    vec3 v = normalize( cameraPosition - ow ); float F = seaFresnel( v.y );
+    outgoingLight = seaOut( uSeaE, outgoingLight, -ow.y, uSeaLight.x, max( seaUnder( v.y ), 0.2 ) ) * ( 1.0 - F ) + F * uSeaE * ${num(0.25 / Math.PI)};
+  }
+}
+`;
 
 // ---- the passes, drawn on the GPU into the island's own textures
 const QUAD_VERT = 'void main() { gl_Position = vec4( position.xy, 0.0, 1.0 ); }';
@@ -314,10 +343,11 @@ const LAND_NORMAL = 'vWN = normalize( mat3( modelMatrix ) * objectNormal );';
 const LAND_PLACE = 'vW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n#ifdef ISLE_FLAT\nvEarth = aEarth;\n#endif';
 
 function landFrag({ lite }) {
-  const FACE = LAYERS.indexOf('face'), CLIFF = LAYERS.indexOf('cliff'), ROCK = LAYERS.indexOf('rock');
+  const FACE = LAYERS.indexOf('face'), CLIFF = LAYERS.indexOf('cliff'), ROCK = LAYERS.indexOf('rock'), SHORE = LAYERS.indexOf('shore'), SAND = LAYERS.indexOf('sand');
   return {
     pars: `
 varying vec3 vW; varying vec3 vWN;
+vec3 isleW;                        // where the splat reads: the land's own place, or the floor the sea's refracted line meets
 #ifdef ISLE_FLAT
 varying float vEarth;
 #endif
@@ -337,7 +367,7 @@ vec3 isleTan( vec4 s ) { vec2 xy = s.xy * 2.0 - 1.0; return vec3( xy, sqrt( max(
 // height, its finish, and its normal in the world (whiteout blend onto the land's own normal). Past 140 m a close
 // scan's shape and finish are under a pixel: its mean finish and the land's own normal (half the reads).
 void isleRead( int axis, float layer, float side, mat2 R, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
-  vec2 uv = axis == 0 ? vW.zy : axis == 1 ? vW.xz : vW.xy, gx = axis == 0 ? dpx.zy : axis == 1 ? dpx.xz : dpx.xy, gy = axis == 0 ? dpy.zy : axis == 1 ? dpy.xz : dpy.xy;
+  vec2 uv = axis == 0 ? isleW.zy : axis == 1 ? isleW.xz : isleW.xy, gx = axis == 0 ? dpx.zy : axis == 1 ? dpx.xz : dpx.xy, gy = axis == 0 ? dpy.zy : axis == 1 ? dpy.xz : dpy.xy;
   if ( side > 9.0 ) uv += isleWarp;                                          // every large-scale read, drawn aside (no grid from afar)
   vec3 at = vec3( R * uv / side, layer ); gx = R * gx / side; gy = R * gy / side;
   col = textureGrad( uIsleCol, at, gx, gy );
@@ -399,7 +429,7 @@ void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out 
   // the cliffs' vertical streaks (water and weather down a basalt wall), across the face's own horizontal
   if ( i == ${CLIFF} ) {
     vec2 along = normalize( vec2( -n0.z, n0.x ) + 1.0e-4 );
-    float st = gn( vec2( dot( vW.xz, along ) * 0.33, vW.y * 0.022 ) ) * 0.7 + gn( vec2( dot( vW.xz, along ) * 1.1 + 9.0, vW.y * 0.06 ) ) * 0.3;
+    float st = gn( vec2( dot( isleW.xz, along ) * 0.33, isleW.y * 0.022 ) ) * 0.7 + gn( vec2( dot( isleW.xz, along ) * 1.1 + 9.0, isleW.y * 0.06 ) ) * 0.3;
     col.rgb *= 0.72 + 0.56 * st;
   }
   #endif`}
@@ -418,18 +448,19 @@ void isleCanopy( vec2 p, float px, vec3 n0, out vec3 col, out vec3 nw ) {
 `,
     // the splat: in place of three's vertex colour (it sets diffuseColor), with what the later chunks need kept in isle*
     body: `
+isleW = vW;
 vec3 isleN0 = normalize( vWN );
-vec3 isleDpx = dFdx( vW ), isleDpy = dFdy( vW );
-float isleDist = length( vW - cameraPosition ), islePx = max( length( isleDpx ), length( isleDpy ) );
-float isleH = vW.y;
+vec3 isleDpx = dFdx( isleW ), isleDpy = dFdy( isleW );
+float isleDist = length( isleW - cameraPosition ), islePx = max( length( isleDpx ), length( isleDpy ) );
+float isleH = isleW.y;
 isleFar = isleDist > 140.0;
 float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
 // the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
-vec4 isleCtl = texture2D( uIsleCtl, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
+vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
 isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
-float isleSkySeen = texture2D( uIsleSky, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
+float isleSkySeen = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
 // a finer jitter for edges, near the eye only (further off it is under a pixel)
-float isleE2 = isleDist < 60.0 ? gn( vW.xz * 0.43 + 7.0 ) : 0.5;
+float isleE2 = isleDist < 60.0 ? gn( isleW.xz * 0.43 + 7.0 ) : 0.5;
 float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
 // (each class's own band is narrow, a few metres on the ground: the two surfaces' heights shape the edge within it)
 // (the island's slopes are forested up to the foot of its cliffs: the 30 m data's slopes past 0.9, 42 degrees, are walls
@@ -484,7 +515,7 @@ if ( isleWb > 0.06 ) {
   if ( isleDist < 120.0 ) {
   #endif
     vec4 PB = uIsleLayer[ isleB ]; float sb = isleDist < 43.0 ? PB.x : PB.y;
-    isleColB = textureGrad( uIsleCol, vec3( vW.xz / sb, float( isleB ) ), isleDpx.xz / sb, isleDpy.xz / sb );
+    isleColB = textureGrad( uIsleCol, vec3( isleW.xz / sb, float( isleB ) ), isleDpx.xz / sb, isleDpy.xz / sb );
   } else isleColB = vec4( uIsleMean[ isleB ], 0.5 );
   // by their heights: each one's weight raised by how high it stands, and only what comes within a span of the top kept
   float ha = isleWa / ( isleWa + isleWb ) + isleColA.a * uIsleLayer[ isleA ].w * 0.5, hb = isleWb / ( isleWa + isleWb ) + isleColB.a * uIsleLayer[ isleB ].w * 0.5, top = max( ha, hb ) - 0.12;
@@ -503,36 +534,125 @@ isleAlb *= ( 0.84 + 0.32 * isleCtl.g ) * mix( 1.0, 0.78 + 0.3 * isleSkySeen, uIs
 float isleMoss = smoothstep( 600.0, 690.0, isleH ) * ( 1.0 - wCliff * 0.6 );
 isleAlb = mix( isleAlb, isleAlb * vec3( 0.55, 1.05, 0.5 ) + vec3( 0.004, 0.012, 0.002 ), isleMoss * 0.85 );
 // the forest beyond the palms: its canopy, the crowns lit as domes
-float isleCrowns = wLitter * smoothstep( ${(PALM.near - 40).toFixed(1)}, ${(PALM.near - 5).toFixed(1)}, length( vW.xz - uIsleBody.xz ) + 25.0 * ( isleCtl.a - 0.5 ) ) * ( 1.0 - isleSea );
+float isleCrowns = wLitter * smoothstep( ${(PALM.near - 40).toFixed(1)}, ${(PALM.near - 5).toFixed(1)}, length( isleW.xz - uIsleBody.xz ) + 25.0 * ( isleCtl.a - 0.5 ) ) * ( 1.0 - isleSea );
 #ifdef ISLE_NO_CANOPY
 isleCrowns = 0.0;
 #endif
 if ( isleCrowns > 0.001 ) {
-  vec3 cc, cn; isleCanopy( vW.xz, islePx, isleN0, cc, cn );
+  vec3 cc, cn; isleCanopy( isleW.xz, islePx, isleN0, cc, cn );
   isleAlb = mix( isleAlb, cc, isleCrowns ); isleNw = normalize( mix( isleNw, cn, isleCrowns ) ); isleRough = mix( isleRough, 0.8, isleCrowns ); isleOcc = mix( isleOcc, 1.0, isleCrowns );
 }
-// the wet strip, where the swash has reached (a line that wanders about 0.35 m over the sea), and the spray on low rock:
-// darker by how porous it is, smooth and glossy, the water filling its small relief
-// (the lagoon's beach is nearly level: a tenth of a metre of height is two of sand, so the line is held close to the sea)
-float isleWetLine = 0.2 + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+// THE SWASH (water.js seaSwash): the sea's edge running up the beach and back. Where it is now, the land is under a film
+// of water (its look is the sea's: after the light, below), the sand's own ripples in the film's edge; above it the sand
+// is wet as high as the swash reaches (a line that wanders about it), and the spray wets the low rock: darker by how
+// porous each is (Lekner and Dorf), smooth and glossy, the water filling its small relief. Under the water (the sea's
+// own drawing, and the film) the floor has the water in its pores, not a film on it: a little darker (0.78), not glossy;
+// the water's own light is the sea's.
+// (worked out only on ground low enough for the swash to reach: the rest of the island pays nothing for it)
+float seaRise = 0.0, isleFilm = -1.0, isleWetLine = 0.2 + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+#ifndef SEA_NO_SWASH
+if ( isleH < 1.2 && uIsleOn > 0.5 ) {
+  vec4 seaM = seaMapAt( isleW.xz );
+  isleFilm = seaSwash( isleW.xz, seaM, seaRise ) - ( isleH + 0.06 * ( isleColA.a - 0.5 ) );
+  isleWetLine = seaReach( seaM ) + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+}
+#endif
 float isleWet = max( smoothstep( isleWetLine + 0.1, isleWetLine - 0.05, isleH ), isleSea );
 isleWet = max( isleWet, ( wCliff + wRock + wShore ) * smoothstep( 2.6, 0.4, isleH ) * 0.85 );
-float isleWetK = mix( uIsleLayer[ isleB ].z, uIsleLayer[ isleA ].z, isleK );
+float isleWetK = isleFilm > 0.0 ? 0.78 : mix( uIsleLayer[ isleB ].z, uIsleLayer[ isleA ].z, isleK );
+isleWet = isleFilm > 0.0 ? 1.0 : isleWet;
 isleAlb *= mix( 1.0, isleWetK, isleWet );
 isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), isleWet * 0.3 );     // a little deeper in colour, warmer
-isleRough = mix( isleRough, mix( 0.4, 0.14, smoothstep( isleWetLine, isleWetLine - 0.15, isleH ) ), isleWet );
-isleNw = normalize( mix( isleNw, isleN0, isleWet * 0.75 ) );
+isleRough = isleFilm > 0.0 ? isleRough : mix( isleRough, mix( 0.4, 0.14, smoothstep( isleWetLine, isleWetLine - 0.15, isleH ) ), isleWet );
+isleNw = normalize( mix( isleNw, isleN0, ( isleFilm > 0.0 ? 0.0 : isleWet ) * 0.75 ) );
 #ifdef ISLE_FLAT
 // a building's pad: packed earth, eased into what was there
 isleAlb = mix( isleAlb, vec3( 0.16, 0.115, 0.07 ) * ( 0.75 + 0.5 * isleE2 ), vEarth );
 isleRough = mix( isleRough, 0.9, vEarth );
 #endif
-// the lagoon's floor, darker with depth (the sea over it is drawn by island.js, its own colour over this)
-isleAlb *= mix( 1.0, 0.38, smoothstep( 0.0, 16.0, -isleH ) * isleSea ) * mix( vec3( 1.0 ), vec3( 0.86, 0.97, 1.0 ), isleSea );
 diffuseColor.rgb = isleAlb * uIsleLook.y;
 #ifdef ISLE_FLATCOL
 diffuseColor.rgb = vec3( 0.2 ); isleNw = isleN0;
 #endif
+`,
+    // THE SEA'S OWN DRAWING (terrain.js's sea material: the water's surface, moved by the waves, with the floor seen through
+    // it). Before the light: where the eye's line, bent by the surface's larger waves, meets the floor, and the floor there,
+    // plainer than the land's splat (it is seen through the water): coral sand, its patches of rubble and coral heads, the
+    // reef's crest and outer face in rubble, steep floors (the feet of the cliffs) in rock, each as the land reads it, the
+    // two it is most made of blended by their heights; the water in its pores. The surface's own shading is after the light
+    // (SEA_AFTER): kept out of here, so the drawing never holds the splat and the surface at once.
+    seabed: `
+isleW = vW;
+vec3 seaV = normalize( cameraPosition - vW );
+vec4 seaM = seaMapAt( vW.xz );
+float seaRise = 0.0, seaLevel = seaM.z < 40.0 ? max( vW.y, seaSwash( vW.xz, seaM, seaRise ) ) : vW.y;       // (the swash: by the shore only)
+float seaD0 = max( 0.0, seaLevel - seaGround( vW.xz ) );
+vec2 seaDx = dFdx( vW.xz ), seaDy = dFdy( vW.xz );
+// the open sea (from a little way outside the crest); the lagoon's short fetch, calmer near the land the wind leaves, but
+// never glassy: the bands' weights
+float seaOpen = smoothstep( -40.0, 40.0, seaM.x ), seaFetch = smoothstep( 20.0, 700.0, seaM.z );
+vec3 seaWt = vec3( seaOpen * smoothstep( 1.5, 8.0, seaD0 ), mix( 0.3 * ( 0.5 + 0.5 * seaFetch ), 1.0, seaOpen ), mix( 0.6 + 0.4 * seaFetch, 1.0, seaOpen ) );
+vec2 seaSw = vec2( 0.0 ); float seaSwW = seaOpen * ( 1.0 - smoothstep( 650.0, 300.0, seaM.x ) );
+if ( seaSwW > 0.0 ) { seaSwell( vW.xz, seaSw ); seaSw *= seaSwW; }        // (the swell: over open water, away from the reef)
+// the eye's line into the water, bent by the waves as large as a few pixels (the finest, read a few levels up, only blur
+// the floor, as they do an eye's view through rippled water; read sharp, they scatter its grain into speckle)
+float seaSp2; vec2 seaSm = seaD0 < 22.0 ? seaSlope( vW.xz, seaDx * 6.0, seaDy * 6.0, seaWt, seaSp2 ).xy + seaSw : seaSw;
+vec3 seaT = refract( -seaV, normalize( vec3( -seaSm.x, 1.0, -seaSm.y ) ), 1.0 / SEA_N ); seaT = normalize( vec3( seaT.x, min( seaT.y, -0.05 ), seaT.z ) );
+vec3 seaFN = vec3( 0.0, 1.0, 0.0 ), seaP = vec3( vW.x, seaLevel - seaD0, vW.z );
+if ( seaD0 < 22.0 ) {                                    // (past that the floor is not seen: straight down is enough)
+  seaP = vW + seaT * ( seaD0 / -seaT.y );
+  seaP = vW + seaT * ( max( 0.0, seaLevel - seaFloorAt( seaP.xz, seaFN ) ) / -seaT.y );
+  seaP.y = seaFloorAt( seaP.xz, seaFN );
+}
+float seaH = max( 0.0, seaLevel - seaP.y ), seaMuV = clamp( -seaT.y, 0.05, 1.0 ), isleFilm = seaH, isleShadeK = 1.0;
+isleW = seaP;
+// THE LIGHT'S DANCE ON THE FLOOR (caustics): where the light that falls on the floor came into the water, the short waves'
+// curvature (the slope's divergence) gathers it or spreads it: 1 / (1 + (1 - 1/n) H div). A floor under a pixel that
+// spans several of them sees their mean (one); deep, the dance blurs out
+float seaCaustic = 1.0;
+#if defined( SEA_FFT ) && NUM_DIR_LIGHTS > 0
+{
+  vec3 kl = inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix ), lt = refract( -kl, vec3( 0.0, 1.0, 0.0 ), 1.0 / SEA_N );
+  float px = max( length( dFdx( seaP.xz ) ), length( dFdy( seaP.xz ) ) ), fade = smoothstep( 0.16, 0.05, px ) * smoothstep( 7.0, 2.5, seaH ) * smoothstep( 0.03, 0.25, seaH ) * step( 0.0, kl.y );
+  if ( fade > 0.0 ) {
+    vec2 e = ( seaP.xz - lt.xz * ( seaH / max( -lt.y, 0.3 ) ) ) / uSeaL.z; float q = 0.1 / uSeaL.z, lod = max( 1.5, log2( px * ${SEA.N}.0 / uSeaL.z ) );
+    float div = ( textureLod( uSeaB2, e + vec2( q, 0.0 ), lod ).x - textureLod( uSeaB2, e - vec2( q, 0.0 ), lod ).x + textureLod( uSeaB2, e + vec2( 0.0, q ), lod ).y - textureLod( uSeaB2, e - vec2( 0.0, q ), lod ).y ) / 0.2;
+    seaCaustic = mix( 1.0, clamp( 1.0 / max( abs( 1.0 + 0.254 * seaH * div * seaWt.z ), 0.33 ), 0.25, 3.0 ), fade );
+  }
+}
+#endif
+vec3 isleN0 = seaFN;
+vec3 isleDpx = dFdx( isleW ), isleDpy = dFdy( isleW );
+float isleDist = length( isleW - cameraPosition );
+isleFar = isleDist > 140.0;
+vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
+isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
+float isleSkySeen = 1.0;
+// sand, rubble or rock: the rock where the floor is steep, the rubble in the lagoon's patches and on the reef's crest
+float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
+float wR = smoothstep( 0.35, 0.6, isleSlope ), wRub = max( smoothstep( 0.64, 0.7, isleCtl.b ) * smoothstep( -4.0, -0.6, isleW.y ), smoothstep( 70.0, 15.0, abs( seaM.x + 12.0 ) + 25.0 * gn( isleW.xz * 0.05 ) ) );
+float wS = ( 1.0 - wR ) * wRub, wD = ( 1.0 - wR ) * ( 1.0 - wRub );
+int isleA = wR >= wS && wR >= wD ? ${ROCK} : wS >= wD ? ${SHORE} : ${SAND};
+float isleWa = max( wR, max( wS, wD ) ), isleWb = wR + wS + wD - isleWa - min( wR, min( wS, wD ) );
+int isleB = isleA == ${ROCK} ? ( wS >= wD ? ${SHORE} : ${SAND} ) : isleA == ${SHORE} ? ( wR >= wD ? ${ROCK} : ${SAND} ) : ( wR >= wS ? ${ROCK} : ${SHORE} );
+vec4 isleColA = vec4( uIsleMean[ isleA ], 0.5 ), isleSrfA = vec4( 0.5, 0.5, 0.9, 1.0 ), isleColB = isleColA, isleSrfB = isleSrfA; vec3 isleNA = isleN0, isleNB = isleN0;
+float isleK = 1.0;
+// (twenty metres down the floor's own light is a twentieth of itself in blue, nothing in red: its mean is enough)
+if ( seaH < 22.0 ) {
+  isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, false, isleColA, isleSrfA, isleNA );
+  if ( isleWb > 0.06 ) {
+    isleLayer( isleB, isleDist, isleDpx, isleDpy, isleN0, false, isleColB, isleSrfB, isleNB );
+    float ha = isleWa / ( isleWa + isleWb ) + isleColA.a * uIsleLayer[ isleA ].w * 0.5, hb = isleWb / ( isleWa + isleWb ) + isleColB.a * uIsleLayer[ isleB ].w * 0.5, top = max( ha, hb ) - 0.12;
+    float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); isleK = ba / max( ba + bb, 1.0e-5 );
+  }
+}
+vec3 isleAlb = mix( mix( uIsleMean[ isleB ], uIsleMean[ isleA ], isleK ), mix( isleColB.rgb, isleColA.rgb, isleK ), uIsleLook.x );
+vec4 isleSrf = mix( isleSrfB, isleSrfA, isleK );
+vec3 isleNw = normalize( mix( isleN0, normalize( mix( isleNB, isleNA, isleK ) ), uIsleLook.x ) );
+float isleRough = max( mix( 0.85, isleSrf.b, uIsleLook.x ), mix( uIsleFloor[ isleB ], uIsleFloor[ isleA ], isleK ) ), isleOcc = mix( 1.0, isleSrf.a, uIsleLook.x );
+isleAlb *= ( 0.84 + 0.32 * isleCtl.g ) * 0.78;
+isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), 0.3 );     // in the water, a little deeper in colour
+diffuseColor.rgb = isleAlb * uIsleLook.y;
 `,
     rough: 'float roughnessFactor = isleRough;',
     // the wrapped sky's light: three reads it twice (once about the normal for the diffuse light, once along the
@@ -554,30 +674,153 @@ reflectedLight.indirectDiffuse *= ambientOcclusion;
   };
 }
 
+// THE WATER'S OWN LIGHT, after the floor (or the beach under the swash) has been lit: what leaves the water toward the eye
+// (Lee et al.), the sky in the surface (the wrapped sky along the reflection, as blurred as the slopes under the pixel
+// spread it), the key light's glitter (where the land, a palm or a ship does not shade the water), the white water
+const SEA_LATE = `
+${SEA_OPTICS_GLSL}
+${SEA_WAVES_GLSL}
+${SEA_SURFACE_GLSL}
+// the sky along the surface's reflection: the wrapped sky, at the share of it the land takes (all of it under the true sky;
+// under the present one 0.35, its painted sky being brighter against its painted light than a real sky against the Sun)
+vec3 seaSkyIn( vec3 v, vec3 n, float spread ) {
+  vec3 r = reflect( -v, n ); r.y = abs( r.y ) + 0.003; r = normalize( r );
+  #ifdef USE_ENVMAP
+  vec3 vv = normalize( ( viewMatrix * vec4( v, 0.0 ) ).xyz ), rv = normalize( ( viewMatrix * vec4( r, 0.0 ) ).xyz );
+  return getIBLRadiance( vv, normalize( vv + rv ), clamp( sqrt( spread ), 0.025, 0.7 ) );
+  #else
+  return uSeaE * ${num(1 / Math.PI)};
+  #endif
+}
+void seaKey( out vec3 l, out vec3 e ) {
+  l = vec3( 0.0, 1.0, 0.0 ); e = vec3( 0.0 );
+  #if NUM_DIR_LIGHTS > 0
+  l = inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix ); e = directionalLights[ 0 ].color;
+  #endif
+}`;
+const SEA_AFTER = `
+#if defined( ISLE_WATER ) && ! defined( SEA_NO_WATER )
+{
+  // THE SURFACE over the floor just lit: its slope (the wind's sea, the swell, the swell at the reef, the rings) and the
+  // spread of the slopes under the pixel, the white water; then what leaves the water toward the eye (Lee et al.), the sky
+  // in the surface, the key light's glitter where the land, a palm or a ship does not shade the water, the white water
+  float spread, white; vec2 sh; vec4 b = seaSlope( vW.xz, seaDx, seaDy, seaWt, spread );
+  vec2 s = b.xy + seaSw;
+  #ifdef SEA_NO_SHORE
+  sh = vec2( 0.0 ); white = 0.0;
+  #else
+  {
+    // the phase's gradient in the world, from its change across the pixel and the place's: (dx dy)^T g = (dphase/dx, dphase/dy)
+    vec2 b = vec2( dFdx( seaM.y ), dFdy( seaM.y ) ); float det = seaDx.x * seaDy.y - seaDx.y * seaDy.x;
+    vec2 g = abs( det ) > 1.0e-9 ? vec2( seaDy.y * b.x - seaDx.y * b.y, seaDx.x * b.y - seaDy.x * b.x ) / det : vec2( 0.0 );
+    g *= min( 1.0, 2.0 / max( length( g ), 1.0e-6 ) );            // (no wave is shorter than three metres: at a graze the solve wanders)
+    seaShore( vW.xz, seaM, seaD0, g, sh, white ); s += sh;
+  }
+  #endif
+  s += seaRipples( vW.xz );
+  float thin = smoothstep( 0.0, 0.3, seaD0 ); s *= 0.2 + 0.8 * thin; spread *= 0.15 + 0.85 * thin;      // water a few centimetres deep lies almost flat
+  // the facets an eye sees most of lean toward it: of a Gaussian sea's facets, weighted by the area each turns to the eye,
+  // the mean leans toward it by sg Phi(x) / (phi(x) + x Phi(x)), x the look's cotangent over sg (sg: the slopes' spread
+  // along the look under the pixel), 1.25 sg at a graze. So from a beach the sea a few hundred metres out reflects the sky
+  // well above the horizon, and much less of it, and shows the water's own blue (B. Smith's shadowing for a Gaussian
+  // surface; E. Bruneton, F. Neyret and N. Holzschuch's ocean lighting, 2010, takes its mean the same way)
+  float hl = max( length( seaV.xz ), 1.0e-5 ), sg = sqrt( 0.5 * spread + 1.0e-6 ), x = ( seaV.y / hl ) / sg;
+  float Phi = 0.5 * ( 1.0 + tanh( 0.7978846 * ( x + 0.044715 * x * x * x ) ) ), phi = 0.3989423 * exp( -0.5 * x * x );
+  vec2 sv = s - ( seaV.xz / hl ) * ( sg * Phi / ( phi + x * Phi ) );
+  vec3 nv = normalize( vec3( -sv.x, 1.0, -sv.y ) );
+  vec3 kl, ke; seaKey( kl, ke );
+  vec3 up = seaOut( uSeaE, outgoingLight, seaH, uSeaLight.x, seaMuV );
+  float F = seaFresnel( dot( nv, seaV ) );
+  #ifdef SEA_NO_GLINT
+  vec3 glint = vec3( 0.0 );
+  #else
+  vec3 glint = seaGlitter( seaV, kl, ke * uSeaLight.y, s, spread ) * isleShadeK;
+  #endif
+  #ifdef SEA_NO_LACE
+  float foam = 0.0;
+  #else
+  float wIn = clamp( white + smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 );
+  float foam = wIn > 0.004 ? seaLace( vW.xz, wIn, max( length( seaDx ), length( seaDy ) ) ) : 0.0;
+  #endif
+  vec3 wc = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - isleShadeK ), vec3( 0.0 ) );
+  #ifdef SEA_NO_SKY
+  vec3 sky = uSeaE * 0.3;
+  #else
+  vec3 sky = seaSkyIn( seaV, nv, spread );
+  #endif
+  outgoingLight = mix( up, sky, F ) + glint * ( 1.0 - foam );
+  outgoingLight = mix( outgoingLight, wc, foam );
+  if ( uSeaDebug > 0.5 ) outgoingLight = uSeaDebug < 1.5 ? vec3( 1.0, 0.0, 1.0 ) : uSeaDebug < 2.5 ? up * ( 1.0 - F ) : uSeaDebug < 3.5 ? sky * F : uSeaDebug < 4.5 ? glint : uSeaDebug < 5.5 ? vec3( foam ) : uSeaDebug < 6.5 ? vec3( F ) : nv * 0.5 + 0.5;
+}
+#elif ! defined( ISLE_WATER ) && ! defined( SEA_NO_FILM )
+if ( isleFilm > 0.0 ) {
+  // the swash's film over the beach: glassy, the sky in it, the Sun's glint, lace at its front as it runs up
+  vec3 kl, ke; seaKey( kl, ke );
+  vec3 v = normalize( cameraPosition - vW ), n = vec3( 0.0, 1.0, 0.0 );
+  vec3 up = seaOut( uSeaE, outgoingLight, isleFilm, uSeaLight.x, seaUnder( v.y ) );
+  float F = seaFresnel( v.y ), lit = 1.0;
+  #if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
+  lit = isleShade;
+  #endif
+  float foam = seaLace( vW.xz * 1.6, smoothstep( 0.035, 0.0, isleFilm ) * ( 0.25 + 0.6 * seaRise ), 1.6 * max( length( dFdx( vW.xz ) ), length( dFdy( vW.xz ) ) ) );
+  vec3 white = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - lit ), vec3( 0.0 ) );
+  outgoingLight = mix( up, seaSkyIn( v, n, 0.002 ), F ) + seaGlitter( v, kl, ke * uSeaLight.y, vec2( 0.0 ), 0.004 ) * lit * ( 1.0 - foam );
+  outgoingLight = mix( outgoingLight, white, foam );
+}
+#endif
+`;
 // a probe's shader switches (material defines, which three folds into the program's key), to measure what each part costs
 const VARIANT = { defines: {} };
+// the sea's sheet is moved by the waves: the swell, the swell at the reef (where the sheet is fine enough to carry it),
+// the wind's largest band near the eye (its smaller ones only shade it: a program has sixteen texture units in all, and
+// the sea's drawing uses fifteen); they lie down where the water thins to nothing, so the sheet meets the beach still
+const SEA_VERT = `
+uniform float uIsleOn; uniform highp sampler2D uIsleHt; uniform vec4 uIsleGrid; uniform vec2 uIsleN;
+${GRID_GLSL}
+${NOISE_GLSL}
+${SEA_OPTICS_GLSL}
+${SEA_WAVES_GLSL}
+${SEA_SURFACE_GLSL}
+vec3 seaMove( vec3 w ) {
+  float d = max( 0.0, -seaGround( w.xz ) ), r = length( w.xz - cameraPosition.xz );
+  vec4 m = seaMapAt( w.xz );
+  float open = smoothstep( -40.0, 40.0, m.x ), wh; vec2 sl;
+  vec3 mv = seaSwell( w.xz, sl ) * open * ( 1.0 - smoothstep( 650.0, 300.0, m.x ) );
+  mv.y += seaShore( w.xz, m, d, vec2( 0.0 ), sl, wh ) * smoothstep( 700.0, 300.0, r );
+  #ifdef SEA_FFT
+  mv += textureLod( uSeaA0, w.xz / uSeaL.x, 0.0 ).xyz * open * smoothstep( 1.5, 8.0, d ) * smoothstep( 300.0, 150.0, r );
+  #endif
+  mv *= smoothstep( 0.03, 1.0, d );
+  mv.y = max( mv.y, 0.02 - 0.8 * d );         // a trough never reaches the floor
+  return mv;
+}`;
 // The land's material and the levelled ground's, made from a MeshStandardMaterial island.js hands in; `cut`: island.js's
-// own lines (the levelled ground's cut: its uniforms, its declarations and its body, run before the splat)
-function landMaterial(base, { lite, flat, uniforms, cut = null }) {
+// own lines (the levelled ground's cut: its uniforms, its declarations and its body, run before the splat). `water`: the
+// sea's own (its sheet: the water's surface and the floor seen through it, with the same splat)
+function landMaterial(base, { lite, flat, uniforms, cut = null, water = false }) {
   const m = base, f = landFrag({ lite });
   const loop = THREE.ShaderChunk.lights_fragment_begin.replace(DIR_LOOP, ISLE_LOOP);
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms, SHARED, cut?.uniforms || {});
-    sh.vertexShader = (flat ? '#define ISLE_FLAT\n' : '') + sh.vertexShader.replace('#include <common>', '#include <common>\n' + LAND_VERT_PARS)
-      .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\n' + LAND_NORMAL).replace('#include <begin_vertex>', '#include <begin_vertex>\n' + LAND_PLACE);
+    const head = (flat ? '#define ISLE_FLAT\n' : '') + (water ? '#define ISLE_WATER\n' : '');
+    sh.vertexShader = head + sh.vertexShader.replace('#include <common>', '#include <common>\n' + LAND_VERT_PARS + (water ? SEA_VERT : ''))
+      .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\n' + LAND_NORMAL)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + (water ? 'transformed += seaMove( ( modelMatrix * vec4( transformed, 1.0 ) ).xyz );\n' : '') + LAND_PLACE);
     let fs = sh.fragmentShader;
     fs = fs.replace('#include <common>', '#include <common>\n' + f.pars + (cut?.pars || ''))
-      .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.body || '') + f.body)
+      .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS + SEA_LATE)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.body || '') + (water ? f.seabed : f.body))
       .replace('#include <roughnessmap_fragment>', f.rough)
       .replace('#include <normal_fragment_maps>', f.normal)
       .replace('#include <aomap_fragment>', f.ao)
       .replace('#include <lights_fragment_maps>', f.maps)
-      .replace('#include <lights_fragment_begin>', loop);
-    // the land's own height over the ground is 0 (its fragments are the grid's triangles); the levelled ground's is not
-    sh.fragmentShader = (flat ? '#define ISLE_FLAT\n#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + fs;
+      .replace('#include <lights_fragment_begin>', loop)
+      .replace('#include <opaque_fragment>', SEA_AFTER + '#include <opaque_fragment>');
+    // the land's own height over the ground is 0 (its fragments are the grid's triangles); the levelled ground's is not;
+    // the sea's floor is where its refracted line meets it
+    sh.fragmentShader = head + (flat ? '#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + fs;
   };
-  m.customProgramCacheKey = () => `isle-land|${lite ? 1 : 0}|${flat ? 1 : 0}`;
+  m.customProgramCacheKey = () => `isle-land|${lite ? 1 : 0}|${flat ? 1 : 0}|${water ? 1 : 0}`;
   ADOPTED.add(m);
   m.needsUpdate = true;
   return m;
@@ -586,7 +829,7 @@ function landMaterial(base, { lite, flat, uniforms, cut = null }) {
 // createGroundLook({ renderer, lite, phone, ground, scene }): the land's materials (`land`, `flat`), the passes and the
 // shadow maps. update({ camera, dir, body }) once a frame (dir: toward the key light) draws the shadow maps; adoptAll
 // (scene) makes whatever lit thing has come into the scene take the shadows; read() is the probes' numbers.
-export function createGroundLook({ renderer, lite = false, phone = false, ground, scene }) {
+export function createGroundLook({ renderer, lite = false, phone = false, ground, scene, water = null }) {
   const head = ground.head, W = head.w, H = head.h, S = head.spacing;
   const C = lite ? CASCADES.lite : CASCADES, nC = C.far.length, per = lite || phone ? CONTROL.lite : CONTROL.per;
   const spare = spareDepth(renderer);
@@ -703,7 +946,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   const [col0, surf0] = standIns(); disposables.push(col0, surf0);
   const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleCtl: { value: ctlRT.texture },
     uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) }, uIsleFloor: { value: FLOOR },
-    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) } };
+    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) }, ...(water ? water.uniforms : {}) };
   const which = lite || phone ? 'lite' : 'full';
   let mapsState = 'fetching', mapsAt = 0, fade = 0;
   const t0 = performance.now();
@@ -721,10 +964,21 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     cascades: nC,
     // a probe's switches, to measure what each part costs (nothing in the game sets them), and its handles
     debug: { shadows: true, lines: true, variant: VARIANT, recompile() { for (const o of landRefs) { o.defines = { ...(o.userData.isleDefines ||= { ...(o.defines || {}) }), ...VARIANT.defines }; o.needsUpdate = true; } } },
-    parts: { scene, cascades, renderer, uniforms },
+    parts: { scene, cascades, renderer, uniforms, water },
     // the land's own material from island.js's (its flats' cut runs first), and the levelled ground's
     land: (base, cut) => { const m = landMaterial(base, { lite, flat: false, uniforms, cut }); landRefs.push(m); return m; },
     flat: (base, cut) => { const m = landMaterial(base, { lite, flat: true, uniforms, cut }); landRefs.push(m); return m; },
+    // the sea's own material (its sheet): the water's surface and the floor seen through it, in one drawing. It is not drawn
+    // over what stands in the water (adoptAll marks those, stencil 2): each of them shows its own submerged part
+    sea: (base, extra = {}) => {
+      const m = landMaterial(base, { lite, flat: false, uniforms: { ...uniforms, ...extra }, water: true }); landRefs.push(m);
+      m.defines = { ...(m.defines || {}), ...(water ? water.defines : {}) };
+      Object.assign(m, { stencilWrite: true, stencilWriteMask: 0, stencilFunc: THREE.NotEqualStencilFunc, stencilRef: 2, stencilZPass: THREE.KeepStencilOp });
+      return m;
+    },
+    // the light on level water and its cosine under it (shared: the sea, the swash, whatever stands in the water read it);
+    // island.js sets it under the present sky, sky.js under the true one
+    seaLight: { uSeaE: SHARED.uSeaE, uSeaLight: SHARED.uSeaLight },
     // the present light raises the land's colours (island.js says why)
     set paint(k) { uniforms.uIsleLook.value.y = k; },
     get paint() { return uniforms.uIsleLook.value.y; },
@@ -734,7 +988,12 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
         if (!o.isMesh || o.userData.isleShadow === false || o.userData.isleSeen) return;
         const m = o.material, list = Array.isArray(m) ? m : [m];
         let lit = false;
-        for (const x of list) { if (x && (x.isMeshStandardMaterial || x.isMeshLambertMaterial || x.isMeshPhongMaterial || x.isMeshToonMaterial) && !x.transparent && x.blending === THREE.NormalBlending) { adopt(x); lit = true; } }
+        for (const x of list) {
+          if (!x || !(x.isMeshStandardMaterial || x.isMeshLambertMaterial || x.isMeshPhongMaterial || x.isMeshToonMaterial) || x.transparent || x.blending !== THREE.NormalBlending) continue;
+          adopt(x); lit = true;
+          // what stands on the land or in the water marks its pixels: the sea's sheet is not drawn over them
+          if (!o.userData.isleLand && !o.userData.isleSea) Object.assign(x, { stencilWrite: true, stencilRef: 2, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
+        }
         if (!lit) return;
         o.userData.isleSeen = true; o.receiveShadow = true;
         if (!o.userData.isleLand) o.layers.enable(CASCADES.layer);

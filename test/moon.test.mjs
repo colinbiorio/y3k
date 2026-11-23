@@ -242,7 +242,7 @@ ok('SOLAR.md, GAME.md and the README say what was built, with the credit, in the
   for (const line of measured) assert.ok(md.includes(line[0].toUpperCase() + line.slice(1)), 'SOLAR.md is behind the measurement: ' + line);
   assert.match(game, /### The true sky over the island, its third part: the Moon \(22 November 2026\)/);
   for (const text of [game, readme]) assert.ok(text.includes('CGI Moon Kit'), 'the credit');
-  assert.match(readme, /- \*\*2026-11-22\*\* \(latest\) — \*\*The true sky over the island, its third part: the Moon/);
+  assert.match(readme, /- \*\*2026-11-22\*\* \((latest|evening)\) — \*\*The true sky over the island, its third part: the Moon/, 'its line (the latest no longer: the island\'s ground and sea came after it)');
   assert.ok(readme.indexOf('its third part: the Moon') < readme.indexOf('its second part: the night'), 'newest first');
 });
 
