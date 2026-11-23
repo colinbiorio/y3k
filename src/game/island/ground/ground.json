@@ -1,0 +1,172 @@
+{
+ "layers": [
+  {
+   "name": "sand",
+   "scan": "aerial_beach_01",
+   "page": "https://polyhaven.com/a/aerial_beach_01",
+   "side_m": 30.0,
+   "albedo_scan": [
+    0.2829,
+    0.2372,
+    0.1959
+   ],
+   "albedo_graded": [
+    0.57,
+    0.53,
+    0.45
+   ],
+   "gain": [
+    2.015,
+    2.234,
+    2.297
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.61,
+   "ao_mean": 0.714
+  },
+  {
+   "name": "grass",
+   "scan": "leafy_grass",
+   "page": "https://polyhaven.com/a/leafy_grass",
+   "side_m": 2.0,
+   "albedo_scan": [
+    0.3238,
+    0.2387,
+    0.1086
+   ],
+   "albedo_graded": [
+    0.075,
+    0.13,
+    0.035
+   ],
+   "gain": [
+    0.232,
+    0.545,
+    0.322
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.685,
+   "ao_mean": 0.74
+  },
+  {
+   "name": "litter",
+   "scan": "forest_leaves_03",
+   "page": "https://polyhaven.com/a/forest_leaves_03",
+   "side_m": 2.3,
+   "albedo_scan": [
+    0.0722,
+    0.0472,
+    0.0189
+   ],
+   "albedo_graded": [
+    0.1,
+    0.075,
+    0.045
+   ],
+   "gain": [
+    1.385,
+    1.589,
+    2.375
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.786,
+   "ao_mean": 0.687
+  },
+  {
+   "name": "rock",
+   "scan": "rock_3",
+   "page": "https://polyhaven.com/a/rock_3",
+   "side_m": 1.5,
+   "albedo_scan": [
+    0.1841,
+    0.1293,
+    0.0836
+   ],
+   "albedo_graded": [
+    0.135,
+    0.125,
+    0.112
+   ],
+   "gain": [
+    0.733,
+    0.967,
+    1.339
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.524,
+   "ao_mean": 0.675
+  },
+  {
+   "name": "cliff",
+   "scan": "dark_rock_02",
+   "page": "https://polyhaven.com/a/dark_rock_02",
+   "side_m": 2.0,
+   "albedo_scan": [
+    0.0436,
+    0.0346,
+    0.0257
+   ],
+   "albedo_graded": [
+    0.105,
+    0.097,
+    0.088
+   ],
+   "gain": [
+    2.407,
+    2.804,
+    3.424
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.824,
+   "ao_mean": 0.906
+  },
+  {
+   "name": "shore",
+   "scan": "low_tide_rocks",
+   "page": "https://polyhaven.com/a/low_tide_rocks",
+   "side_m": 2.17,
+   "albedo_scan": [
+    0.1517,
+    0.1183,
+    0.079
+   ],
+   "albedo_graded": [
+    0.16,
+    0.15,
+    0.135
+   ],
+   "gain": [
+    1.055,
+    1.268,
+    1.709
+   ],
+   "texels_over_one": 0.00052,
+   "rough_mean": 0.63,
+   "ao_mean": 0.899
+  },
+  {
+   "name": "face",
+   "scan": "aerial_rocks_02",
+   "page": "https://polyhaven.com/a/aerial_rocks_02",
+   "side_m": 50.0,
+   "albedo_scan": [
+    0.1747,
+    0.1237,
+    0.0529
+   ],
+   "albedo_graded": [
+    0.11,
+    0.105,
+    0.085
+   ],
+   "gain": [
+    0.63,
+    0.849,
+    1.607
+   ],
+   "texels_over_one": 0.0,
+   "rough_mean": 0.817,
+   "ao_mean": 0.783
+  }
+ ]
+}
