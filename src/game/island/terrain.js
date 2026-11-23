@@ -1,24 +1,24 @@
-// terrain.js — LORD HOWE ISLAND'S GROUND, MADE OF WHAT IT IS MADE OF (three.js), and the Sun's shadows on it and on
-// everything that stands on it. island.js draws the land's triangles with this material; the shadows and the lines of
-// light reach every lit thing in the island's scene (adoptAll, below).
+// terrain.js — LORD HOWE ISLAND'S GROUND, MADE OF WHAT IT IS MADE OF (three.js), and the key light's shadows on it and
+// on everything that stands on it. island.js draws the land's triangles with this material; the shadows reach every
+// lit thing in the island's scene (adoptAll, below).
 //
 // THE GROUND. Seven scanned surfaces (Poly Haven, CC0; scripts/island/ground-textures.py grades each to what the
 // island's own ground reflects and packs it): coral sand, the lowland grass, the palm forest's leaf litter, weathered
 // rock, the cliffs' fractured basalt, the shore's pebbles and rubble, and the cliffs' large-scale face (outcrops,
 // ledges, the green on them). Which one a pixel is made of follows life.js's cover(), the rule the palms grow by
 // (beach under 2.9 m, rock past a slope of 0.8 and cliff past 0.95, the mist forest's moss over 640 m, grass on the
-// low flats where its noise allows, forest the rest), with the same noise to the bit, so a palm stands on forest
-// floor. The two that a pixel is most made of are read and blended by their own heights (sand fills between pebbles,
-// rock stands out of grass: no smooth fade). Each surface is read at two scales: its own (a 2 m scan at 2 m) near the
-// eye, and five to eight times larger further off, so its tiles do not show at a distance; the cliffs and steep rock
-// are read from three sides at once (a vertical face is not a smear of the ground's texture), and from a few hundred
-// metres off the large-scale face takes over from the close one. The forest beyond the palms (life.js draws them only
-// within PALM.near of the body) is drawn as a canopy of crowns, lit by the Sun on their domes. The ground at the water
-// is wet: darker, smoother, glossy where the swash reaches, and the lagoon's floor under the sea is the same sand.
+// low flats where its noise allows, forest the rest), with its noise made once on the GPU from the same hash, so a
+// palm stands on forest floor. The two a pixel is most made of are read and blended by their own heights (sand fills
+// between pebbles, rock stands out of grass: no smooth fade). Each surface is read at its own scale near the eye (a
+// 2 m scan over 2 m) and five to eight times larger further off, so its tiles do not show; the cliffs and steep rock
+// are read from the two sides they face most (a vertical face is not a smear of the ground's texture), and from a few
+// hundred metres off the large-scale face takes over. The forest beyond the palms (life.js draws them only within
+// PALM.near of the body) is a canopy of crowns lit by the Sun as domes. The ground at the water is wet: darker,
+// smoother, glossy where the swash reaches; the lagoon's floor under the sea is the same sand.
 //
-// THE LIGHT. The true sky's (sky.js) or the present one's: the key light, the sky's fill and the wrapped sky, all
-// through three's own lighting, so the air between the eye and the land (sky.js adopt) and the eye's curve go on as
-// before. What is new:
+// THE LIGHT. The true sky's (sky.js) or the present one's: the key light, the sky's fill and the wrapped sky, through
+// three's own lighting, so the air between the eye and the land (sky.js adopt) and the eye's curve go on as before.
+// What is new:
 //   · THE LAND'S OWN SHADOW: for every point of the grid (16 m), how high above the ground the land toward the key
 //     light cuts off its disc's lower limb and its upper limb (a march over the same triangles the land is drawn with,
 //     on the GPU, made again a band at a time as the light moves). A point is lit by the share of the disc above both
@@ -27,16 +27,16 @@
 //   · THE SKY'S SHARE: how much of the sky each point of the grid sees past the land round it (sixteen ways, out to a
 //     kilometre, cosine-weighted about its own slope: the GTAO integral over a heightfield), made once; with each
 //     scan's own occlusion it darkens what the sky and the wrapped sky give, not the Sun.
-//   · CASCADED SHADOW MAPS for the things on the land (the palms, the body, buildings, ships, bots): three maps round
-//     the eye (to 15 m, 60 m and 220 m), each a sphere about its slice of the view so it does not swim as the eye
-//     turns, stepped by whole texels as the eye moves. Their lights carry no light of their own: the key light is
-//     shadowed by the one each pixel's distance falls in, so a material this has not adopted is lit, not lit thrice.
-//     The land casts into none of them (its shadow is the line above, sharp to the metre at golden hour without the
-//     acne a map of a 16 m grid would draw).
+//   · CASCADED SHADOW MAPS for the things on the land (the palms, the body, buildings, ships, bots): three depth maps
+//     round the eye (to 15 m, 60 m and 220 m), each a sphere about its slice of the view so it does not swim as the
+//     eye turns, stepped by whole texels as the eye moves, read with the GPU's own comparison (four taps, each a 2 x 2
+//     filter: a soft edge for a quarter of what three's own sixteen-tap filter costs). Only the things on the land are
+//     drawn into them (a layer of their own); the land casts into none (its shadow is the line above, sharp to the
+//     metre at golden hour without the acne a map of a 16 m grid would draw).
 //
 // Where this machine cannot draw into half floats (sky.js asks the same), the land's own shadow and sky's share are
-// left out and the land is lit as before. A plainer picture (`lite`: fine.js's plain, or a phone) reads the 512
-// maps, the nearest scale only, no faces from three sides, two shadow maps.
+// left out. A plainer picture (`lite`: fine.js's plain, or a phone) reads the 512 maps at one scale, from above only,
+// with two shadow maps.
 import * as THREE from 'three';
 import { PALM } from './life.js';
 
@@ -52,12 +52,15 @@ export const MEAN = [[0.57, 0.53, 0.45], [0.075, 0.13, 0.035], [0.10, 0.075, 0.0
 // when two meet (rock stands out of what is round it; sand fills)
 const WET = [0.45, 0.7, 0.7, 0.62, 0.62, 0.55, 0.62];
 const RISE = [0.5, 0.75, 0.7, 1.15, 1.25, 1.0, 1.25];
-// the shadow maps round the eye: where each ends (m of the view's depth), its texels, and how far behind its slice
-// along the light a thing may stand and still cast into it (a 14 m palm with the Sun 4 degrees up: 200 m)
-export const CASCADES = { far: [15, 60, 220], size: [2048, 1024, 1024], lite: { far: [20, 110], size: [1024, 1024] }, margin: 260 };
+// the shadow maps round the eye: where each ends (m of the view's depth), its texels, how far behind its slice along
+// the light a thing may stand and still cast into it (a 14 m palm with the Sun 4 degrees up: 200 m), and the layer
+// the things that cast are put on
+export const CASCADES = { far: [15, 60, 220], size: [2048, 1536, 1024], lite: { far: [20, 110], size: [1024, 1024] }, margin: 260, layer: 2 };
 // the land's own shadow: how far toward the light it looks (m), the step near the point and how the steps grow
 export const LINES = { far: 16000, step: 8, grow: 0.012, steps: 420, bands: 8, moved: 0.06 };
 export const SKYSHARE = { ways: 16, steps: 18, first: 12, grow: 1.32 };
+// the ground's control texture: texels to each 16 m cell (life.js's noise and the slow variations, made once)
+export const CONTROL = { per: 2, lite: 1 };
 
 // ---- the maps, fetched once for the page (both arrays together, transcoded off the page's thread) and kept: going to
 // the void and back does not fetch them again
@@ -67,11 +70,26 @@ function loadMaps(renderer, which) {
   if (fetched.has(which)) return fetched.get(which);
   const p = (async () => {
     const { KTX2Loader } = await import('three/addons/loaders/KTX2Loader.js');
-    const loader = new KTX2Loader().setTranscoderPath(new URL('../../vendor/three@0.160.0/examples/jsm/libs/basis/', import.meta.url).href).detectSupport(renderer);
+    // three's loader, its transcoding worker loaded from a file of the site's own (basis-worker.js says why: a worker made
+    // from a Blob keeps the page's content policy, and the transcoder's bindings evaluate strings), the transcoder's
+    // binary fetched once and handed to each worker as three's own init does
+    class IsleLoader extends KTX2Loader {
+      init() {
+        if (!this.transcoderPending) {
+          const wasm = new URL('../../vendor/three@0.187.0/examples/jsm/libs/basis/basis_transcoder.wasm', import.meta.url).href, file = new URL('./basis-worker.js', import.meta.url).href;
+          this.transcoderPending = fetch(wasm).then((r) => { if (!r.ok) throw new Error(`the transcoder did not arrive (${r.status})`); return r.arrayBuffer(); }).then((bin) => {
+            this.transcoderBinary = bin;
+            this.workerPool.setWorkerCreator(() => { const w = new Worker(file), b = this.transcoderBinary.slice(0); w.postMessage({ type: 'init', config: this.workerConfig, transcoderBinary: b }, [b]); return w; });
+          });
+        }
+        return this.transcoderPending;
+      }
+    }
+    const loader = new IsleLoader().detectSupport(renderer);
     try {
       const base = new URL('./ground/', import.meta.url).href;
       const maps = await Promise.all(MAP_FILES[which].map((f) => loader.loadAsync(base + f)));
-      const aniso = Math.min(which === 'lite' ? 4 : 8, renderer.capabilities.getMaxAnisotropy());
+      const aniso = Math.min(4, renderer.capabilities.getMaxAnisotropy());
       for (const t of maps) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; }
       return maps;
     } finally { loader.dispose(); }
@@ -100,28 +118,27 @@ const SHARED = {
   uIsleLines: { value: null },                              // the land's shadow lines over each grid point (RG16F)
   uIsleGrid: { value: new THREE.Vector4(0, 0, 16, 0) },     // x0, z0, spacing, and 1 where the lines are drawn
   uIsleN: { value: new THREE.Vector2(1, 1) },               // the grid's width and height (points)
-  uIsleSplit: { value: new THREE.Vector3(15, 60, 220) },    // where each shadow map ends (view depth, m)
+  uIsleSplit: { value: new THREE.Vector4(15, 60, 220, 0) }, // where each shadow map ends (view depth, m), and how many there are
+  uIsleShade0: { value: null }, uIsleShade1: { value: null }, uIsleShade2: { value: null },     // the maps (depth, compared)
+  uIsleShadeM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] },     // world to each map
+  uIsleShadeO: { value: new THREE.Vector3() },              // each map's offset along the normal (m: a texel and a half)
+  uIsleShadeT: { value: new THREE.Vector3() },              // each map's texel (in its own 0..1)
+  uIsleShadeZ: { value: new THREE.Vector3() },              // each map's depth bias (2 cm, in its own depth)
 };
 // a point on the grid's triangles (ground.js onGrid: (00, 10, 01) and (10, 11, 01)), from its heights texel by texel
 const GRID_GLSL = `
-float isleGround(highp sampler2D hts, vec2 n, vec2 g) {
-  vec2 c = clamp(floor(g), vec2(0.0), n - 2.0), f = g - c; ivec2 i = ivec2(c);
-  float h00 = texelFetch(hts, i, 0).r, h10 = texelFetch(hts, i + ivec2(1, 0), 0).r, h01 = texelFetch(hts, i + ivec2(0, 1), 0).r, h11 = texelFetch(hts, i + ivec2(1, 1), 0).r;
-  return f.x + f.y <= 1.0 ? h00 + (h10 - h00) * f.x + (h01 - h00) * f.y : h11 + (h01 - h11) * (1.0 - f.x) + (h10 - h11) * (1.0 - f.y);
+float isleGround( highp sampler2D hts, vec2 n, vec2 g ) {
+  vec2 c = clamp( floor( g ), vec2( 0.0 ), n - 2.0 ), f = g - c; ivec2 i = ivec2( c );
+  float h00 = texelFetch( hts, i, 0 ).r, h10 = texelFetch( hts, i + ivec2( 1, 0 ), 0 ).r, h01 = texelFetch( hts, i + ivec2( 0, 1 ), 0 ).r, h11 = texelFetch( hts, i + ivec2( 1, 1 ), 0 ).r;
+  return f.x + f.y <= 1.0 ? h00 + ( h10 - h00 ) * f.x + ( h01 - h00 ) * f.y : h11 + ( h01 - h11 ) * ( 1.0 - f.x ) + ( h10 - h11 ) * ( 1.0 - f.y );
 }`;
 // how much of the key light's disc the land leaves in sight at a world point, and the shadow maps' word on it
-function lightPars(cascades) {
-  const one = (i) => `float isleMap${i}() { DirectionalLightShadow s = directionalLightShadows[ ${i} ]; return getShadow( directionalShadowMap[ ${i} ], s.shadowMapSize, s.shadowBias, s.shadowRadius, vDirectionalShadowCoord[ ${i} ] ); }`;
-  const steps = [];
-  for (let i = 0; i < cascades; i += 1) {
-    const end = ['x', 'y', 'z'][i], next = i + 1 < cascades ? `isleMap${i + 1}()` : '1.0';
-    // the last tenth of each map's reach is blended into the next (into the land's own light past the last), so no seam shows
-    steps.push(`if ( d < uIsleSplit.${end} ) { float a = isleMap${i}(), k = smoothstep( uIsleSplit.${end} * 0.88, uIsleSplit.${end}, d ); return k > 0.0 ? mix( a, ${next}, k ) : a; }`);
-  }
-  return `
-uniform float uIsleOn; uniform mat4 uIsleV2W; uniform highp sampler2D uIsleHt; uniform sampler2D uIsleLines; uniform vec4 uIsleGrid; uniform vec2 uIsleN; uniform vec3 uIsleSplit;
+const LIGHT_PARS = `
+uniform float uIsleOn; uniform mat4 uIsleV2W; uniform highp sampler2D uIsleHt; uniform sampler2D uIsleLines; uniform vec4 uIsleGrid; uniform vec2 uIsleN; uniform vec4 uIsleSplit;
+uniform highp sampler2DShadow uIsleShade0; uniform highp sampler2DShadow uIsleShade1; uniform highp sampler2DShadow uIsleShade2;
+uniform mat4 uIsleShadeM[ 3 ]; uniform vec3 uIsleShadeO; uniform vec3 uIsleShadeT; uniform vec3 uIsleShadeZ;
 ${GRID_GLSL}
-// the share of the key light's disc above the land's two lines at w (y: its height over the ground there, when known)
+// the share of the key light's disc above the land's two lines at w (over: its height over the ground there, when known)
 float isleLand( vec3 w, float over ) {
   if ( uIsleGrid.w < 0.5 ) return 1.0;
   vec2 g = ( w.xz - uIsleGrid.xy ) / uIsleGrid.z;
@@ -131,70 +148,77 @@ float isleLand( vec3 w, float over ) {
   float t = clamp( ( y - v.y ) / max( v.x - v.y, 1.0e-3 ), 0.0, 1.0 );
   return t * t * ( 3.0 - 2.0 * t );                                          // a disc's area above a line, near enough
 }
-#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS == ${cascades}
-${Array.from({ length: cascades }, (_, i) => one(i)).join('\n')}
-float isleMaps( float d ) {
-  ${steps.join('\n  ')}
+// one map: four of the GPU's own 2 x 2 comparisons half a texel apart (a 3 x 3 tent); out of the map, lit
+float isleTap( highp sampler2DShadow s, mat4 m, vec3 w, float texel, float bias ) {
+  vec3 c = ( m * vec4( w, 1.0 ) ).xyz * 0.5 + 0.5;
+  if ( any( lessThan( c, vec3( 0.0 ) ) ) || any( greaterThan( c, vec3( 1.0 ) ) ) ) return 1.0;
+  float z = c.z - bias, o = 0.5 * texel;
+  return 0.25 * ( texture( s, vec3( c.xy + vec2( -o, -o ), z ) ) + texture( s, vec3( c.xy + vec2( o, -o ), z ) ) + texture( s, vec3( c.xy + vec2( -o, o ), z ) ) + texture( s, vec3( c.xy + vec2( o, o ), z ) ) );
+}
+// the map this pixel's distance falls in (its last eighth blended into the next, past the last into the light)
+float isleMaps( vec3 w, vec3 n, float d ) {
+  float k;
+  if ( uIsleSplit.w < 0.5 ) return 1.0;
+  if ( d < uIsleSplit.x ) {
+    float a = isleTap( uIsleShade0, uIsleShadeM[ 0 ], w + n * uIsleShadeO.x, uIsleShadeT.x, uIsleShadeZ.x ); k = smoothstep( uIsleSplit.x * 0.88, uIsleSplit.x, d );
+    return k > 0.0 ? mix( a, isleTap( uIsleShade1, uIsleShadeM[ 1 ], w + n * uIsleShadeO.y, uIsleShadeT.y, uIsleShadeZ.y ), k ) : a;
+  }
+  if ( d < uIsleSplit.y ) {
+    float a = isleTap( uIsleShade1, uIsleShadeM[ 1 ], w + n * uIsleShadeO.y, uIsleShadeT.y, uIsleShadeZ.y ); k = smoothstep( uIsleSplit.y * 0.88, uIsleSplit.y, d );
+    if ( k <= 0.0 ) return a;
+    return mix( a, uIsleSplit.w > 2.5 ? isleTap( uIsleShade2, uIsleShadeM[ 2 ], w + n * uIsleShadeO.z, uIsleShadeT.z, uIsleShadeZ.z ) : 1.0, k );
+  }
+  if ( d < uIsleSplit.z && uIsleSplit.w > 2.5 ) {
+    float a = isleTap( uIsleShade2, uIsleShadeM[ 2 ], w + n * uIsleShadeO.z, uIsleShadeT.z, uIsleShadeZ.z ); k = smoothstep( uIsleSplit.z * 0.88, uIsleSplit.z, d );
+    return mix( a, 1.0, k );
+  }
   return 1.0;
 }
-#endif
-float isleKey( vec3 viewPos, float over ) {
+float isleKey( vec3 viewPos, vec3 viewN, float over ) {
   if ( uIsleOn < 0.5 || ! receiveShadow ) return 1.0;
-  float s = isleLand( ( uIsleV2W * vec4( viewPos, 1.0 ) ).xyz, over );
-  #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS == ${cascades}
-  if ( s > 0.0 ) s *= isleMaps( - viewPos.z );
-  #endif
+  vec3 w = ( uIsleV2W * vec4( viewPos, 1.0 ) ).xyz;
+  float s = isleLand( w, over );
+  if ( s > 0.0 ) s *= isleMaps( w, normalize( mat3( uIsleV2W ) * viewN ), - viewPos.z );
   return s;
 }`;
-}
-// three's own directional loop (r160), and the island's: the shadow maps' lights skipped (they carry nothing), the key
-// light (the first after them; the first of all off the island) shadowed
+// three's own directional loop (r160), and the island's: its key light (the first directional light) shadowed
 const DIR_LOOP = '#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )\n\tDirectionalLight directionalLight;\n\t#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0\n\tDirectionalLightShadow directionalLightShadow;\n\t#endif\n\t#pragma unroll_loop_start\n\tfor ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {\n\t\tdirectionalLight = directionalLights[ i ];\n\t\tgetDirectionalLightInfo( directionalLight, directLight );\n\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )\n\t\tdirectionalLightShadow = directionalLightShadows[ i ];\n\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;\n\t\t#endif\n\t\tRE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\t}\n\t#pragma unroll_loop_end\n#endif\n';
-const isleLoop = (cascades) => `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
+const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	DirectionalLight directionalLight;
-	float isleShade = isleKey( geometryPosition, ISLE_OVER );
-	#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS == ${cascades}
-	#define ISLE_KEY ${cascades}
-	#else
-	#define ISLE_KEY 0
-	#endif
+	float isleShade = isleKey( geometryPosition, geometryNormal, ISLE_OVER );
 	#pragma unroll_loop_start
 	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
-		#if UNROLLED_LOOP_INDEX >= ISLE_KEY
 		directionalLight = directionalLights[ i ];
 		getDirectionalLightInfo( directionalLight, directLight );
-		#if UNROLLED_LOOP_INDEX == ISLE_KEY
+		#if UNROLLED_LOOP_INDEX == 0
 		directLight.color *= isleShade;
 		#endif
 		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
-		#endif
 	}
 	#pragma unroll_loop_end
-	#undef ISLE_KEY
 #endif
 `;
-const ADOPTED = new WeakMap();          // material -> the number of shadow maps it was made for
+const ADOPTED = new WeakSet();
 let owner = null;                       // the island whose numbers SHARED holds (a plainer island is made before the last is let go)
 
 // A lit material is made to take the island's shadows: its key light is shadowed by the land's lines and the shadow
 // maps. Its own onBeforeCompile still runs first; the sky's adoption (sky.js) may wrap this one or be wrapped by it.
-function adopt(material, cascades) {
+function adopt(material) {
   if (!material || !material.isMaterial || ADOPTED.has(material)) return;
   if (!(material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial || material.isMeshToonMaterial)) return;
-  ADOPTED.set(material, cascades);
-  const before = material.onBeforeCompile, keyOf = material.customProgramCacheKey.bind(material);
-  const loop = THREE.ShaderChunk.lights_fragment_begin.replace(DIR_LOOP, isleLoop(cascades));
+  ADOPTED.add(material);
+  const loop = THREE.ShaderChunk.lights_fragment_begin.replace(DIR_LOOP, ISLE_LOOP);
   if (loop === THREE.ShaderChunk.lights_fragment_begin) { console.warn('[island] three.js\'s light loop is not the one this was written for: no shadows'); return; }
+  const before = material.onBeforeCompile, keyOf = material.customProgramCacheKey.bind(material);
   material.onBeforeCompile = function (shader, renderer) {
     before.call(this, shader, renderer);
     let fs = shader.fragmentShader;
     if (!fs.includes('#include <lights_fragment_begin>') || !fs.includes('#include <shadowmap_pars_fragment>')) return;
     Object.assign(shader.uniforms, SHARED);
-    fs = fs.replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + lightPars(cascades));
-    if (!/#define ISLE_OVER/.test(fs)) fs = '#define ISLE_OVER -1.0e9\n' + fs;
-    shader.fragmentShader = fs.replace('#include <lights_fragment_begin>', loop);
+    fs = fs.replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS);
+    shader.fragmentShader = '#define ISLE_OVER -1.0e9\n' + fs.replace('#include <lights_fragment_begin>', loop);
   };
-  material.customProgramCacheKey = () => keyOf() + '|isle' + cascades;
+  material.customProgramCacheKey = () => keyOf() + '|isle';
   material.needsUpdate = true;
 }
 
@@ -249,12 +273,7 @@ void main() {
   }
   gl_FragColor = vec4( clamp( sum / ${(SKYSHARE.ways / 2).toFixed(1)}, 0.0, 1.0 ), 0.0, 0.0, 1.0 );
 }`;
-
-// ---- the land's own drawing (island.js's landMat and flatMat): the vertex hands on where it is and its own normal
-const LAND_VERT_PARS = 'varying vec3 vW;\nvarying vec3 vWN;\n#ifdef ISLE_FLAT\nattribute float aEarth;\nvarying float vEarth;\n#endif';
-const LAND_NORMAL = 'vWN = normalize( mat3( modelMatrix ) * objectNormal );';
-const LAND_PLACE = 'vW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n#ifdef ISLE_FLAT\nvEarth = aEarth;\n#endif';
-// life.js's hash and vnoise, bit for bit (Math.imul is a 32-bit multiply; >>> an unsigned shift)
+// life.js's hash and vnoise, bit for bit (Math.imul is a 32-bit multiply; >>> an unsigned shift), and a cheaper noise
 const NOISE_GLSL = `
 float lhHash( int i, int j ) { uint h = uint( i ) * 374761393u + uint( j ) * 668265263u; h = ( h ^ ( h >> 13u ) ) * 1274126177u; h ^= h >> 16u; return float( h ) * ( 1.0 / 4294967296.0 ); }
 float lhNoise( vec2 p ) { vec2 c = floor( p ), f = p - c, u = f * f * ( 3.0 - 2.0 * f ); int a = int( c.x ), b = int( c.y );
@@ -262,76 +281,120 @@ float lhNoise( vec2 p ) { vec2 c = floor( p ), f = p - c, u = f * f * ( 3.0 - 2.
 float gh( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }
 vec2 gh2( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * vec3( 0.1031, 0.1030, 0.0973 ) ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.xx + q.yz ) * q.zy ); }
 float gn( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0 - 2.0 * f ); return mix( mix( gh( i ), gh( i + vec2( 1, 0 ) ), u.x ), mix( gh( i + vec2( 0, 1 ) ), gh( i + vec2( 1, 1 ) ), u.x ), u.y ); }`;
+// THE CONTROL TEXTURE, made once: at each of its texels (CONTROL.per to a 16 m cell), life.js's own cover noise (the
+// grass's), a slow variation of the colour, the lagoon's patches of rubble, and a jitter for the beach's edge
+const CONTROL_FRAG = `
+uniform vec4 uGrid; uniform float uPer;
+${NOISE_GLSL}
+void main() {
+  vec2 xz = uGrid.xy + ( gl_FragCoord.xy - 0.5 ) * uGrid.z / uPer;
+  gl_FragColor = vec4( lhNoise( xz / 70.0 ) * 0.7 + lhNoise( xz / 17.0 ) * 0.3, gn( xz * 0.011 ) * 0.6 + gn( xz * 0.037 + 5.0 ) * 0.4, gn( xz * 0.06 + 3.0 ), gn( xz * 0.09 ) );
+}`;
 
-function landFrag({ lite, flat }) {
-  const L = (name) => LAYERS.indexOf(name) + '.0', arr = (a) => `float[${a.length}](${a.map((x) => x.toFixed(3)).join(', ')})`;
+// ---- the land's own drawing (island.js's landMat and flatMat): the vertex hands on where it is and its own normal
+const LAND_VERT_PARS = 'varying vec3 vW;\nvarying vec3 vWN;\n#ifdef ISLE_FLAT\nattribute float aEarth;\nvarying float vEarth;\n#endif';
+const LAND_NORMAL = 'vWN = normalize( mat3( modelMatrix ) * objectNormal );';
+const LAND_PLACE = 'vW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n#ifdef ISLE_FLAT\nvEarth = aEarth;\n#endif';
+
+function landFrag({ lite }) {
+  const FACE = LAYERS.indexOf('face'), CLIFF = LAYERS.indexOf('cliff'), ROCK = LAYERS.indexOf('rock');
   return {
     pars: `
 varying vec3 vW; varying vec3 vWN;
 #ifdef ISLE_FLAT
 varying float vEarth;
 #endif
-uniform mediump sampler2DArray uIsleCol; uniform mediump sampler2DArray uIsleSurf; uniform sampler2D uIsleSky;
-uniform vec4 uIsleLook;      // the maps' weight (0 until they come, then 1), the present light's raise of the colours, the eye's height over the land, time
+uniform mediump sampler2DArray uIsleCol; uniform mediump sampler2DArray uIsleSurf; uniform sampler2D uIsleSky; uniform sampler2D uIsleCtl;
+uniform vec4 uIsleLook;      // the maps' weight (0 until they come, then 1), the present light's raise of the colours, the control's texels to a cell
 uniform vec3 uIsleBody;      // where the body is: the palms stand within PALM.near of it
 ${NOISE_GLSL}
-const float FINE[7] = ${arr(FINE)}; const float COARSE[7] = ${arr(COARSE)}; const float WET[7] = ${arr(WET)}; const float RISE[7] = ${arr(RISE)};
-const vec3 MEAN[7] = vec3[7](${MEAN.map((m) => `vec3(${m.map((x) => x.toFixed(4)).join(', ')})`).join(', ')});
+uniform vec4 uIsleLayer[ 7 ];    // each surface's fine and coarse side (m), how dark it goes wet, how much its height counts
+uniform vec3 uIsleMean[ 7 ];     // and its mean colour
+bool isleFar;                      // past 140 m (set by the splat before any read)
 vec3 isleTan( vec4 s ) { vec2 xy = s.xy * 2.0 - 1.0; return vec3( xy, sqrt( max( 0.0, 1.0 - dot( xy, xy ) ) ) ); }
 // one surface at one scale, seen from above: its colour and height, its finish; its normal in the world (whiteout
 // blend onto the land's own normal: the scan's x along the world's x, its y (up the picture) along z)
 void isleTop( float layer, float side, vec2 dx, vec2 dy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
-  vec3 uv = vec3( vW.xz / side, layer ); vec2 gx = dx / side, gy = dy / side;
-  col = textureGrad( uIsleCol, uv, gx, gy ); srf = textureGrad( uIsleSurf, uv, gx, gy );
+  vec3 uv = vec3( vW.xz / side, layer );
+  // past 140 m a scan's shape and finish are under a pixel: its mean finish, the land's own normal (half the reads)
+  if ( isleFar ) { col = textureGrad( uIsleCol, uv, dx / side, dy / side ); srf = vec4( 0.5, 0.5, 0.8, 0.9 ); nw = n0; return; }
+  #ifdef ISLE_IMPLICIT
+  col = texture( uIsleCol, uv ); srf = texture( uIsleSurf, uv );
+  #else
+  col = textureGrad( uIsleCol, uv, dx / side, dy / side ); srf = textureGrad( uIsleSurf, uv, dx / side, dy / side );
+  #endif
   vec3 t = isleTan( srf );
   nw = normalize( vec3( t.x + n0.x, t.z * n0.y, t.y + n0.z ) );
 }
-// the same from three sides at once, by how much the land faces each way (a cliff is read from the side it faces)
-void isleTri( float layer, float side, vec3 dpx, vec3 dpy, vec3 n0, vec3 tw, out vec4 col, out vec4 srf, out vec3 nw ) {
-  vec4 cx = vec4( 0.0 ), cy = vec4( 0.0 ), cz = vec4( 0.0 ), sx = vec4( 0.0 ), sy = vec4( 0.0 ), sz = vec4( 0.0 ); vec3 nx = vec3( 0.0 ), ny = vec3( 0.0 ), nz = vec3( 0.0 );
-  if ( tw.x > 0.01 ) { vec3 uv = vec3( vW.zy / side, layer ); cx = textureGrad( uIsleCol, uv, dpx.zy / side, dpy.zy / side ); sx = textureGrad( uIsleSurf, uv, dpx.zy / side, dpy.zy / side );
-    vec3 t = isleTan( sx ); nx = vec3( t.z * n0.x, t.y + n0.y, t.x + n0.z ); }
-  if ( tw.y > 0.01 ) { vec3 uv = vec3( vW.xz / side, layer ); cy = textureGrad( uIsleCol, uv, dpx.xz / side, dpy.xz / side ); sy = textureGrad( uIsleSurf, uv, dpx.xz / side, dpy.xz / side );
-    vec3 t = isleTan( sy ); ny = vec3( t.x + n0.x, t.z * n0.y, t.y + n0.z ); }
-  if ( tw.z > 0.01 ) { vec3 uv = vec3( vW.xy / side, layer ); cz = textureGrad( uIsleCol, uv, dpx.xy / side, dpy.xy / side ); sz = textureGrad( uIsleSurf, uv, dpx.xy / side, dpy.xy / side );
-    vec3 t = isleTan( sz ); nz = vec3( t.x + n0.x, t.y + n0.y, t.z * n0.z ); }
-  col = cx * tw.x + cy * tw.y + cz * tw.z; srf = sx * tw.x + sy * tw.y + sz * tw.z;
-  nw = normalize( nx * tw.x + ny * tw.y + nz * tw.z + n0 * 1.0e-4 );
+// from the two sides the land faces most (after Quilez's biplanar mapping: a cliff is read from the side it faces, and a
+// third read would add little), each blended by how much it faces that way. Read from above, it is read by x and z as
+// the level ground is (isleTop), so nothing turns where the ground steepens. (Each side chosen by selects, not by
+// indexing a vector at run time: that puts the vector in memory on some GPUs.)
+void isleSide( int axis, float layer, float side, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
+  vec2 uv = axis == 0 ? vW.zy : axis == 1 ? vW.xz : vW.xy, gx = axis == 0 ? dpx.zy : axis == 1 ? dpx.xz : dpx.xy, gy = axis == 0 ? dpy.zy : axis == 1 ? dpy.xz : dpy.xy;
+  vec3 at = vec3( uv / side, layer );
+  col = textureGrad( uIsleCol, at, gx / side, gy / side );
+  srf = isleFar && side < 40.0 ? vec4( 0.5, 0.5, 0.8, 0.9 ) : textureGrad( uIsleSurf, at, gx / side, gy / side );
+  vec3 t = isleTan( srf );
+  nw = axis == 0 ? vec3( t.z * n0.x, t.y + n0.y, t.x + n0.z ) : axis == 1 ? vec3( t.x + n0.x, t.z * n0.y, t.y + n0.z ) : vec3( t.x + n0.x, t.y + n0.y, t.z * n0.z );
 }
-// one surface as it is seen at this distance: its own scale near, the larger one further off (from 18 to 110 m); a
-// steep one from three sides; the cliffs' large-scale face over the close rock from 90 m to 400 m
-void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, vec3 tw, bool steep, out vec4 col, out vec4 srf, out vec3 nw ) {
-  float layer = float( i ), far = ${lite ? '0.0' : 'smoothstep( 18.0, 110.0, dist )'};
+void isleTwo( float layer, float side, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
+  vec3 a = abs( n0 );
+  int ma = a.x > a.y && a.x > a.z ? 0 : a.y > a.z ? 1 : 2;
+  float am = ma == 0 ? a.x : ma == 1 ? a.y : a.z, b1 = ma == 0 ? a.y : a.x, b2 = ma == 2 ? a.y : a.z;
+  int me = ma == 0 ? ( a.y >= a.z ? 1 : 2 ) : ma == 1 ? ( a.x >= a.z ? 0 : 2 ) : ( a.x >= a.y ? 0 : 1 );
+  float ae = max( b1, b2 );
+  vec2 w = clamp( ( vec2( am, ae ) - 0.5773 ) / ( 1.0 - 0.5773 ), 0.0, 1.0 ); w = w * w * w * w; w.x = max( w.x, 1.0e-4 ); w /= w.x + w.y;
+  vec4 c1, s1, c2, s2; vec3 n1, n2;
+  isleSide( ma, layer, side, dpx, dpy, n0, c1, s1, n1 );
+  if ( w.y > 0.01 ) { isleSide( me, layer, side, dpx, dpy, n0, c2, s2, n2 ); } else { c2 = c1; s2 = s1; n2 = n1; }
+  col = c1 * w.x + c2 * w.y; srf = s1 * w.x + s2 * w.y;
+  nw = normalize( n1 * w.x + n2 * w.y + n0 * 1.0e-4 );
+}
+// one surface as it is seen at this distance: its own scale near the eye, the larger one past 60 m (both between 25
+// and 60 m); steep, from its two sides; the cliffs' large-scale face over the close rock from 80 to 350 m
+void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out vec4 col, out vec4 srf, out vec3 nw ) {
+  #ifdef ISLE_NO_COARSE
+  float layer = float( i ), far = 0.0;
+  #else
+  float layer = float( i ), far = ${lite ? '0.0' : 'smoothstep( 34.0, 50.0, dist )'};
+  #endif
   vec4 c1 = vec4( 0.0 ), s1 = vec4( 0.0 ), c2 = vec4( 0.0 ), s2 = vec4( 0.0 ); vec3 n1 = n0, n2 = n0;
-  ${lite ? `isleTop( layer, FINE[i], dpx.xz, dpy.xz, n0, c1, s1, n1 ); col = c1; srf = s1; nw = n1;` : `
+  vec4 P = uIsleLayer[ i ];
+  ${lite ? 'isleTop( layer, P.x, dpx.xz, dpy.xz, n0, col, srf, nw );' : `
+  // only the rock, the cliffs and the shore are read from their sides (grass and litter do not hold to a cliff)
+  steep = steep && ( i == ${ROCK} || i == ${CLIFF} || i == ${LAYERS.indexOf('shore')} );
   if ( steep ) {
-    if ( far < 0.999 ) isleTri( layer, FINE[i], dpx, dpy, n0, tw, c1, s1, n1 );
-    if ( far > 0.001 ) isleTri( layer, COARSE[i], dpx, dpy, n0, tw, c2, s2, n2 );
+    if ( far < 0.999 ) isleTwo( layer, P.x, dpx, dpy, n0, c1, s1, n1 );
+    if ( far > 0.001 ) isleTwo( layer, P.y, dpx, dpy, n0, c2, s2, n2 );
   } else {
-    if ( far < 0.999 ) isleTop( layer, FINE[i], dpx.xz, dpy.xz, n0, c1, s1, n1 );
-    if ( far > 0.001 ) isleTop( layer, COARSE[i], dpx.xz, dpy.xz, n0, c2, s2, n2 );
+    if ( far < 0.999 ) isleTop( layer, P.x, dpx.xz, dpy.xz, n0, c1, s1, n1 );
+    if ( far > 0.001 ) isleTop( layer, P.y, dpx.xz, dpy.xz, n0, c2, s2, n2 );
   }
   col = mix( c1, c2, far ); srf = mix( s1, s2, far ); nw = normalize( mix( n1, n2, far ) );
-  // the cliffs' and the steep rock's large-scale face: their ledges, their outcrops and the green on them, from far off
-  if ( ( i == ${LAYERS.indexOf('cliff')} || i == ${LAYERS.indexOf('rock')} ) && dist > 90.0 ) {
-    float k = smoothstep( 90.0, 400.0, dist ) * ( i == ${LAYERS.indexOf('cliff')} ? 0.85 : 0.6 );
+  #ifndef ISLE_NO_FACE
+  if ( ( i == ${CLIFF} || i == ${ROCK} ) && dist > 80.0 ) {
+    float k = smoothstep( 80.0, 350.0, dist ) * ( i == ${CLIFF} ? 0.85 : 0.6 );
     vec4 cf, sf; vec3 nf;
-    if ( steep ) isleTri( ${L('face')}, FINE[6], dpx, dpy, n0, tw, cf, sf, nf ); else isleTop( ${L('face')}, FINE[6], dpx.xz, dpy.xz, n0, cf, sf, nf );
+    float fs = uIsleLayer[ ${FACE} ].x;
+    if ( steep ) isleTwo( ${FACE}.0, fs, dpx, dpy, n0, cf, sf, nf ); else isleTop( ${FACE}.0, fs, dpx.xz, dpy.xz, n0, cf, sf, nf );
     col = vec4( mix( col.rgb, cf.rgb, k ), mix( col.a, cf.a, k * 0.5 ) ); srf = mix( srf, sf, k ); nw = normalize( mix( nw, nf, k ) );
-  }`}
+  }
+  #endif`}
 }
 // the forest's canopy, where the palms are not drawn: crowns six or seven metres across, each a dome, a little
-// different in its green, the dark of the understorey between them (n: the crowns' own normal; k: 1 in a crown)
+// different in its green, the dark of the understorey between them. Each crown's middle stands in the middle half of
+// its cell, so the four cells round a point hold its nearest
 void isleCanopy( vec2 p, float px, vec3 n0, out vec3 col, out vec3 nw ) {
-  vec2 q = p / 6.5, c = floor( q ), f = q - c, best = vec2( 0.0 ); float d1 = 9.0, id = 0.0;
-  for ( int j = -1; j <= 1; j ++ ) for ( int i = -1; i <= 1; i ++ ) {
-    vec2 o = vec2( float( i ), float( j ) ), r = o + 0.15 + 0.7 * gh2( c + o ) - f; float d = dot( r, r );
+  vec2 q = p / 6.5 - 0.5, c = floor( q ), f = q - c, best = vec2( 0.0 ); float d1 = 9.0, id = 0.0;
+  for ( int j = 0; j <= 1; j ++ ) for ( int i = 0; i <= 1; i ++ ) {
+    vec2 o = vec2( float( i ), float( j ) ), r = o + 0.25 + 0.5 * gh2( c + o ) - f; float d = dot( r, r );
     if ( d < d1 ) { d1 = d; best = r; id = gh( c + o + 17.0 ); }
   }
-  float rad = 0.52 + 0.22 * id, u = sqrt( d1 ) / rad, crown = 1.0 - smoothstep( 0.86, 1.04, u );
+  float rad = 0.5 + 0.2 * id, u = sqrt( d1 ) / rad, crown = 1.0 - smoothstep( 0.86, 1.04, u );
   vec2 out2 = -best / rad;
   vec3 dome = normalize( vec3( out2.x * 1.15, sqrt( max( 0.04, 1.0 - u * u ) ), out2.y * 1.15 ) );
-  vec3 green = mix( vec3( 0.030, 0.072, 0.018 ), vec3( 0.050, 0.090, 0.024 ), id ) * ( 0.85 + 0.3 * gh( c * 3.1 ) );
+  vec3 green = mix( vec3( 0.030, 0.072, 0.018 ), vec3( 0.050, 0.090, 0.024 ), id );
   col = mix( vec3( 0.012, 0.022, 0.008 ), green, crown );
   // far off, the pattern under a pixel is its mean: the crowns' and the gaps' colour, the land's own normal
   float fade = smoothstep( 1.2, 3.5, px );
@@ -341,84 +404,109 @@ void isleCanopy( vec2 p, float px, vec3 n0, out vec3 col, out vec3 nw ) {
 `,
     // the splat: in place of three's vertex colour (it sets diffuseColor), with what the later chunks need kept in isle*
     body: `
+#if defined( ISLE_BARE ) || defined( ISLE_BARE_TEX )
+vec3 isleN0 = normalize( vWN ), isleNw = isleN0; float isleRough = 0.85, isleOcc = 1.0;
+#ifdef ISLE_BARE_TEX
+vec4 bc, bs; vec3 bn; isleTop( 2.0, 2.3, dFdx( vW ).xz, dFdy( vW ).xz, isleN0, bc, bs, bn ); diffuseColor.rgb = bc.rgb; isleNw = bn; isleRough = bs.b; isleOcc = bs.a;
+#else
+diffuseColor.rgb = vec3( 0.1, 0.075, 0.045 );
+#endif
+#else
 vec3 isleN0 = normalize( vWN );
 vec3 isleDpx = dFdx( vW ), isleDpy = dFdy( vW );
 float isleDist = length( vW - cameraPosition ), islePx = max( length( isleDpx ), length( isleDpy ) );
 float isleH = vW.y;
+isleFar = isleDist > 140.0;
 float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
-// life.js cover(): the same noise, the same lines
-float isleCov = lhNoise( vW.xz / 70.0 ) * 0.7 + lhNoise( vW.xz / 17.0 ) * 0.3;
-float isleE1 = gn( vW.xz * 0.09 ), isleE2 = gn( vW.xz * 0.43 + 7.0 );
-float isleBeach = 2.9 + 0.9 * ( isleE1 - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
-float wCliff = smoothstep( 0.86, 1.06, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
-float wRockS = smoothstep( 0.6, 0.84, isleSlope + 0.1 * ( isleE1 - 0.5 ) );
-float lowGround = smoothstep( isleBeach + 0.5, isleBeach - 0.5, isleH );
-float wSand = lowGround * ( 1.0 - smoothstep( 0.32, 0.55, isleSlope ) );
-float wShore = smoothstep( isleBeach + 1.6, isleBeach - 0.4, isleH ) * smoothstep( 0.3, 0.6, isleSlope );
-float sea = smoothstep( 0.05, -0.35, isleH );
+// the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
+vec4 isleCtl = texture2D( uIsleCtl, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
+// a finer jitter for edges, near the eye only (further off it is under a pixel)
+float isleE2 = isleDist < 60.0 ? gn( vW.xz * 0.43 + 7.0 ) : 0.5;
+float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
+// (each class's own band is narrow, a few metres on the ground: the two surfaces' heights shape the edge within it)
+float wCliff = smoothstep( 0.92, 0.99, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
+float wRockS = smoothstep( 0.74, 0.83, isleSlope + 0.1 * ( isleCtl.a - 0.5 ) );
+float wSand = smoothstep( isleBeach + 0.22, isleBeach - 0.22, isleH ) * ( 1.0 - smoothstep( 0.4, 0.5, isleSlope ) );
+float wShore = smoothstep( isleBeach + 0.9, isleBeach - 0.2, isleH ) * smoothstep( 0.42, 0.52, isleSlope );
+float isleSea = smoothstep( 0.05, -0.35, isleH );
 // under the sea: the lagoon's sand, with rubble and coral heads in patches where it is shallow
-float reefy = smoothstep( 0.6, 0.75, gn( vW.xz * 0.06 + 3.0 ) ) * smoothstep( -4.0, -0.6, isleH );
-wShore = max( wShore, sea * reefy );
-wSand = max( wSand, sea * ( 1.0 - reefy ) );
-float rest = ( 1.0 - wCliff ) * clamp( 1.0 - wSand - wShore, 0.0, 1.0 );
-float wRock = wRockS * rest;
-float wGrass = smoothstep( 0.40, 0.50, isleCov ) * smoothstep( 28.0, 24.0, isleH ) * smoothstep( 0.25, 0.16, isleSlope ) * ( rest - wRock );
-float wLitter = max( 0.0, rest - wRock - wGrass );
+float isleReef = smoothstep( 0.64, 0.7, isleCtl.b ) * smoothstep( -4.0, -0.6, isleH );
+wShore = max( wShore, isleSea * isleReef );
+wSand = max( wSand, isleSea * ( 1.0 - isleReef ) );
+float isleRest = ( 1.0 - wCliff ) * clamp( 1.0 - wSand - wShore, 0.0, 1.0 );
+float wRock = wRockS * isleRest;
+float wGrass = smoothstep( 0.43, 0.47, isleCtl.r ) * smoothstep( 26.6, 25.4, isleH ) * smoothstep( 0.215, 0.185, isleSlope ) * ( isleRest - wRock );
+float wLitter = max( 0.0, isleRest - wRock - wGrass );
 wSand *= ( 1.0 - wCliff ); wShore *= ( 1.0 - wCliff );
-float isleW[6] = float[6]( wSand, wGrass, wLitter, wRock, wCliff, wShore );
-// the two it is most made of (the second less the third, so nothing jumps where they change places)
+// the two it is most made of (the second less the third, so nothing jumps where they change places), taken one by one
 int isleA = 0, isleB = 1; float isleWa = -1.0, isleWb = -1.0, isleWc = 0.0;
-for ( int i = 0; i < 6; i ++ ) { float w = isleW[i]; if ( w > isleWa ) { isleWc = isleWb; isleWb = isleWa; isleB = isleA; isleWa = w; isleA = i; } else if ( w > isleWb ) { isleWc = isleWb; isleWb = w; isleB = i; } else if ( w > isleWc ) isleWc = w; }
+#define ISLE_TAKE( w, k ) if ( w > isleWa ) { isleWc = isleWb; isleWb = isleWa; isleB = isleA; isleWa = w; isleA = k; } else if ( w > isleWb ) { isleWc = isleWb; isleWb = w; isleB = k; } else if ( w > isleWc ) isleWc = w;
+ISLE_TAKE( wSand, 0 ) ISLE_TAKE( wGrass, 1 ) ISLE_TAKE( wLitter, 2 ) ISLE_TAKE( wRock, 3 ) ISLE_TAKE( wCliff, 4 ) ISLE_TAKE( wShore, 5 )
 isleWb = max( 0.0, isleWb - isleWc );
-// faces from three sides where it is steep
-vec3 isleTw = pow( abs( isleN0 ), vec3( 4.0 ) ); isleTw /= isleTw.x + isleTw.y + isleTw.z;
+#ifdef ISLE_NO_STEEP
+bool isleSteep = false;
+#else
 bool isleSteep = ${lite ? 'false' : 'isleN0.y < 0.82'};
-vec4 colA, srfA, colB = vec4( 0.0 ), srfB = vec4( 0.0 ); vec3 nA, nB = isleN0;
-isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, isleTw, isleSteep, colA, srfA, nA );
-float ka = 1.0;
-if ( isleWb > 0.002 ) {
-  isleLayer( isleB, isleDist, isleDpx, isleDpy, isleN0, isleTw, isleSteep, colB, srfB, nB );
+#endif
+#ifdef ISLE_ONE
+isleWb = 0.0;
+#endif
+vec4 isleColA, isleSrfA, isleColB = vec4( 0.0 ), isleSrfB = vec4( 0.0 ); vec3 isleNA, isleNB = isleN0;
+isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, isleSteep, isleColA, isleSrfA, isleNA );
+float isleK = 1.0;
+if ( isleWb > 0.02 ) {
+  // the second, as finely as it can be seen: whole within 60 m, its colour and height to 250 m, its mean beyond
+  if ( isleDist < 250.0 ) {
+    bool keep = isleFar; isleFar = isleDist > 60.0;
+    isleLayer( isleB, isleDist, isleDpx, isleDpy, isleN0, isleSteep, isleColB, isleSrfB, isleNB );
+    isleFar = keep;
+  } else { isleColB = vec4( uIsleMean[ isleB ], 0.5 ); isleSrfB = isleSrfA; isleNB = isleNA; }
   // by their heights: each one's weight raised by how high it stands, and only what comes within a span of the top kept
-  float ha = isleWa / ( isleWa + isleWb ) + colA.a * RISE[isleA] * 0.5, hb = isleWb / ( isleWa + isleWb ) + colB.a * RISE[isleB] * 0.5, top = max( ha, hb ) - 0.12;
-  float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); ka = ba / max( ba + bb, 1.0e-5 );
+  float ha = isleWa / ( isleWa + isleWb ) + isleColA.a * uIsleLayer[ isleA ].w * 0.5, hb = isleWb / ( isleWa + isleWb ) + isleColB.a * uIsleLayer[ isleB ].w * 0.5, top = max( ha, hb ) - 0.12;
+  float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); isleK = ba / max( ba + bb, 1.0e-5 );
 }
-vec3 isleAlb = mix( colB.rgb, colA.rgb, ka );
-vec4 isleSrf = mix( srfB, srfA, ka );
-vec3 isleNw = normalize( mix( nB, nA, ka ) );
+vec3 isleAlb = mix( isleColB.rgb, isleColA.rgb, isleK );
+vec4 isleSrf = mix( isleSrfB, isleSrfA, isleK );
+vec3 isleNw = normalize( mix( isleNB, isleNA, isleK ) );
 // the maps not come yet: each surface's mean colour, the land's own normal
-isleAlb = mix( mix( MEAN[isleB], MEAN[isleA], ka ), isleAlb, uIsleLook.x );
+isleAlb = mix( mix( uIsleMean[ isleB ], uIsleMean[ isleA ], isleK ), isleAlb, uIsleLook.x );
 isleNw = normalize( mix( isleN0, isleNw, uIsleLook.x ) );
 float isleRough = mix( 0.85, isleSrf.b, uIsleLook.x ), isleOcc = mix( 1.0, isleSrf.a, uIsleLook.x );
 // a slow variation over all of it (one colour of grass is not a lawn), and the moss of Gower's mist forest
-float isleVar = gn( vW.xz * 0.011 ) * 0.6 + gn( vW.xz * 0.037 + 5.0 ) * 0.4;
-isleAlb *= 0.84 + 0.32 * isleVar;
+isleAlb *= 0.84 + 0.32 * isleCtl.g;
 float isleMoss = smoothstep( 600.0, 690.0, isleH ) * ( 1.0 - wCliff * 0.6 );
 isleAlb = mix( isleAlb, isleAlb * vec3( 0.55, 1.05, 0.5 ) + vec3( 0.004, 0.012, 0.002 ), isleMoss * 0.85 );
 // the forest beyond the palms: its canopy, the crowns lit as domes
-float isleBody = length( vW.xz - uIsleBody.xz );
-float isleCrowns = wLitter * smoothstep( ${(PALM.near - 40).toFixed(1)}, ${(PALM.near - 5).toFixed(1)}, isleBody + 25.0 * ( isleE1 - 0.5 ) ) * ( 1.0 - sea );
+float isleCrowns = wLitter * smoothstep( ${(PALM.near - 40).toFixed(1)}, ${(PALM.near - 5).toFixed(1)}, length( vW.xz - uIsleBody.xz ) + 25.0 * ( isleCtl.a - 0.5 ) ) * ( 1.0 - isleSea );
+#ifdef ISLE_NO_CANOPY
+isleCrowns = 0.0;
+#endif
 if ( isleCrowns > 0.001 ) {
   vec3 cc, cn; isleCanopy( vW.xz, islePx, isleN0, cc, cn );
   isleAlb = mix( isleAlb, cc, isleCrowns ); isleNw = normalize( mix( isleNw, cn, isleCrowns ) ); isleRough = mix( isleRough, 0.8, isleCrowns ); isleOcc = mix( isleOcc, 1.0, isleCrowns );
 }
 // the wet strip, where the swash has reached (a line that wanders about 0.35 m over the sea), and the spray on low rock:
 // darker by how porous it is, smooth and glossy, the water filling its small relief
-float isleWetLine = 0.35 + 0.45 * ( gn( vW.xz * 0.045 ) - 0.5 ) + 0.18 * ( isleE2 - 0.5 );
-float isleWet = max( smoothstep( isleWetLine + 0.3, isleWetLine - 0.12, isleH ), sea );
+float isleWetLine = 0.35 + 0.45 * ( isleCtl.a - 0.5 ) + 0.18 * ( isleE2 - 0.5 );
+float isleWet = max( smoothstep( isleWetLine + 0.3, isleWetLine - 0.12, isleH ), isleSea );
 isleWet = max( isleWet, ( wCliff + wRock + wShore ) * smoothstep( 2.6, 0.4, isleH ) * 0.85 );
-float isleWetK = mix( WET[isleB], WET[isleA], ka );
+float isleWetK = mix( uIsleLayer[ isleB ].z, uIsleLayer[ isleA ].z, isleK );
 isleAlb *= mix( 1.0, isleWetK, isleWet );
 isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), isleWet * 0.25 );     // a little deeper in colour
 isleRough = mix( isleRough, mix( 0.34, 0.1, smoothstep( isleWetLine, isleWetLine - 0.4, isleH ) ), isleWet );
 isleNw = normalize( mix( isleNw, isleN0, isleWet * 0.75 ) );
 #ifdef ISLE_FLAT
 // a building's pad: packed earth, eased into what was there
-isleAlb = mix( isleAlb, vec3( 0.16, 0.115, 0.07 ) * ( 0.75 + 0.5 * gn( vW.xz * 1.7 ) ), vEarth );
+isleAlb = mix( isleAlb, vec3( 0.16, 0.115, 0.07 ) * ( 0.75 + 0.5 * isleE2 ), vEarth );
 isleRough = mix( isleRough, 0.9, vEarth );
 #endif
 // the lagoon's floor, darker with depth (the sea over it is drawn by island.js, its own colour over this)
-isleAlb *= mix( 1.0, 0.38, smoothstep( 0.0, 16.0, -isleH ) * sea ) * mix( vec3( 1.0 ), vec3( 0.86, 0.97, 1.0 ), sea );
+isleAlb *= mix( 1.0, 0.38, smoothstep( 0.0, 16.0, -isleH ) * isleSea ) * mix( vec3( 1.0 ), vec3( 0.86, 0.97, 1.0 ), isleSea );
 diffuseColor.rgb = isleAlb * uIsleLook.y;
+#endif
+#ifdef ISLE_FLATCOL
+diffuseColor.rgb = vec3( 0.2 ); isleNw = isleN0;
+#endif
 `,
     rough: 'float roughnessFactor = isleRough;',
     normal: 'normal = normalize( ( viewMatrix * vec4( isleNw, 0.0 ) ).xyz );',
@@ -435,39 +523,40 @@ reflectedLight.indirectDiffuse *= ambientOcclusion;
   };
 }
 
+// a probe's shader switches (material defines, which three folds into the program's key), to measure what each part costs
+const VARIANT = { defines: {} };
 // The land's material and the levelled ground's, made from a MeshStandardMaterial island.js hands in; `cut`: island.js's
 // own lines (the levelled ground's cut: its uniforms, its declarations and its body, run before the splat)
-function landMaterial(base, { lite, flat, uniforms, cascades, cut = null }) {
-  const m = base;
-  const f = landFrag({ lite, flat });
+function landMaterial(base, { lite, flat, uniforms, cut = null }) {
+  const m = base, f = landFrag({ lite });
+  const loop = THREE.ShaderChunk.lights_fragment_begin.replace(DIR_LOOP, ISLE_LOOP);
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms, SHARED, cut?.uniforms || {});
     sh.vertexShader = (flat ? '#define ISLE_FLAT\n' : '') + sh.vertexShader.replace('#include <common>', '#include <common>\n' + LAND_VERT_PARS)
       .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\n' + LAND_NORMAL).replace('#include <begin_vertex>', '#include <begin_vertex>\n' + LAND_PLACE);
     let fs = sh.fragmentShader;
-    fs = fs.replace('#include <common>', '#include <common>\n' + f.pars)
-      .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + lightPars(cascades))
-      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.pars ? '' : '') + (cut?.body || '') + f.body)
+    fs = fs.replace('#include <common>', '#include <common>\n' + f.pars + (cut?.pars || ''))
+      .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + LIGHT_PARS)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n' + (cut?.body || '') + f.body)
       .replace('#include <roughnessmap_fragment>', f.rough)
       .replace('#include <normal_fragment_maps>', f.normal)
       .replace('#include <aomap_fragment>', f.ao)
-      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(DIR_LOOP, isleLoop(cascades)));
+      .replace('#include <lights_fragment_begin>', loop);
     // the land's own height over the ground is 0 (its fragments are the grid's triangles); the levelled ground's is not
-    if (cut?.pars) fs = fs.replace('#include <common>', '#include <common>\n' + cut.pars);
     sh.fragmentShader = (flat ? '#define ISLE_FLAT\n#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + fs;
   };
-  m.customProgramCacheKey = () => `isle-land|${lite ? 1 : 0}|${flat ? 1 : 0}|${cascades}`;
-  ADOPTED.set(m, cascades);
+  m.customProgramCacheKey = () => `isle-land|${lite ? 1 : 0}|${flat ? 1 : 0}`;
+  ADOPTED.add(m);
   m.needsUpdate = true;
   return m;
 }
 
-// createGroundLook({ renderer, lite, phone, ground, scene, key }): the land's materials (`land`, `flat`), the passes
-// and the shadow maps. update({ camera, dir, body }) once a frame (dir: toward the key light); adoptAll(scene) makes
-// whatever lit thing has come into the scene take the shadows; read() is the probes' numbers.
-export function createGroundLook({ renderer, lite = false, phone = false, ground, scene, key }) {
+// createGroundLook({ renderer, lite, phone, ground, scene }): the land's materials (`land`, `flat`), the passes and the
+// shadow maps. update({ camera, dir, body }) once a frame (dir: toward the key light) draws the shadow maps; adoptAll
+// (scene) makes whatever lit thing has come into the scene take the shadows; read() is the probes' numbers.
+export function createGroundLook({ renderer, lite = false, phone = false, ground, scene }) {
   const head = ground.head, W = head.w, H = head.h, S = head.spacing;
-  const C = lite ? CASCADES.lite : CASCADES, nC = C.far.length;
+  const C = lite ? CASCADES.lite : CASCADES, nC = C.far.length, per = lite || phone ? CONTROL.lite : CONTROL.per;
   const canDraw = (() => { try { return !!renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float')); } catch { return false; } })();
   const disposables = [];
   // the heights, as they are (texel by texel), and as half floats the GPU blends between (the sky's share)
@@ -477,23 +566,26 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   hf.magFilter = hf.minFilter = THREE.LinearFilter; hf.wrapS = hf.wrapT = THREE.ClampToEdgeWrapping; hf.generateMipmaps = false; hf.needsUpdate = true;
   disposables.push(ht, hf);
   let top = 0; for (const v of ground.hts.main) if (v > top) top = v;
-  const rt = (type, format) => new THREE.WebGLRenderTarget(W, H, { type, format, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+  const rt = (w, h, type, format) => new THREE.WebGLRenderTarget(w, h, { type, format, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
   const quadGeo = new THREE.BufferGeometry(); quadGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const quad = new THREE.Mesh(quadGeo), quadScene = new THREE.Scene(), quadCam = new THREE.Camera(); quad.frustumCulled = false; quadScene.add(quad);
   disposables.push(quadGeo);
   const run = (material, target) => { const was = renderer.getRenderTarget(); quad.material = material; renderer.setRenderTarget(target); renderer.render(quadScene, quadCam); renderer.setRenderTarget(was); };
   const pass = (frag, uniforms) => { const m = new THREE.ShaderMaterial({ uniforms, vertexShader: QUAD_VERT, fragmentShader: frag, depthTest: false, depthWrite: false }); disposables.push(m); return m; };
-  const times = { skyShare: 0, lines: 0, band: 0 };
-  // the sky's share, once
+  const times = { skyShare: 0, control: 0, lines: 0, band: 0, maps: 0 };
+  // the control texture and the sky's share, once (the control needs nothing more than eight bits a channel)
+  const cw = (W - 1) * per + 1, ch = (H - 1) * per + 1;
+  const ctlRT = rt(cw, ch, THREE.UnsignedByteType, THREE.RGBAFormat); disposables.push(ctlRT);
+  { const t0 = performance.now(); run(pass(CONTROL_FRAG, { uGrid: { value: new THREE.Vector4(head.x0, head.z0, S, 0) }, uPer: { value: per } }), ctlRT); times.control = performance.now() - t0; }
   let skyRT = null;
   if (canDraw) {
-    skyRT = rt(THREE.UnsignedByteType, THREE.RedFormat); disposables.push(skyRT);
+    skyRT = rt(W, H, THREE.UnsignedByteType, THREE.RedFormat); disposables.push(skyRT);
     const t0 = performance.now();
     run(pass(SKYSHARE_FRAG, { uHf: { value: hf }, uH: { value: ht }, uN: { value: new THREE.Vector2(W, H) }, uS: { value: S } }), skyRT);
     times.skyShare = performance.now() - t0;
   }
   // the land's lines: two targets, one shown while the other is made, a band of rows a frame
-  const lineRT = canDraw ? [rt(THREE.HalfFloatType, THREE.RGFormat), rt(THREE.HalfFloatType, THREE.RGFormat)] : [];
+  const lineRT = canDraw ? [rt(W, H, THREE.HalfFloatType, THREE.RGFormat), rt(W, H, THREE.HalfFloatType, THREE.RGFormat)] : [];
   disposables.push(...lineRT);
   const LU = { uH: { value: ht }, uN: { value: new THREE.Vector2(W, H) }, uS: { value: S }, uDir: { value: new THREE.Vector2() }, uTan: { value: new THREE.Vector2() }, uTop: { value: top } };
   const linesMat = canDraw ? pass(LINES_FRAG, LU) : null;
@@ -504,7 +596,6 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     LU.uDir.value.set(hz > 1e-6 ? dir.x / hz : 0, hz > 1e-6 ? dir.z / hz : 0);
     LU.uTan.value.set(Math.tan(Math.max(-0.2, alt - radius)), Math.tan(Math.max(-0.2, alt + radius)));
   }
-  function startLines(dir) { linesToward(dir, 0.00466); making = { band: 0, dir: dir.clone() }; }
   function bandOf(target, k, n) {
     const y0 = Math.floor((H * k) / n), y1 = Math.floor((H * (k + 1)) / n);
     target.scissor.set(0, y0, W, y1 - y0); target.scissorTest = true;
@@ -512,74 +603,91 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     target.scissorTest = false;
   }
 
-  // ---- the shadow maps: their lights carry no light; the key light is shadowed by them (lightPars)
-  const maps = C.far.map((far, i) => {
-    const l = new THREE.DirectionalLight(0xffffff, 0); l.castShadow = true;
-    l.shadow.mapSize.set(C.size[i], C.size[i]); l.shadow.bias = -0.0002; l.shadow.radius = 1;
-    l.shadow.camera.near = 0.1; l.shadow.camera.far = 1000; l.name = 'isle-shadow-' + i;
-    scene.add(l, l.target);
-    return l;
+  // ---- the shadow maps: depth textures, compared by the GPU as they are read; the things that cast are drawn into
+  // them alone (their layer), by a depth material that draws both faces (a palm's frond is a sheet)
+  const depthMat = new THREE.MeshDepthMaterial({ side: THREE.DoubleSide }); depthMat.colorWrite = false; disposables.push(depthMat);
+  const cascades = C.far.map((far, i) => {
+    const size = C.size[i], depth = new THREE.DepthTexture(size, size);
+    depth.compareFunction = THREE.LessEqualCompare; depth.minFilter = depth.magFilter = THREE.LinearFilter;
+    const target = new THREE.WebGLRenderTarget(size, size, { depthTexture: depth, depthBuffer: true, stencilBuffer: false, format: THREE.RedFormat, type: THREE.UnsignedByteType, generateMipmaps: false });
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000); cam.layers.set(CASCADES.layer);
+    disposables.push(target, depth);
+    return { size, far, target, depth, cam, frame: 0 };
   });
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   // each slice's bounding sphere (its radius is fixed while the view's angle is: the map does not swim as the eye turns)
   const sphere = (n, f, k) => { let c = ((f + n) * (1 + k * k)) / 2; if (c > f) c = f; return { c, r: Math.hypot(f - c, f * k) }; };
-  const RIGHT = new THREE.Vector3(), UPV = new THREE.Vector3(), Z = new THREE.Vector3(), CEN = new THREE.Vector3(), FWD = new THREE.Vector3();
-  function fit(camera, dir) {
+  const RIGHT = new THREE.Vector3(), UPV = new THREE.Vector3(), Z = new THREE.Vector3(), CEN = new THREE.Vector3(), FWD = new THREE.Vector3(), UP0 = new THREE.Vector3();
+  let frameNo = 0;
+  function drawMaps(camera, dir) {
     const ty = Math.tan((camera.fov * Math.PI) / 360), tx = ty * camera.aspect, k = Math.hypot(tx, ty);
     Z.copy(dir).normalize();
-    const up = Math.abs(Z.y) > 0.995 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-    RIGHT.crossVectors(up, Z).normalize(); UPV.crossVectors(Z, RIGHT);
+    UP0.set(0, 1, 0); if (Math.abs(Z.y) > 0.995) UP0.set(0, 0, 1);
+    RIGHT.crossVectors(UP0, Z).normalize(); UPV.crossVectors(Z, RIGHT);
     camera.getWorldDirection(FWD);
-    let near = 0.1;
-    maps.forEach((l, i) => {
-      const { c, r } = sphere(near, C.far[i], k), cam = l.shadow.camera, texel = (2 * r) / C.size[i];
-      CEN.copy(camera.position).addScaledVector(FWD, c);
+    const was = renderer.getRenderTarget(), override = scene.overrideMaterial, bg = scene.background, auto = renderer.autoClear;
+    scene.overrideMaterial = depthMat; scene.background = null; renderer.autoClear = true;
+    let near = 0.1; frameNo += 1;
+    cascades.forEach((c, i) => {
+      const { c: mid, r } = sphere(near, c.far, k), texel = (2 * r) / c.size;
+      CEN.copy(camera.position).addScaledVector(FWD, mid);
       // stepped by whole texels across the light, so a still shadow stays still as the eye moves
       const a = CEN.dot(RIGHT), b = CEN.dot(UPV);
       CEN.addScaledVector(RIGHT, Math.round(a / texel) * texel - a).addScaledVector(UPV, Math.round(b / texel) * texel - b);
-      cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r; cam.near = 0.1; cam.far = 2 * r + CASCADES.margin; cam.up.copy(up);
-      cam.updateProjectionMatrix();
-      l.target.position.copy(CEN); l.position.copy(CEN).addScaledVector(Z, r + CASCADES.margin);
-      l.target.updateMatrixWorld(); l.updateMatrixWorld();
-      l.shadow.normalBias = 1.5 * texel;
-      near = C.far[i];
+      const cam = c.cam, depthRange = 2 * r + CASCADES.margin;
+      cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r; cam.near = 0.1; cam.far = depthRange; cam.up.copy(UP0);
+      cam.position.copy(CEN).addScaledVector(Z, r + CASCADES.margin); cam.lookAt(CEN); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+      SHARED.uIsleShadeM.value[i].multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      SHARED.uIsleShadeO.value.setComponent(i, 1.5 * texel); SHARED.uIsleShadeT.value.setComponent(i, 1 / c.size); SHARED.uIsleShadeZ.value.setComponent(i, 0.02 / depthRange);
+      // the furthest map is drawn every other frame (its texels are 40 cm: half a frame's lag at a run is a tenth of one)
+      if (api.debug.shadows && (i < 2 || frameNo % 2 === 0 || !c.drawn)) {
+        renderer.setRenderTarget(c.target); renderer.clear(false, true, false); renderer.render(scene, cam); c.drawn = true;
+      }
+      near = c.far;
     });
-    SHARED.uIsleSplit.value.set(C.far[0], C.far[1] ?? 1e9, C.far[2] ?? 1e9);
+    scene.overrideMaterial = override; scene.background = bg; renderer.autoClear = auto; renderer.setRenderTarget(was);
+    SHARED.uIsleSplit.value.set(C.far[0], C.far[1] ?? 1e9, C.far[2] ?? 1e9, api.debug.shadows ? nC : 0);
+    SHARED.uIsleShade0.value = cascades[0].depth; SHARED.uIsleShade1.value = cascades[1]?.depth || null; SHARED.uIsleShade2.value = cascades[2]?.depth || null;
   }
 
   // ---- the land's materials
   const [col0, surf0] = standIns(); disposables.push(col0, surf0);
-  const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleLook: { value: new THREE.Vector4(0, 1, 0, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) } };
+  const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleCtl: { value: ctlRT.texture },
+    uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) },
+    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) } };
   const which = lite || phone ? 'lite' : 'full';
-  let mapsState = 'fetching', mapsAt = 0;
+  let mapsState = 'fetching', mapsAt = 0, fade = 0;
   const t0 = performance.now();
   loadMaps(renderer, which).then(([c, s]) => {
     if (mapsState === 'gone') return;
     uniforms.uIsleCol.value = c; uniforms.uIsleSurf.value = s; mapsState = 'drawn'; mapsAt = performance.now() - t0;
   }, (e) => { mapsState = 'failed'; console.error('[island] the ground\'s maps could not be fetched', e); });
-  let fade = 0;
-
-  // SHARED holds this island's numbers from now on (and again every frame: see update)
+  // SHARED holds this island's numbers (again every frame: see update)
   const own = () => {
-    SHARED.uIsleOn.value = 1; SHARED.uIsleHt.value = ht; SHARED.uIsleGrid.value.set(head.x0, head.z0, S, canDraw ? 1 : 0); SHARED.uIsleN.value.set(W, H);
+    SHARED.uIsleOn.value = 1; SHARED.uIsleHt.value = ht; SHARED.uIsleGrid.value.set(head.x0, head.z0, S, canDraw && api.debug.lines ? 1 : 0); SHARED.uIsleN.value.set(W, H);
     SHARED.uIsleLines.value = lineRT[shown]?.texture || null;
   };
-
+  const landRefs = [];
   const api = {
     cascades: nC,
+    // a probe's switches, to measure what each part costs (nothing in the game sets them), and its handles
+    debug: { shadows: true, lines: true, variant: VARIANT, recompile() { for (const o of landRefs) { o.defines = { ...(o.userData.isleDefines ||= { ...(o.defines || {}) }), ...VARIANT.defines }; o.needsUpdate = true; } } },
+    parts: { scene, cascades, renderer, uniforms },
     // the land's own material from island.js's (its flats' cut runs first), and the levelled ground's
-    land: (base, cut) => landMaterial(base, { lite, flat: false, uniforms, cascades: nC, cut }),
-    flat: (base, cut) => landMaterial(base, { lite, flat: true, uniforms, cascades: nC, cut }),
-    // the present light raises the land's colours (it was painted for colours twice as bright as the ground's own)
+    land: (base, cut) => { const m = landMaterial(base, { lite, flat: false, uniforms, cut }); landRefs.push(m); return m; },
+    flat: (base, cut) => { const m = landMaterial(base, { lite, flat: true, uniforms, cut }); landRefs.push(m); return m; },
+    // the present light raises the land's colours (island.js says why)
     set paint(k) { uniforms.uIsleLook.value.y = k; },
     get paint() { return uniforms.uIsleLook.value.y; },
+    // every lit, solid thing in the scene takes the shadows; what is not the land casts them (into the maps' layer)
     adoptAll(sc) {
       sc.traverse((o) => {
-        if (!o.isMesh || o.userData.isleShadow === false) return;
+        if (!o.isMesh || o.userData.isleShadow === false || o.userData.isleSeen) return;
         const m = o.material, list = Array.isArray(m) ? m : [m];
         let lit = false;
-        for (const x of list) { if (x && (x.isMeshStandardMaterial || x.isMeshLambertMaterial || x.isMeshPhongMaterial || x.isMeshToonMaterial) && !x.transparent && x.blending === THREE.NormalBlending) { adopt(x, nC); lit = true; } }
-        if (lit && !o.userData.isleSeen) { o.userData.isleSeen = true; if (o.userData.isleLand) { o.receiveShadow = true; } else { o.castShadow = true; o.receiveShadow = true; } }
+        for (const x of list) { if (x && (x.isMeshStandardMaterial || x.isMeshLambertMaterial || x.isMeshPhongMaterial || x.isMeshToonMaterial) && !x.transparent && x.blending === THREE.NormalBlending) { adopt(x); lit = true; } }
+        if (!lit) return;
+        o.userData.isleSeen = true; o.receiveShadow = true;
+        if (!o.userData.isleLand) o.layers.enable(CASCADES.layer);
       });
     },
     update({ camera, dir, body = null }) {
@@ -589,22 +697,22 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
       if (mapsState === 'drawn' && fade < 1) fade = Math.min(1, fade + 0.08);
       uniforms.uIsleLook.value.x = fade;
       D.copy(dir).normalize();
-      fit(camera, D);
+      const t1 = performance.now(); drawMaps(camera, D); times.maps += (performance.now() - t1 - times.maps) * 0.05;
       if (!canDraw) return;
       // the land's lines: all at once the first time, then a band a frame into the other target once the light has moved
       if (firstLines) {
-        const t1 = performance.now(); linesToward(D, 0.00466); run(linesMat, lineRT[0]); renderer.getContext().flush(); times.lines = performance.now() - t1;
+        const t2 = performance.now(); linesToward(D, 0.00466); run(linesMat, lineRT[0]); times.lines = performance.now() - t2;
         linesFor = D.clone(); firstLines = false; own();
         return;
       }
-      if (!making && linesFor.angleTo(D) > (LINES.moved * Math.PI) / 180) startLines(D);
+      if (!making && linesFor.angleTo(D) > (LINES.moved * Math.PI) / 180) making = { band: 0, dir: D.clone() };
       if (making) {
-        const t1 = performance.now(); linesToward(making.dir, 0.00466); bandOf(lineRT[1 - shown], making.band, LINES.bands); times.band = performance.now() - t1;
+        const t2 = performance.now(); linesToward(making.dir, 0.00466); bandOf(lineRT[1 - shown], making.band, LINES.bands); times.band = performance.now() - t2;
         making.band += 1;
         if (making.band >= LINES.bands) { shown = 1 - shown; own(); linesFor = making.dir; making = null; }
       }
     },
-    read: () => ({ maps: mapsState, which, mapsMs: Math.round(mapsAt), fade, canDraw, cascades: C.far, sizes: C.size, times: { ...times }, lines: linesFor ? linesFor.toArray().map((v) => +v.toFixed(4)) : null }),
+    read: () => ({ maps: mapsState, which, mapsMs: Math.round(mapsAt), fade, canDraw, cascades: C.far, sizes: C.size, control: [cw, ch], times: { ...times }, lines: linesFor ? linesFor.toArray().map((v) => +v.toFixed(4)) : null }),
     // the probes' handles: the land's lines and the sky's share as the GPU made them (in metres; 0..1)
     peek(i, j) {
       const out = {};
@@ -614,10 +722,11 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     },
     dispose() {
       mapsState = 'gone';
-      // the void draws no shadows: only the island that last held SHARED lets it go (a plainer island made before this
-      // one was let go holds it now)
-      if (owner === api || !owner) { owner = null; SHARED.uIsleOn.value = 0; SHARED.uIsleGrid.value.w = 0; SHARED.uIsleLines.value = null; SHARED.uIsleHt.value = null; renderer.shadowMap.enabled = false; }
-      for (const l of maps) { scene.remove(l, l.target); l.shadow.map?.dispose(); l.dispose(); }
+      // only the island that last held SHARED lets it go (a plainer island made before this one was let go holds it now)
+      if (owner === api || !owner) {
+        owner = null; SHARED.uIsleOn.value = 0; SHARED.uIsleGrid.value.w = 0; SHARED.uIsleLines.value = null; SHARED.uIsleHt.value = null;
+        SHARED.uIsleSplit.value.w = 0; SHARED.uIsleShade0.value = SHARED.uIsleShade1.value = SHARED.uIsleShade2.value = null;
+      }
       for (const x of disposables) x.dispose();
     },
   };

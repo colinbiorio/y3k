@@ -1137,6 +1137,22 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
         thread: K.combat.thread.mode, spin: Math.round(K.combat.thread.power * 100) / 100, snare: K.combat.thread.snare, torch: K.combat.torch.mode, reach: K.combat.torch.mode === 'flame' ? Math.round(K.combat.torch.reach * 10) / 10 : 0, fires: K.combat.fires.length, flared: K.combat.flared, embers: K.combat.bolts.filter((x) => x.kind === 'ember').length, power: Math.round(K.combat.bell.power * 100) / 100, tones: K.combat.tones.length, rang: K.combat.bell.rang, ring: K.combat.ring.mode, charge: Math.round(K.combat.ring.charge * 100) / 100, guard: K.combat.guard.up, hp: Math.round(K.combat.player.hp), down: K.combat.player.down > 0, broken: K.combat.broken, turned: K.combat.turned, level: st.level, bolts: K.combat.bolts.length,
         bots: K.combat.bots.map((b) => ({ id: b.id, level: b.level, hp: b.hp, max: b.max, mode: b.mode, heat: Math.round(b.heat * 100) / 100, p: b.p.map((v) => Math.round(v * 100) / 100), over: K.world.ground ? Math.round((b.p[1] - Math.max(0, K.world.ground.height(b.p[0], b.p[2]))) * 100) / 100 : b.p[1] })), ringAt: K.combat.ring.p.map((v) => Math.round(v * 100) / 100) } } : null) };
     globalThis.Y3K.game.sky = () => K?.void?.air || null;      // the true sky itself, where it is drawn: the probes read its tables
+    // the island's ground (terrain.js: its maps, its passes' numbers), and a probe's hand that puts the body down at
+    // (x, z) on the island (up in the air, flying, if `up` metres are asked), the eye turned to `yaw`, `pitch` and
+    // stood `zoom` back: the fixed views the island's contact sheets are drawn from. Nothing in the game calls either.
+    globalThis.Y3K.game.ground = () => K?.void?.ground || null;
+    globalThis.Y3K.game.put = ({ x, z, up = 0, yaw = null, pitch = null, zoom = null } = {}) => {
+      if (!K || K.place !== 'island' || !K.island || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+      if (K.aboard) { leave(K.aboard, K.body); K.aboard = null; }
+      const floor = K.island.ground.floor(x, z);
+      if (up > 0) { modeTo('creative', false); K.body.flying = true; K.body.grounded = false; } else { K.body.flying = false; K.body.grounded = true; }
+      K.body.p = [x, floor + Math.max(0, up), z]; K.body.v = [0, 0, 0]; K.body.was = [...K.body.p]; K.body.light = null; K.body.rising = false; K.body.wallrun = null; K.body.climbing = false;
+      if (yaw != null) { K.body.yaw = yaw + Math.PI; K.eye.yaw = yaw; }
+      if (pitch != null) K.eye.pitch = clamp(pitch, PITCH[0], PITCH[1]);
+      if (zoom != null) st.zoom = clamp(zoom, ZOOM.min, ZOOM.max);
+      K.eye.has = false; still = 0;
+      return { p: [...K.body.p], ground: floor };
+    };
     showMode();
     document.body.classList.add('in-void');        // styles.css: what the page puts away while the void is open
     root.dataset.place = K.place;
