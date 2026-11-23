@@ -204,6 +204,19 @@ const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 `;
 const ADOPTED = new WeakSet();
 let owner = null;                       // the island whose numbers SHARED holds (a plainer island is made before the last is let go)
+// A shadow sampler must always have a depth texture behind it: three r160's own stand-in for an empty one is never
+// uploaded (its version stays 0), so an empty sampler2DShadow is bound to nothing and every draw that declares it fails
+// ("mismatch between texture format and sampler type"): on the lighter path's third map, and, after the island, for
+// every adopted thing in the void (the body). This one is one texel, cleared once in each renderer, and never let go.
+const SPARE = { target: null, ready: new WeakSet() };
+function spareDepth(renderer) {
+  if (!SPARE.target) {
+    const d = new THREE.DepthTexture(1, 1); d.compareFunction = THREE.LessEqualCompare;
+    SPARE.target = new THREE.WebGLRenderTarget(1, 1, { depthTexture: d, depthBuffer: true, stencilBuffer: false, format: THREE.RedFormat, type: THREE.UnsignedByteType, generateMipmaps: false });
+  }
+  if (!SPARE.ready.has(renderer)) { const was = renderer.getRenderTarget(); renderer.setRenderTarget(SPARE.target); renderer.clear(false, true, false); renderer.setRenderTarget(was); SPARE.ready.add(renderer); }
+  return SPARE.target.depthTexture;
+}
 
 // A lit material is made to take the island's shadows: its key light is shadowed by the land's lines and the shadow
 // maps. Its own onBeforeCompile still runs first; the sky's adoption (sky.js) may wrap this one or be wrapped by it.
@@ -576,6 +589,8 @@ function landMaterial(base, { lite, flat, uniforms, cut = null }) {
 export function createGroundLook({ renderer, lite = false, phone = false, ground, scene }) {
   const head = ground.head, W = head.w, H = head.h, S = head.spacing;
   const C = lite ? CASCADES.lite : CASCADES, nC = C.far.length, per = lite || phone ? CONTROL.lite : CONTROL.per;
+  const spare = spareDepth(renderer);
+  if (!SHARED.uIsleShade0.value) SHARED.uIsleShade0.value = SHARED.uIsleShade1.value = SHARED.uIsleShade2.value = spare;
   const canDraw = (() => { try { return !!renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float')); } catch { return false; } })();
   const disposables = [];
   // the heights, as they are (texel by texel), and as half floats the GPU blends between (the sky's share)
@@ -681,7 +696,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     });
     scene.overrideMaterial = override; scene.background = bg; renderer.autoClear = auto; renderer.setRenderTarget(was);
     SHARED.uIsleSplit.value.set(C.far[0], C.far[1] ?? 1e9, C.far[2] ?? 1e9, api.debug.shadows ? nC : 0);
-    SHARED.uIsleShade0.value = cascades[0].depth; SHARED.uIsleShade1.value = cascades[1]?.depth || null; SHARED.uIsleShade2.value = cascades[2]?.depth || null;
+    SHARED.uIsleShade0.value = cascades[0].depth; SHARED.uIsleShade1.value = cascades[1]?.depth || spare; SHARED.uIsleShade2.value = cascades[2]?.depth || spare;
   }
 
   // ---- the land's materials
@@ -764,7 +779,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
       // only the island that last held SHARED lets it go (a plainer island made before this one was let go holds it now)
       if (owner === api || !owner) {
         owner = null; SHARED.uIsleOn.value = 0; SHARED.uIsleGrid.value.w = 0; SHARED.uIsleLines.value = null; SHARED.uIsleHt.value = null;
-        SHARED.uIsleSplit.value.w = 0; SHARED.uIsleShade0.value = SHARED.uIsleShade1.value = SHARED.uIsleShade2.value = null;
+        SHARED.uIsleSplit.value.w = 0; SHARED.uIsleShade0.value = SHARED.uIsleShade1.value = SHARED.uIsleShade2.value = spare;
       }
       for (const x of disposables) x.dispose();
     },

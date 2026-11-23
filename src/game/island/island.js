@@ -107,9 +107,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   scene.add(key, key.target, fill);
   scene.fog = air ? air.fog : new THREE.FogExp2(0xffffff, 3.6e-5);
   // ---- the ground (terrain.js): what each pixel of it is made of, the land's own shadow and the sky's share, and the
-  // shadow maps round the eye for what stands on it. A phone (a coarse pointer on a small screen) reads the lighter maps.
+  // shadow maps round the eye for what stands on it. A phone (a coarse pointer on a small screen) takes the lighter path:
+  // the 512 maps, one scale read from above, two shadow maps.
   const phone = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches && Math.min(globalThis.screen?.width || 1e4, globalThis.screen?.height || 1e4) < 900;
-  const look = createGroundLook({ renderer, lite, phone, ground, scene, key });
+  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key });
   // ---- the land and the shallows round it, and Ball's Pyramid. Under the true sky the land takes the whole of the
   // wrapped sky's light (the other half of the sky's fill: sky.js); under the present one, as it was painted (0.35).
   // ground levelled for a building (../plinth.js levelFor, ground.flats): the land's own triangles are let go of where
