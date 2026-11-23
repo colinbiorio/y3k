@@ -263,7 +263,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-22** (latest) — **The true sky over the island, its third part: the Moon, behind the switch**
+- **2026-11-23** (latest) — **Lord Howe Island's ground, to standard: what it is made of, and its light**
+  (`src/game/island/terrain.js`, `basis-worker.js`, `ground/*.ktx2`, `ground.json`, new; `island.js`, `creatures.js`,
+  `view.js`; `scripts/island/ground-textures.py`, `basis-worker.mjs`; `test/ground.test.mjs`, 7 checks; vendored: three
+  r160's KTX2Loader and its libraries, three r187's Basis transcoder). The first of four parts of the island brought to
+  standard (Colin, 22 November: "the most realistic game ever made", Jedi: Fallen Order's detail the floor, quality over
+  quantity). The ground is no longer flat colour: seven scanned surfaces from Poly Haven (CC0; credited all the same:
+  aerial_beach_01, leafy_grass, forest_leaves_03, rock_3, dark_rock_02, low_tide_rocks, aerial_rocks_02), each graded to
+  what the island's own ground reflects (coral sand 0.53, basalt 0.09), laid where life.js's cover() puts them (the palms
+  grow by the same rule, its noise made on the GPU from the same hash), blended by their own heights, read near at the
+  scan's size and further off larger, walls from their sides, the cliffs from far off with their ledges and plants, a
+  wet strip at the water; the forest past the palms a canopy of colour. The key light, under either sky, is shadowed by
+  the land itself (a march over its triangles toward the light, both limbs of the Sun's disc: a mountain's shadow has its
+  true penumbra), by three shadow maps round the eye for what stands on the land, and the sky's light by how much of the
+  sky each point sees (the heightfield's own occlusion). 12.3 MB of GPU-compressed maps (KTX2, Basis), fetched when the
+  island is first come to (3.1 MB on a phone, which takes a lighter path). GAME.md "The island's ground, to standard" has
+  what changed in the look, why, what is rough and what was measured.
+
+- **2026-11-22** (evening) — **The true sky over the island, its third part: the Moon, behind the switch**
   (`src/game/solar/moon.js`, `moonmaps.js`, `moon-albedo.jpg`, `moon-relief.png`, new; `src/game/sky.js`, `daylight.js`,
   `ephemeris.js`; `scripts/solar/moon.py`, `moon-maps.py`, `moon-render.py`; `test/moon.test.mjs`, 9 checks). With
   `?sky=true` the Moon over Lord Howe Island is a sphere with its real face (NASA's Scientific Visualization Studio,

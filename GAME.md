@@ -119,6 +119,98 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The island's ground, to standard: what it is made of, and its light (23 November 2026)
+
+Colin, 22 November: "the ultimate goal is the most realistic game ever made", Jedi: Fallen Order's detail the floor,
+"i would FAR prefer quality over quantity", and the island brought to a general standard before the world goes further
+out. This is the first of the four parts of that (the ground and its light; the sea and the lagoon; the island's own
+plants; the rocks and the beach's life). The ground had been flat colour: three colours and a noise
+([`src/game/island/terrain.js`](src/game/island/terrain.js), new; `island.js`).
+
+- **What it is made of.** Seven scanned surfaces from Poly Haven (polyhaven.com, CC0: no rights reserved; credited all
+  the same): coral sand (`aerial_beach_01`), the lowland grass (`leafy_grass`), the palm forest's leaf litter
+  (`forest_leaves_03`), weathered pitted rock (`rock_3`), the cliffs' fractured basalt (`dark_rock_02`), the shore's
+  pebbles and rubble (`low_tide_rocks`), and a 50 m aerial scan of a rock face with plants on its ledges for the
+  cliffs seen from far off (`aerial_rocks_02`). Each is graded, channel by channel in linear light, to what the
+  island's own ground reflects (coral sand 0.53, its basalt 0.09, weathered rock 0.13, grass 0.11 with its green
+  twice its red, litter 0.08); their scanned shape, height, roughness and occlusion are kept
+  (`scripts/island/ground-textures.py`; `src/game/island/ground/ground.json` says what each came from).
+- **Which one, where.** life.js's `cover()`, the rule the palms grow by, with its own noise made once on the GPU from
+  the same hash: so a palm stands on forest floor and the grass flats are where they were. Beach under 2.9 m; forest
+  floor up the slopes to 42 degrees (the mountains are forested to the foot of their walls), weathered rock to 46, the
+  basalt walls past that; the mist forest's moss over 640 m; under the lagoon the same sand with patches of rubble.
+  The two a pixel is most made of are blended by their scanned heights (sand fills between pebbles, rock stands out
+  of the litter), not faded into each other.
+- **Near and far.** Each scan is read at its own size near the eye (a 2 m scan over 2 m: a leaf is a leaf at the
+  feet) and five to eight times larger past 45 m; walls and steep rock are read from the two sides they face; past
+  40 m (cliffs) and 60 m (rock) the large aerial scan gives the walls its ledges, cracks and plants (the plants as the
+  island's own dark green, the rock keeping the basalt's colour), with vertical streaks; every large-scale read is
+  drawn slowly aside by the island's own noise, and the land's sky share darkens its gullies, so nothing lines up into
+  a grid from 300 m; past a kilometre the large scan gives way to its mean.
+- **The forest past the palms** (life.js draws them within 170 m of the body) is a field of the canopy's colour
+  (dapples, clumps, regions) until the plants' part brings the trees themselves.
+- **Wet at the water.** A strip at the waterline is darker by how porous each surface is (sand to 0.45 of its dry
+  albedo: Lekner and Dorf's water film), smooth and glossy where the swash reaches, held close to the sea on the
+  nearly level lagoon beach; spray darkens the low rock to 2.6 m.
+- **The light.** Under either sky the key light is shadowed three ways:
+  - **the land's own shadow**: for every 16 m point of the grid, how high over the ground the land toward the light
+    cuts off the Sun's disc's lower limb and its upper limb (a march on the GPU over the same triangles the land is
+    drawn with, made again a band at a time as the Sun moves). A mountain's shadow has the penumbra the Sun's half
+    degree gives it at that distance (9 m a kilometre off), and anything at any height, a body, a palm's crown, a
+    ship, is in it or out of it by its own height;
+  - **shadow maps round the eye** for what stands on the land (to 15, 60 and 220 m): depth maps read with the GPU's
+    own comparison, the nearest round the view and the others round the eye (drawn again only when it has moved four
+    of their texels, the light has moved, or every second and sixth frame for what moves), the palms planted nearest
+    first so a map draws only those whose shadows can reach it. The land casts into none of them: its shadow is its
+    lines, sharp to the metre at golden hour without the acne a map of a 16 m grid draws;
+  - **the sky's share**: how much of the sky each point sees past the land round it (GTAO's integral over the
+    heightfield, sixteen ways, out to a kilometre), made once, with each scan's own occlusion, on what the sky and the
+    wrapped sky give, not on the Sun. Baked from the heightfield rather than drawn from the screen each frame: one
+    read a pixel.
+- **Under the true sky** the ground takes its light as everything else does (sky.js: the Sun through the air, the
+  sky's fill, the air between the eye and the land), and now the whole of the wrapped sky's (it took 0.35 of it).
+  **Under the present sky** (the switch off) it is the same ground, its colours raised by 0.15 because that light was
+  painted for brighter ones, and its named lights cast the same shadows.
+- **The lighter path** (a phone, a coarse pointer on a small screen; or fine.js's plain): the 512 maps, one scale read
+  from above, two shadow maps.
+- **What is fetched.** 12.3 MB for the island's ground (two KTX2 arrays of seven layers: ETC1S colour and height, UASTC
+  normal, roughness and occlusion), only when the island is first come to, transcoded off the page's thread to what
+  the GPU reads (BC7 and ASTC on the M2), kept for the page; a phone's set 3.1 MB. Until they come, each surface's
+  mean colour. three r160's KTX2Loader with three r187's Basis transcoder (Binomial's, Apache 2.0), in a worker loaded
+  from a file of the site's own ([`basis-worker.js`](src/game/island/basis-worker.js), made by
+  `scripts/island/basis-worker.mjs`): a worker made from a Blob keeps the page's content policy, which allows
+  WebAssembly but no evaluated strings, and the transcoder's bindings evaluate strings. The page's policy is
+  unchanged.
+
+**What changed in the look, and why** (the before and after sheets are in the scratch folder `island-real/pr1`):
+
+1. **The ground has the grain of what it is at every distance**: leaves underfoot in the forest, ripples in the
+   sand, pebbles at the shore; from 300 m up the cliffs are walls with ledges and plants and the forest a canopy.
+2. **Things cast shadows**: the palms on the sand and the litter, the body under itself, a building on the ground,
+   the mountains on the land at golden hour.
+3. **The cliffs are dark grey-brown basalt**, not beige: measured in the pictures, the wall at 50 m in the afternoon
+   Sun went from sRGB 163, 154, 125 (saturation 0.17) to 126, 130, 109 (0.08), and from 300 m up from 188, 167, 142
+   (0.26) to 148, 142, 129 (0.08).
+4. **The sand is coral sand's warm white**: dry, at noon under the true sky, 233, 223, 202 where it was 213, 207,
+   170; it had mirrored the sky at its scan's 0.61 roughness and read grey (each surface now has a roughness floor).
+5. **The mountains are forested up to their walls**: the old rule made everything past 38 degrees bare rock.
+6. **With the switch off the island keeps its brightness**: the same ground under the painted light.
+
+**What is rough, seen in the pictures:**
+
+- **The frame time at the pixel cap** (below): the ground costs about 2.5 ms of the GPU's time a frame at 2940 x 1912
+  over main; main itself takes 13.6 ms at the beach as played and more at some places.
+- Steep rock at 200 to 400 m shows the basalt scan's strata repeating every 13 m in rows (read as lava flows, but
+  regular); the canopy past the palms is colour, not crowns; the large aerial scan's plants are one green.
+- The wet strip does not move (no tide, no swash: the sea's part); where the sea meets the land the line is still the
+  16 m triangles' straight edge (the sea's part); the palms' sway is not in their shadows (the plants' part).
+- Ball's Pyramid has no land shadow of its own (its grid is not marched); on the lighter path the cliffs are read
+  from above only and have no large-scale face.
+
+**Measured** (23 November 2026, the M2 MacBook Air on mains power, headless Chromium on the Mac's own chip, the GPU's
+own timer round each frame; numbers from runs alternating main and this branch at the same view, because a
+fanless Air under a long run warms by 2 to 5 ms): at 2940 x 1912, the pixel cap of a full 1470 x 956 window, the GPU's time per frame (two alternations each, branch against main): the beach as played 16.5 and 16.5 ms against 13.6 and 13.5; the lagoon's shore, half of it sea, 20.0 and 20.1 against 17.2 and 16.9; the forest edge 15.0 and 16.7 against 12.6 and 13.1; the foot of Lidgbird's cliffs from 50 m 18.8 and 17.3 against 13.8 and 13.9; the cliffs from 300 m up 19.9 and 20.8 against 15.1 and 15.9. So the ground costs about 3 ms a frame on the level and 4 to 5 ms where the land is steep, and at the cap it does not hold 60 a second on this machine (main itself does not at the shore). Its parts, measured in one page against themselves: the shadow maps 1.3 ms (the passes' fixed price and the lookups: drawing all three at 1024 cost the same; with the palms culled to those whose shadows can reach it the nearest map draws 72,500 triangles in 39 calls), the second surface at a blend line 1 to 1.5 ms (most of it the shader's size, not its one read), the large face 0.6 ms at the beach, the canopy nothing measurable; anisotropy 1, 2, 4 or 8 the same. fine.js does what it is for: where the frames are long it steps the pixels down (a step of 0.875 is a quarter fewer pixels). The lighter path at 1837 x 1195: 4.6 to 6.3 ms, a steady 60; a phone's size, 780 x 1688 (the lighter path, on this Mac's GPU): 3.5 to 4.4 ms. Made once when the island opens: the sky's share, the control texture and the land's lines, each about 3 ms of the page's own thread (then the lines a band of an eighth a frame as the Sun moves); the maps arrive in 0.5 to 0.8 s, and on coming back to the island they are already there. `npm test`: 2,496 checks, all pass (`test/ground.test.mjs` 7 new). The GPU smokes: island 15, build 39, light 23, ship 39 checks, all pass; fight 35 of 35 (a first run missed one, its torch's wall finding no bot, in the void this does not touch). To the island and back to the void and back: no draw fails, the body drawn.
+
 ### The true sky over the island, its third part: the Moon (22 November 2026)
 
 The third of the true sky's four parts ([`SOLAR.md`](SOLAR.md) "Step 2, third part" has the method and the numbers).
