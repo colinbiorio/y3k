@@ -199,7 +199,7 @@ const DIR_LOOP = '#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )\n\tDirectio
 const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	DirectionalLight directionalLight;
 	#ifdef ISLE_WATER
-	isleShadeK = isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) );
+	isleShadeK = seaH < 22.0 ? isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) ) : ( uIsleOn < 0.5 ? 1.0 : isleLand( vW, seaD0 ) );
 	float isleShade = isleShadeK * seaCaustic;
 	#else
 	float isleShade = isleKey( geometryPosition, geometryNormal, ISLE_OVER );
@@ -585,21 +585,25 @@ diffuseColor.rgb = vec3( 0.2 ); isleNw = isleN0;
 isleW = vW;
 vec3 seaV = normalize( cameraPosition - vW );
 vec4 seaM = seaMapAt( vW.xz );
-float seaRise, seaLevel = max( vW.y, seaSwash( vW.xz, seaM, seaRise ) );
+float seaRise = 0.0, seaLevel = seaM.z < 40.0 ? max( vW.y, seaSwash( vW.xz, seaM, seaRise ) ) : vW.y;       // (the swash: by the shore only)
 float seaD0 = max( 0.0, seaLevel - seaGround( vW.xz ) );
 vec2 seaDx = dFdx( vW.xz ), seaDy = dFdy( vW.xz );
 // the open sea (from a little way outside the crest); the lagoon's short fetch, calmer near the land the wind leaves, but
 // never glassy: the bands' weights
 float seaOpen = smoothstep( -40.0, 40.0, seaM.x ), seaFetch = smoothstep( 20.0, 700.0, seaM.z );
 vec3 seaWt = vec3( seaOpen * smoothstep( 1.5, 8.0, seaD0 ), mix( 0.3 * ( 0.5 + 0.5 * seaFetch ), 1.0, seaOpen ), mix( 0.6 + 0.4 * seaFetch, 1.0, seaOpen ) );
-vec2 seaSw; seaSwell( vW.xz, seaSw ); seaSw *= seaOpen * ( 1.0 - smoothstep( 650.0, 300.0, seaM.x ) );
+vec2 seaSw = vec2( 0.0 ); float seaSwW = seaOpen * ( 1.0 - smoothstep( 650.0, 300.0, seaM.x ) );
+if ( seaSwW > 0.0 ) { seaSwell( vW.xz, seaSw ); seaSw *= seaSwW; }        // (the swell: over open water, away from the reef)
 // the eye's line into the water, bent by the waves as large as a few pixels (the finest, read a few levels up, only blur
 // the floor, as they do an eye's view through rippled water; read sharp, they scatter its grain into speckle)
-float seaSp2; vec2 seaSm = seaSlope( vW.xz, seaDx * 6.0, seaDy * 6.0, seaWt, seaSp2 ).xy + seaSw;
+float seaSp2; vec2 seaSm = seaD0 < 22.0 ? seaSlope( vW.xz, seaDx * 6.0, seaDy * 6.0, seaWt, seaSp2 ).xy + seaSw : seaSw;
 vec3 seaT = refract( -seaV, normalize( vec3( -seaSm.x, 1.0, -seaSm.y ) ), 1.0 / SEA_N ); seaT = normalize( vec3( seaT.x, min( seaT.y, -0.05 ), seaT.z ) );
-vec3 seaFN, seaP = vW + seaT * ( seaD0 / -seaT.y );
-seaP = vW + seaT * ( max( 0.0, seaLevel - seaFloorAt( seaP.xz, seaFN ) ) / -seaT.y );
-seaP.y = seaFloorAt( seaP.xz, seaFN );
+vec3 seaFN = vec3( 0.0, 1.0, 0.0 ), seaP = vec3( vW.x, seaLevel - seaD0, vW.z );
+if ( seaD0 < 22.0 ) {                                    // (past that the floor is not seen: straight down is enough)
+  seaP = vW + seaT * ( seaD0 / -seaT.y );
+  seaP = vW + seaT * ( max( 0.0, seaLevel - seaFloorAt( seaP.xz, seaFN ) ) / -seaT.y );
+  seaP.y = seaFloorAt( seaP.xz, seaFN );
+}
 float seaH = max( 0.0, seaLevel - seaP.y ), seaMuV = clamp( -seaT.y, 0.05, 1.0 ), isleFilm = seaH, isleShadeK = 1.0;
 isleW = seaP;
 // THE LIGHT'S DANCE ON THE FLOOR (caustics): where the light that falls on the floor came into the water, the short waves'
@@ -702,7 +706,17 @@ const SEA_AFTER = `
   // in the surface, the key light's glitter where the land, a palm or a ship does not shade the water, the white water
   float spread, white; vec2 sh; vec4 b = seaSlope( vW.xz, seaDx, seaDy, seaWt, spread );
   vec2 s = b.xy + seaSw;
-  seaShore( vW.xz, seaM, seaD0, sh, white ); s += sh;
+  #ifdef SEA_NO_SHORE
+  sh = vec2( 0.0 ); white = 0.0;
+  #else
+  {
+    // the phase's gradient in the world, from its change across the pixel and the place's: (dx dy)^T g = (dphase/dx, dphase/dy)
+    vec2 b = vec2( dFdx( seaM.y ), dFdy( seaM.y ) ); float det = seaDx.x * seaDy.y - seaDx.y * seaDy.x;
+    vec2 g = abs( det ) > 1.0e-9 ? vec2( seaDy.y * b.x - seaDx.y * b.y, seaDx.x * b.y - seaDy.x * b.x ) / det : vec2( 0.0 );
+    g *= min( 1.0, 2.0 / max( length( g ), 1.0e-6 ) );            // (no wave is shorter than three metres: at a graze the solve wanders)
+    seaShore( vW.xz, seaM, seaD0, g, sh, white ); s += sh;
+  }
+  #endif
   s += seaRipples( vW.xz );
   float thin = smoothstep( 0.0, 0.3, seaD0 ); s *= 0.2 + 0.8 * thin; spread *= 0.15 + 0.85 * thin;      // water a few centimetres deep lies almost flat
   // the facets an eye sees most of lean toward it: of a Gaussian sea's facets, weighted by the area each turns to the eye,
@@ -717,10 +731,23 @@ const SEA_AFTER = `
   vec3 kl, ke; seaKey( kl, ke );
   vec3 up = seaOut( uSeaE, outgoingLight, seaH, uSeaLight.x, seaMuV );
   float F = seaFresnel( dot( nv, seaV ) );
+  #ifdef SEA_NO_GLINT
+  vec3 glint = vec3( 0.0 );
+  #else
   vec3 glint = seaGlitter( seaV, kl, ke * uSeaLight.y, s, spread ) * isleShadeK;
-  float foam = seaLace( vW.xz, clamp( white + smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 ), max( length( seaDx ), length( seaDy ) ) );
+  #endif
+  #ifdef SEA_NO_LACE
+  float foam = 0.0;
+  #else
+  float wIn = clamp( white + smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 );
+  float foam = wIn > 0.004 ? seaLace( vW.xz, wIn, max( length( seaDx ), length( seaDy ) ) ) : 0.0;
+  #endif
   vec3 wc = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - isleShadeK ), vec3( 0.0 ) );
+  #ifdef SEA_NO_SKY
+  vec3 sky = uSeaE * 0.3;
+  #else
   vec3 sky = seaSkyIn( seaV, nv, spread );
+  #endif
   outgoingLight = mix( up, sky, F ) + glint * ( 1.0 - foam );
   outgoingLight = mix( outgoingLight, wc, foam );
   if ( uSeaDebug > 0.5 ) outgoingLight = uSeaDebug < 1.5 ? vec3( 1.0, 0.0, 1.0 ) : uSeaDebug < 2.5 ? up * ( 1.0 - F ) : uSeaDebug < 3.5 ? sky * F : uSeaDebug < 4.5 ? glint : uSeaDebug < 5.5 ? vec3( foam ) : uSeaDebug < 6.5 ? vec3( F ) : nv * 0.5 + 0.5;
@@ -759,7 +786,7 @@ vec3 seaMove( vec3 w ) {
   vec4 m = seaMapAt( w.xz );
   float open = smoothstep( -40.0, 40.0, m.x ), wh; vec2 sl;
   vec3 mv = seaSwell( w.xz, sl ) * open * ( 1.0 - smoothstep( 650.0, 300.0, m.x ) );
-  mv.y += seaShore( w.xz, m, d, sl, wh ) * smoothstep( 700.0, 300.0, r );
+  mv.y += seaShore( w.xz, m, d, vec2( 0.0 ), sl, wh ) * smoothstep( 700.0, 300.0, r );
   #ifdef SEA_FFT
   mv += textureLod( uSeaA0, w.xz / uSeaL.x, 0.0 ).xyz * open * smoothstep( 1.5, 8.0, d ) * smoothstep( 300.0, 150.0, r );
   #endif

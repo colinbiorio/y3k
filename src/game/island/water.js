@@ -161,13 +161,10 @@ float seaFloorAt( vec2 xz, out vec3 n ) {
 // McKee's explicit dispersion), breaks where it would stand over 0.78 of the depth and from there in is held to that (a
 // bore, lower as it runs into the lagoon), its crest sharpening as it nears breaking (Stokes' second harmonic). Its sets
 // come as a slow swing drifting along the reef; each stretch of reef a little out of step with the next.
-float seaShore( vec2 xz, vec4 m, float d, out vec2 slope, out float white ) {
+float seaShore( vec2 xz, vec4 m, float d, vec2 grad, out vec2 slope, out float white ) {
   slope = vec2( 0.0 ); white = 0.0;
   if ( m.x > 900.0 || m.x < -600.0 ) return 0.0;
-  float w = uSeaClock.y, t = uSeaClock.x;
-  vec2 g = vec2( seaMapAt( xz + vec2( 6.0, 0.0 ) ).x - m.x, seaMapAt( xz + vec2( 0.0, 6.0 ) ).x - m.x );
-  g /= max( length( g ), 1.0e-4 );
-  float along = dot( xz, vec2( -g.y, g.x ) );
+  float w = uSeaClock.y, t = uSeaClock.x, along = dot( xz, vec2( 0.6, 0.8 ) );
   float group = 0.62 + 0.38 * sin( 6.2831853 * t / 84.0 + along * 0.0021 + 2.0 * gn( xz * 0.0011 ) );
   float H0 = 2.0 * uSeaClock.z * group * m.w;
   float dd = max( d, 0.05 ), k0 = w * w / 9.81, kd = k0 * dd * pow( 1.0 / tanh( pow( k0 * dd, 0.75 ) ), 0.66667 );
@@ -175,13 +172,15 @@ float seaShore( vec2 xz, vec4 m, float d, out vec2 slope, out float white ) {
   float Hb = m.x < 0.0 ? ${f(SEA.breaker)} * 0.35 * group * exp( m.x / 90.0 ) : min( Hh, ${f(SEA.breaker)} * dd );
   float th = m.y + w * t + 0.7 * gn( vec2( along * 0.004, 3.0 ) ), u = fract( th / 6.2831853 );
   float a = 0.5 * Hb, c = cos( th ), sn = sin( th ), steep = clamp( ( br - 0.55 ) / 0.45, 0.0, 1.0 );
-  slope = g * ( a * kd / dd * -sn * ( 1.0 + 0.9 * steep * c ) );
+  slope = grad * ( a * -sn * ( 1.0 + 0.9 * steep * c ) );                 // grad: the phase's own, k along the way in
   // the white water: the lip where it breaks, the bore behind each broken crest (most just behind it), what is left
   // between the waves; into the lagoon it thins out over a hundred metres or so
   float broken = m.x < 0.0 ? 1.0 : smoothstep( 0.92, 1.12, br );
   float lip = smoothstep( 0.8, 0.98, u ) * smoothstep( 0.85, 1.05, br ) * ( 1.0 - smoothstep( 1.25, 1.7, br ) ) * step( 0.0, m.x );
   float churn = 0.35 * smoothstep( -90.0, -10.0, m.x ) * smoothstep( 20.0, -5.0, m.x );
   white = ( broken * ( exp( -u * 2.6 ) + 0.18 + churn ) + lip ) * ( m.x < 0.0 ? exp( m.x / 170.0 ) : 1.0 ) * smoothstep( 0.0, 0.25, H0 );
+  // no two stretches of a breaking crest alike: it breaks harder here, peels there, and the patches drift
+  white *= 0.3 + 0.95 * gn( xz * 0.021 + vec2( 0.37 * th, 0.05 * t ) );
   return a * ( c + 0.45 * steep * ( c * c - 0.5 ) );
 }
 // the rings a body makes (rings.js ring(), the slope of the sum of them)
