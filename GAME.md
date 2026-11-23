@@ -119,6 +119,134 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The island's sea and lagoon, to standard (23 November 2026)
+
+The second of the four parts the island is being brought to standard in (the ground and its light; the sea and the
+lagoon; the island's own plants; the rocks and the beach's life). The sea had been one flat sheet coloured by the depth
+under it, with white bands painted along the depth's contours, its edge the 16 m triangles' straight line; under the true
+sky in civil twilight it came out an electric cyan ([`src/game/island/sea.js`](src/game/island/sea.js) and
+[`water.js`](src/game/island/water.js), new; `terrain.js`, `island.js`, `ground.js`, `sky.js`).
+
+- **What the water is.** Clear oceanic water, at the sky's own three wavelengths: pure water's absorption (R. M. Pope and
+  E. S. Fry, 1997) and scattering (A. Morel, 1974, as R. C. Smith and K. S. Baker tabulate it), with what 0.1 mg of
+  chlorophyll a cubic metre brings (the algae, after Prieur and Sathyendranath; dissolved matter; particles after Gordon
+  and Morel, backscattering after Morel 1988). The light it gives back is Z. Lee et al.'s fit to radiative transfer
+  (Appl. Opt. 38, 3831, 1999): the water's own light and the floor's, each as far as it carries down and back up, and
+  what the surface lets out. Deep, it gives back 0.70% of the blue light falling on it (per steradian), 0.16% of the
+  green, 0.03% of the red: navy. Over the lagoon's coral sand two metres down, 6.0% of the green and 5.5% of the blue,
+  2.5% of the red: turquoise, bluer as the floor falls away, the deep blue past the reef's drop. Sand under a film of
+  water gives back 0.49 of what it does dry, where the ground's wet beach (Lekner and Dorf) is 0.45: the two drawings
+  meet at the water's edge.
+- **Its light is what falls on level water**: the Sun's and the sky's by day, the twilight's blue, the Moon's (sky.js
+  hands it on under the true sky; with the switch off, the present sky's named lights). A twilight sea is lit by the
+  twilight, and its colours are the twilight's.
+- **The surface.** Fresnel's equations for seawater (2.1% straight down). The sky in it is the wrapped sky along each
+  reflection, blurred as much as the slopes under the pixel spread it: the Earth's shadow, the afterglow, the Moon's sky.
+  The facets an eye sees most of lean toward it (a Gaussian sea's facets weighted by the area each turns to the eye: by
+  1.25 times the slopes' spread at a graze; B. G. Smith's shadowing, taken as E. Bruneton, F. Neyret and N. Holzschuch's
+  ocean lighting takes it, 2010), so from a beach the sea a few hundred metres out reflects the sky from well above the
+  horizon, and less of it, and shows the water's own blue. The key light's glitter is C. Cox and W. Munk's (1954): every
+  facet a mirror, their slopes spread about the surface's own by what the pixel cannot hold (their mean square slope for
+  the day's wind, less what the bands draw), so the Sun's glitter path and the Moon's path come out of the slopes; the
+  land, a palm or a ship shades them.
+- **The waves.** The wind's sea: 6.5 m/s from the south-east (the trades) over 50 km of open ocean, JONSWAP's spectrum
+  (K. Hasselmann et al., 1973; 1.0 m significant, 4.3 s), spread about the wind by M. Donelan, J. Hamilton and W. Hui's
+  law with Banner's tail (as C. J. Horvath gathers them, 2015), drawn as J. Tessendorf's random sea (2001): each wave at
+  its own speed (short ones feel the surface's tension), in three bands (squares of 250, 37 and 5.3 m, 128 waves a
+  side), summed on the GPU each frame; the surface's lean sharpens the crests, and where it folds (the Jacobian) the
+  wind's sea whitens. The swell: 1.5 m at 11.5 s from the south-west, nine long waves of nearby periods and ways (sets
+  come out of their beats), the same on the CPU (`swellAt`) and the GPU. In the lagoon the swell is gone and the wind's
+  sea is what a kilometre or so of fetch raises, calmer near the land the wind leaves. Toward the reef the swell turns to
+  come in square to it (its crests follow the distance to the crest, their phase the integral of the wavenumber the depth
+  gives them), stands higher as the water shoals (J. D. Fenton and W. D. McKee's dispersion, the root of the group
+  speeds), and breaks where it would stand higher than 0.78 of the depth: white water behind each broken crest, a churn
+  just inside the crest, thinning on into the lagoon, uneven along the reef, harder in the sets. The west reef faces the
+  swell and takes it whole; the east reef faces the wind's sea and takes that.
+- **The reef's map** (`seaMap`, made once as the island opens, 0.1 s): the lagoon is the island's own, by
+  lordhowe-build.mjs's rule (the water inside the island's hull, within 1.4 km of the shore, north of its south end:
+  10.98 km², the shape says 11.03), its edge the reef's crest; for every point, how far outside the crest, the swell's
+  phase there, how far from dry land, how square it faces the waves.
+- **The floor seen through it.** The eye's line, bent at the surface by its larger waves (the finest only blur the
+  floor), meets the floor (two steps over the grid's heights); the floor there is drawn plainer than the land, since it
+  is seen through water: coral sand, its patches of rubble and coral heads, the reef's crest and face in rubble, steep
+  floors in rock, the water in its pores; lit as the land is (the land's own shadow, the shadow maps) and through the
+  caustics: where the light that falls on the floor came into the water, the short waves' curvature gathers it or
+  spreads it, 1 / (1 + (1 - 1/n) H div s), strongest a metre or two down.
+- **Where the water meets the beach.** The swash runs up the beach and back (the swell's bores where the reef lets them
+  through, the lagoon's small waves elsewhere), each stretch of beach out of step with the next and no two alike: the
+  land under it is drawn as under a film of water, the sand's own ripples in its edge, lace at its front as it runs up;
+  above it the sand is wet as high as the swash reaches. The waterline is drawn per pixel, not along the 16 m triangles.
+- **What stands in the water** (a body wading, a ship's hull) shows its part under the water through the water's own
+  light; the sea is not drawn over it (a stencil mark).
+- **How it is drawn.** One drawing for the sea: the sheet round the eye (38,400 points, a sixteenth of the distance
+  apart near the eye) moved by the swell, the swell at the reef and the largest band, drawn with its own material, the
+  seabed and the surface in one shader and the surface worked out after the light (a first version held the land's whole
+  splat and the surface at once and took 122 ms a frame over the lagoon from 50 m up); the land's cells only where they
+  stand above the water or meet it (to 1.5 m down), drawn before it, so the GPU skips the sea under the land. The bands'
+  inverse transforms in two passes, each a whole direction at once (fourteen radix-2 stages took 4.4 ms a frame on the
+  M2: a tile-based GPU pays for every pass; the two take 1.3).
+- **The lighter path** (a phone; fine.js's plain): one band of the wind's sea made once on the CPU and slid two ways
+  across itself; no caustics; the same water, swell, reef and swash.
+- **Nothing is fetched.** The sea is numbers and shaders.
+
+**What changed in the look, and why** (the before and after sheets are in the scratch folder `island-real/pr2`;
+luminance below is the picture's own, linear, from the screen's colours):
+
+1. **The lagoon is turquoise over its sand, blue over the reef's drop, navy offshore**, out of the water's optics, not
+   painted: from 300 m up at noon the lagoon went from sRGB 132, 226, 224 (painted aqua) to 93, 174, 173, the open sea
+   from 115, 155, 195 to 84, 101, 140.
+2. **Civil twilight reads as twilight.** The electric cyan's cause: the old sea's colours were painted bright (its deep
+   blue gave back, as a radiance, ten times what deep water does, its shallows four to five times) and lit by the
+   twilight's blue light, shown to an eye adapted to the dim scene. From 150 m up with the Sun 3.7 degrees down, the
+   lagoon in the foreground was 72% of the luminance of the sky 10 to 25 degrees up (sRGB 101, 176, 232) and is 39%
+   (82, 132, 177); the deep sea at the horizon 93% of that sky and now 69%. Off the east coast at moonrise (Sun 3.1
+   degrees down), the sea under the eye went from 44% of the sky 10 to 30 degrees up (93, 120, 168) to 23% (74, 83, 118).
+   (The lagoon stays brighter than deep water would: its floor is white sand two metres down, which gives back a
+   twentieth of the light even through the water.)
+3. **The open sea from a beach is darker than the sky over it.** From the east beach at noon, the sea past the reef was
+   107% of the luminance of the sky just over the horizon (136, 175, 201) and is 55% (90, 127, 165), a deep blue band.
+4. **The water meets the sand**: a clear film, the sand through it, a line of lace that runs up and back, wet sand above.
+5. **The Sun's glitter and the Moon's path** are the slopes' own: a broad path at golden hour from 50 m up, the Moon's
+   broken into the wavelets that carry it.
+
+**What is rough, seen in the pictures:**
+
+- **The surf is the swell's own model**, its crests following the distance to the crest: white water where it would
+  break, behind each crest and into the lagoon, but no curling lip or plunging face. From 300 m up it reads as a reef's
+  surf; from a beach 250 m off it is a thin white line.
+- **What the sheet carries**: the swell, the swell at the reef and the largest band of the wind's sea; the two smaller
+  bands only shade it (a program has sixteen texture units in all, and the sea's drawing uses fifteen). A body, a ship
+  does not heave with the swell: their sea is still the flat one (nothing else changed).
+- **The water reflects the sky, not the island**: no mountain in the lagoon's mirror yet.
+- The wind's sea repeats every 250, 37 and 5.3 m: from 300 m up its pattern can be found in the open sea if looked for.
+- The caustics come from the finest band only (the net a metre or two down); the larger chop's deeper focus is not in
+  them. The floor under the water takes the 16 m triangles' own normals.
+- The twilight lagoon stays a fairly saturated blue: its white floor two metres down under the blue light (Colin's eye).
+- With the switch off the sea is the same physics under the painted light: from the beach the lagoon is paler, a grey
+  turquoise, than the old painted aqua.
+- The algae's spectral shape at the three wavelengths is chosen from their mean curve (T-II); at 549 and 611 nm pure water
+  dominates either way.
+
+**Measured** (23 November 2026, the M2 MacBook Air on mains power, headless Chromium on the Mac's own chip, the GPU's own
+timer round each frame; this branch against main at the same views, two alternations each, because a fanless Air under a
+long run warms by 2 to 5 ms; main is in brackets). At 2940 x 1912, the pixel cap: the beach as played 17.5 and 17.2 ms
+(15.9, 15.7); the lagoon's shore 22.8 and 23.1 (19.3, 19.6); the forest edge 16.1 and 17.2 (14.0, 19.7); Lidgbird's cliffs
+from 300 m up 27.3 and 30.2 (23.3, 27.3); the lagoon from 50 m up 31.9 and 30.9 (31.1, 27.1); the lagoon and its reef from
+300 m up 35.1 and 34.0 (30.3, 31.0); the open sea off the east reef 6 m up, the screen half sea, 24.3 and 32.6 (20.2,
+25.5). So the sea costs 1.5 to 4 ms a frame at the cap where it is part of the view and about 5 ms where it is half of it;
+fine.js does what it is for where the frames are long. Its parts, measured in one page against themselves: the bands'
+transforms 1.3 ms (fourteen radix-2 passes had taken 4.4); the surface over a screen of open sea about 7 ms, the seabed
+under it about 5 (the old sheet took about 7 for both); the swash on the land nothing measurable. The lighter path at 1470
+x 956: the beach 5.4 and 3.9 ms (3.9, 3.7), the lagoon's shore 5.3 and 5.3 (4.4, 4.6), the lagoon from 50 m up 14.2 and 7.6
+(7.5, 6.9), the open sea 5.5 and 5.7 (4.2, 4.3): a steady sixty. A phone's size, 780 x 1688 (touch, the lighter path, on
+this Mac's GPU): 4.4 and 4.2 ms (4.0, 4.3), 5.4 and 5.8 (5.0, 4.9), 6.6 and 5.9 (6.0, 5.8), 5.1 and 5.3 (4.4, 4.6). Made once
+as the island opens: the reef's map 0.1 s, the starting sea 15 ms. `npm test`: 2,509 checks, all pass (`test/sea.test.mjs`
+13 new: the water's optics against what clear ocean water gives back, the lagoon's colours, the film and the wet beach,
+Fresnel, the transforms against a plain sum, the spectrum, the swell, the shoaling, the reef's map against the island's
+lagoon, the shaders' numbers; on main the suite had stopped at the Moon's checks, which pinned the README's latest line,
+and so never reached the ground's: fixed here). The GPU smokes: island 15, build 39, ship 39, light 23, fight 35 checks,
+all pass, no warnings.
+
 ### The island's ground, to standard: what it is made of, and its light (23 November 2026)
 
 Colin, 22 November: "the ultimate goal is the most realistic game ever made", Jedi: Fallen Order's detail the floor,
@@ -202,8 +330,8 @@ plants; the rocks and the beach's life). The ground had been flat colour: three 
   over main; main itself takes 13.6 ms at the beach as played and more at some places.
 - Steep rock at 200 to 400 m shows the basalt scan's strata repeating every 13 m in rows (read as lava flows, but
   regular); the canopy past the palms is colour, not crowns; the large aerial scan's plants are one green.
-- The wet strip does not move (no tide, no swash: the sea's part); where the sea meets the land the line is still the
-  16 m triangles' straight edge (the sea's part); the palms' sway is not in their shadows (the plants' part).
+- (The wet strip's swash and the waterline drawn per pixel came with the sea, below.) The palms' sway is not in their
+  shadows (the plants' part).
 - Ball's Pyramid has no land shadow of its own (its grid is not marched); on the lighter path the cliffs are read
   from above only and have no large-scale face.
 
@@ -227,8 +355,8 @@ The third of the true sky's four parts ([`SOLAR.md`](SOLAR.md) "Step 2, third pa
 - **Seen as an eye sees it**: the face, not a white blob; its brightness against the night grows as the cube root of its
   light (Stevens' law), its face in proportion, its glow a soft ring the disc stands clear of.
 
-**Rough, seen in the pictures**: from 150 m up in civil twilight the island and the sea come out an electric blue (on
-main too: not this part's); the face through a telescope forty times narrower is a little soft (the relief is 10.7 km a
+**Rough, seen in the pictures**: from 150 m up in civil twilight the island and the sea came out an electric blue (on
+main too: not this part's; the sea's part found the cause and fixed it, above); the face through a telescope forty times narrower is a little soft (the relief is 10.7 km a
 texel); the ashen light at the first quarter shows faintly through a telescope where the eye's glare hides it as played.
 
 ### The true sky over the island, its second part: the night (22 November 2026)

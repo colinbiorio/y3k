@@ -263,7 +263,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-23** (latest) — **Lord Howe Island's ground, to standard: what it is made of, and its light**
+- **2026-11-23** (latest) — **Lord Howe Island's sea and lagoon, to standard: what the water is, its waves, its light**
+  (`src/game/island/sea.js`, `water.js`, new; `terrain.js`, `island.js`, `ground.js`, `sky.js`; `test/sea.test.mjs`, 13
+  checks). The second of four parts of the island brought to standard. The sea is no longer a sheet of painted colours:
+  its own optics (pure water's absorption and scattering, Pope and Fry, Morel; a clear oceanic water's algae and
+  particles; the light it gives back by Z. Lee et al.'s fit to radiative transfer, 1999) make the lagoon turquoise over
+  its sand, blue at the reef's drop and navy offshore, lit by whatever falls on it, so a twilight sea is twilight's colour
+  (the electric cyan's cause: the old colours were painted ten times brighter than deep water and lit by the twilight's
+  blue). Its waves: Tessendorf's random sea for the day's wind (JONSWAP, Donelan and Banner's spreading), summed on the GPU
+  each frame in three bands; a long swell from the south-west that turns in square to the reef, shoals and breaks on it
+  into white water (higher than 0.78 of the depth); the lagoon calm behind it. The surface: Fresnel's equations, the sky
+  in it, the facets an eye sees leaning toward it (from a beach the sea far out is a deep blue, not the sky's), the Sun's
+  glitter and the Moon's path from Cox and Munk's slopes. The floor seen through it, bent by its waves, with caustics; the
+  swash up the beach with lace at its front, the waterline drawn per pixel; what stands in the water seen through it. Nothing
+  fetched. GAME.md "The island's sea and lagoon, to standard" has the sources, what changed in the look and why, what is
+  rough and what was measured.
+
+- **2026-11-23** (morning) — **Lord Howe Island's ground, to standard: what it is made of, and its light**
   (`src/game/island/terrain.js`, `basis-worker.js`, `ground/*.ktx2`, `ground.json`, new; `island.js`, `creatures.js`,
   `view.js`; `scripts/island/ground-textures.py`, `basis-worker.mjs`; `test/ground.test.mjs`, 7 checks; vendored: three
   r160's KTX2Loader and its libraries, three r187's Basis transcoder). The first of four parts of the island brought to
