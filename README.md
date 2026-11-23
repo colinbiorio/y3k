@@ -263,6 +263,17 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-11-22** (latest) — **The true sky over the island, its third part: the Moon, behind the switch**
+  (`src/game/solar/moon.js`, `moonmaps.js`, `moon-albedo.jpg`, `moon-relief.png`, new; `src/game/sky.js`, `daylight.js`,
+  `ephemeris.js`; `scripts/solar/moon.py`, `moon-maps.py`, `moon-render.py`; `test/moon.test.mjs`, 9 checks). With
+  `?sky=true` the Moon over Lord Howe Island is a sphere with its real face (NASA's Scientific Visualization Studio,
+  CGI Moon Kit, svs.gsfc.nasa.gov/4720: LRO LROC WAC and LOLA data, NASA/GSFC/Arizona State University), turned by the IAU's
+  rotation (its librations within 21 arcsec of the clockwork's; "upside down" from the south), lit by the lunar light law
+  (its whole light the magnitude law's within 0.002 mag at full), its craters in shadow at the terminator, the earthshine
+  on its dark part (some 1:1,500 of a 3-day crescent's bright limb as seen), and seen as an eye sees it: its face, not a
+  white disc. Without the switch nothing has changed. [`SOLAR.md`](SOLAR.md) "Step 2, third part" has the method, the
+  numbers and what is approximated.
+
 - **2026-11-22** (later) — **The true sky over the island, its second part: the night, behind the
   switch** (`src/game/solar/night.js`, `stars.js`, `milkyway.js`, `milkyway-cube.jpg`, new; `daylight.js`, `air.js`,
   `src/game/sky.js`; `scripts/solar/stars.mjs`, `calibrate.py`, `texture.py`, `cube.py`, `milkyway.py`,

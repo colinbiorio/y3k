@@ -45,8 +45,8 @@ error has not been measured; what cannot yet be done well is written under "What
    Sun, the Moon with its phase and its face, the planets where they are and as bright as they are, for the real
    clock, seen from Lord Howe Island (31.55 S, 159.08 E); the eye's adaptation from noon to a moonless night.
    In four parts, each looked at before the next: **the air and the Sun** (built, 22 November 2026, behind a
-   switch: below); **the night** (built the same day, behind the same switch: below); the Moon; the clock's dial,
-   the sea's mirror, phones.
+   switch: below); **the night** (built the same day, behind the same switch: below); **the Moon** (built the same
+   day: below); the clock's dial, the sea's mirror, phones.
 3. **The seamless rise.** The air's scattering from the beach to space; the Earth as a globe under the island
    (his clean Earth: no city lights), the island at its real place; numerical precision at planetary scale, so
    that a metre on the sand and the distance to the Moon live in one picture without a seam.
@@ -63,8 +63,9 @@ error has not been measured; what cannot yet be done well is written under "What
 air and the Sun: its own section below): three more plain modules beside the clockwork, one that draws, and
 `test/sky.test.mjs` (18 checks). **Its second part, the night, is built behind the same switch** (its own section
 below): the stars, the Milky Way, the zodiacal light, the airglow, the planets, the Moon's light and the eye at
-night, in `night.js` and two generated files, and `test/night.test.mjs` (20 checks). The world tab uses them only
-when the page's address says `?sky=true`.
+night, in `night.js` and two generated files, and `test/night.test.mjs` (20 checks). **Its third part, the Moon,
+is built behind it too** (its own section below): `moon.js`, two maps and their numbers, and `test/moon.test.mjs` (9
+checks). The world tab uses them only when the page's address says `?sky=true`.
 
 | file | what it is |
 |---|---|
@@ -824,6 +825,104 @@ little faint, the plane a little bright: the map draws a star as its flux to the
   veil, its glitter on the sea (the sea's mirror is the fourth part's).
 - **The switch**: the true sky comes out from behind `?sky=true` when the Moon's face is made and looked at.
 
+## Step 2, third part: the Moon (22 November 2026)
+
+Standing on the beach, the Moon is the Moon over that beach at the world's clock's instant: a sphere of its true size
+and place (the clockwork's `sky()`, parallax and all), its face (the LRO camera's albedo, LOLA's relief) turned by the
+IAU's rotation, so its librations and its tilt come out of the rotation itself (from Lord Howe it is "upside down" to a
+northern eye), lit by the Sun with the lunar light law, its craters' floors in shadow at the terminator, the Earth's light
+on its dark part, dimmed, reddened and flattened by the air low down as the Sun is. **Behind the same switch**
+(`?sky=true`); without it nothing has changed and none of its files is fetched.
+
+| file | what it is |
+|---|---|
+| `solar/moon.js` | the face as numbers: the Moon's own axes each frame, the Sun's and the Earth's light at the Moon, the light law, the eye's rule for the Moon; and `MOON_GLSL`, the same for the GPU |
+| `solar/moonmaps.js` | the maps' numbers, PHI every 2 degrees, the credit. Generated (`scripts/solar/moon-maps.py`) |
+| `solar/moon-albedo.jpg` | 2048 x 1024, plate carree in the IAU Moon frame: rho = RHO_MAX sRGB-to-linear(byte), the albedo relative to sunlight. `scripts/solar/moon.py`'s own picture, byte for byte |
+| `solar/moon-relief.png` | 1024 x 512, lossless: the normal toward east and north, and the height over 1737.4 km (LOLA) |
+
+### The method
+
+- **The law** (`scripts/solar/moon.py` made its numbers true): L = E rho PHI(alpha) 2 mu0 / (mu0 + mu) / pi. Lommel-Seeliger,
+  so a full Moon is as bright at its limb as at its middle; PHI, fitted so the whole disc gives the clockwork's magnitude
+  law at every phase, carries the opposition surge and the roughness. The albedo is NASA's colour mosaic on the Moon's
+  measured scale and colour (its disc-weighted mean is the geometric albedo, 0.123; red : green : blue 1.14 : 1 : 0.80 of
+  sunlight; the highlands 2.3 times the maria).
+- **Its turn**: `orientation('moon')` at the instant its light left, onto the J2000 equator and the horizon of the
+  instant; a look that meets the disc is a place on the sphere, and that place is read from the two maps at the level a
+  pixel covers there (so a face 17 pixels across neither sparkles nor blurs).
+- **Shadows**: each place near the terminator looks along the ground toward the Sun over LOLA's heights, 16 steps from 3
+  to 300 km (past that the Moon's curvature hides anything its relief can raise; 8 on the lighter path), and takes the
+  share of the Sun's disc (its radius as the Moon sees it) over the highest of it: crater floors in long shadow, and
+  peaks past the terminator lit before the plain round them.
+- **Earthshine**: the Earth's light at the Moon from the clockwork's own magnitude law for the Earth (A. Mallama and
+  J. L. Hilton, 2018) at the Earth's phase as the Moon sees it, in earthlight's colour (B-V 0.44: P. Thejll et al., A&A
+  563, A38, 2014). The earthlit face is seen almost back along that light (the Earth within a degree of the eye, as the
+  Moon sees them), so it has the opposition surge, while a crescent is seen at 140 degrees or more: the ashen light is a
+  ten-thousandth of the sunlight on the Moon (the published figure) and some 1:1,500 of the crescent's bright limb as seen.
+- **The eye looking at it** (T-II: the laws are published, putting them together is mine). Through the one curve for the
+  whole picture a full Moon, 4,600 cd/m2 over a land at 0.03, was a white disc in a white glare with no face. So, for the
+  Moon alone: each face's mean brightness over the eye's adapted level grows as the cube root of its light (S. S.
+  Stevens' power law for a field, Psychophysics, 1975: 0.33; the night's points take his 0.5); the face is shown in a
+  frame of its own, in proportion to its light (the maria at their measured share of the highlands, a shadow black), its
+  brightest tenth where the eye's curve puts that brightness; its earthlit face and its glare (the CIE's veil, as the
+  night's part has it) are seen in the same frame, so the disc stands clear of its glow, and beside a crescent the ashen
+  light is shown as the cube root of their ratio. Below a third of white (by day, or rising in a bright dusk) the Moon is
+  simply part of the scene. A star near the Moon is still put out by its glare as light: the eye's rule is for the Moon's
+  own look, not for what it hides.
+
+### What was measured
+
+`node test/moon.test.mjs` measures and prints these (no GPU), and fails if a line here stops being true.
+
+- The maps: the albedo 2048 x 1024 (671 KB), the relief 1024 x 512 (823 KB, heights -8.5 to 10 km in steps of 72.5 m); the near side's mean albedo 0.1230 (red, green, blue 0.1381, 0.1211, 0.0969), its brightest tenth 1.416 times that; Mare Tranquillitatis 0.068, Aristarchus 0.249
+- The face turned by the IAU's rotation at 10 instants from 1999 to 2030: the point under the eye within 21 arcsec of the clockwork's librations (aberration, which moves the disc and not its face, is not in the frame), the north pole's and the bright limb's angles within 4e-12 degrees; the full Moon of 24 November 2026 at midnight, due north 32 degrees up, has its north pole 167.3 degrees from up (upside down, to a northern eye), librations -2.4, -7.3 degrees
+- The law over the near side's albedo (2 degree cells): the mean of the waxing and the waning Moon within 0.001 mag of the magnitude law at 0, 30, 60, 90, 120 and 150 degrees; the waxing Moon brighter by 0.048 (30), 0.114 (60), 0.169 (90), 0.163 (120), 0.049 (150) mag (the maps' own: the waning half holds Oceanus Procellarum)
+- The earthshine: a full Earth at the Moon's mean distance gives 16 lux (the clockwork's magnitude law for the Earth), 48 times a full Moon on the Earth; on 12 November 2026 at 09:00 UTC (a 3-day crescent, phase angle 146.1 degrees, the Earth 34.6 degrees from full as the Moon sees it) 12.2 lux against the Sun's 136,643: 8.91e-5 of it (published: 0.01%); seen from the island the ashen light (0.467 cd/m2 above the air) is 1:1,587 of the crescent's bright limb (its brightest tenth, 742 cd/m2): seen almost back along the Earth's light it has the opposition surge (PHI 0.981), and the crescent is seen at 146 degrees (PHI 0.089); earthlight's colour 0.92, 1.01, 1.16 (B-V 0.44)
+- The eye looking at the full Moon at midnight on 24 November (adapted to 0.03545 cd/m2, as the GPU's meter read): its face's mean, a scene value of 3500, is seen at 1.70 (the cube root over the adapted level's own 0.0375), and shown at 52% of white, its brightest tenth at 73%, a mare of albedo 0.07 at 29% and a highland of 0.16 at 67% (sRGB 148 and 214)
+
+**On the GPU** (the M2's own chip, headless Chromium on Metal; not in `npm test`; on battery):
+
+- **The disc's light, read back**: the dome's own chunk draws the disc 512 by 512 with nothing between it and the eye,
+  and its light summed over the pixels' solid angles is set against the clockwork's magnitude law: at full (5.9 degrees)
+  -0.002 mag, rising on 24 November -0.003; at 30, 60, 91 and 146 degrees the waxing and the waning Moon straddle the law
+  (waxing -0.014, -0.044, -0.077, -0.067; waning +0.017, +0.055, +0.098, +0.105 mag), their means +0.001, +0.005, +0.010
+  and +0.019. Each side is off by half the waxing-minus-waning difference the maps carry (0.031, 0.099, 0.175, 0.172 mag);
+  the clockwork's law is symmetric, the Moon is not (published: the first quarter about a fifth brighter than the last).
+  At 146 degrees the shadows take about 2% the fit did not have.
+- **The pictures** (a contact sheet, kept outside the repository): through a telescope ten and forty
+  times narrower, the full Moon upside down (Tycho and its rays at the top, Mare Crisium at the left), the first quarter's
+  terminator with its craters' floors in shadow and peaks lit past it, a 3-day crescent with the ashen light and its
+  maria; as played, the full Moon 17 pixels across with its maria and a soft glow, the rising full Moon a pale peach disc
+  over the sea in the twilight's airlight.
+- **Frames**: 16.7 ms a frame at the pixel cap (2940 by 1912) facing the full Moon, the 99th percentile 16.8, with the
+  switch on. With the switch off nothing of this is fetched or drawn (the night's part measured 16.7 ms there). Not
+  measured in this part, for want of battery: the lighter path, a phone's size, and the switch off again.
+
+### What is approximated in the Moon
+
+- **One phase law for every place**: PHI is the whole disc's, fitted to the magnitude law; the real surge and roughness
+  vary with the terrain (the maria are smoother). Within the fit's 0.01 mag where the law is symmetric.
+- **The relief at 10.7 km a texel** (1024 x 512): right as played and through a telescope ten times narrower; at forty it
+  is a little soft. The 4K albedo and LOLA at 64 pixels a degree are the next level (the landing).
+- **Heights in 72.5 m steps**: enough for shadows of craters kilometres deep; the shadow march reads coarser levels for
+  its far steps, which lowers distant peaks a little (shadows a little short).
+- **At the limb the relief fades into the sphere** over the last tenth of the radius: a slope turned from the eye there
+  would be hidden by the ground in front of it, which is not drawn (the limb's mountains are not in silhouette).
+- **Earthshine is uniform over the Earth's disc**: the Earth's clouds and continents, and its light's own phase law past
+  Mallama and Hilton's mean, are not in it (the Earth's brightness varies by a fifth with its cloud).
+- **The eye's rule** is chosen (above); a real eye looking at the Moon for long adapts further, and its glare is that eye's.
+- **The waxing and the waning Moon** are each 0.03 to 0.10 mag from the clockwork's symmetric law, as the real Moon is;
+  the light on the land is still the law's (`daylight.js`).
+- **The Moon's mirror in calm water** is the fourth part's, with the sea's.
+
+### What the next parts need from here
+
+- **The sea**: its glitter is the key light's (the Moon's at night, from the night's part); the Moon's own image in calm
+  water wants `moonLight()` along the reflected ray.
+- **The landing (step 4)**: the maps at their full resolution, and the frame from `moon.js` (`createMoonFace`) carries
+  over: the same axes, the same law, the light from above instead of from the Earth.
+
 ## What the tests cannot check, and what is rough
 
 - **The Earth's real rotation.** The clock is UTC. UT1 - UTC (under 0.9 s) is not known ahead and is not in the
@@ -923,6 +1022,7 @@ numpy, pyerfa, OpenEXR, Pillow; run with `python -I`):
 | the star places' fixture | ERFA (pyerfa), the IAU's SOFA library | `python -I scripts/solar/stars-erfa.py src/game/solar/stars.js test/fixtures/solar/stars.json` |
 | the zodiacal light, the airglow | Ch. Leinert et al., A&AS 127, 1 (1998), Tables 16 and 13 | typed into `night.js`, each beside its source |
 | the eye's threshold | B. E. Schaefer's program for the visual limiting magnitude (Sky & Telescope, May 1998), fitted to H. R. Blackwell's measurements | its constants, typed into `night.js` |
+| the Moon's face (`moon-albedo.jpg`, `moon-relief.png`, `moonmaps.js`, the fixture) | NASA's Scientific Visualization Studio, CGI Moon Kit (svs.gsfc.nasa.gov/4720): LRO LROC WAC and LOLA data (NASA/GSFC/Arizona State University): `lroc_color_16bit_srgb_4k.tif`, `ldem_16.tif` | `python -I scripts/solar/moon.py <colour tif> <ldem_16.tif> <out>`, then `python -I scripts/solar/moon-maps.py <out> <ldem_16.tif> src/game/solar test/fixtures/solar` (the albedo byte for byte from moon.py's run); `moon-render.py <out>` draws the reference sheet |
 
 **Licences.** This repository is MIT. What it carries from elsewhere is measurement and published theory, with
 its source named where it sits. IMCCE's VSOP87 and ELP directories name the papers and give no licence; the
