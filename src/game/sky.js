@@ -711,11 +711,14 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
     shownColour([d0 / Math.PI, d1 / Math.PI, d2 / Math.PI], col3, api.curve); state.sunCol.setRGB(2 * col3[0], 2 * col3[1], 2 * col3[2]);
     const k = exposure / Math.PI; shownColour([L.fill[0] * k, L.fill[1] * k, L.fill[2] * k], col3, api.curve); state.skyCol.setRGB(col3[0], col3[1], col3[2]);
     state.night = Math.min(1, Math.max(0, (-L.alt - 2) / 8)); state.exposure = exposure;
-    // the sea's own few numbers: where the key light is (the island turns its key light that way too), its glitter, how
-    // lit the water's own colour is (the sky in it, it reads from the tables: seaSky)
+    // the sea's own few numbers (island/water.js, terrain.js): everything that falls on level water, in the picture's units
+    // (the water gives back its share of it: Lee et al.), and that light's cosine once it is in the water, as the key's beam
+    // and the sky's light share it (the sky's, refracted from every way, about 0.86). Its glitter is the key light's own
     if (sea) {
-      sea.uSun.value.set(K.dir[0], K.dir[1], K.dir[2]); sea.uSunCol.value.setRGB(d0 / top, d1 / top, d2 / top); sea.uSunAmt.value = top / 2.4;
-      sea.uBodyAmt.value.setRGB(L.ground[0] * exposure / 2.4, L.ground[1] * exposure / 2.4, L.ground[2] * exposure / 2.4);
+      sea.uSun?.value.set(K.dir[0], K.dir[1], K.dir[2]);                   // where the key light is: the island turns its key light that way too
+      sea.uSeaE.value.set(L.ground[0] * exposure, L.ground[1] * exposure, L.ground[2] * exposure);
+      const up = Math.max(0, K.dir[1]), all = luminance(L.ground), beam = luminance(K.direct) * up, mu = Math.sqrt(Math.max(0, 1 - (1 - up * up) / (1.34 * 1.34)));
+      sea.uSeaLight.value.set(0.86 + (mu - 0.86) * (all > 0 ? Math.min(1, beam / all) : 0), 1, 0, 0);
     }
     // whatever has come into the scene since stands in the same air
     if (scene) { let n = 0; scene.traverse((o) => { const m = o.material; if (!m) return; n += 1; if (Array.isArray(m)) m.forEach(adopt); else adopt(m); }); seen = n; }

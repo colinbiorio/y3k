@@ -2,24 +2,24 @@
 // lordhowe-shape.js. It stands where the void stands (view.js asks the same of
 // both: a scene, its light and key, drops on its water, its size, its frame).
 //
-// The land is the grid's own triangles, coloured by what the ground is: beach
-// sand low and flat by the sea, grass on the low flats, palm forest on the
-// slopes, bare basalt where it is too steep to hold anything, and the moss of
-// the mist forest on Mount Gower's top; a fine grain over all of it near the
-// eye. The sea is one sheet at y = 0 whose colour comes from the depth under
-// it (the same heights, as a texture): the lagoon's turquoise over its sand,
-// the reef's crest and the shore in surf, blue going to ink offshore; the sky
-// in it at a slant, the sun's glitter, and the rings a body makes. A haze
-// takes the distance, so Ball's Pyramid, 28 km off, stands faint in it.
-// Three lights, as the void's are named: pale (a clear day), dusk, night.
+// The land is the grid's own triangles, made of what the ground is (terrain.js). The sea (sea.js, water.js; drawn by
+// terrain.js's sea material) is a sheet round the eye moved by the waves (the wind's sea, the swell, the swell
+// breaking on the reef), and in one drawing the water's surface and the floor seen through it: the floor where the
+// eye's line meets it once the surface has bent it, lit through the water by the light the water lets down, carried
+// up through it by what the water is made of (turquoise over the lagoon's sand, blue over the reef's drop, navy
+// offshore); the sky in the surface, the key light's glitter, the surf and the whitecaps; the swash up the beach is
+// the land's own drawing. A haze takes the distance, so Ball's Pyramid, 28 km off, stands faint in it. Three lights,
+// as the void's are named: pale (a clear day), dusk, night.
 //
 // Asked for (`sky`: ../sky.js itself, which view.js fetches and hands in when the page's address says ?sky=true;
 // nothing here imports it, so a page without the switch never reads it), the sky is the true one instead: the air
 // and the Sun over the island at the world's clock's instant, the land and sea lit by them and standing in that
-// air. Then the three named lights are not used here, and the sea takes its colours from the sky.
+// air. Then the three named lights are not used here, and the sea takes its light from the sky.
 import * as THREE from 'three';
-import { DROPS, RIPPLE_SPEED, RING, createDrops } from '../rings.js';
-import { SEA_FLOOR, seaSheet } from './ground.js';
+import { DROPS, createDrops } from '../rings.js';
+import { seaSheet } from './ground.js';
+import { createWater } from './water.js';
+import { underCos } from './sea.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
 import { createGroundLook } from './terrain.js';
@@ -50,8 +50,10 @@ const SKY_FRAG = `
 
 // The sea's sheet (ground.js seaSheet: rings round the eye, all at y = 0, facing up), as a mesh.
 function seaRings() {
-  const { pos, idx } = seaSheet(), g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+  const { pos, idx } = seaSheet(), g = new THREE.BufferGeometry(), nor = new Float32Array(pos.length);
+  for (let i = 1; i < nor.length; i += 3) nor[i] = 1;
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   g.computeBoundingSphere();
   return g;
 }
@@ -81,16 +83,9 @@ function gridMesh(a, w, h, x0, z0, S, deepest) {
   g.computeBoundingSphere();
   return g;
 }
-// the heights as a texture the sea can read its depth from (half floats: they filter everywhere)
-function heightTexture(a, w, h) {
-  const d = new Uint16Array(w * h);
-  for (let k = 0; k < w * h; k++) d[k] = THREE.DataUtils.toHalfFloat(a[k]);
-  const t = new THREE.DataTexture(d, w, h, THREE.RedFormat, THREE.HalfFloatType);
-  t.magFilter = t.minFilter = THREE.LinearFilter; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true;
-  return t;
-}
 
 const FLATS = 5;                          // levellings drawn at once (one building of each kind stands at a time)
+const SHORE_CELL = -1.5;                  // m: the land's cells reach this far under the mean water (the swash's floor, the sheet's edge)
 export function createIsland({ renderer, lite = false, light = 'pale', ground, shape, sky = null }) {
   const scene = new THREE.Scene(), head = ground.head, S = head.spacing, geos = [], mats = [], texs = [];
   const time = { value: 0 }, drops = createDrops(DROPS);
@@ -110,7 +105,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   // shadow maps round the eye for what stands on it. A phone (a coarse pointer on a small screen) takes the lighter path:
   // the 512 maps, one scale read from above, two shadow maps.
   const phone = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches && Math.min(globalThis.screen?.width || 1e4, globalThis.screen?.height || 1e4) < 900;
-  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key });
+  // ---- the sea's waves and map (water.js): on the lighter path one band of the wind's sea, made once
+  const water = createWater({ renderer, lite: lite || phone, ground, shape });
+  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key, water });
   // ---- the land and the shallows round it, and Ball's Pyramid. Under the true sky the land takes the whole of the
   // wrapped sky's light (the other half of the sky's fill: sky.js); under the present one, as it was painted (0.35).
   // ground levelled for a building (../plinth.js levelFor, ground.flats): the land's own triangles are let go of where
@@ -162,7 +159,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aEarth', new THREE.BufferAttribute(earth, 1));
     g.setIndex(n > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
-    const mesh = new THREE.Mesh(g, flatMat); mesh.receiveShadow = true; mesh.userData = { base, wt, k: -1, isleLand: true };
+    const mesh = new THREE.Mesh(g, flatMat); mesh.receiveShadow = true; mesh.renderOrder = 1; mesh.userData = { base, wt, k: -1, isleLand: true };
     return mesh;
   }
   // the levellings now on the ground, drawn as far as each is come; asked each frame
@@ -184,101 +181,20 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     flatU.uFlatN.value = list.length;
     land.material = list.length ? landCutMat : landMat;
   }
-  const landGeo = gridMesh(ground.hts.main, head.w, head.h, head.x0, head.z0, S, lite ? -6 : -16); geos.push(landGeo);
-  const land = new THREE.Mesh(landGeo, landMat); land.userData.isleLand = true; land.receiveShadow = true; scene.add(land);
-  const pyrGeo = gridMesh(ground.hts.pyramid, head.pw, head.ph, head.px0, head.pz0, S, -16); geos.push(pyrGeo);
-  const pyramid = new THREE.Mesh(pyrGeo, landMat); pyramid.userData.isleLand = true; pyramid.receiveShadow = true; scene.add(pyramid);
+  // (only the cells that stand above the water or meet it: the sea's own drawing shows the floor under it. Drawn after
+  // what stands on it, so the GPU skips what those hide, and before the sea, so the sea's sheet is skipped under the land)
+  const landGeo = gridMesh(ground.hts.main, head.w, head.h, head.x0, head.z0, S, SHORE_CELL); geos.push(landGeo);
+  const land = new THREE.Mesh(landGeo, landMat); land.userData.isleLand = true; land.receiveShadow = true; land.renderOrder = 1; scene.add(land);
+  const pyrGeo = gridMesh(ground.hts.pyramid, head.pw, head.ph, head.px0, head.pz0, S, SHORE_CELL); geos.push(pyrGeo);
+  const pyramid = new THREE.Mesh(pyrGeo, landMat); pyramid.userData.isleLand = true; pyramid.receiveShadow = true; pyramid.renderOrder = 1; scene.add(pyramid);
 
-  // ---- the sea
-  const hTex = heightTexture(ground.hts.main, head.w, head.h), pTex = heightTexture(ground.hts.pyramid, head.pw, head.ph); texs.push(hTex, pTex);
-  const seaU = {
-    uTime: time, uH: { value: hTex }, uP: { value: pTex }, uDrops: { value: drops.data },
-    uGrid: { value: new THREE.Vector4(head.x0, head.z0, (head.w - 1) * S, (head.h - 1) * S) }, uPGrid: { value: new THREE.Vector4(head.px0, head.pz0, (head.pw - 1) * S, (head.ph - 1) * S) },
-    uSun: skyU.uSun, uSunCol: skyU.uSunCol, uZenith: skyU.uZenith, uHorizon: skyU.uHorizon, uSunAmt: { value: 1 }, uSkyAmt: { value: 1 },
-  };
-  // under the true sky the sea's own colour is lit by what falls on level water (in three colours), and the sky in
-  // it is the sky itself, read where each ripple throws the eye's line (sky.js skyOver): these lines of its drawing
-  // are written for the one or the other
-  if (air) Object.assign(seaU, { uBodyAmt: { value: new THREE.Color(1, 1, 1) } }, air.seaSky);
-  const seaLit = air ? 'uBodyAmt' : 'uSkyAmt', seaSky = air ? 'skyOver(r, normalize(uSun))' : 'mix(uHorizon, uZenith, pow(r.y, 0.55)) * uSkyAmt', seaFoam = air ? 'uBodyAmt' : '(0.12 + 0.88 * uSkyAmt)';
-  const seaMat = new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]), transparent: true, depthWrite: false, fog: true,
-    vertexShader: `varying vec3 vW;
-      #include <fog_pars_vertex>
-      void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }`,
-    fragmentShader: `
-      uniform float uTime; uniform sampler2D uH; uniform sampler2D uP; uniform vec4 uGrid; uniform vec4 uPGrid; uniform vec4 uDrops[${DROPS}];
-      uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uZenith; uniform vec3 uHorizon; uniform float uSunAmt; uniform float uSkyAmt;${air ? ' uniform vec3 uBodyAmt;' + sky.SKY_OVER_GLSL : ''}
-      varying vec3 vW;
-      #include <fog_pars_fragment>
-      float sh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-      float sn(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f); return mix(mix(sh(i), sh(i + vec2(1, 0)), u.x), mix(sh(i + vec2(0, 1)), sh(i + vec2(1, 1)), u.x), u.y); }
-      float ground(vec2 p) {
-        vec2 a = (p - uGrid.xy) / uGrid.zw;
-        if (a.x >= 0.0 && a.y >= 0.0 && a.x <= 1.0 && a.y <= 1.0) return texture2D(uH, a).r;
-        vec2 b = (p - uPGrid.xy) / uPGrid.zw;
-        if (b.x >= 0.0 && b.y >= 0.0 && b.x <= 1.0 && b.y <= 1.0) return texture2D(uP, b).r;
-        return ${SEA_FLOOR.toFixed(1)};
-      }
-      // the rings a body makes (rings.js ring(), as the void's water draws them)
-      vec2 ripples(vec2 p) {
-        vec2 grad = vec2(0.0);
-        for (int i = 0; i < ${DROPS}; i++) {
-          vec4 d = uDrops[i]; float age = uTime - d.z;
-          if (age < 0.0 || age > ${RING.oldest.toFixed(1)}) continue;
-          vec2 q = p - d.xy; float r = length(q), s = r - ${(RIPPLE_SPEED * 2).toFixed(5)} * age;
-          if (abs(s) > ${(RING.reach * RING.width * 2).toFixed(3)}) continue;
-          float a = (d.w / ${((2 * Math.PI) / (RING.wavelength * 2)).toFixed(4)}) * exp(-age / ${RING.life.toFixed(3)}) * min(1.0, age / ${RING.born.toFixed(3)}) / sqrt(1.0 + r / ${RING.thin.toFixed(3)});
-          float g = exp(-(s * s) / ${((RING.width * 2) ** 2).toFixed(4)});
-          grad += a * g * (-2.0 * s / ${((RING.width * 2) ** 2).toFixed(4)} * cos(${((2 * Math.PI) / (RING.wavelength * 2)).toFixed(4)} * s) - ${((2 * Math.PI) / (RING.wavelength * 2)).toFixed(4)} * sin(${((2 * Math.PI) / (RING.wavelength * 2)).toFixed(4)} * s)) * q / max(r, 1e-4);
-        }
-        return grad;
-      }
-      void main() {
-        float depth = max(0.0, -ground(vW.xz)), t = uTime;
-        vec3 toEye = cameraPosition - vW; float dist = length(toEye); vec3 v = toEye / dist;
-        // the swell and the chop, quieter in the lagoon's shelter, finer near the eye
-        float calm = mix(0.35, 1.0, smoothstep(1.0, 9.0, depth));
-        vec2 p = vW.xz;
-        vec2 w1 = vec2(sn(p * 0.045 + vec2(t * 0.05, t * 0.03)) - 0.5, sn(p * 0.045 + vec2(17.0, t * 0.04)) - 0.5);
-        vec2 w2 = vec2(sn(p * 0.31 + vec2(-t * 0.21, t * 0.17)) - 0.5, sn(p * 0.31 + vec2(5.0 - t * 0.13, 9.0)) - 0.5);
-        vec2 w3 = vec2(sn(p * 1.7 + vec2(t * 0.6, -t * 0.5)) - 0.5, sn(p * 1.7 + vec2(3.0, t * 0.7)) - 0.5) * (1.0 - smoothstep(30.0, 140.0, dist));
-        vec2 slope = (w1 * 0.34 + w2 * 0.2 + w3 * 0.12) * calm + ripples(p) * 1.6;
-        vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
-        // its colour: the sand through the shallows, turquoise to the reef, blue to ink offshore
-        vec3 shallow = vec3(0.12, 0.62, 0.62), mid = vec3(0.03, 0.34, 0.47), deep = vec3(0.012, 0.075, 0.17);
-        vec3 body = mix(shallow, mid, smoothstep(1.5, 9.0, depth));
-        body = mix(body, deep, smoothstep(9.0, 34.0, depth));
-        body *= ${seaLit};
-        // the sky in it, at a slant; the sun's glitter
-        vec3 r = reflect(-v, n); r.y = abs(r.y);
-        vec3 sky = ${seaSky};
-        float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
-        vec3 c = mix(body, sky, fres);
-        c += uSunCol * uSunAmt * pow(max(dot(r, normalize(uSun)), 0.0), 420.0) * 3.0 * step(0.0, uSun.y);
-        // surf: on the reef's crest and along the shore, moving with the swell
-        // surf: thin lines breaking along the reef's crest and the shore (parallel to the depth's contours), moving in
-        float near = smoothstep(0.7, 0.18, depth) * smoothstep(-0.05, 0.06, depth);
-        float lines = smoothstep(0.82, 0.97, sin(depth * 26.0 - t * 1.9 + 3.0 * sn(p * 0.02)) * 0.5 + 0.5);
-        float lace = near * (lines * (0.45 + 0.55 * sn(p * 0.6 + vec2(t * 0.3, 0.0))) + 0.25 * smoothstep(0.3, 0.12, depth) * sn(p * 2.3 + vec2(-t * 0.4, t * 0.3)));
-        c = mix(c, vec3(0.95, 0.97, 0.97) * ${seaFoam}, clamp(lace, 0.0, 1.0) * 0.85);
-        // the water's clearness: shallow water shows the floor drawn under it, deep water does not
-        float alpha = mix(0.62, 0.97, smoothstep(0.3, 7.0, depth));
-        alpha = max(alpha, fres * 0.9 + lace);
-        gl_FragColor = vec4(c, clamp(alpha, 0.0, 1.0));
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }`,
-  });
-  Object.assign(seaMat.uniforms, seaU); mats.push(seaMat);
-  // the sheet is rings round the eye, fine near it and coarse far off (it was two triangles 120 km across, whose
-  // depth and places a browser may draw only roughly where they are near the eye), and it moves with the eye (its
-  // colour is the world's: nothing in it is the mesh's own). It is the first see-through thing drawn, so what stands
-  // over the water (a flame, a glow, a canopy of glass) is drawn over it and not under it.
+  // ---- the sea: the sheet round the eye (ground.js seaSheet), moved by the waves, drawn with terrain.js's sea material
+  // (the water's surface and the floor seen through it). It follows the eye (its colour is the world's: nothing in it is
+  // the mesh's own); it is drawn after the land, so the GPU skips its pixels under the land, and not over what stands
+  // in the water (each shows its own submerged part)
+  const seaMat = look.sea(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), { uDrops: { value: drops.data } }); mats.push(seaMat);
   const seaGeo = seaRings(); geos.push(seaGeo);
-  const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = -1; sea.frustumCulled = false;
+  const sea = new THREE.Mesh(seaGeo, seaMat); sea.renderOrder = 2; sea.frustumCulled = false; sea.userData = { isleSea: true, isleShadow: false };
   scene.add(sea);
 
   // ---- what grows and lives there (creatures.js, from life.js)
@@ -300,7 +216,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     key.color.setRGB(...L.sunCol); key.intensity = L.sunAmt * indoor;
     fill.color.setRGB(...L.sky); fill.groundColor.setRGB(...L.ground); fill.intensity = L.hemi * indoor;
     scene.fog.color.setRGB(...L.horizon); scene.fog.density = L.fog;
-    seaU.uSunAmt.value = L.sunAmt / 2.4; seaU.uSkyAmt.value = name === 'night' ? 0.22 : 1;
+    presentSea(L);
     // the sky wrapped round whatever stands in it
     const envScene = new THREE.Scene(), d2 = new THREE.Mesh(skyGeo, skyMat); d2.frustumCulled = false; envScene.add(d2);
     const was = dome.scale.x; d2.scale.setScalar(10);
@@ -309,6 +225,17 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     scene.environment = envRT.texture;
     return lightName;
   }
+  // under the present sky, the light on level water in its own units: the key's on level ground, the hemisphere's from the
+  // sky, the wrapped sky's (at the land's share of it); the light's cosine under the water as the key's beam and the sky
+  // share it; the glitter scaled as the painted Sun stands to its painted sky (the real Sun gives the sea's glitter about
+  // five times what its light on the land would)
+  function presentSea(L) {
+    const s = new THREE.Vector3(...L.sun).normalize(), up = Math.max(0, s.y), k = L.sunAmt * indoor, h = L.hemi * indoor, env = 0.35 * Math.PI * 0.5;
+    const E = [0, 1, 2].map((c) => k * L.sunCol[c] * up + h * L.sky[c] + env * 0.5 * (L.zenith[c] + L.horizon[c]));
+    look.seaLight.uSeaE.value.set(...E);
+    const direct = k * up * (0.2126 * L.sunCol[0] + 0.7152 * L.sunCol[1] + 0.0722 * L.sunCol[2]), all = 0.2126 * E[0] + 0.7152 * E[1] + 0.0722 * E[2];
+    look.seaLight.uSeaLight.value.set(0.86 + (underCos(up) - 0.86) * Math.min(1, direct / Math.max(all, 1e-6)), 5, 0, 0);
+  }
   setLight(light);
   let bodyAt = null, adoptN = 0;        // where the body is (live): the palms are drawn round it, the canopy beyond them
 
@@ -316,7 +243,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     scene, drops, place: 'island', ground, shape, life,
     get light() { return lightName; },
     setLight,
-    setIndoor(k) { indoor = k; if (air) return; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; },
+    setIndoor(k) { indoor = k; if (air) return; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; presentSea(L); },
     // the true sky, where it is drawn: what the rooms and ships ask after (air.state), and its numbers (air.read())
     get air() { return air; },
     get key() { return key; },
@@ -328,7 +255,8 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     update(t, camera) {
       time.value = t;
       flats();
-      if (air) air.update({ camera, t, key, fill, sea: seaU, scene, indoor });      // the tables, the lights, the exposure; skyU.uSun is the Sun as seen
+      if (air) air.update({ camera, t, key, fill, sea: { ...look.seaLight, uSun: skyU.uSun }, scene, indoor });      // the tables, the lights, the exposure, the light on the sea; skyU.uSun is the key light as seen
+      water.update(t);                                  // the wind's sea at this instant (its FFTs), the swell's time
       dome.position.copy(camera.position);
       sea.position.set(camera.position.x, 0, camera.position.z);
       key.target.position.set(camera.position.x, 0, camera.position.z);
@@ -342,6 +270,6 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     live(dt, t, body, world) { bodyAt = body.p; life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
     renderMirror() {},
     setScale() {},
-    dispose() { look.dispose(); air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
+    dispose() { look.dispose(); water.dispose(); air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
   };
 }

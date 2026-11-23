@@ -122,8 +122,9 @@ export function createGround(head, hts) {
 
 // The sea's sheet, as numbers: a fan of SEGS round its middle, then RINGS each GROW times as wide as the one inside it,
 // out past the eye's furthest (45 km), all at y = 0 and facing up (its triangles wound counter-clockwise seen from
-// above). island.js moves it with the eye, so no triangle near the eye is more than a few metres across.
-export const SEA_RINGS = { segs: 96, rings: 52, first: 0.8, grow: 1.25 };
+// above). island.js moves it with the eye, and the waves move its points (water.js), so near the eye they are close: a
+// sixteenth of the distance apart along the way out, a thirtieth across (half a metre at ten metres).
+export const SEA_RINGS = { segs: 192, rings: 202, first: 0.4, grow: 1.06 };
 export function seaSheet({ segs, rings, first, grow } = SEA_RINGS) {
   const pos = [0, 0, 0], idx = [];
   for (let k = 0, r = first; k < rings; k++, r *= grow) for (let i = 0; i < segs; i++) { const a = (i / segs) * 2 * Math.PI; pos.push(Math.cos(a) * r, 0, Math.sin(a) * r); }
