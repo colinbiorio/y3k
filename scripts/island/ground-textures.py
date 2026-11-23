@@ -42,11 +42,11 @@ LAYERS = [
     # numbers, each channel multiplied to its own (the scan's hue turned to the island's), or one, the luminance, all three
     # channels multiplied alike (its hue kept: the large-scale face has grey rock and green moss in one scan, and a gain
     # per channel turned its rock lavender)
-    ("sand", "aerial_beach_01", 30.0, (0.57, 0.53, 0.45)),
+    ("sand", "aerial_beach_01", 30.0, (0.58, 0.53, 0.43)),
     ("grass", "leafy_grass", 2.0, (0.075, 0.13, 0.035)),
     ("litter", "forest_leaves_03", 2.3, (0.10, 0.075, 0.045)),
     ("rock", "rock_3", 1.5, (0.135, 0.125, 0.112)),
-    ("cliff", "dark_rock_02", 2.0, (0.105, 0.097, 0.088)),
+    ("cliff", "dark_rock_02", 2.0, (0.098, 0.088, 0.077)),
     ("shore", "low_tide_rocks", 2.17, (0.16, 0.15, 0.135)),
     ("face", "aerial_rocks_02", 50.0, 0.10),
 ]

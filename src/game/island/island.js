@@ -289,7 +289,11 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   function setLight(name) {
     const L = ISLAND_LIGHTS[name] || ISLAND_LIGHTS.pale;
     lightName = ISLAND_LIGHTS[name] ? name : 'pale';
-    if (air) return lightName;                       // the true sky is lit by the clock, not by a name
+    // the true sky is lit by the clock, not by a name; under it the ground's colours are its own (terrain.js). The present
+    // light was painted for a ground of brighter colours (its sand reflected 0.65 to 0.74): under it the ground is raised
+    // by 0.15, so the island keeps the brightness it had
+    look.paint = air ? 1 : 1.15;
+    if (air) return lightName;
     skyU.uZenith.value.setRGB(...L.zenith); skyU.uHorizon.value.setRGB(...L.horizon);
     skyU.uSun.value.set(...L.sun).normalize(); skyU.uSunCol.value.setRGB(...L.sunCol); skyU.uStars.value = L.stars;
     key.color.setRGB(...L.sunCol); key.intensity = L.sunAmt * indoor;
@@ -305,7 +309,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     return lightName;
   }
   setLight(light);
-  let bodyAt = null;                    // where the body is (live): the palms are drawn round it, the canopy beyond them
+  let bodyAt = null, adoptN = 0;        // where the body is (live): the palms are drawn round it, the canopy beyond them
 
   return {
     scene, drops, place: 'island', ground, shape, life,
@@ -331,7 +335,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       // the ground's shadows: the land's own lines toward the key light, the shadow maps round the eye; and whatever lit
       // thing has come into the scene takes them (terrain.js adoptAll)
       look.update({ camera, dir: skyU.uSun.value, body: bodyAt });
-      look.adoptAll(scene);
+      if (adoptN++ % 10 === 0) look.adoptAll(scene);           // a walk over the whole scene: a sixth of a second is soon enough for a new thing
     },
     // the island's life, a frame on: the palms round the body, the birds, the woodhens, the turtles
     live(dt, t, body, world) { bodyAt = body.p; life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },

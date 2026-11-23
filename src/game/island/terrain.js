@@ -47,11 +47,14 @@ export const LAYERS = ['sand', 'grass', 'litter', 'rock', 'cliff', 'shore', 'fac
 export const FINE = [3.75, 2.0, 2.3, 1.5, 2.0, 2.17, 50];
 export const COARSE = [30, 13, 15, 10, 13, 14, 50];
 // each surface's mean colour (linear, as graded): drawn before the maps have come
-export const MEAN = [[0.57, 0.53, 0.45], [0.075, 0.13, 0.035], [0.10, 0.075, 0.045], [0.135, 0.125, 0.112], [0.105, 0.097, 0.088], [0.16, 0.15, 0.135], [0.135, 0.096, 0.041]];
+export const MEAN = [[0.58, 0.53, 0.43], [0.075, 0.13, 0.035], [0.10, 0.075, 0.045], [0.135, 0.125, 0.112], [0.098, 0.088, 0.077], [0.16, 0.15, 0.135], [0.1349, 0.0956, 0.0409]];
 // how dark each goes wet (Lekner and Dorf's water film: a porous surface loses most) and how much its height counts
 // when two meet (rock stands out of what is round it; sand fills)
 const WET = [0.45, 0.7, 0.7, 0.62, 0.62, 0.55, 0.62];
 const RISE = [0.5, 0.75, 0.7, 1.15, 1.25, 1.0, 1.25];
+// the roughest each is at least (a scan's own roughness map is an artist's: dry coral sand at its 0.61 mirrors the blue sky
+// at a slant and reads grey; dry sand, litter and grass scatter nearly all of it)
+const FLOOR = [0.88, 0.8, 0.82, 0.62, 0.62, 0.7, 0.66];
 // the shadow maps round the eye: where each ends (m of the view's depth), its texels, how far behind its slice along
 // the light a thing may stand and still cast into it (a 14 m palm with the Sun 4 degrees up: 200 m), and the layer
 // the things that cast are put on
@@ -118,7 +121,7 @@ const SHARED = {
   uIsleLines: { value: null },                              // the land's shadow lines over each grid point (RG16F)
   uIsleGrid: { value: new THREE.Vector4(0, 0, 16, 0) },     // x0, z0, spacing, and 1 where the lines are drawn
   uIsleN: { value: new THREE.Vector2(1, 1) },               // the grid's width and height (points)
-  uIsleSplit: { value: new THREE.Vector4(15, 60, 220, 0) }, // where each shadow map ends (view depth, m), and how many there are
+  uIsleSplit: { value: new THREE.Vector4(15, 60, 220, 0) }, // where each shadow map ends (distance from the eye, m), and how many there are
   uIsleShade0: { value: null }, uIsleShade1: { value: null }, uIsleShade2: { value: null },     // the maps (depth, compared)
   uIsleShadeM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] },     // world to each map
   uIsleShadeO: { value: new THREE.Vector3() },              // each map's offset along the normal (m: a texel and a half)
@@ -153,6 +156,7 @@ float isleTap( highp sampler2DShadow s, mat4 m, vec3 w, float texel, float bias 
   vec3 c = ( m * vec4( w, 1.0 ) ).xyz * 0.5 + 0.5;
   if ( any( lessThan( c, vec3( 0.0 ) ) ) || any( greaterThan( c, vec3( 1.0 ) ) ) ) return 1.0;
   float z = c.z - bias, o = 0.5 * texel;
+  if ( texel < 0.0 ) return texture( s, vec3( c.xy, z ) );                   // the further maps: one 2 x 2 comparison
   return 0.25 * ( texture( s, vec3( c.xy + vec2( -o, -o ), z ) ) + texture( s, vec3( c.xy + vec2( o, -o ), z ) ) + texture( s, vec3( c.xy + vec2( -o, o ), z ) ) + texture( s, vec3( c.xy + vec2( o, o ), z ) ) );
 }
 // the map this pixel's distance falls in (its last eighth blended into the next, past the last into the light)
@@ -178,7 +182,7 @@ float isleKey( vec3 viewPos, vec3 viewN, float over ) {
   if ( uIsleOn < 0.5 || ! receiveShadow ) return 1.0;
   vec3 w = ( uIsleV2W * vec4( viewPos, 1.0 ) ).xyz;
   float s = isleLand( w, over );
-  if ( s > 0.0 ) s *= isleMaps( w, normalize( mat3( uIsleV2W ) * viewN ), - viewPos.z );
+  if ( s > 0.0 ) s *= isleMaps( w, normalize( mat3( uIsleV2W ) * viewN ), length( viewPos ) );     // by distance: the outer maps are spheres round the eye
   return s;
 }`;
 // three's own directional loop (r160), and the island's: its key light (the first directional light) shadowed
@@ -310,108 +314,97 @@ uniform vec3 uIsleBody;      // where the body is: the palms stand within PALM.n
 ${NOISE_GLSL}
 uniform vec4 uIsleLayer[ 7 ];    // each surface's fine and coarse side (m), how dark it goes wet, how much its height counts
 uniform vec3 uIsleMean[ 7 ];     // and its mean colour
+uniform float uIsleFloor[ 7 ];   // and the roughest it is at least (dry)
 bool isleFar;                      // past 140 m (set by the splat before any read)
+float isleFaceMix;                 // a slow noise over the island (the canopy's colour by region)
+vec2 isleWarp;                     // how far the large-scale face is drawn aside here (m)
 vec3 isleTan( vec4 s ) { vec2 xy = s.xy * 2.0 - 1.0; return vec3( xy, sqrt( max( 0.0, 1.0 - dot( xy, xy ) ) ) ); }
-// one surface at one scale, seen from above: its colour and height, its finish; its normal in the world (whiteout
-// blend onto the land's own normal: the scan's x along the world's x, its y (up the picture) along z)
-void isleTop( float layer, float side, vec2 dx, vec2 dy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
-  vec3 uv = vec3( vW.xz / side, layer );
-  // past 140 m a scan's shape and finish are under a pixel: its mean finish, the land's own normal (half the reads)
-  if ( isleFar ) { col = textureGrad( uIsleCol, uv, dx / side, dy / side ); srf = vec4( 0.5, 0.5, 0.8, 0.9 ); nw = n0; return; }
-  #ifdef ISLE_IMPLICIT
-  col = texture( uIsleCol, uv ); srf = texture( uIsleSurf, uv );
-  #else
-  col = textureGrad( uIsleCol, uv, dx / side, dy / side ); srf = textureGrad( uIsleSurf, uv, dx / side, dy / side );
-  #endif
-  vec3 t = isleTan( srf );
-  nw = normalize( vec3( t.x + n0.x, t.z * n0.y, t.y + n0.z ) );
-}
-// from the two sides the land faces most (after Quilez's biplanar mapping: a cliff is read from the side it faces, and a
-// third read would add little), each blended by how much it faces that way. Read from above, it is read by x and z as
-// the level ground is (isleTop), so nothing turns where the ground steepens. (Each side chosen by selects, not by
-// indexing a vector at run time: that puts the vector in memory on some GPUs.)
-void isleSide( int axis, float layer, float side, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
+// ONE READ of a surface at one scale, along one axis (x: by z and y; y: from above, by x and z; z: by x and y), its
+// coordinates turned by R (the large-scale face is read twice, turned, so its tiles never line up): its colour and
+// height, its finish, and its normal in the world (whiteout blend onto the land's own normal). Past 140 m a close
+// scan's shape and finish are under a pixel: its mean finish and the land's own normal (half the reads).
+void isleRead( int axis, float layer, float side, mat2 R, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
   vec2 uv = axis == 0 ? vW.zy : axis == 1 ? vW.xz : vW.xy, gx = axis == 0 ? dpx.zy : axis == 1 ? dpx.xz : dpx.xy, gy = axis == 0 ? dpy.zy : axis == 1 ? dpy.xz : dpy.xy;
-  vec3 at = vec3( uv / side, layer );
-  col = textureGrad( uIsleCol, at, gx / side, gy / side );
-  srf = isleFar && side < 40.0 ? vec4( 0.5, 0.5, 0.8, 0.9 ) : textureGrad( uIsleSurf, at, gx / side, gy / side );
-  vec3 t = isleTan( srf );
+  if ( side > 9.0 ) uv += isleWarp;                                          // every large-scale read, drawn aside (no grid from afar)
+  vec3 at = vec3( R * uv / side, layer ); gx = R * gx / side; gy = R * gy / side;
+  col = textureGrad( uIsleCol, at, gx, gy );
+  if ( isleFar && side < 40.0 ) { srf = vec4( 0.5, 0.5, 0.8, 0.9 ); nw = n0; return; }
+  srf = textureGrad( uIsleSurf, at, gx, gy );
+  vec3 t = isleTan( srf ); t.xy = t.xy * R;                                   // back to the world's own axes
   nw = axis == 0 ? vec3( t.z * n0.x, t.y + n0.y, t.x + n0.z ) : axis == 1 ? vec3( t.x + n0.x, t.z * n0.y, t.y + n0.z ) : vec3( t.x + n0.x, t.y + n0.y, t.z * n0.z );
 }
-void isleTwo( float layer, float side, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
+// from above (the level ground), or from the two sides the land faces most (after Quilez's biplanar mapping: a cliff is
+// read from the side it faces; a third read would add little), each blended by how much it faces that way. From above
+// it is read by x and z either way, so nothing turns where the ground steepens. (Each side is chosen by selects: indexing
+// a vector at run time puts it in memory on some GPUs.)
+void isleTwo( float layer, float side, mat2 R, bool steep, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
+  if ( ! steep ) { isleRead( 1, layer, side, R, dpx, dpy, n0, col, srf, nw ); nw = normalize( nw ); return; }
   vec3 a = abs( n0 );
   int ma = a.x > a.y && a.x > a.z ? 0 : a.y > a.z ? 1 : 2;
-  float am = ma == 0 ? a.x : ma == 1 ? a.y : a.z, b1 = ma == 0 ? a.y : a.x, b2 = ma == 2 ? a.y : a.z;
+  float am = ma == 0 ? a.x : ma == 1 ? a.y : a.z, ae = ma == 0 ? max( a.y, a.z ) : ma == 1 ? max( a.x, a.z ) : max( a.x, a.y );
   int me = ma == 0 ? ( a.y >= a.z ? 1 : 2 ) : ma == 1 ? ( a.x >= a.z ? 0 : 2 ) : ( a.x >= a.y ? 0 : 1 );
-  float ae = max( b1, b2 );
   vec2 w = clamp( ( vec2( am, ae ) - 0.5773 ) / ( 1.0 - 0.5773 ), 0.0, 1.0 ); w = w * w * w * w; w.x = max( w.x, 1.0e-4 ); w /= w.x + w.y;
   vec4 c1, s1, c2, s2; vec3 n1, n2;
-  isleSide( ma, layer, side, dpx, dpy, n0, c1, s1, n1 );
-  if ( w.y > 0.01 ) { isleSide( me, layer, side, dpx, dpy, n0, c2, s2, n2 ); } else { c2 = c1; s2 = s1; n2 = n1; }
+  isleRead( ma, layer, side, R, dpx, dpy, n0, c1, s1, n1 );
+  if ( w.y > 0.01 ) { isleRead( me, layer, side, R, dpx, dpy, n0, c2, s2, n2 ); } else { c2 = c1; s2 = s1; n2 = n1; }
   col = c1 * w.x + c2 * w.y; srf = s1 * w.x + s2 * w.y;
   nw = normalize( n1 * w.x + n2 * w.y + n0 * 1.0e-4 );
 }
-// one surface as it is seen at this distance: its own scale near the eye, the larger one past 60 m (both between 25
-// and 60 m); steep, from its two sides; the cliffs' large-scale face over the close rock from 80 to 350 m
+// one surface as it is seen at this distance: its own scale near the eye, the larger one past 48 m (both between 38 and
+// 48 m); steep rock, cliff and shore from their two sides; the large-scale face over the cliffs (a third of it even
+// close, against their own strata repeating, all of it by 300 m) and over the steep rock (from 60 m)
 void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out vec4 col, out vec4 srf, out vec3 nw ) {
+  const mat2 I2 = mat2( 1.0 );
   #ifdef ISLE_NO_COARSE
   float layer = float( i ), far = 0.0;
   #else
-  float layer = float( i ), far = ${lite ? '0.0' : 'smoothstep( 34.0, 50.0, dist )'};
+  float layer = float( i ), far = ${lite ? '0.0' : 'smoothstep( 38.0, 48.0, dist )'};
   #endif
   vec4 c1 = vec4( 0.0 ), s1 = vec4( 0.0 ), c2 = vec4( 0.0 ), s2 = vec4( 0.0 ); vec3 n1 = n0, n2 = n0;
   vec4 P = uIsleLayer[ i ];
-  ${lite ? 'isleTop( layer, P.x, dpx.xz, dpy.xz, n0, col, srf, nw );' : `
+  ${lite ? 'isleTwo( layer, P.x, I2, false, dpx, dpy, n0, col, srf, nw );' : `
   // only the rock, the cliffs and the shore are read from their sides (grass and litter do not hold to a cliff)
   steep = steep && ( i == ${ROCK} || i == ${CLIFF} || i == ${LAYERS.indexOf('shore')} );
-  if ( steep ) {
-    if ( far < 0.999 ) isleTwo( layer, P.x, dpx, dpy, n0, c1, s1, n1 );
-    if ( far > 0.001 ) isleTwo( layer, P.y, dpx, dpy, n0, c2, s2, n2 );
-  } else {
-    if ( far < 0.999 ) isleTop( layer, P.x, dpx.xz, dpy.xz, n0, c1, s1, n1 );
-    if ( far > 0.001 ) isleTop( layer, P.y, dpx.xz, dpy.xz, n0, c2, s2, n2 );
-  }
+  if ( far < 0.999 ) isleTwo( layer, P.x, I2, steep, dpx, dpy, n0, c1, s1, n1 );
+  if ( far > 0.001 ) isleTwo( layer, P.y, I2, steep, dpx, dpy, n0, c2, s2, n2 );
   col = mix( c1, c2, far ); srf = mix( s1, s2, far ); nw = normalize( mix( n1, n2, far ) );
   #ifndef ISLE_NO_FACE
-  if ( ( i == ${CLIFF} || i == ${ROCK} ) && dist > 80.0 ) {
-    float k = smoothstep( 80.0, 350.0, dist ) * ( i == ${CLIFF} ? 0.85 : 0.6 );
+  float k = i == ${CLIFF} ? 0.3 + 0.7 * smoothstep( 40.0, 300.0, dist ) : i == ${ROCK} ? 0.85 * smoothstep( 60.0, 400.0, dist ) : 0.0;
+  if ( k > 0.001 ) {
+    // read once, its coordinates drawn slowly aside by the island's own slow noise (up to 12 m over a few hundred), so
+    // its 50 m tiles never line up into a grid. Its colour is not the basalt's (the scan is pale rock under lichen): the
+    // rock keeps its own colour and takes the scan's light and shade (its ledges, its cracks), and where the scan is green
+    // (its plants), the island's own dark green
     vec4 cf, sf; vec3 nf;
-    float fs = uIsleLayer[ ${FACE} ].x;
-    if ( steep ) isleTwo( ${FACE}.0, fs, dpx, dpy, n0, cf, sf, nf ); else isleTop( ${FACE}.0, fs, dpx.xz, dpy.xz, n0, cf, sf, nf );
-    col = vec4( mix( col.rgb, cf.rgb, k ), mix( col.a, cf.a, k * 0.5 ) ); srf = mix( srf, sf, k ); nw = normalize( mix( nw, nf, k ) );
+    isleTwo( ${FACE}.0, uIsleLayer[ ${FACE} ].x, mat2( 1.0 ), steep, dpx, dpy, n0, cf, sf, nf );
+    float rel = clamp( dot( cf.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) / 0.10, 0.45, 1.6 ), plant = clamp( ( cf.g - 0.5 * ( cf.r + cf.b ) ) * 22.0, 0.0, 1.0 );
+    // a kilometre off its 50 m pattern is a few pixels and would repeat: it gives way to its mean (a third of it green)
+    float away = smoothstep( 900.0, 2600.0, dist ); rel = mix( rel, 1.0, away ); plant = mix( plant, 0.33, away );
+    vec3 macro = mix( col.rgb * mix( 1.0, rel, 0.8 ), vec3( 0.026, 0.052, 0.017 ) * rel, plant * 0.85 );
+    col = vec4( mix( col.rgb, macro, k ), mix( col.a, cf.a, k * 0.5 ) ); srf = mix( srf, sf, k ); nw = normalize( mix( nw, nf, k ) );
+  }
+  // the cliffs' vertical streaks (water and weather down a basalt wall), across the face's own horizontal
+  if ( i == ${CLIFF} ) {
+    vec2 along = normalize( vec2( -n0.z, n0.x ) + 1.0e-4 );
+    float st = gn( vec2( dot( vW.xz, along ) * 0.33, vW.y * 0.022 ) ) * 0.7 + gn( vec2( dot( vW.xz, along ) * 1.1 + 9.0, vW.y * 0.06 ) ) * 0.3;
+    col.rgb *= 0.72 + 0.56 * st;
   }
   #endif`}
 }
-// the forest's canopy, where the palms are not drawn: crowns six or seven metres across, each a dome, a little
-// different in its green, the dark of the understorey between them. Each crown's middle stands in the middle half of
-// its cell, so the four cells round a point hold its nearest
+// the forest's canopy, where the palms are not drawn, until the plants come (the brief's third part brings the trees
+// themselves): its colour only, in dapples of a few metres and clumps of twenty, some crowns yellower, some darker, the
+// whole changing slowly over the hills; far off, their mean
 void isleCanopy( vec2 p, float px, vec3 n0, out vec3 col, out vec3 nw ) {
-  vec2 q = p / 6.5 - 0.5, c = floor( q ), f = q - c, best = vec2( 0.0 ); float d1 = 9.0, id = 0.0;
-  for ( int j = 0; j <= 1; j ++ ) for ( int i = 0; i <= 1; i ++ ) {
-    vec2 o = vec2( float( i ), float( j ) ), r = o + 0.25 + 0.5 * gh2( c + o ) - f; float d = dot( r, r );
-    if ( d < d1 ) { d1 = d; best = r; id = gh( c + o + 17.0 ); }
-  }
-  float rad = 0.5 + 0.2 * id, u = sqrt( d1 ) / rad, crown = 1.0 - smoothstep( 0.86, 1.04, u );
-  vec2 out2 = -best / rad;
-  vec3 dome = normalize( vec3( out2.x * 1.15, sqrt( max( 0.04, 1.0 - u * u ) ), out2.y * 1.15 ) );
-  vec3 green = mix( vec3( 0.030, 0.072, 0.018 ), vec3( 0.050, 0.090, 0.024 ), id );
-  col = mix( vec3( 0.012, 0.022, 0.008 ), green, crown );
-  // far off, the pattern under a pixel is its mean: the crowns' and the gaps' colour, the land's own normal
-  float fade = smoothstep( 1.2, 3.5, px );
-  col = mix( col, vec3( 0.032, 0.068, 0.018 ), fade );
-  nw = normalize( mix( mix( n0, dome, crown * 0.9 ), n0, fade ) );
+  float d = gn( p / 5.5 ) * 0.65 + gn( p / 23.0 + 3.0 ) * 0.35, hue = gn( p / 11.0 + 17.0 );
+  float lit = smoothstep( 0.28, 0.72, d );
+  vec3 green = mix( vec3( 0.026, 0.06, 0.015 ), vec3( 0.052, 0.088, 0.024 ), hue );
+  col = mix( vec3( 0.009, 0.018, 0.007 ), green, 0.35 + 0.65 * lit ) * ( 0.8 + 0.4 * isleFaceMix );
+  col = mix( col, vec3( 0.024, 0.05, 0.014 ) * ( 0.8 + 0.4 * isleFaceMix ), smoothstep( 1.2, 3.5, px ) );
+  nw = n0;
 }
 `,
     // the splat: in place of three's vertex colour (it sets diffuseColor), with what the later chunks need kept in isle*
     body: `
-#if defined( ISLE_BARE ) || defined( ISLE_BARE_TEX )
-vec3 isleN0 = normalize( vWN ), isleNw = isleN0; float isleRough = 0.85, isleOcc = 1.0;
-#ifdef ISLE_BARE_TEX
-vec4 bc, bs; vec3 bn; isleTop( 2.0, 2.3, dFdx( vW ).xz, dFdy( vW ).xz, isleN0, bc, bs, bn ); diffuseColor.rgb = bc.rgb; isleNw = bn; isleRough = bs.b; isleOcc = bs.a;
-#else
-diffuseColor.rgb = vec3( 0.1, 0.075, 0.045 );
-#endif
-#else
 vec3 isleN0 = normalize( vWN );
 vec3 isleDpx = dFdx( vW ), isleDpy = dFdy( vW );
 float isleDist = length( vW - cameraPosition ), islePx = max( length( isleDpx ), length( isleDpy ) );
@@ -420,12 +413,16 @@ isleFar = isleDist > 140.0;
 float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
 // the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
 vec4 isleCtl = texture2D( uIsleCtl, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
+isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
+float isleSkySeen = texture2D( uIsleSky, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
 // a finer jitter for edges, near the eye only (further off it is under a pixel)
 float isleE2 = isleDist < 60.0 ? gn( vW.xz * 0.43 + 7.0 ) : 0.5;
 float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
 // (each class's own band is narrow, a few metres on the ground: the two surfaces' heights shape the edge within it)
-float wCliff = smoothstep( 0.92, 0.99, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
-float wRockS = smoothstep( 0.74, 0.83, isleSlope + 0.1 * ( isleCtl.a - 0.5 ) );
+// (the island's slopes are forested up to the foot of its cliffs: the 30 m data's slopes past 0.9, 42 degrees, are walls
+// it has smoothed; life.js plants no palm past 0.8, so the floor between 0.8 and 0.9 is forest floor without palms)
+float wCliff = smoothstep( 1.06, 1.14, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
+float wRockS = smoothstep( 0.88, 0.97, isleSlope + 0.1 * ( isleCtl.a - 0.5 ) );
 float wSand = smoothstep( isleBeach + 0.22, isleBeach - 0.22, isleH ) * ( 1.0 - smoothstep( 0.4, 0.5, isleSlope ) );
 float wShore = smoothstep( isleBeach + 0.9, isleBeach - 0.2, isleH ) * smoothstep( 0.42, 0.52, isleSlope );
 float isleSea = smoothstep( 0.05, -0.35, isleH );
@@ -438,10 +435,19 @@ float wRock = wRockS * isleRest;
 float wGrass = smoothstep( 0.43, 0.47, isleCtl.r ) * smoothstep( 26.6, 25.4, isleH ) * smoothstep( 0.215, 0.185, isleSlope ) * ( isleRest - wRock );
 float wLitter = max( 0.0, isleRest - wRock - wGrass );
 wSand *= ( 1.0 - wCliff ); wShore *= ( 1.0 - wCliff );
-// the two it is most made of (the second less the third, so nothing jumps where they change places), taken one by one
-int isleA = 0, isleB = 1; float isleWa = -1.0, isleWb = -1.0, isleWc = 0.0;
-#define ISLE_TAKE( w, k ) if ( w > isleWa ) { isleWc = isleWb; isleWb = isleWa; isleB = isleA; isleWa = w; isleA = k; } else if ( w > isleWb ) { isleWc = isleWb; isleWb = w; isleB = k; } else if ( w > isleWc ) isleWc = w;
-ISLE_TAKE( wSand, 0 ) ISLE_TAKE( wGrass, 1 ) ISLE_TAKE( wLitter, 2 ) ISLE_TAKE( wRock, 3 ) ISLE_TAKE( wCliff, 4 ) ISLE_TAKE( wShore, 5 )
+// the two it is most made of (the second less the third, so nothing jumps where they change places), without branches:
+// the largest of the six by max and step, then the largest of the rest, then the next (a hair's difference by index
+// keeps any two from being equal)
+vec3 isleW1 = vec3( wSand, wGrass, wLitter ) + vec3( 0.0, 1.0e-5, 2.0e-5 ), isleW2 = vec3( wRock, wCliff, wShore ) + vec3( 3.0e-5, 4.0e-5, 5.0e-5 );
+float isleWa = max( max( isleW1.x, max( isleW1.y, isleW1.z ) ), max( isleW2.x, max( isleW2.y, isleW2.z ) ) );
+vec3 isleF1 = step( isleWa, isleW1 ), isleF2 = step( isleWa, isleW2 );
+int isleA = int( dot( isleF1, vec3( 0.0, 1.0, 2.0 ) ) + dot( isleF2, vec3( 3.0, 4.0, 5.0 ) ) + 0.5 );
+isleW1 *= 1.0 - isleF1; isleW2 *= 1.0 - isleF2;
+float isleWb = max( max( isleW1.x, max( isleW1.y, isleW1.z ) ), max( isleW2.x, max( isleW2.y, isleW2.z ) ) );
+vec3 isleG1 = step( isleWb, isleW1 ) * step( 1.0e-6, isleW1 ), isleG2 = step( isleWb, isleW2 ) * step( 1.0e-6, isleW2 );
+int isleB = min( 5, int( dot( isleG1, vec3( 0.0, 1.0, 2.0 ) ) + dot( isleG2, vec3( 3.0, 4.0, 5.0 ) ) + 0.5 ) );
+isleW1 *= 1.0 - isleG1; isleW2 *= 1.0 - isleG2;
+float isleWc = max( max( isleW1.x, max( isleW1.y, isleW1.z ) ), max( isleW2.x, max( isleW2.y, isleW2.z ) ) );
 isleWb = max( 0.0, isleWb - isleWc );
 #ifdef ISLE_NO_STEEP
 bool isleSteep = false;
@@ -454,13 +460,19 @@ isleWb = 0.0;
 vec4 isleColA, isleSrfA, isleColB = vec4( 0.0 ), isleSrfB = vec4( 0.0 ); vec3 isleNA, isleNB = isleN0;
 isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, isleSteep, isleColA, isleSrfA, isleNA );
 float isleK = 1.0;
-if ( isleWb > 0.02 ) {
+if ( isleWb > 0.06 ) {
   // the second, as finely as it can be seen: whole within 60 m, its colour and height to 250 m, its mean beyond
-  if ( isleDist < 250.0 ) {
-    bool keep = isleFar; isleFar = isleDist > 60.0;
-    isleLayer( isleB, isleDist, isleDpx, isleDpy, isleN0, isleSteep, isleColB, isleSrfB, isleNB );
-    isleFar = keep;
-  } else { isleColB = vec4( uIsleMean[ isleB ], 0.5 ); isleSrfB = isleSrfA; isleNB = isleNA; }
+  // its colour and height only, in one read from above at the scale its distance calls for (the first's finish and
+  // normal carry the edge: where two meet the eye reads the colours and the edge's shape), its mean past 120 m
+  isleSrfB = isleSrfA; isleNB = isleNA;
+  #ifdef ISLE_B_MEAN
+  if ( false ) {
+  #else
+  if ( isleDist < 120.0 ) {
+  #endif
+    vec4 PB = uIsleLayer[ isleB ]; float sb = isleDist < 43.0 ? PB.x : PB.y;
+    isleColB = textureGrad( uIsleCol, vec3( vW.xz / sb, float( isleB ) ), isleDpx.xz / sb, isleDpy.xz / sb );
+  } else isleColB = vec4( uIsleMean[ isleB ], 0.5 );
   // by their heights: each one's weight raised by how high it stands, and only what comes within a span of the top kept
   float ha = isleWa / ( isleWa + isleWb ) + isleColA.a * uIsleLayer[ isleA ].w * 0.5, hb = isleWb / ( isleWa + isleWb ) + isleColB.a * uIsleLayer[ isleB ].w * 0.5, top = max( ha, hb ) - 0.12;
   float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); isleK = ba / max( ba + bb, 1.0e-5 );
@@ -471,9 +483,10 @@ vec3 isleNw = normalize( mix( isleNB, isleNA, isleK ) );
 // the maps not come yet: each surface's mean colour, the land's own normal
 isleAlb = mix( mix( uIsleMean[ isleB ], uIsleMean[ isleA ], isleK ), isleAlb, uIsleLook.x );
 isleNw = normalize( mix( isleN0, isleNw, uIsleLook.x ) );
-float isleRough = mix( 0.85, isleSrf.b, uIsleLook.x ), isleOcc = mix( 1.0, isleSrf.a, uIsleLook.x );
-// a slow variation over all of it (one colour of grass is not a lawn), and the moss of Gower's mist forest
-isleAlb *= 0.84 + 0.32 * isleCtl.g;
+float isleRough = max( mix( 0.85, isleSrf.b, uIsleLook.x ), mix( uIsleFloor[ isleB ], uIsleFloor[ isleA ], isleK ) ), isleOcc = mix( 1.0, isleSrf.a, uIsleLook.x );
+// a slow variation over all of it (one colour of grass is not a lawn); the land's own shape in it (a gully, which sees
+// less sky, is wetter and darker than a ridge: no two places alike, at any distance); the moss of Gower's mist forest
+isleAlb *= ( 0.84 + 0.32 * isleCtl.g ) * mix( 1.0, 0.78 + 0.3 * isleSkySeen, uIsleGrid.w * ( 1.0 - wSand ) );
 float isleMoss = smoothstep( 600.0, 690.0, isleH ) * ( 1.0 - wCliff * 0.6 );
 isleAlb = mix( isleAlb, isleAlb * vec3( 0.55, 1.05, 0.5 ) + vec3( 0.004, 0.012, 0.002 ), isleMoss * 0.85 );
 // the forest beyond the palms: its canopy, the crowns lit as domes
@@ -487,13 +500,14 @@ if ( isleCrowns > 0.001 ) {
 }
 // the wet strip, where the swash has reached (a line that wanders about 0.35 m over the sea), and the spray on low rock:
 // darker by how porous it is, smooth and glossy, the water filling its small relief
-float isleWetLine = 0.35 + 0.45 * ( isleCtl.a - 0.5 ) + 0.18 * ( isleE2 - 0.5 );
-float isleWet = max( smoothstep( isleWetLine + 0.3, isleWetLine - 0.12, isleH ), isleSea );
+// (the lagoon's beach is nearly level: a tenth of a metre of height is two of sand, so the line is held close to the sea)
+float isleWetLine = 0.2 + 0.16 * ( isleCtl.a - 0.5 ) + 0.06 * ( isleE2 - 0.5 );
+float isleWet = max( smoothstep( isleWetLine + 0.1, isleWetLine - 0.05, isleH ), isleSea );
 isleWet = max( isleWet, ( wCliff + wRock + wShore ) * smoothstep( 2.6, 0.4, isleH ) * 0.85 );
 float isleWetK = mix( uIsleLayer[ isleB ].z, uIsleLayer[ isleA ].z, isleK );
 isleAlb *= mix( 1.0, isleWetK, isleWet );
-isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), isleWet * 0.25 );     // a little deeper in colour
-isleRough = mix( isleRough, mix( 0.34, 0.1, smoothstep( isleWetLine, isleWetLine - 0.4, isleH ) ), isleWet );
+isleAlb = mix( isleAlb, isleAlb * isleAlb / max( dot( isleAlb, vec3( 0.333 ) ), 1.0e-4 ), isleWet * 0.3 );     // a little deeper in colour, warmer
+isleRough = mix( isleRough, mix( 0.4, 0.14, smoothstep( isleWetLine, isleWetLine - 0.15, isleH ) ), isleWet );
 isleNw = normalize( mix( isleNw, isleN0, isleWet * 0.75 ) );
 #ifdef ISLE_FLAT
 // a building's pad: packed earth, eased into what was there
@@ -503,17 +517,21 @@ isleRough = mix( isleRough, 0.9, vEarth );
 // the lagoon's floor, darker with depth (the sea over it is drawn by island.js, its own colour over this)
 isleAlb *= mix( 1.0, 0.38, smoothstep( 0.0, 16.0, -isleH ) * isleSea ) * mix( vec3( 1.0 ), vec3( 0.86, 0.97, 1.0 ), isleSea );
 diffuseColor.rgb = isleAlb * uIsleLook.y;
-#endif
 #ifdef ISLE_FLATCOL
 diffuseColor.rgb = vec3( 0.2 ); isleNw = isleN0;
 #endif
 `,
     rough: 'float roughnessFactor = isleRough;',
+    // the wrapped sky's light: three reads it twice (once about the normal for the diffuse light, once along the
+    // reflection for the specular); for ground rougher than 0.7 the second is the first over pi (three's own radiance
+    // read leans to the normal by roughness squared and blurs to the same level), so it is read once; wet, glossy ground
+    // keeps its true reflection
+    maps: THREE.ShaderChunk.lights_fragment_maps.replace('\t\tradiance += getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );',
+      '\t\tradiance += material.roughness > 0.7 ? iblIrradiance * RECIPROCAL_PI : getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );'),
     normal: 'normal = normalize( ( viewMatrix * vec4( isleNw, 0.0 ) ).xyz );',
     // the sky's share at this point (the land round it) and the scan's own occlusion, on what the sky and the wrapped
     // sky give (three's aomap chunk, by these numbers)
     ao: `
-float isleSkySeen = texture2D( uIsleSky, ( ( vW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
 float ambientOcclusion = isleOcc * mix( 1.0, isleSkySeen, uIsleGrid.w );
 reflectedLight.indirectDiffuse *= ambientOcclusion;
 #if defined( USE_ENVMAP ) && defined( STANDARD )
@@ -541,6 +559,7 @@ function landMaterial(base, { lite, flat, uniforms, cut = null }) {
       .replace('#include <roughnessmap_fragment>', f.rough)
       .replace('#include <normal_fragment_maps>', f.normal)
       .replace('#include <aomap_fragment>', f.ao)
+      .replace('#include <lights_fragment_maps>', f.maps)
       .replace('#include <lights_fragment_begin>', loop);
     // the land's own height over the ground is 0 (its fragments are the grid's triangles); the levelled ground's is not
     sh.fragmentShader = (flat ? '#define ISLE_FLAT\n#define ISLE_OVER -1.0e9\n' : '#define ISLE_OVER 0.0\n') + fs;
@@ -566,7 +585,9 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   hf.magFilter = hf.minFilter = THREE.LinearFilter; hf.wrapS = hf.wrapT = THREE.ClampToEdgeWrapping; hf.generateMipmaps = false; hf.needsUpdate = true;
   disposables.push(ht, hf);
   let top = 0; for (const v of ground.hts.main) if (v > top) top = v;
-  const rt = (w, h, type, format) => new THREE.WebGLRenderTarget(w, h, { type, format, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+  // (with their smaller levels: the far land reads them a few texels a pixel apart, and without them scattered reads
+  // empty the GPU's texture cache)
+  const rt = (w, h, type, format) => new THREE.WebGLRenderTarget(w, h, { type, format, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false, generateMipmaps: true });
   const quadGeo = new THREE.BufferGeometry(); quadGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
   const quad = new THREE.Mesh(quadGeo), quadScene = new THREE.Scene(), quadCam = new THREE.Camera(); quad.frustumCulled = false; quadScene.add(quad);
   disposables.push(quadGeo);
@@ -612,12 +633,13 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     const target = new THREE.WebGLRenderTarget(size, size, { depthTexture: depth, depthBuffer: true, stencilBuffer: false, format: THREE.RedFormat, type: THREE.UnsignedByteType, generateMipmaps: false });
     const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000); cam.layers.set(CASCADES.layer);
     disposables.push(target, depth);
-    return { size, far, target, depth, cam, frame: 0 };
+    return { size, far, target, depth, cam, frame: 0, drawn: false, at: new THREE.Vector3() };
   });
   // each slice's bounding sphere (its radius is fixed while the view's angle is: the map does not swim as the eye turns)
   const sphere = (n, f, k) => { let c = ((f + n) * (1 + k * k)) / 2; if (c > f) c = f; return { c, r: Math.hypot(f - c, f * k) }; };
   const RIGHT = new THREE.Vector3(), UPV = new THREE.Vector3(), Z = new THREE.Vector3(), CEN = new THREE.Vector3(), FWD = new THREE.Vector3(), UP0 = new THREE.Vector3();
   let frameNo = 0;
+  const LAST = new THREE.Vector3(), crowds = [], lastDrawn = [];      // the instanced crowds planted nearest first (adoptAll finds them); what each map last drew
   function drawMaps(camera, dir) {
     const ty = Math.tan((camera.fov * Math.PI) / 360), tx = ty * camera.aspect, k = Math.hypot(tx, ty);
     Z.copy(dir).normalize();
@@ -627,20 +649,33 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     const was = renderer.getRenderTarget(), override = scene.overrideMaterial, bg = scene.background, auto = renderer.autoClear;
     scene.overrideMaterial = depthMat; scene.background = null; renderer.autoClear = true;
     let near = 0.1; frameNo += 1;
+    const lightMoved = LAST.angleTo(Z) > 0.0009; if (lightMoved) LAST.copy(Z);
     cascades.forEach((c, i) => {
-      const { c: mid, r } = sphere(near, c.far, k), texel = (2 * r) / c.size;
-      CEN.copy(camera.position).addScaledVector(FWD, mid);
+      // the nearest map round the slice of the view in front of the eye (the body's own shadow, every frame); the others
+      // round the eye itself, whichever way it looks: turning moves nothing in them, so they are drawn again only when the
+      // eye has gone four of their texels, the light has moved, or (for what moves in them) every second and sixth frame
+      const round = i === 0 ? sphere(near, c.far, k) : { c: 0, r: c.far }, r = round.r, texel = (2 * r) / c.size;
+      CEN.copy(camera.position).addScaledVector(FWD, round.c);
       // stepped by whole texels across the light, so a still shadow stays still as the eye moves
       const a = CEN.dot(RIGHT), b = CEN.dot(UPV);
       CEN.addScaledVector(RIGHT, Math.round(a / texel) * texel - a).addScaledVector(UPV, Math.round(b / texel) * texel - b);
-      const cam = c.cam, depthRange = 2 * r + CASCADES.margin;
-      cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r; cam.near = 0.1; cam.far = depthRange; cam.up.copy(UP0);
-      cam.position.copy(CEN).addScaledVector(Z, r + CASCADES.margin); cam.lookAt(CEN); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
-      SHARED.uIsleShadeM.value[i].multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-      SHARED.uIsleShadeO.value.setComponent(i, 1.5 * texel); SHARED.uIsleShadeT.value.setComponent(i, 1 / c.size); SHARED.uIsleShadeZ.value.setComponent(i, 0.02 / depthRange);
-      // the furthest map is drawn every other frame (its texels are 40 cm: half a frame's lag at a run is a tenth of one)
-      if (api.debug.shadows && (i < 2 || frameNo % 2 === 0 || !c.drawn)) {
-        renderer.setRenderTarget(c.target); renderer.clear(false, true, false); renderer.render(scene, cam); c.drawn = true;
+      const due = i === 0 || !c.drawn || lightMoved || c.at.distanceTo(CEN) >= 4 * texel || frameNo - c.frame >= (i === 1 ? 2 : 6);
+      if (api.debug.shadows && due) {
+        // an instanced crowd planted nearest first (creatures.js isleNear: the palms) is drawn only as far as its shadows can
+        // reach this map: its reach, a tall thing's shadow at this light's height, and how far the planting may lag
+        const reach = Math.hypot(CEN.x - camera.position.x, CEN.z - camera.position.z) + r + Math.min(400, 14.5 / Math.max(0.035, Math.tan(Math.asin(Math.min(1, Math.max(0.01, Z.y)))))) + 25;
+        for (const m of crowds) { const nb = m.userData.isleNear; if (!nb || !m.parent) continue; m.userData.isleCount = m.count; const lim = reach + Math.hypot(camera.position.x - nb.x, camera.position.z - nb.z); let lo = 0, hi = Math.min(m.count, nb.d.length); while (lo < hi) { const mid = (lo + hi) >> 1; if (nb.d[mid] <= lim) lo = mid + 1; else hi = mid; } m.count = lo; }
+        const cam = c.cam, depthRange = 2 * r + CASCADES.margin;
+        cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r; cam.near = 0.1; cam.far = depthRange; cam.up.copy(UP0);
+        cam.position.copy(CEN).addScaledVector(Z, r + CASCADES.margin); cam.lookAt(CEN); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+        renderer.setRenderTarget(c.target); renderer.clear(false, true, false); renderer.render(scene, cam);
+        lastDrawn[i] = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+        for (const m of crowds) if (m.userData.isleCount !== undefined) { m.count = m.userData.isleCount; delete m.userData.isleCount; }
+        c.drawn = true; c.frame = frameNo; c.at.copy(CEN);
+        SHARED.uIsleShadeM.value[i].multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+        // (the nearest map is read with four comparisons, a soft edge round the body; the others with one: their texels
+        // are already 8 and 43 cm)
+        SHARED.uIsleShadeO.value.setComponent(i, 1.5 * texel); SHARED.uIsleShadeT.value.setComponent(i, i === 0 ? 1 / c.size : -1 / c.size); SHARED.uIsleShadeZ.value.setComponent(i, 0.02 / depthRange);
       }
       near = c.far;
     });
@@ -652,7 +687,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   // ---- the land's materials
   const [col0, surf0] = standIns(); disposables.push(col0, surf0);
   const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleCtl: { value: ctlRT.texture },
-    uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) },
+    uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) }, uIsleFloor: { value: FLOOR },
     uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) } };
   const which = lite || phone ? 'lite' : 'full';
   let mapsState = 'fetching', mapsAt = 0, fade = 0;
@@ -688,6 +723,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
         if (!lit) return;
         o.userData.isleSeen = true; o.receiveShadow = true;
         if (!o.userData.isleLand) o.layers.enable(CASCADES.layer);
+        if (o.isInstancedMesh && !crowds.includes(o)) crowds.push(o);                 // (whether it is planted nearest first is asked as it is drawn)
       });
     },
     update({ camera, dir, body = null }) {
@@ -712,7 +748,9 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
         if (making.band >= LINES.bands) { shown = 1 - shown; own(); linesFor = making.dir; making = null; }
       }
     },
-    read: () => ({ maps: mapsState, which, mapsMs: Math.round(mapsAt), fade, canDraw, cascades: C.far, sizes: C.size, control: [cw, ch], times: { ...times }, lines: linesFor ? linesFor.toArray().map((v) => +v.toFixed(4)) : null }),
+    read: () => ({ maps: mapsState, which, mapsMs: Math.round(mapsAt), fade, canDraw, cascades: C.far, sizes: C.size, control: [cw, ch], times: { ...times }, lines: linesFor ? linesFor.toArray().map((v) => +v.toFixed(4)) : null,
+      casters: (() => { let n = 0, inst = 0; scene.traverse((o) => { if (o.isMesh && o.layers.isEnabled(CASCADES.layer) && o.visible) { n += 1; if (o.isInstancedMesh) inst += o.count; } }); return { meshes: n, instances: inst, crowds: crowds.map((m) => [m.count, m.userData.isleNear ? m.userData.isleNear.d.length : -1, m.geometry.attributes.position.count]) }; })(),
+      drawn: lastDrawn }),
     // the probes' handles: the land's lines and the sky's share as the GPU made them (in metres; 0..1)
     peek(i, j) {
       const out = {};
