@@ -229,7 +229,7 @@ ok('no page and no three in the Moon\'s numbers; they ask no clock; only sky.js 
   const n = read('src/game/solar/moon.js');
   for (const src of ['Mallama', 'Thejll', 'Stevens', 'Lommel-Seeliger', 'LOLA']) assert.ok(n.includes(src), 'the source is named: ' + src);
   assert.match(MOON_CREDIT, /NASA's Scientific Visualization Studio, CGI Moon Kit \(svs\.gsfc\.nasa\.gov\/4720\)/); assert.match(MOON_CREDIT, /NASA\/GSFC\/Arizona State University/);
-  assert.match(read('package.json'), /node test\/night\.test\.mjs && node test\/moon\.test\.mjs"/);
+  assert.match(read('package.json'), /node test\/night\.test\.mjs && node test\/moon\.test\.mjs( && node test\/[\w-]+\.test\.mjs)*"/);
 });
 
 // `node test/moon.test.mjs --measured` prints only the lines measured so far, for writing them into SOLAR.md

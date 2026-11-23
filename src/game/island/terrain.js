@@ -756,6 +756,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
       const out = {};
       if (lineRT[shown]) { const p = new Uint16Array(4); renderer.readRenderTargetPixels(lineRT[shown], i, j, 1, 1, p); out.lines = [THREE.DataUtils.fromHalfFloat(p[0]), THREE.DataUtils.fromHalfFloat(p[1])]; }
       if (skyRT) { const p = new Uint8Array(4); renderer.readRenderTargetPixels(skyRT, i, j, 1, 1, p); out.sky = p[0] / 255; }
+      { const p = new Uint8Array(4); renderer.readRenderTargetPixels(ctlRT, i * per, j * per, 1, 1, p); out.control = [...p].map((x) => x / 255); out.at = [head.x0 + i * S, head.z0 + j * S]; }
       return out;
     },
     dispose() {

@@ -315,7 +315,7 @@ ok('behind the switch: only sky.js reads the night\'s files, and only ?sky=true 
   for (const [name, text] of [['view.js', view], ['island.js', island]]) assert.ok(!/(night|stars|milkyway)\.js|milkyway-cube/.test(text.replace(/^\s*\/\/.*$/gm, '')), name + ' reads none of the night\'s files');
   assert.match(view, /if \(name === 'island' && TRUE_SKY && !SKY\) \{ try \{ SKY = await import\('\.\/sky\.js'\); \} catch/);
   for (const f of ['src/game/void.js', 'src/game/lights.js', 'src/frequencies/night.mjs', 'src/frequencies/starfield.js']) assert.ok(!/solar\/(night|stars|milkyway)/.test(read(f)), f + ' knows nothing of it');
-  assert.match(read('package.json'), /node test\/sky\.test\.mjs && node test\/night\.test\.mjs( && node test\/moon\.test\.mjs)?"/);
+  assert.match(read('package.json'), /node test\/sky\.test\.mjs && node test\/night\.test\.mjs( && node test\/moon\.test\.mjs)?( && node test\/[\w-]+\.test\.mjs)*"/);
 });
 
 // `node test/night.test.mjs --measured` prints only the lines measured so far, for writing them into SOLAR.md

@@ -3736,7 +3736,7 @@ ok('the blueprint shows a building where it would go and waits to be put there (
   assert.match(blue, /up: \[0\.42, 0\.86, 1\.0\], steep: \[1\.0, 0\.72, 0\.28\], blocked: \[1\.0, 0\.36, 0\.32\]/, 'its colour says what may be done');
   assert.match(blue, /fwidth\(q\)/, 'gridded, the lines kept fine at any distance');
   assert.match(island, /#ifdef FLATS_CUT[\s\S]*discard;[\s\S]*#endif/, 'the land lets go where levelled ground stands under it');
-  assert.match(island, /flatMat\.onBeforeCompile = landMat\.onBeforeCompile;/, 'drawn as the land is');
+  assert.match(island, /const flatMat = look\.flat\(/, 'drawn as the land is (terrain.js: the same ground, its pad packed earth)');
   for (const id of ['place', 'turn', 'cancel', 'level', 'platform']) assert.ok(GLYPHS[id] && menu.includes(`fix('${id}'`), 'the sheet says the blueprint\'s hands: ' + id);
 });
 
