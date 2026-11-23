@@ -3762,7 +3762,7 @@ ok('on the island the hall stands in the lagoon\'s shallows by the beach, facing
   assert.equal(w2.build(at, 'hall').did, 'steep', 'where the house stands (the ground falls 5.6 m under the hall\'s terraces)');
 });
 
-ok('the island\'s sea (Colin, 19 Nov: "the water levels definitely have a visual glitch"): rings round the eye, every triangle facing up, out past the eye\'s furthest, none near the eye wider than ten metres; it follows the eye and is the first see-through thing drawn, so a flame or a glow over the water is drawn over it', () => {
+ok('the island\'s sea (Colin, 19 Nov: "the water levels definitely have a visual glitch"): rings round the eye, every triangle facing up, out past the eye\'s furthest, none near the eye wider than ten metres; it follows the eye and is solid, drawn after the land, so a flame or a glow over the water is drawn over it', () => {
   const { pos, idx } = GR.seaSheet(), R = GR.SEA_RINGS;
   let down = 0, wide = 0, far = 0;
   for (let t = 0; t < idx.length; t += 3) {
@@ -3774,10 +3774,11 @@ ok('the island\'s sea (Colin, 19 Nov: "the water levels definitely have a visual
   }
   assert.equal(down, 0, 'every triangle faces up');
   assert.ok(wide < 10, 'near the eye no triangle is wide: ' + wide.toFixed(2));
-  assert.ok(far > 45000 && R.rings * R.segs < 6000, 'out past 45 km, in a few thousand points: ' + Math.round(far));
+  assert.ok(far > 45000 && R.rings * R.segs < 60000, 'out past 45 km, in tens of thousands of points (the waves move them): ' + Math.round(far));
   assert.ok(pos.every((v, i) => i % 3 !== 1 || v === 0), 'all at the water\'s height');
   const isl = read('src/game/island/island.js');
-  assert.match(isl, /sea\.renderOrder = -1;/, 'drawn before the other see-through things');
+  assert.match(isl, /sea\.renderOrder = 2;/, 'drawn after the land (the GPU skips it under the land), and solid: every see-through thing is drawn after it');
+  assert.ok(!/look\.sea\(new THREE\.MeshStandardMaterial\(\{[^}]*transparent/.test(isl), 'not see-through');
   assert.match(isl, /sea\.position\.set\(camera\.position\.x, 0, camera\.position\.z\);/, 'and moved with the eye');
   assert.ok(!/PlaneGeometry\(120000/.test(isl), 'not two triangles 120 km across');
 });

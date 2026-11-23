@@ -13,7 +13,7 @@
 // The shaders that read these are in SEA_WAVES_GLSL (below) and terrain.js (the sea's own material: the lagoon's floor
 // seen through the water and the water's surface over it, in one drawing).
 import * as THREE from 'three';
-import { SEA, SWELL, SEA_FLOOR, startingSea, shoreTables, SHORE, seaMap, coxMunk, inverseFFT } from './sea.js';
+import { SEA, SWELL, SEA_FLOOR, startingSea, shoreTables, SHORE, seaMap, coxMunk, inverseFFT, toward } from './sea.js';
 import { DROPS, RIPPLE_SPEED, RING } from '../rings.js';
 
 const f = (x) => { const s = Number(x).toPrecision(8); return /[.e]/.test(s) ? s : s + '.0'; };
@@ -158,7 +158,8 @@ float seaShore( vec2 xz, vec4 m, float d, out vec2 slope, out float white ) {
   // between the waves; into the lagoon it thins out over a hundred metres or so
   float broken = m.x < 0.0 ? 1.0 : smoothstep( 0.92, 1.12, br );
   float lip = smoothstep( 0.8, 0.98, u ) * smoothstep( 0.85, 1.05, br ) * ( 1.0 - smoothstep( 1.25, 1.7, br ) ) * step( 0.0, m.x );
-  white = ( broken * ( 0.95 * exp( -u * 4.0 ) + 0.1 ) + lip ) * ( m.x < 0.0 ? exp( m.x / 120.0 ) : 1.0 ) * smoothstep( 0.0, 0.25, H0 );
+  float churn = 0.35 * smoothstep( -90.0, -10.0, m.x ) * smoothstep( 20.0, -5.0, m.x );
+  white = ( broken * ( exp( -u * 2.6 ) + 0.18 + churn ) + lip ) * ( m.x < 0.0 ? exp( m.x / 170.0 ) : 1.0 ) * smoothstep( 0.0, 0.25, H0 );
   return a * ( c + 0.45 * steep * ( c * c - 0.5 ) );
 }
 // the rings a body makes (rings.js ring(), the slope of the sum of them)
@@ -186,11 +187,13 @@ float seaSwash( vec2 xz, vec4 m, out float rising ) {
   float up = u < 0.3 ? sqrt( u / 0.3 ) : 1.0 - smoothstep( 0.3, 1.0, u );
   return seaReach( m ) * up * ( 0.55 + 0.45 * gn( vec2( floor( ph ) * 0.37 + xz.x * 0.004, xz.y * 0.004 ) ) );
 }
-// foam's lace (bubbles drawn out into threads): three scales of noise, drifting; covered where it is over 1 - white
-float seaLace( vec2 p, float white ) {
-  float t = uSeaClock.x;
-  float n = gn( p * 0.85 + vec2( 0.23 * t, -0.13 * t ) ) * 0.5 + gn( p * 2.9 + vec2( -0.41 * t, 0.29 * t ) + 7.0 ) * 0.32 + gn( p * 9.5 - vec2( 0.2 * t ) ) * 0.18;
-  return smoothstep( 1.0 - white, 1.0 - white + 0.22, n + 0.12 * white );
+// foam's lace (bubbles drawn out into threads): three scales of noise, drifting; covered where it is over 1 - white. A
+// pixel that spans more of it than its finest threads (px: metres a pixel) sees their mean, and far off the share itself
+float seaLace( vec2 p, float white, float px ) {
+  float t = uSeaClock.x, f1 = smoothstep( 0.35, 0.06, px ), f2 = smoothstep( 1.6, 0.3, px ), f3 = smoothstep( 5.0, 1.2, px );
+  float n = 0.5 + f3 * ( gn( p * 0.85 + vec2( 0.23 * t, -0.13 * t ) ) - 0.5 ) * 0.5 + f2 * ( gn( p * 2.9 + vec2( -0.41 * t, 0.29 * t ) + 7.0 ) - 0.5 ) * 0.32 + f1 * ( gn( p * 9.5 - vec2( 0.2 * t ) ) - 0.5 ) * 0.18;
+  float w = 0.22 + 0.5 * ( 1.0 - f2 );
+  return mix( white, smoothstep( 1.0 - white - 0.5 * w + 0.5 * 0.22, 1.0 - white + 0.5 * w + 0.5 * 0.22, n + 0.12 * white ), f3 );
 }
 // THE KEY LIGHT'S GLITTER: C. Cox and W. Munk's (J. Opt. Soc. Am. 44, 838, 1954): each facet a mirror, their slopes
 // spread as a Gaussian about the surface's own (the spread finer than a pixel: the bands' and the remainder), the light
@@ -239,26 +242,31 @@ export function createWater({ renderer, lite = false, ground, shape = null }) {
   const head = ground.head, N = SEA.N, C = SEA.cascades.length, disposables = [];
   const canFloat = (() => { try { return !!renderer.capabilities.isWebGL2 && renderer.extensions.has('EXT_color_buffer_float'); } catch { return false; } })();
   const gpu = !lite && canFloat, times = { map: 0, start: 0, band: 0 };
-  // the sea's map, once
+  // the wind's sea to start from, and the unresolved slope: Cox and Munk's whole, less what the bands draw (at least a tenth of it)
   let t0 = performance.now();
+  const sea = startingSea(), drawn = sea.slope.reduce((a, b) => a + b, 0), finer = Math.max(0.1 * coxMunk(SEA.wind.speed), coxMunk(SEA.wind.speed) - drawn);
+  times.start = performance.now() - t0;
+  // the sea's map, once
+  t0 = performance.now();
   const map = seaMap(ground.hts.main, head.w, head.h, head.spacing, { x0: head.x0, z0: head.z0, reef: shape?.reef || null, lagoonSouth: shape?.lagoonSouth ?? Infinity }), shore = shoreTables();
-  // the swell's phase by the distance outside the crest (sea.js shoreTables), into the map's second channel; how square
-  // each point faces the swell into its fourth (the lee of the island takes what wraps round it: a third)
+  // the swell's phase by the distance outside the crest (sea.js shoreTables), into the map's second channel; into its
+  // fourth, how high the waves come in at the reef over the swell's own height: the swell where the reef faces it, the
+  // wind's sea where it faces that (each with a third of itself wrapping round to the island's lee), together as their
+  // energies add
   const sw = SWELL.reduce((a, w) => [a[0] + w.dir[0] * w.amp, a[1] + w.dir[1] * w.amp], [0, 0]), swl = Math.hypot(...sw), swd = [sw[0] / swl, sw[1] / swl];
+  const wd = toward(SEA.wind.from), hw = 4 * Math.sqrt(sea.variance.reduce((a, b) => a + b, 0)) / SEA.swell.hs;
   const data = new Uint16Array(head.w * head.h * 4), H = THREE.DataUtils.toHalfFloat;
   for (let k = 0; k < head.w * head.h; k++) {
     const sd = map.data[4 * k], u = Math.min(SHORE.n - 1.001, Math.max(0, (sd - SHORE.from) / SHORE.step)), i = Math.floor(u), fr = u - i;
-    const phase = shore.phase[i] + (shore.phase[i + 1] - shore.phase[i]) * fr, face = Math.max(0, -(map.data[4 * k + 1] * swd[0] + map.data[4 * k + 2] * swd[1]));
-    data[4 * k] = H(Math.max(-2000, Math.min(4000, sd))); data[4 * k + 1] = H(phase); data[4 * k + 2] = H(Math.min(4000, map.data[4 * k + 3])); data[4 * k + 3] = H(0.33 + 0.67 * face);
+    const nx = map.data[4 * k + 1], nz = map.data[4 * k + 2], phase = shore.phase[i] + (shore.phase[i + 1] - shore.phase[i]) * fr;
+    const fs = 0.33 + 0.67 * Math.max(0, -(nx * swd[0] + nz * swd[1])), fw = (0.33 + 0.67 * Math.max(0, -(nx * wd[0] + nz * wd[1]))) * hw;
+    data[4 * k] = H(Math.max(-2000, Math.min(4000, sd))); data[4 * k + 1] = H(phase); data[4 * k + 2] = H(Math.min(4000, map.data[4 * k + 3])); data[4 * k + 3] = H(Math.sqrt(fs * fs + fw * fw));
   }
   const mapTex = new THREE.DataTexture(data, head.w, head.h, THREE.RGBAFormat, THREE.HalfFloatType);
   mapTex.magFilter = mapTex.minFilter = THREE.LinearFilter; mapTex.wrapS = mapTex.wrapT = THREE.ClampToEdgeWrapping; mapTex.generateMipmaps = false; mapTex.needsUpdate = true;
   disposables.push(mapTex);
   times.map = performance.now() - t0;
-  // the unresolved slope: Cox and Munk's whole, less what the bands draw (at least a tenth of it)
-  t0 = performance.now();
-  const sea = startingSea(), drawn = sea.slope.reduce((a, b) => a + b, 0), finer = Math.max(0.1 * coxMunk(SEA.wind.speed), coxMunk(SEA.wind.speed) - drawn);
-  times.start = performance.now() - t0;
+
   const uniforms = {
     uSeaA0: { value: null }, uSeaA1: { value: null }, uSeaB0: { value: null }, uSeaB1: { value: null }, uSeaB2: { value: null }, uSeaMap: { value: mapTex },
     uSeaL: { value: new THREE.Vector3(...SEA.cascades.map((c) => c.L)) },

@@ -362,7 +362,7 @@ ok('behind a switch, and off: only ?sky=true in the address asks for the true sk
   assert.match(island, /const air = sky && sky\.canDrawTrueSky\(renderer\) \? sky\.createTrueSky\(/, 'nor on a machine that cannot draw it');
   // with the switch off every line that draws is the line it was: the old sky's dome, its fog, its three lights, its sea
   assert.match(island, /scene\.add\(air \? air\.dome : dome\);/); assert.match(island, /scene\.fog = air \? air\.fog : new THREE\.FogExp2\(0xffffff, 3\.6e-5\);/);
-  assert.match(island, /if \(air\) return lightName;/); assert.match(island, /const seaLit = air \? 'uBodyAmt' : 'uSkyAmt', seaSky = air \? 'skyOver\(r, normalize\(uSun\)\)' : 'mix\(uHorizon, uZenith, pow\(r\.y, 0\.55\)\) \* uSkyAmt'/);
+  assert.match(island, /if \(air\) return lightName;/); assert.match(island, /presentSea\(L\);/, 'the sea takes the present light\'s numbers when the switch is off');
   for (const f of ['src/game/void.js', 'src/game/lights.js', 'src/game/figure.js', 'src/game/world.js']) assert.ok(!/sky\.js|solar\//.test(read(f)), f + ' knows nothing of the true sky');
   // what the drawing leans on: materials adopted once, the wrapped sky's level put back when the sky is let go, the
   // tables over the sky's own light, the GPU asked about the Sun's disc

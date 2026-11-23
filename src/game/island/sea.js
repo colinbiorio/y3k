@@ -121,7 +121,7 @@ export function gauss(rand) { let u = 0; while (u === 0) u = rand(); return Math
 export function startingSea({ N = SEA.N, cascades = SEA.cascades, U = SEA.wind.speed, from = SEA.wind.from, F = SEA.wind.fetch, seed = SEA.seed } = {}) {
   const rand = random(seed), W = cascades.length * N, data = new Float32Array(W * N * 4), wp = peakOmega(U, F);
   const [wx, wz] = toward(from), wind = Math.atan2(wz, wx);
-  const h0 = new Float32Array(W * N * 2), slope = [], variance = [];
+  const h0 = new Float32Array(W * N * 2), expect = new Float32Array(W * N), slope = [], variance = [];
   cascades.forEach((c, ci) => {
     const dk = (2 * Math.PI) / c.L, kLo = (2 * Math.PI) / c.from, kHi = (2 * Math.PI) / c.to;
     let s2 = 0, v = 0;
@@ -135,7 +135,7 @@ export function startingSea({ N = SEA.N, cascades = SEA.cascades, U = SEA.wind.s
         s2 += psi * dk * dk * k * k; v += psi * dk * dk;
       }
       const g1 = gauss(rand), g2 = gauss(rand), t = (j * W + ci * N + i) * 2;
-      h0[t] = g1 * amp; h0[t + 1] = g2 * amp;
+      h0[t] = g1 * amp; h0[t + 1] = g2 * amp; expect[t / 2] = 2 * amp * amp;
     }
     slope.push(s2); variance.push(v);
   });
@@ -143,7 +143,7 @@ export function startingSea({ N = SEA.N, cascades = SEA.cascades, U = SEA.wind.s
     const ci = Math.floor(x / N), i = x - ci * N, mi = (N - i) % N, mj = (N - j) % N, t = (j * W + x) * 2, m = (mj * W + ci * N + mi) * 2, o = (j * W + x) * 4;
     data[o] = h0[t]; data[o + 1] = h0[t + 1]; data[o + 2] = h0[m]; data[o + 3] = -h0[m + 1];
   }
-  return { data, width: W, height: N, slope, variance, hs: variance.map((x) => 4 * Math.sqrt(x)) };
+  return { data, width: W, height: N, slope, variance, expect, hs: variance.map((x) => 4 * Math.sqrt(x)) };
 }
 // a frequency held to a whole number of turns in SEA.loop (so the sea repeats, and the time handed to the GPU stays small)
 export const looped = (omega, loop = SEA.loop) => { const w0 = (2 * Math.PI) / loop; return Math.max(1, Math.round(omega / w0)) * w0; };
