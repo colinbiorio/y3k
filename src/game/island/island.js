@@ -202,7 +202,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   scene.add(sea);
 
   // ---- what grows and lives there (creatures.js, from life.js)
-  const life = createLife(scene, { lite, ground, shape, look });
+  const life = createLife(scene, { lite: lite || phone, ground, shape, look });          // (a phone takes the plants' lighter path too)
   // the floor under the far forest's crowns, and the canopy's colour past where they fade (far.js)
   { const B = lite || phone ? PLANTS.lite : PLANTS, F = lite || phone ? FAR.lite : FAR; look.forest = life.far ? [B.mid, F.end - F.fade, F.end] : [1e9, 130, 165]; }
 
