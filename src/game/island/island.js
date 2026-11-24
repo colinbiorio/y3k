@@ -23,6 +23,8 @@ import { underCos } from './sea.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
 import { createGroundLook } from './terrain.js';
+import { PLANTS } from './plants.js';
+import { FAR } from './far.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -201,6 +203,8 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
 
   // ---- what grows and lives there (creatures.js, from life.js)
   const life = createLife(scene, { lite, ground, shape, look });
+  // the floor under the far forest's crowns, and the canopy's colour past where they fade (far.js)
+  { const B = lite || phone ? PLANTS.lite : PLANTS, F = lite || phone ? FAR.lite : FAR; look.forest = life.far ? [B.mid, F.end - F.fade, F.end] : [1e9, 130, 165]; }
 
   // ---- the lights, by name
   const pmrem = new THREE.PMREMGenerator(renderer);

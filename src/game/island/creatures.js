@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { PALM, palmsNear, flocksOf, ternAt, nearTernAt, NEAR_TERNS, tropicsOf, tropicAt, createHens, stepHens, createTurtles, stepTurtles } from './life.js';
 import { createPalms, plantsFrame } from './plants.js';
+import { createFarForest } from './far.js';
 
 // parts gathered into one shape, each with its colour (linear light)
 function merge(parts) {
@@ -82,6 +83,8 @@ export function createLife(scene, { lite = false, ground, shape, look = null }) 
   // goes by its distance from the eye (frame, below)
   const NEAR = lite ? 115 : PALM.near;
   const palms = createPalms(group, { lite, twins: look ? look.twins : null, renderer: look?.parts?.renderer });
+  // the far forest (far.js): every palm on the island past the cards, planted a square at a time
+  const far = look ? createFarForest(group, { renderer: look.parts.renderer, ground, shape, lite }) : null;
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3(), S = new THREE.Vector3();
   let palmAt = null, sites = '', list = [], planted = false;
   // the palms round (cx, cz), but none where a building stands (skip(x, z))
@@ -121,7 +124,8 @@ export function createLife(scene, { lite = false, ground, shape, look = null }) 
     group, plant, palms,
     // a frame's palms as the eye sees them (island.js, before the shadow maps): the shaders' time and eye, and the whole
     // palms round the eye chosen again as it moves
-    frame(camera) { plantsFrame(time.value, camera.position); palms.update(list, camera.position, planted, palmAt); planted = false; },
+    frame(camera) { plantsFrame(time.value, camera.position); palms.update(list, camera.position, planted, palmAt); planted = false; far?.update(camera.position); },
+    far,
     // one frame: the palms round the body (planted again as it goes), the birds where they are at t, the hens and
     // turtles a step on; a turtle breaking the surface rings the water
     live(dt, t, body, drop, world = null) {
@@ -155,8 +159,8 @@ export function createLife(scene, { lite = false, ground, shape, look = null }) 
       turtles.count = turtleList.length; turtles.instanceMatrix.needsUpdate = true;
     },
     // what the view reads (the smoke): how many of each are drawn
-    counts: () => ({ palms: list.length, whole: palms.count, terns: terns.count, tropicbirds: tropicMesh.count, hens: hens.count, turtles: turtles.count }),
+    counts: () => ({ palms: list.length, whole: palms.count, far: far ? far.read() : null, terns: terns.count, tropicbirds: tropicMesh.count, hens: hens.count, turtles: turtles.count }),
     hens: hensOf, turtles: turtleList,
-    dispose() { palms.dispose(); scene.remove(group); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); },
+    dispose() { palms.dispose(); far?.dispose(); scene.remove(group); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); },
   };
 }

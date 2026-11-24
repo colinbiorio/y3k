@@ -12,8 +12,8 @@
 // between pebbles, rock stands out of grass: no smooth fade). Each surface is read at its own scale near the eye (a
 // 2 m scan over 2 m) and five to eight times larger further off, so its tiles do not show; the cliffs and steep rock
 // are read from the two sides they face most (a vertical face is not a smear of the ground's texture), and from a few
-// hundred metres off the large-scale face takes over. The forest beyond the palms (life.js draws them only within
-// PALM.near of the body) is a canopy of crowns lit by the Sun as domes. The ground at the water is wet: darker,
+// hundred metres off the large-scale face takes over. Under the far forest's crowns (far.js) the floor is its seedlings and
+// ferns in their shade; past where those crowns fade out, the canopy's colour. The ground at the water is wet: darker,
 // smoother, glossy where the swash reaches; the lagoon's floor under the sea is the same sand.
 //
 // THE LIGHT. The true sky's (sky.js) or the present one's: the key light, the sky's fill and the wrapped sky, through
@@ -38,7 +38,6 @@
 // left out. A plainer picture (`lite`: fine.js's plain, or a phone) reads the 512 maps at one scale, from above only,
 // with two shadow maps.
 import * as THREE from 'three';
-import { PALM } from './life.js';
 import { SEA, SEA_OPTICS_GLSL } from './sea.js';
 import { SEA_WAVES_GLSL, SEA_SURFACE_GLSL } from './water.js';
 
@@ -356,7 +355,8 @@ varying float vEarth;
 #endif
 uniform mediump sampler2DArray uIsleCol; uniform mediump sampler2DArray uIsleSurf; uniform sampler2D uIsleSky; uniform sampler2D uIsleCtl;
 uniform vec4 uIsleLook;      // the maps' weight (0 until they come, then 1), the present light's raise of the colours, the control's texels to a cell
-uniform vec3 uIsleBody;      // where the body is: the palms stand within PALM.near of it
+uniform vec3 uIsleBody;      // where the body is
+uniform vec4 uIsleForest;    // the far forest (far.js): where its crowns begin (m from the eye), where they fade out to the canopy's colour, and end
 ${NOISE_GLSL}
 uniform vec4 uIsleLayer[ 7 ];    // each surface's fine and coarse side (m), how dark it goes wet, how much its height counts
 uniform vec3 uIsleMean[ 7 ];     // and its mean colour
@@ -536,8 +536,11 @@ float isleRough = max( mix( 0.85, isleSrf.b, uIsleLook.x ), mix( uIsleFloor[ isl
 isleAlb *= ( 0.84 + 0.32 * isleCtl.g ) * mix( 1.0, 0.78 + 0.3 * isleSkySeen, uIsleGrid.w * ( 1.0 - wSand ) );
 float isleMoss = smoothstep( 600.0, 690.0, isleH ) * ( 1.0 - wCliff * 0.6 );
 isleAlb = mix( isleAlb, isleAlb * vec3( 0.55, 1.05, 0.5 ) + vec3( 0.004, 0.012, 0.002 ), isleMoss * 0.85 );
-// the forest beyond the palms: its canopy, the crowns lit as domes
-float isleCrowns = wLitter * smoothstep( ${(PALM.near - 40).toFixed(1)}, ${(PALM.near - 5).toFixed(1)}, length( isleW.xz - uIsleBody.xz ) + 25.0 * ( isleCtl.a - 0.5 ) ) * ( 1.0 - isleSea );
+// the forest past where the far forest's crowns fade out (far.js): its canopy's colour; under the far crowns nearer than
+// that, the floor in their shade (the shadow maps carry only the nearer palms' shadows)
+float isleCrowns = wLitter * smoothstep( uIsleForest.y, uIsleForest.z, isleDist + 150.0 * ( isleCtl.a - 0.5 ) ) * ( 1.0 - isleSea );
+// (the floor of a Kentia forest is its seedlings and ferns in the crowns' shade: dark green between the far crowns)
+isleAlb = mix( isleAlb, vec3( 0.018, 0.032, 0.012 ) * ( 0.8 + 0.4 * isleCtl.g ), 0.85 * wLitter * smoothstep( uIsleForest.x - 10.0, uIsleForest.x + 25.0, isleDist ) * ( 1.0 - isleCrowns ) * ( 1.0 - isleSea ) );
 #ifdef ISLE_NO_CANOPY
 isleCrowns = 0.0;
 #endif
@@ -954,7 +957,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   const [col0, surf0] = standIns(); disposables.push(col0, surf0);
   const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleCtl: { value: ctlRT.texture },
     uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) }, uIsleFloor: { value: FLOOR },
-    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) }, ...(water ? water.uniforms : {}) };
+    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) }, uIsleForest: { value: new THREE.Vector4(1e9, 1e9, 2e9, 0) }, ...(water ? water.uniforms : {}) };
   const which = lite || phone ? 'lite' : 'full';
   let mapsState = 'fetching', mapsAt = 0, fade = 0;
   const t0 = performance.now();
@@ -989,6 +992,8 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
     // the light on level water and its cosine under it (shared: the sea, the swash, whatever stands in the water read it);
     // island.js sets it under the present sky, sky.js under the true one
     seaLight: { uSeaE: SHARED.uSeaE, uSeaLight: SHARED.uSeaLight },
+    // the far forest's reach (far.js), for the floor under it and the canopy's colour past it
+    set forest([under, from, to]) { uniforms.uIsleForest.value.set(under, from, to, 0); },
     // the present light raises the land's colours (island.js says why)
     set paint(k) { uniforms.uIsleLook.value.y = k; },
     get paint() { return uniforms.uIsleLook.value.y; },
