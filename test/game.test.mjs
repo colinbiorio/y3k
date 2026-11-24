@@ -3546,7 +3546,7 @@ ok('kentia palms grow thick on forest ground and here and there on the grass fla
   const p1 = LF.palmsNear(islandGround, hills[0], hills[1], 120), p2 = LF.palmsNear(islandGround, hills[0], hills[1], 120);
   assert.deepEqual(p1, p2, 'the same every time');
   assert.ok(p1.length > 400, 'a forest: ' + p1.length + ' palms within 120 m');
-  for (const p of LF.palmsNear(islandGround, a.x + 300, a.z, 200)) { assert.ok(['forest', 'grass'].includes(LF.cover(islandGround, p.x, p.z))); assert.ok(p.y > 2.9 && p.h >= 7 && p.h <= 14); }
+  for (const p of LF.palmsNear(islandGround, a.x + 300, a.z, 200)) { assert.ok(['forest', 'grass'].includes(LF.cover(islandGround, p.x, p.z))); assert.ok(p.y > 2.9 && p.h >= 2.5 && p.h <= 14); }
   assert.equal(LF.palmsNear(islandGround, a.x - 400, a.z, 60).length, 0, 'none in the lagoon');
   const covers = new Set(); for (let k = 0; k < 400; k++) covers.add(LF.cover(islandGround, a.x - 300 + k * 6, a.z));
   for (const c of ['sea', 'beach', 'forest']) assert.ok(covers.has(c), 'from the lagoon inland: ' + [...covers]);

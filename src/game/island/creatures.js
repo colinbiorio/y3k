@@ -1,18 +1,18 @@
 // creatures.js — WHAT GROWS AND LIVES ON LORD HOWE, DRAWN (three.js), from
-// life.js's numbers: the kentia palms round the body (one draw for every trunk,
-// one for every crown), the sooty terns and the tropicbirds in the air, the
-// woodhens on the forest floor, the green turtles in the lagoon. Each kind is a
-// single instanced shape, so a forest costs two draws.
+// life.js's numbers: the kentia palms (plants.js draws them, from kentia.js's
+// numbers), the sooty terns and the tropicbirds in the air, the woodhens on the
+// forest floor, the green turtles in the lagoon. Each animal is a single
+// instanced shape.
 //
-// A palm: a slender ringed grey trunk, a crown of nine fronds arching out and
-// drooping, each folded along its spine as a kentia's is, swaying in the wind
-// more toward its tip. A tern: dark above, white below, a forked tail, its
+// A tern: dark above, white below, a forked tail, its
 // wings beating. A tropicbird: white, two long red streamers for a tail,
 // beating slowly between glides. A woodhen: brown, short-legged, its head
 // going down to peck. A turtle: an olive shell, its flippers out, rocking as it
 // swims, rising to breathe.
 import * as THREE from 'three';
 import { PALM, palmsNear, flocksOf, ternAt, nearTernAt, NEAR_TERNS, tropicsOf, tropicAt, createHens, stepHens, createTurtles, stepTurtles } from './life.js';
+import { createPalms, plantsFrame } from './plants.js';
+import { createFarForest } from './far.js';
 
 // parts gathered into one shape, each with its colour (linear light)
 function merge(parts) {
@@ -33,26 +33,6 @@ const lin = (r, g, b) => [r ** 2.2, g ** 2.2, b ** 2.2];
 // triangles from a list of [a, b, c] corners
 function tris(list) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(list.flat(2), 3)); g.computeVertexNormals(); return g; }
 
-// a kentia's crown: nine fronds arching out from its top and drooping, each folded along its spine (aX: how far out, 0..1)
-function crownGeo(lite) {
-  const parts = [], segs = lite ? 4 : 6;
-  for (let f = 0; f < 9; f++) {
-    const a = (f / 9) * Math.PI * 2 + 0.3 * Math.sin(f * 2.3), L = 2.5 + 0.5 * Math.sin(f * 1.7), up = 0.55 + 0.25 * Math.cos(f * 3.1);
-    const spine = (u) => [Math.cos(a) * L * u, up * Math.sin(Math.PI * u * 0.85) - 1.25 * u * u, Math.sin(a) * L * u];
-    const side = [-Math.sin(a), 0, Math.cos(a)], list = [];
-    for (let k = 0; k < segs; k++) {
-      const u0 = k / segs, u1 = (k + 1) / segs, s0 = spine(u0), s1 = spine(u1);
-      const w0 = 0.46 * Math.sin(Math.PI * Math.min(1, u0 ** 0.7 + 0.05)), w1 = 0.46 * Math.sin(Math.PI * Math.min(1, u1 ** 0.7 + 0.05));
-      for (const sgn of [-1, 1]) {
-        const e0 = [s0[0] + side[0] * sgn * w0, s0[1] - 0.16 * w0, s0[2] + side[2] * sgn * w0], e1 = [s1[0] + side[0] * sgn * w1, s1[1] - 0.16 * w1, s1[2] + side[2] * sgn * w1];
-        list.push([s0, e0, e1], [s0, e1, s1]);
-      }
-    }
-    const g = tris(list), shade = 0.85 + 0.15 * Math.sin(f * 1.3);
-    parts.push([g, lin(0.16 * shade, 0.34 * shade, 0.12 * shade), (x, y, z) => Math.min(1, Math.hypot(x, z) / 3)]);
-  }
-  return merge(parts);
-}
 // a bird: a body pointed both ways, two wings in two pieces, a forked tail (aX: how far out along the wing)
 function birdGeo(span, len, streamers = 0) {
   const s = span / 2, l = len / 2, list = [
@@ -92,47 +72,26 @@ function turtleGeo() {
   ]);
 }
 
-export function createLife(scene, { lite = false, ground, shape }) {
+export function createLife(scene, { lite = false, ground, shape, look = null }) {
   const geos = [], mats = [], group = new THREE.Group(), time = { value: 0 };
   group.name = 'life'; scene.add(group);
   const add = (geo, mat, n) => { geos.push(geo); mats.push(mat); const m = new THREE.InstancedMesh(geo, mat, n); m.frustumCulled = false; m.count = 0; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); group.add(m); return m; };
   // what moves in the wind or beats its wings: a vertex's aX says how much
   const moving = (mat, body) => { mat.onBeforeCompile = (sh) => { sh.uniforms.uTime = time; sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;\nattribute float aX;').replace('#include <begin_vertex>', `#include <begin_vertex>\n${body}`); }; return mat; };
 
-  // ---- the palms
-  const MAXP = lite ? 900 : 2000, NEAR = lite ? 115 : PALM.near;
-  const trunkGeo = new THREE.CylinderGeometry(0.11, 0.17, 1, 7, 6, true).translate(0, 0.5, 0);
-  trunkGeo.setAttribute('aX', new THREE.Float32BufferAttribute(new Float32Array(trunkGeo.attributes.position.count), 1));
-  const trunkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(...lin(0.36, 0.34, 0.29)), roughness: 0.92 });
-  trunkMat.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vRing;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvRing = position.y;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vRing;').replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= 0.78 + 0.22 * smoothstep(0.0, 0.25, abs(fract(vRing * 38.0) - 0.5));');
-  };
-  const trunks = add(trunkGeo, trunkMat, MAXP);
-  const crownMat = moving(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, side: THREE.DoubleSide }),
-    'float ph = instanceMatrix[3].x * 0.31 + instanceMatrix[3].z * 0.17; float sway = aX * aX; transformed.x += sway * 0.22 * sin(uTime * 1.3 + ph); transformed.z += sway * 0.16 * sin(uTime * 1.1 + ph * 1.7); transformed.y -= sway * 0.07 * (1.0 + sin(uTime * 2.1 + ph));');
-  const crowns = add(crownGeo(lite), crownMat, MAXP);
-  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3(), S = new THREE.Vector3(), UP = new THREE.Vector3();
-  let palmAt = null, sites = '';
+  // ---- the palms (plants.js): the list round the body, nearest first, planted again as the body goes; how each is drawn
+  // goes by its distance from the eye (frame, below)
+  const NEAR = lite ? 115 : PALM.near;
+  const palms = createPalms(group, { lite, twins: look ? look.twins : null, renderer: look?.parts?.renderer });
+  // the far forest (far.js): every palm on the island past the cards, planted a square at a time
+  const far = look ? createFarForest(group, { renderer: look.parts.renderer, ground, shape, lite }) : null;
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3(), S = new THREE.Vector3();
+  let palmAt = null, sites = '', list = [], planted = false;
   // the palms round (cx, cz), but none where a building stands (skip(x, z))
   function plant(cx, cz, skip = null) {
-    // nearest first, and their distances kept (userData.isleNear): the island's shadow maps draw only the palms whose
-    // shadows can reach them (terrain.js), and the nearest map is 15 m round the eye
-    const list = palmsNear(ground, cx, cz, NEAR).filter((p) => !skip || !skip(p.x, p.z)).map((p) => [p, Math.hypot(p.x - cx, p.z - cz)]).sort((a, b) => a[1] - b[1]).map(([p]) => p);
-    let n = 0;
-    for (const p of list) {
-      if (n >= MAXP) break;
-      E.set(p.lean * Math.cos(p.turn), p.turn, p.lean * Math.sin(p.turn)); Q.setFromEuler(E);
-      M.compose(V.set(p.x, p.y - 0.25, p.z), Q, S.set(1, p.h, 1)); trunks.setMatrixAt(n, M);
-      UP.set(0, p.h - 0.35, 0).applyQuaternion(Q);
-      M.compose(V.set(p.x + UP.x, p.y - 0.25 + UP.y, p.z + UP.z), Q, S.setScalar(0.85 + 0.03 * p.h)); crowns.setMatrixAt(n, M);
-      n++;
-    }
-    trunks.count = crowns.count = n; trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
-    palmAt = [cx, cz];
-    const near = { x: cx, z: cz, d: Float32Array.from(list.slice(0, n), (p) => Math.hypot(p.x - cx, p.z - cz)), tall: 14.5 };
-    trunks.userData.isleNear = crowns.userData.isleNear = near;
-    return n;
+    list = palmsNear(ground, cx, cz, NEAR).filter((p) => !skip || !skip(p.x, p.z)).map((p) => [p, Math.hypot(p.x - cx, p.z - cz)]).sort((a, b) => a[1] - b[1]).map(([p]) => p);
+    palmAt = [cx, cz]; planted = true;
+    return list.length;
   }
 
   // ---- the birds
@@ -162,7 +121,11 @@ export function createLife(scene, { lite = false, ground, shape }) {
 
   let clock = 0;
   return {
-    group, plant,
+    group, plant, palms,
+    // a frame's palms as the eye sees them (island.js, before the shadow maps): the shaders' time and eye, and the whole
+    // palms round the eye chosen again as it moves
+    frame(camera) { plantsFrame(time.value, camera.position); palms.update(list, camera.position, planted, palmAt); planted = false; far?.update(camera.position); },
+    far,
     // one frame: the palms round the body (planted again as it goes), the birds where they are at t, the hens and
     // turtles a step on; a turtle breaking the surface rings the water
     live(dt, t, body, drop, world = null) {
@@ -196,8 +159,8 @@ export function createLife(scene, { lite = false, ground, shape }) {
       turtles.count = turtleList.length; turtles.instanceMatrix.needsUpdate = true;
     },
     // what the view reads (the smoke): how many of each are drawn
-    counts: () => ({ palms: trunks.count, terns: terns.count, tropicbirds: tropicMesh.count, hens: hens.count, turtles: turtles.count }),
+    counts: () => ({ palms: list.length, whole: palms.count, far: far ? far.read() : null, terns: terns.count, tropicbirds: tropicMesh.count, hens: hens.count, turtles: turtles.count }),
     hens: hensOf, turtles: turtleList,
-    dispose() { scene.remove(group); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); },
+    dispose() { palms.dispose(); far?.dispose(); scene.remove(group); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); },
   };
 }

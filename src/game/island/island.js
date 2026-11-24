@@ -23,6 +23,8 @@ import { underCos } from './sea.js';
 import { padDistance, toWorld as padWorld } from '../plinth.js';
 import { createLife } from './creatures.js';
 import { createGroundLook } from './terrain.js';
+import { PLANTS } from './plants.js';
+import { FAR } from './far.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -200,7 +202,9 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   scene.add(sea);
 
   // ---- what grows and lives there (creatures.js, from life.js)
-  const life = createLife(scene, { lite, ground, shape });
+  const life = createLife(scene, { lite: lite || phone, ground, shape, look });          // (a phone takes the plants' lighter path too)
+  // the floor under the far forest's crowns, and the canopy's colour past where they fade (far.js)
+  { const B = lite || phone ? PLANTS.lite : PLANTS, F = lite || phone ? FAR.lite : FAR; look.forest = life.far ? [B.mid, F.end - F.fade, F.end] : [1e9, 130, 165]; }
 
   // ---- the lights, by name
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -268,6 +272,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       key.position.copy(skyU.uSun.value).multiplyScalar(400).add(key.target.position);
       // the ground's shadows: the land's own lines toward the key light, the shadow maps round the eye; and whatever lit
       // thing has come into the scene takes them (terrain.js adoptAll)
+      life.frame(camera);                               // the palms as the eye sees them (plants.js), before the shadow maps are drawn
       look.update({ camera, dir: skyU.uSun.value, body: bodyAt });
       if (adoptN++ % 10 === 0) look.adoptAll(scene);           // a walk over the whole scene: a sixth of a second is soon enough for a new thing
     },
