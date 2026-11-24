@@ -199,7 +199,7 @@ const IMP_COLOR = `
   vLeafPart = 1.0 - smoothstep( 1.1, 1.5, alb.g / max( alb.r, 1.0e-4 ) );
 }`;
 function farMaterial(pics, lod, { lite }) {
-  const m = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0, side: THREE.DoubleSide });
   const uniforms = { uLod: { value: lod }, ...SHARED, uFarCol: { value: pics.colour }, uFarFace: { value: pics.face }, uThrough: { value: lin(LEAF.through) },
     uFar: { value: new THREE.Vector4(pics.n, pics.kinds, pics.px, lite ? FAR.lite.end : FAR.end) }, uFarS: { value: pics.spheres.map((s) => new THREE.Vector4(s.x, s.y, s.z, s.R)) } };
   m.onBeforeCompile = (sh) => {
@@ -219,7 +219,10 @@ function farMaterial(pics, lod, { lite }) {
       .replace('#include <opaque_fragment>', '#undef OPAQUE\n#include <opaque_fragment>');
   };
   m.customProgramCacheKey = () => 'palm-far';
-  m.defines = { ISLE_SHADE_N: '( dot( geometryNormal, directionalLights[ 0 ].direction ) < 0.0 ? - geometryNormal : geometryNormal )', ...(FAR.debug ? { FAR_DEBUG: FAR.debug } : {}) };
+  // (past the shadow maps a far crown is not shaded by the crowns round it: with the light low, most of its own height is
+  // in their shade, the more the less open it is to the sky; so its key light is thinned as the light goes down)
+  m.defines = { ISLE_SHADE_N: '( dot( geometryNormal, directionalLights[ 0 ].direction ) < 0.0 ? - geometryNormal : geometryNormal )',
+    ISLE_KEY_K: '( mix( 0.3 + 0.55 * vAo, 1.0, smoothstep( 0.06, 0.55, inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix ).y ) ) )', ...(FAR.debug ? { FAR_DEBUG: FAR.debug } : {}) };
   m.alphaToCoverage = true;
   return m;
 }

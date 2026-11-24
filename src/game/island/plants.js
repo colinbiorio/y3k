@@ -38,8 +38,8 @@ export const PLANTS = {
 // blue; the Kentia's upper side is darker and glossier than its under side; a thick leaflet lets through about half the
 // green it gives back, little red or blue)
 export const LEAF = {
-  up: [0.032, 0.066, 0.022], down: [0.062, 0.098, 0.044], through: [0.017, 0.048, 0.006], rib: [0.16, 0.16, 0.06],
-  rachis: [0.075, 0.09, 0.032], fibre: [0.07, 0.055, 0.038], spear: [0.1, 0.12, 0.045], dead: [0.13, 0.1, 0.068],
+  up: [0.032, 0.066, 0.022], down: [0.062, 0.098, 0.044], through: [0.034, 0.078, 0.009], rib: [0.16, 0.16, 0.06],
+  rachis: [0.058, 0.096, 0.032], fibre: [0.07, 0.055, 0.038], spear: [0.1, 0.12, 0.045], dead: [0.13, 0.1, 0.068],
   roughUp: 0.4, roughDown: 0.62,
 };
 export const BARK = { grey: [0.2, 0.2, 0.185], lichen: [0.34, 0.35, 0.31], ring: [0.09, 0.09, 0.085], green: [0.07, 0.1, 0.045], moss: [0.06, 0.07, 0.035] };
@@ -159,7 +159,7 @@ const CROWN_COLOR = `
     alb *= 1.0 + 0.08 * sin( lf.y * 23.0 ) * seen;
     alb *= ( 0.84 + 0.32 * lf.w ) * ( 1.0 + 0.12 * lf.z );
     plantRough = gl_FrontFacing ? ${LEAF.roughUp.toFixed(3)} : ${LEAF.roughDown.toFixed(3)};
-  } else if ( part < 1.5 ) { alb = uRachis * ( 0.8 + 0.4 * lf.z ); plantRough = 0.55; }
+  } else if ( part < 1.5 ) { alb = uRachis * ( 0.85 + 0.3 * lf.z ); plantRough = 0.5; }
   // the leaf bases sheathing the top of the trunk: dark fibre, green where the youngest still wrap it
   else if ( part < 2.5 ) { alb = mix( uFibre, uSpear * 0.55, smoothstep( 0.55, 1.0, lf.z ) ) * ( 0.6 + 0.5 * fract( lf.y * 13.7 + lf.w ) ); plantRough = 0.9; }
   else { alb = uSpear; plantRough = 0.5; }
@@ -182,8 +182,8 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
   RE_Direct_Physical( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   float back = saturate( - dot( geometryNormal, directLight.direction ) );
   // diffuse, and a little more straight through toward the eye (a leaf scatters forward)
-  float fwd = pow( saturate( dot( - geometryViewDir, directLight.direction ) ), 6.0 );
-  reflectedLight.directDiffuse += directLight.color * plantThrough * RECIPROCAL_PI * back * ( 0.75 + 1.2 * fwd );
+  float fwd = pow( saturate( dot( - geometryViewDir, directLight.direction ) ), 4.0 );
+  reflectedLight.directDiffuse += directLight.color * plantThrough * RECIPROCAL_PI * back * ( 0.6 + 2.2 * fwd );
 }
 #undef RE_Direct
 #define RE_Direct RE_Direct_Leaf`;
@@ -365,8 +365,18 @@ function tube(b, f, sp, s0, s1, ring, segs, r, part, ph, tint) {
     b.I.push(a, d, c, c, d, e);
   }
 }
-const rachisR = (x) => 0.022 * (1 - 0.8 * x) + 0.004;
-// the fibrous leaf bases about the top of the trunk, from 0.6 m under it to a little over, and the spear, furled, straight up
+const rachisR = (x) => 0.017 * (1 - 0.85 * x) + 0.004;
+// EACH FROND'S OWN SHEATH: its base wraps part of the way round the trunk's top where it leaves (the leaf bases spiral up
+// the top 0.6 m, each at its own height: no two fronds start at one point), fibrous, brown going green where it is young
+function sheathOf(b, f, cols, rows) {
+  const R = KENTIA.crown.sheathR + 0.02, y1 = -f.drop + 0.07, y0 = y1 - 0.34 - 0.1 * f.age, span = 1.0, base = b.n;
+  for (let k = 0; k <= rows; k++) {
+    const t = k / rows, y = y0 + (y1 - y0) * t, r = R + 0.025 * Math.sin(Math.PI * t);
+    for (let j = 0; j <= cols; j++) { const a = f.az + span * (j / cols - 0.5); b.vert([Math.cos(a) * r, y, Math.sin(a) * r], [Math.cos(a), 0.25, Math.sin(a)], f.dead ? DEAD : [1, 1, 1], [2, j / cols + f.k * 0.37, 0.35 + 0.65 * (1 - f.age) * t, 0.5], [0, 0, 0, 0.5]); }
+  }
+  for (let k = 0; k < rows; k++) for (let j = 0; j < cols; j++) { const a = base + k * (cols + 1) + j, c = a + 1, d = a + cols + 1, e = d + 1; b.I.push(a, d, c, c, d, e); }
+}
+// the trunk's top under the leaf bases, and the spear, furled, straight up
 function sleeveAndSpear(b, crown, ring, spear) {
   const R = KENTIA.crown.sheathR, H0 = -KENTIA.crown.sheath + 0.12, H1 = 0.14, rows = ring > 6 ? 4 : 2, base = b.n;
   for (let k = 0; k <= rows; k++) {
@@ -389,6 +399,7 @@ export function crownGeometry(crown, { leaflets = KENTIA.frond.leaflets } = {}) 
   for (const f of crown.fronds) {
     const sp = spineOf(f, 0.04), L = f.petiole + f.rachis, ph = hash(f.seed, 3, 3), tint = tintOf(f);
     tube(b, f, sp, 0, L, 5, 16, rachisR, 1, ph, f.dead ? DEAD : [1, 1, 1]);
+    sheathOf(b, f, 4, 2);
     for (const lf of leafletsOf(f, leaflets)) {
       const b0 = b.n;
       for (const u of LEAFLET_RINGS) {
@@ -459,6 +470,7 @@ export function cardGeometry(crown, { segs = 6, rows = 2, petiole = true } = {})
   const b = builder(true), F = KENTIA.frond;
   for (const f of crown.fronds) {
     const sp = spineOf(f, 0.04), L = f.petiole + f.rachis, ph = hash(f.seed, 3, 3), tint = tintOf(f);
+    if (petiole) sheathOf(b, f, 2, 1);
     for (const side of [1, -1]) {
       const b0 = b.n;
       for (let i = 0; i <= segs; i++) {
@@ -484,7 +496,7 @@ export function cardGeometry(crown, { segs = 6, rows = 2, petiole = true } = {})
       for (const which of [0, 1]) {
         const b0 = b.n, n = 4, s1 = f.petiole + 0.3 * f.rachis;
         for (let k = 0; k <= n; k++) {
-          const s = (s1 * k) / n, at = sp[Math.min(sp.length - 1, Math.round((s / L) * (sp.length - 1)))], r = rachisR(s / L) * 1.3, w = which ? at.n : at.b, nn = which ? at.b : at.n;
+          const s = (s1 * k) / n, at = sp[Math.min(sp.length - 1, Math.round((s / L) * (sp.length - 1)))], r = rachisR(s / L) * 1.8, w = which ? at.n : at.b, nn = which ? at.b : at.n;
           for (const sg of [1, -1]) b.vert([at.p[0] + w[0] * r * sg, at.p[1] + w[1] * r * sg, at.p[2] + w[2] * r * sg], nn, f.dead ? DEAD : [1, 1, 1], [1, sg, s / L, ph], [ph, s / L, 0, openAt(at.p)]);
         }
         for (let k = 0; k < n; k++) { const a = b0 + 2 * k, c = a + 1, d = a + 2, e = a + 3; b.I.push(a, d, c, c, d, e); }

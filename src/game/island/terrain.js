@@ -145,6 +145,9 @@ const LIGHT_PARS = `
 #ifndef ISLE_SHADE_N
 #define ISLE_SHADE_N geometryNormal
 #endif
+#ifndef ISLE_KEY_K
+#define ISLE_KEY_K 1.0
+#endif
 uniform float uIsleOn; uniform mat4 uIsleV2W; uniform highp sampler2D uIsleHt; uniform sampler2D uIsleLines; uniform vec4 uIsleGrid; uniform vec2 uIsleN; uniform vec4 uIsleSplit;
 uniform highp sampler2DShadow uIsleShade0; uniform highp sampler2DShadow uIsleShade1; uniform highp sampler2DShadow uIsleShade2;
 uniform mat4 uIsleShadeM[ 3 ]; uniform vec3 uIsleShadeO; uniform vec3 uIsleShadeT; uniform vec3 uIsleShadeZ;
@@ -204,7 +207,7 @@ const ISLE_LOOP = `#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
 	isleShadeK = seaH < 22.0 ? isleKeyW( isleW, isleNw, 0.0, length( isleW - cameraPosition ) ) : ( uIsleOn < 0.5 ? 1.0 : isleLand( vW, seaD0 ) );
 	float isleShade = isleShadeK * seaCaustic;
 	#else
-	float isleShade = isleKey( geometryPosition, ISLE_SHADE_N, ISLE_OVER );
+	float isleShade = isleKey( geometryPosition, ISLE_SHADE_N, ISLE_OVER ) * ISLE_KEY_K;
 	#endif
 	#pragma unroll_loop_start
 	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {

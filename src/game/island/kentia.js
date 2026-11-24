@@ -29,7 +29,7 @@ export const KENTIA = {
   crown: {
     fronds: [12, 18],                              // how many open fronds a grown crown holds
     spear: 1.5,                                    // m: the unopened spear leaf, straight up from the middle
-    sheath: 0.95, sheathR: 0.17,                   // m: the fibrous leaf bases about the top of the trunk, how high and how wide
+    sheath: 0.8, sheathR: 0.115,                   // m: the trunk's top under the leaf bases (each frond's own sheath wraps it, plants.js), how high and how wide
   },
   frond: {
     petiole: [0.9, 1.25],                            // m of bare stalk before the first leaflets
@@ -38,10 +38,10 @@ export const KENTIA = {
     long: 0.78,                                    // m: the longest leaflets (near the middle of the rachis)
     wide: 0.029,                                   // m: their width (the narrow end of 2 to 5 cm: a frond is a comb, light between its leaflets)
     insertDeg: [62, 40],                           // degrees from the rachis, toward its tip, that a leaflet leaves it at: at its base, at its tip
-    roofDeg: [20, 38],                             // degrees below the frond's own plane a leaflet leaves it at (a shallow ^): a young frond, an old one
-    droop: [0.38, 0.85],                           // how far (of its length) a leaflet's tip hangs below its straight line: young, old
+    roofDeg: [28, 46],                             // degrees below the frond's own plane a leaflet leaves it at (the ^): a young frond, an old one
+    droop: [0.85, 1.4],                            // how far a leaflet hangs (pendulous: a frond is a curtain from both sides of its rachis): young, old
     foldDeg: 17,                                   // the leaflet's fold along its midrib (each half off the flat)
-    stiff: [0.26, 0.44],                           // the rachis's bend under its weight (rad a metre, at its most): young, old
+    stiff: [0.5, 0.56],                            // the rachis's arch (rad a metre, at its most): young, old
   },
 };
 
@@ -80,7 +80,7 @@ export function crownOf(seed, { young = false, dead: hangs = true } = {}) {
       stiff: lerp(K.frond.stiff[0], K.frond.stiff[1], isDead ? 1 : age) * (0.72 + 0.56 * j(6)) * (young ? 0.8 : 1),
       roll: 0.2 * (j(7) - 0.5),
       // where on the stem it comes from: the oldest lowest (m below the top), a little out from the middle
-      drop: young ? 0.02 * k : 0.05 + 0.62 * (isDead ? 1.1 : age) * (0.8 + 0.4 * j(8)),
+      drop: young ? 0.02 * k : 0.04 + 0.58 * (isDead ? 1 : age) + 0.06 * (j(8) - 0.5),
       seed: hash(seed, 200 + k, 0) * 1e6 | 0,
     });
   }
@@ -94,7 +94,7 @@ export function crownOf(seed, { young = false, dead: hangs = true } = {}) {
 export function spineOf(f, step = 0.05) {
   const L = f.petiole + f.rachis, out = [];
   const c = Math.cos(f.az), sn = Math.sin(f.az), b = [-sn, 0, c];
-  let th = f.rise, p = [c * (0.1 + 0.05 * Math.cos(f.rise)), -f.drop, sn * (0.1 + 0.05 * Math.cos(f.rise))];
+  let th = f.rise, p = [c * (0.13 + 0.04 * Math.cos(f.rise)), -f.drop, sn * (0.13 + 0.04 * Math.cos(f.rise))];
   const n = Math.max(2, Math.ceil(L / step));
   for (let i = 0; i <= n; i++) {
     const s = (L * i) / n;
@@ -103,7 +103,7 @@ export function spineOf(f, step = 0.05) {
     const roll = f.roll * (s / L), nn = cross(b, t), bb = add(b.map((v) => v * Math.cos(roll)), nn, Math.sin(roll)), nr = norm(cross(bb, t));
     out.push({ s, p: [...p], t, b: norm(bb), n: nr });
     // the bend: weight times lever, in the vertical plane; a frond past straight down does not bend further
-    const k = f.stiff * Math.max(0, Math.cos(th)) * (0.45 + 1.1 * (s / L));
+    const k = f.stiff * (0.45 + 0.55 * Math.max(0, Math.cos(th))) * (0.3 + 1.3 * (s / L));
     th = Math.max(-1.45, th - k * (L / n));
     p = add(p, [Math.cos(th) * c, Math.sin(th), Math.cos(th) * sn], L / n);
   }
