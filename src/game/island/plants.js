@@ -44,18 +44,18 @@ export const LEAF = {
 };
 export const BARK = { grey: [0.2, 0.2, 0.185], lichen: [0.34, 0.35, 0.31], ring: [0.09, 0.09, 0.085], green: [0.07, 0.1, 0.045], moss: [0.06, 0.07, 0.035] };
 
-const lin = (c) => new THREE.Color().setRGB(c[0], c[1], c[2]);
+export const lin = (c) => new THREE.Color().setRGB(c[0], c[1], c[2]);
 const WIND = toward(SEA.wind.from);
 
 // ---- what every palm's shaders share: the time, the wind, the eye (by reference; the island sets them each frame)
-const SHARED = {
+export const SHARED = {
   uTime: { value: 0 },
   uWind: { value: new THREE.Vector4(WIND[0], WIND[1], 1, 0) },       // the way it blows toward (x, z), its strength (1: the day's)
   uEye: { value: new THREE.Vector3(1e6, 0, 1e6) },                   // the eye: how finely a palm is drawn goes by its distance from it
 };
 
 // a hash noise for the bark (GLSL)
-const NOISE = `
+export const NOISE = `
 float plHash( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }
 float plNoise( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0 - 2.0 * f );
   return mix( mix( plHash( i ), plHash( i + vec2( 1.0, 0.0 ) ), u.x ), mix( plHash( i + vec2( 0.0, 1.0 ) ), plHash( i + vec2( 1.0, 1.0 ) ), u.x ), u.y ); }`;
@@ -63,7 +63,7 @@ float plNoise( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0
 // THE VERTEX'S SHARED PART: the eye's bands (an instance outside this way's band is not drawn: its vertices are put out
 // of sight; at a band's edge the pixels are shared between the two ways by a fixed pattern, so a palm changes from one to
 // the other without a jump) and the sway of the trunk's top, which carries the crown
-const VERT_PARS = `
+export const VERT_PARS = `
 uniform float uTime; uniform vec4 uWind; uniform vec3 uEye; uniform vec4 uLod;
 attribute vec4 aAt;
 varying vec2 vPlantFade;
@@ -83,7 +83,7 @@ bool plantShown( vec3 at ) {
 }`;
 const VERT_HIDE = `
 if ( ! plantShown( aAt.xyz ) ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );`;
-const FRAG_PARS = `
+export const FRAG_PARS = `
 varying vec2 vPlantFade;
 float plantH() { return fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) ); }`;
 // a pixel at a band's edge is this way's or the other's, by a fixed pattern on the screen
@@ -169,7 +169,7 @@ if ( vLeafPart < 0.5 ) normal = normalize( normal + vAcross * faceDirection * pl
 // THE LIGHT THROUGH A LEAF: what falls on its far side and is let through, to the side the eye sees. The key light's
 // share is after its shadowing (the island's loop shades the key light before it comes here); the sky's is read about the
 // leaf's far side, as dimmed by the crown round it.
-const LEAF_LIGHT = `
+export const LEAF_LIGHT = `
 uniform vec3 uThrough;
 vec3 plantThrough;                   // the leaf's transmittance here (none on the rachis, fibres or trunk)
 float vLeafPart;
@@ -182,7 +182,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
 }
 #undef RE_Direct
 #define RE_Direct RE_Direct_Leaf`;
-const LEAF_SKY = `
+export const LEAF_SKY = `
 #if defined( RE_IndirectDiffuse )
 {
   vec3 bn = - geometryNormal, eb = vec3( 0.0 );
@@ -521,7 +521,7 @@ export function placePalm(p, out) {
 }
 // which crown a palm wears: a short one none with dead fronds hanging (they would reach the ground)
 export const variantOf = (p, n) => (p.h < 6 ? n / 2 : 0) + Math.floor(hash(p.id, 5, 5) * (p.h < 6 ? n / 2 : n));
-const placeScratch = () => ({ E: new THREE.Euler(), Q: new THREE.Quaternion(), Q2: new THREE.Quaternion(), Q3: new THREE.Quaternion(), V: new THREE.Vector3(), V2: new THREE.Vector3(), V3: new THREE.Vector3(), V4: new THREE.Vector3(), S: new THREE.Vector3(),
+export const placeScratch = () => ({ E: new THREE.Euler(), Q: new THREE.Quaternion(), Q2: new THREE.Quaternion(), Q3: new THREE.Quaternion(), V: new THREE.Vector3(), V2: new THREE.Vector3(), V3: new THREE.Vector3(), V4: new THREE.Vector3(), S: new THREE.Vector3(),
   trunk: new THREE.Matrix4(), crown: new THREE.Matrix4(), at: new THREE.Vector4(), trunkNums: new THREE.Vector4() });
 
 // THE PALMS ROUND THE EYE AND THE BODY: the whole ones round the eye (chosen again as it moves), the cards and the

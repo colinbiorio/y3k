@@ -69,6 +69,18 @@ export function palmsNear(ground, x, z, r = PALM.near) {
 }
 // the trunks a body at (x, z) could touch (the cells round it)
 export function trunksNear(ground, x, z) { return palmsNear(ground, x, z, 2.5); }
+// every palm whose cell lies in the rectangle [x0, x1) by [z0, z1) (the far forest is planted a tile at a time): the same
+// palms, by the same rule, as palmsNear finds
+export function palmsIn(ground, x0, z0, x1, z1) {
+  const c = PALM.cell, out = [];
+  for (let j = Math.ceil(z0 / c); j * c < z1; j++) for (let i = Math.ceil(x0 / c); i * c < x1; i++) {
+    if (hash(i, j, 1) > PALM.chance) continue;
+    const px = (i + 0.15 + 0.7 * hash(i, j, 2)) * c, pz = (j + 0.15 + 0.7 * hash(i, j, 3)) * c, kind = cover(ground, px, pz);
+    if (kind !== 'forest' && !(kind === 'grass' && hash(i, j, 7) < 0.22)) continue;
+    out.push({ x: px, z: pz, y: ground.height(px, pz), h: 2.5 + 11.5 * Math.pow(hash(i, j, 4), 1.3), lean: 0.12 * hash(i, j, 5), turn: 6.283 * hash(i, j, 6), id: i * 100003 + j });
+  }
+  return out;
+}
 
 // ---- the birds of the air: pure functions of time
 // the flocks' places: off the island's north end, over the lagoon off the beach where a body arrives, and south of
