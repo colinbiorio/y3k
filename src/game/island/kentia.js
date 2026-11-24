@@ -27,9 +27,9 @@ export const KENTIA = {
     ring: [0.028, 0.06],                           // m between the ring scars: low on the old trunk, high on the young
   },
   crown: {
-    fronds: [14, 18],                              // how many open fronds a grown crown holds
+    fronds: [12, 18],                              // how many open fronds a grown crown holds
     spear: 1.5,                                    // m: the unopened spear leaf, straight up from the middle
-    sheath: 0.75, sheathR: 0.16,                   // m: the fibrous leaf bases about the top of the trunk, how high and how wide
+    sheath: 0.95, sheathR: 0.17,                   // m: the fibrous leaf bases about the top of the trunk, how high and how wide
   },
   frond: {
     petiole: [0.9, 1.25],                            // m of bare stalk before the first leaflets
@@ -38,10 +38,10 @@ export const KENTIA = {
     long: 0.78,                                    // m: the longest leaflets (near the middle of the rachis)
     wide: 0.029,                                   // m: their width (the narrow end of 2 to 5 cm: a frond is a comb, light between its leaflets)
     insertDeg: [62, 40],                           // degrees from the rachis, toward its tip, that a leaflet leaves it at: at its base, at its tip
-    roofDeg: [36, 56],                             // degrees below the frond's own plane a leaflet leaves it at (the ^): a young frond, an old one
-    droop: [0.5, 1.15],                            // how far (of its length) a leaflet's tip hangs below its straight line: young, old
+    roofDeg: [20, 38],                             // degrees below the frond's own plane a leaflet leaves it at (a shallow ^): a young frond, an old one
+    droop: [0.38, 0.85],                           // how far (of its length) a leaflet's tip hangs below its straight line: young, old
     foldDeg: 17,                                   // the leaflet's fold along its midrib (each half off the flat)
-    stiff: [0.3, 0.42],                            // the rachis's bend under its weight (rad a metre, at its most): young, old
+    stiff: [0.26, 0.44],                           // the rachis's bend under its weight (rad a metre, at its most): young, old
   },
 };
 
@@ -70,17 +70,17 @@ export function crownOf(seed, { young = false, dead: hangs = true } = {}) {
     const age = n > 1 ? Math.min(1, k / (n - 1)) : 0, isDead = k >= n, j = (q) => hash(seed, 100 + k, q);
     // a young frond stands up; the older ones come out lower on the stem, lower, and bend more under their weight
     const rise = young ? (78 - 46 * age + 8 * (j(1) - 0.5)) * Math.PI / 180
-      : isDead ? (-48 - 22 * j(1)) * Math.PI / 180 : (60 - 95 * age + 10 * (j(1) - 0.5)) * Math.PI / 180;
-    const scale = young ? 0.55 + 0.2 * j(2) : 0.92 + 0.16 * j(2);
+      : isDead ? (-48 - 22 * j(1)) * Math.PI / 180 : (76 - 104 * Math.pow(age, 0.9) + 16 * (j(1) - 0.5)) * Math.PI / 180;
+    const scale = young ? 0.55 + 0.2 * j(2) : 0.85 + 0.3 * j(2);
     fronds.push({
       k, age: isDead ? 1 : age, dead: isDead,
       az: az0 + k * GOLDEN + 0.18 * (j(3) - 0.5), rise,
       petiole: lerp(K.frond.petiole[0], K.frond.petiole[1], j(4)) * scale * (young ? 0.8 : 1),
       rachis: lerp(K.frond.rachis[0], K.frond.rachis[1], j(5)) * scale,
-      stiff: lerp(K.frond.stiff[0], K.frond.stiff[1], isDead ? 1 : age) * (0.85 + 0.3 * j(6)) * (young ? 0.8 : 1),
+      stiff: lerp(K.frond.stiff[0], K.frond.stiff[1], isDead ? 1 : age) * (0.72 + 0.56 * j(6)) * (young ? 0.8 : 1),
       roll: 0.2 * (j(7) - 0.5),
       // where on the stem it comes from: the oldest lowest (m below the top), a little out from the middle
-      drop: young ? 0.02 * k : 0.06 + 0.5 * (isDead ? 1.1 : age) * (0.8 + 0.4 * j(8)),
+      drop: young ? 0.02 * k : 0.05 + 0.62 * (isDead ? 1.1 : age) * (0.8 + 0.4 * j(8)),
       seed: hash(seed, 200 + k, 0) * 1e6 | 0,
     });
   }
@@ -94,7 +94,7 @@ export function crownOf(seed, { young = false, dead: hangs = true } = {}) {
 export function spineOf(f, step = 0.05) {
   const L = f.petiole + f.rachis, out = [];
   const c = Math.cos(f.az), sn = Math.sin(f.az), b = [-sn, 0, c];
-  let th = f.rise, p = [c * (0.07 + 0.05 * Math.cos(f.rise)), -f.drop, sn * (0.07 + 0.05 * Math.cos(f.rise))];
+  let th = f.rise, p = [c * (0.1 + 0.05 * Math.cos(f.rise)), -f.drop, sn * (0.1 + 0.05 * Math.cos(f.rise))];
   const n = Math.max(2, Math.ceil(L / step));
   for (let i = 0; i <= n; i++) {
     const s = (L * i) / n;

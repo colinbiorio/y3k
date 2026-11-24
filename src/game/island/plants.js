@@ -30,7 +30,7 @@ export const PLANTS = {
   mid: 120,                   // cards, coarse (four steps, one across); the far forest past this
   band: 3,                    // the hand-over's half-width
   heroAgain: 4,               // m the eye may move before the whole palms round it are chosen again
-  variants: 4,                // crowns made, each palm wearing one of them (turned its own way)
+  variants: 6,                // crowns made, each palm wearing one of them (turned its own way, spread and sagging its own amount)
   lite: { hero: 0, near: 40, mid: 100 },
 };
 // a leaf's colours (linear: what it reflects of each of the sky's three wavelengths), from the island's photographs and
@@ -39,7 +39,7 @@ export const PLANTS = {
 // green it gives back, little red or blue)
 export const LEAF = {
   up: [0.032, 0.066, 0.022], down: [0.062, 0.098, 0.044], through: [0.017, 0.048, 0.006], rib: [0.16, 0.16, 0.06],
-  rachis: [0.075, 0.09, 0.032], fibre: [0.13, 0.085, 0.05], spear: [0.1, 0.12, 0.045], dead: [0.13, 0.1, 0.068],
+  rachis: [0.075, 0.09, 0.032], fibre: [0.07, 0.055, 0.038], spear: [0.1, 0.12, 0.045], dead: [0.13, 0.1, 0.068],
   roughUp: 0.4, roughDown: 0.62,
 };
 export const BARK = { grey: [0.2, 0.2, 0.185], lichen: [0.34, 0.35, 0.31], ring: [0.09, 0.09, 0.085], green: [0.07, 0.1, 0.045], moss: [0.06, 0.07, 0.035] };
@@ -101,6 +101,10 @@ varying vec2 vCardUv; varying vec3 vAcross;
 #endif`;
 const CROWN_MOVE = `
 {
+  // each palm's crown its own: some spread wider, some sag more (an older, heavier crown), so no two crowns of a kind match
+  float own1 = fract( aAt.w * 7.13 ), own2 = fract( aAt.w * 3.71 );
+  transformed.xz *= 0.88 + 0.24 * own2;
+  transformed.y -= ( 0.012 + 0.05 * own1 ) * dot( transformed.xz, transformed.xz ) * smoothstep( 0.3, 1.2, length( transformed.xz ) );
   // the wind's way and the top's push, in the crown's own frame (it is turned and scaled: M = sR, so M^-1 = M^T / s^2)
   mat3 pm = mat3( instanceMatrix ); float ps2 = dot( pm[ 0 ], pm[ 0 ] );
   vec3 wl = ( transpose( pm ) * vec3( uWind.x, 0.0, uWind.y ) ) / ps2, top = ( transpose( pm ) * plantTop( aAt ) ) / ps2;
@@ -156,7 +160,8 @@ const CROWN_COLOR = `
     alb *= ( 0.84 + 0.32 * lf.w ) * ( 1.0 + 0.12 * lf.z );
     plantRough = gl_FrontFacing ? ${LEAF.roughUp.toFixed(3)} : ${LEAF.roughDown.toFixed(3)};
   } else if ( part < 1.5 ) { alb = uRachis * ( 0.8 + 0.4 * lf.z ); plantRough = 0.55; }
-  else if ( part < 2.5 ) { alb = uFibre * ( 0.7 + 0.6 * fract( lf.y * 13.7 + lf.w ) ); plantRough = 0.9; }
+  // the leaf bases sheathing the top of the trunk: dark fibre, green where the youngest still wrap it
+  else if ( part < 2.5 ) { alb = mix( uFibre, uSpear * 0.55, smoothstep( 0.55, 1.0, lf.z ) ) * ( 0.6 + 0.5 * fract( lf.y * 13.7 + lf.w ) ); plantRough = 0.9; }
   else { alb = uSpear; plantRough = 0.5; }
   diffuseColor.rgb *= alb;
   vLeafPart = part;
@@ -321,7 +326,7 @@ reflectedLight.indirectDiffuse *= barkAo;`;
 
 // ---- the shapes
 // how open to the sky a point of a crown is (its own frame): its middle and its underside see less
-const openAt = (p) => Math.min(1, 0.42 + 0.5 * Math.min(1, Math.hypot(p[0], p[2]) / 2.8) + 0.12 * Math.max(-1, Math.min(1, p[1] / 1.5)));
+const openAt = (p) => Math.max(0.2, Math.min(1, 0.3 + 0.6 * Math.min(1, Math.hypot(p[0], p[2]) / 3.0) + 0.15 * Math.max(-1, Math.min(1, p[1] / 1.5))));
 const DEAD = LEAF.dead.map((d, i) => d / LEAF.up[i]);
 const tintOf = (f) => (f.dead ? DEAD : [1 + 0.25 * f.age, 1 + 0.12 * f.age, 1]);
 // a shape's arrays, and the triangles between them
