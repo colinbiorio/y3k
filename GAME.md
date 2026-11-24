@@ -119,6 +119,81 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The island's own plants: the Kentia palm, near and far (24 November 2026)
+
+The third of the four parts the island is being brought to standard in (the ground and its light; the sea and the
+lagoon; the island's own plants; the rocks and the beach's life). The palms had been eight-sided trunks under nine flat
+green fronds, drawn within 170 m of the body, and past them the forest was a colour on the ground
+([`src/game/island/kentia.js`](src/game/island/kentia.js), [`plants.js`](src/game/island/plants.js) and
+[`far.js`](src/game/island/far.js), new; `life.js`, `creatures.js`, `terrain.js`, `island.js`; `test/plants.test.mjs`).
+
+- **The palm is built from its numbers** (no free model of the island's own palm exists; this one is wholly the game's).
+  Howea forsteriana as the botanists give it (Flora of Australia, as the Royal Botanic Gardens Victoria's horticultural
+  flora and LLIFLE's palm encyclopedia quote it; the island's photographs on Wikimedia Commons looked at, never shipped):
+  one slender trunk swollen at its foot, grey, its ring scars oblique, raised and wavering, green for its last metre;
+  no crownshaft, each frond's base a fibrous sheath wrapped round the trunk's top at its own height, so the bases spiral
+  up its top 0.6 m; 12 to 18 fronds of 2.5 to 4.2 m, the youngest rising steeply and the spear straight up, each rachis
+  one continuous arch whose outer third bends below level, the old ones hanging and one or two dead and browning; 46
+  leaflets a side, the longest (about 0.8 m) a third of the way out, 2.9 cm wide, drawn out to a point, folded down
+  along a yellow midrib, dark and glossy above and paler below, leaving the rachis down and outward and hanging: from the
+  side or below a frond is a curtain from both sides of its arch (the Kentia's leaflets hang; the curly palm's rise).
+  Palms of every height, 2.5 to 14 m of trunk (life.js: many short, a few emergent), six crowns, each palm its own turn,
+  lean, bow, spread and sag.
+- **How fine, by each palm's distance from the eye** (each hand-over shared out between the two ways over a few metres
+  by a fixed pattern on the screen, so nothing jumps): within 22 m WHOLE, every leaflet a blade (11,100 to 15,700
+  triangles a crown; the palms round the eye, chosen again every 4 m it moves); to 50 m the fronds as CARDS: a picture of
+  a frond's leaflets drawn once on the GPU, leaflet by leaflet from the same numbers, laid on a surface ruled by the
+  leaflets' own hanging curves, its petiole as two strips (about 1,100 triangles a crown); to 120 m the same coarser
+  (210 to 290); past 120 m the FAR FOREST: every palm on the island, 192,034 of them, each a square turned to the eye
+  showing the three nearest of 64 pictures of its crown taken over the upper half-sphere (R. Brucks's octahedral
+  impostors), blended, with its trunk as a strip to 650 m; past 2.3 km the ground's canopy colour takes over by 3 km. A
+  card's and a far crown's edges are the GPU's own coverage (alpha to coverage, sharpened to the pixel only where the
+  picture is magnified, after B. Golus), so leaflets neither shimmer nor thin away in the distance.
+- **Its light.** Every part is lit as everything else on the island is (the true sky's light and air, the land's own
+  shadow, the shadow maps); a leaf lets light through: lit from behind it glows yellow-green (its transmittance,
+  0.034, 0.078, 0.009, and more of it straight toward the eye), after the key light's own shadowing, and the sky's light
+  reaches its far side; the crown's inside sees less sky. The palms near the eye cast into the shadow maps through twins
+  of their own, swaying as they do, so a crown shades itself, the ground and the body; a leaf lit from behind is tested
+  for shadow on its own lit side. Far crowns (past the maps) are thinned in the key light as it goes low, the more the
+  less open to the sky: the shade the crowns round them would cast.
+- **The wind** (sea.js's day: 6.5 m/s from the south-east): the trunk's top swings with slow gusts rolling over the island
+  and carries its crown, each frond lifts, falls and is pushed along the wind more toward its tip, its leaflets flutter
+  each its own; the shadows sway with them.
+- **Under the far crowns** the floor is their shade and their seedlings (a dark green); the ground's canopy colour is
+  only past 2.3 km.
+- **The lighter path** (fine.js's plain, a person's own lighter page, a phone): no whole palms, cards to 40 and 100 m,
+  far pictures of 64 texels, the far forest to 1.8 km.
+- **Nothing is fetched.** The frond's picture (1,024 x 256) and the crowns' pictures (2,048 x 1,024, twice) are made on the
+  GPU when the island is first come to, in 12 ms; the far forest is planted a 640 m square at a time, nearest first, at
+  most 4 ms a frame (92 ms in all).
+
+**What changed in the look** (before and after sheets: the scratch folder `island-real/pr3`): palms that read as the
+island's own (their arch, their hanging leaflets, their grey ringed trunks, their dead fronds), of every height;
+backlit fronds that glow at golden hour; palm shadows that sway; and from 300 m up, or from across the lagoon, slopes
+that are palm forest crown by crown instead of a green colour.
+
+**What is rough:**
+
+- **The cost** (below): about 8 ms of the GPU's time a frame at the pixel cap at the forest edge, 5 ms from 300 m up; the
+  shadow maps draw 0.8 to 1.2 million triangles each, most of them the whole crowns (drawn into all three maps). Not
+  yet done: the whole crowns' cards in the second and third maps (their texels, 8 and 43 cm, hold no leaflet), fewer
+  whole palms, the far crowns' squares cut to each picture's own outline.
+- **The forest is a park near the eye**: one palm to each 68 m^2 (life.js's 7 m cells) and nothing under them; the
+  island's own forest is denser, with seedlings and ferns everywhere. No banyan, no screw pine, no ground cover yet.
+- The far crowns' coverage is taken as layers, 1 - (1 - c)^4 (a crown far off is many fronds overlapping): chosen by
+  eye, not measured; the far forest has no shadows of its own beyond the thinning of its key light; two crowns pictured.
+- The hand-over patterns at 22, 50 and 120 m can be seen as a fine speckle on a palm passing through them.
+- The contact sheet's after column was drawn before the second look's fixes (the arch, the curtains, the sheaths, the
+  glow); `island-real/pr3/second-look.jpg` has two views after them.
+
+**Measured** (24 November 2026, the M2 MacBook Air on BATTERY, headless Chromium on the Mac's own chip, the GPU's own
+timer round each frame, this branch against main at the same view, two alternations each; on mains power the Air runs
+faster and these want measuring again there): at 2,940 x 1,912, the pixel cap, the forest edge at noon 23.9 and 24.0 ms
+(main 16.0 and 16.0); the slopes from 300 m up 33.2 and 32.4 (27.7 and 28.4). One frame among the palms draws 1.61
+million triangles in 88 calls; 779 palms stand within 170 m of the body there, 40 of them whole. `npm test`: 2,515
+checks, all pass (`test/plants.test.mjs` 6 new: the palm's numbers against the botanists', its leaflets hang, the far
+forest plants the near forest's palms, the shaders' numbers are the modules'). The GPU smokes were not run on battery.
+
 ### The island's sea and lagoon, to standard (23 November 2026)
 
 The second of the four parts the island is being brought to standard in (the ground and its light; the sea and the

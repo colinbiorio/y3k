@@ -263,7 +263,19 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-23** (latest) — **Lord Howe Island's sea and lagoon, to standard: what the water is, its waves, its light**
+- **2026-11-24** (latest) — **Lord Howe Island's own plants: the Kentia palm, near and far**
+  (`src/game/island/kentia.js`, `plants.js`, `far.js`, new; `life.js`, `creatures.js`, `terrain.js`, `island.js`;
+  `test/plants.test.mjs`, 6 checks). The third of four parts of the island brought to standard. The island's own palm
+  (Howea forsteriana) is built from the botanists' numbers, wholly the game's own: a grey trunk with oblique raised ring
+  scars, each frond's fibrous sheath wrapped round its top, 12 to 18 fronds each one continuous arch with 46 leaflets a
+  side that hang in a curtain, the old fronds hanging and browning; light through the leaves (a backlit frond glows),
+  the wind's sway in the fronds and in their shadows. Whole within 22 m (every leaflet a blade), as cards of a frond's
+  picture to 120 m, and past that every palm on the island (192,034) as pictures of its crown from 64 ways, so the slopes
+  are forest crown by crown from 300 m up. Nothing fetched: the pictures are made on the GPU in 12 ms. GAME.md "The
+  island's own plants" has the sources, the look, what is rough (it costs about 8 ms a frame at the pixel cap) and what
+  was measured.
+
+- **2026-11-23** — **Lord Howe Island's sea and lagoon, to standard: what the water is, its waves, its light**
   (`src/game/island/sea.js`, `water.js`, new; `terrain.js`, `island.js`, `ground.js`, `sky.js`; `test/sea.test.mjs`, 13
   checks). The second of four parts of the island brought to standard. The sea is no longer a sheet of painted colours:
   its own optics (pure water's absorption and scattering, Pope and Fry, Morel; a clear oceanic water's algae and
