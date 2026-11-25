@@ -168,9 +168,12 @@ the true sky's [`sky.js`](src/game/sky.js)).
   2. **The true sky's point veils** (behind ?sky=true). sky.js draws each veil out to where it falls under a
      two-hundredth of the sky's brightness as shown; a point whose veil was under that even at its own place (0.1
      degree) was still sent, and the dome's loop over the eight brightest points ran for every pixel of the sky. By day
-     every point is so (a planet's veil at noon is about a ten-thousandth of the sky), and now none is sent by day; the
-     night's are as they were. 1.1 to 1.2 ms looking at the horizon; the pixels within 0.1 degree of a planet by day
-     change by under 1/255.
+     every point is so (a planet's veil at its own place at noon is about a ten-thousandth of the sky's light: worked
+     out, T-II), and now none is sent by day; the night's are as they were. 1.1 to 1.2 ms looking at the horizon. It is
+     the true sky's own cost (SOLAR.md has it too).
+  3. **Probe switches**, for whoever measures next: the sea's floor in parts (SEA_NO_BED its splat, SEA_NO_CAUSTIC,
+     SEA_NO_REFRACT the floor straight below) beside the sea's own SEA_NO_* switches, and ISLE_FAR (every distance's
+     choice at its far side). Nothing in the game sets them.
 - **Measured, and not built** (each switched on in the same page against itself, four cycles; the ms a frame it would
   save, at the five views):
   - the whole palms cast as their cards into the second and third shadow maps: 0.05, 0.09, 0, 0.2, 0.1 (noise);
@@ -184,12 +187,14 @@ the true sky's [`sky.js`](src/game/sky.js)).
   - the maps past the first not drawn again for what moves (birds, the body, bots): 0.25, 0.2, 0.4, -0.1, 0.2, and it
     would freeze the shadows of what moves past 15 m;
   - the wind's sea's bands made only every fourth frame while no sea is seen, by a query round the sea's drawing: up to
-    13 ms slower (the query used, ANY_SAMPLES_PASSED_CONSERVATIVE, round the largest draw of the picture). The sky's own
-    seven marks round the key light use the plain query and cost nothing measurable (0.04 ms at golden hour, facing the
-    Sun); a gate with that query might pay, but only where no sea at all is in sight (about 0.5 ms; at Lidgbird's foot);
-  - the land also split by distance (past 150 m every distance's choice at its far side, as tiles): at most 0.75, 0.8,
-    0.5 ms at the beach, the shore and the slopes, on top of the split above (ISLE_FAR, the bound); not worth a tile's
-    draws;
+    13 ms slower (the query used, ANY_SAMPLES_PASSED_CONSERVATIVE, round the largest draw of the picture; why, not
+    found). The sky's own seven marks round the key light use the plain query and cost nothing measurable (0.04 ms at
+    golden hour, facing the Sun, all seven asking); a gate with that query might pay, but only where no sea at all is in
+    sight (about 0.5 ms; of the five views, only Lidgbird's foot);
+  - the land also split by distance (tiles wholly past 150 m drawn with every distance's choice at its far side): at
+    most 0.75, 0.8 and 0.5 ms at the beach, the shore and the slopes on top of the split above (ISLE_FAR on all the
+    land, the bound), and a tile split would win only part of that; at the forest edge and Lidgbird's foot the bound
+    was lost in another program's use of the GPU;
   - the sea split into deep and shallow water: Lord Howe's water is clear enough that its floor shows everywhere (at
     22 m, where the floor's splat already gives way to its mean, the brightest floor still gives back 3 to 5 times the
     water's own light; at 48 m, the shelf, half of it), so no term of the floor can be left out by depth; over the
@@ -201,7 +206,24 @@ the true sky's [`sky.js`](src/game/sky.js)).
   8 of 255 and at most 10 pixels over 2. Main against itself: 13 of 255, up to 36 pixels over 2.
 
 **Measured** (25 November 2026, the M2 MacBook Air on mains power, headless Chromium on the Mac's own chip, the GPU's own
-timer, this branch against main at the same view, alternated): ...
+timer from one animation tick to the next, the mean without hitches; this branch against main at the same view,
+alternated two or three times; main in brackets). Under the true sky at noon, at 2,940 x 1,912: the beach as played
+21.6, 21.3 and 22.1 ms (23.0, 23.1, 23.3); the lagoon shore 26.1 and 26.4 (27.4, 27.5, 27.3); the forest edge 22.0 and
+21.9 (23.6, 23.8); Lidgbird's foot 22.9 and 23.0 (23.8, 23.8); the slopes from 300 m 29.7 and 30.4 (31.0, 31.3); toward
+the Sun under the beach's palms 17.2 and 17.4 (18.5, 18.5); the open sea off the east reef 20.7 and 20.7 (21.2, 21.5).
+So 0.65 to 1.75 ms a frame back. Under the present sky (the land's split alone): 17.9 and 17.7 (18.4, 18.1), 22.3 and
+21.7 (22.8, 22.5), 19.1 and 18.8 (19.7, 19.5), 20.7 and 20.6 (20.9, 20.6), 27.8 and 27.8 (28.0, 28.3): 0.1 to 0.6 ms (that
+build of the land holds no air, and fewer of the GPU's registers to begin with: T-II). fine.js's own choice, a fresh
+page at each view on a screen of sixty a second, after 90 s: at the forest edge the full 2,940 x 1,912 (main steps down
+to 2,205 x 1,434); at the beach the full pixels on both; at the shore and Lidgbird's foot 2,205 x 1,434 on both; at the
+slopes 1,837 x 1,195 on both. The lighter path (?gfx=low, 1,837 x 1,195): the beach 6.9 and 6.8 ms (7.1, 7.1), the shore
+8.6 and 8.6 (8.7, 8.8), the forest edge 8.0 and 7.9 (8.2, 8.3), a steady sixty; the slopes from 300 m swing between 12 and
+31 ms from one window to the next on both (the GPU's own clock at so light a load: T-II). A phone's size, 780 x 1,688
+(touch, the lighter path, on this Mac's GPU): 5.7 and 5.9 (5.9, 5.9), 6.5 and 6.5 (6.5, 6.5), 6.4 and 6.6 (6.7, 6.6), and
+the slopes 8.0 and 7.8 (8.1, 8.3): a steady sixty. `npm test`: 2,516 checks, all pass (`test/ground.test.mjs` 1 new: the
+level triangles against terrain.js's own thresholds). The GPU smokes: island 15, build 39, light 23, ship 39, fight 35
+checks, all pass, no errors or warnings. The harness, its tables and the contact sheets are in the scratch folder
+`island-real/perf`.
 
 ### The island's own plants: the Kentia palm, near and far (24 November 2026)
 
@@ -278,6 +300,9 @@ faster and these want measuring again there): at 2,940 x 1,912, the pixel cap, t
 million triangles in 88 calls; 779 palms stand within 170 m of the body there, 40 of them whole. `npm test`: 2,515
 checks, all pass (`test/plants.test.mjs` 6 new: the palm's numbers against the botanists', its leaflets hang, the far
 forest plants the near forest's palms, the shaders' numbers are the modules'). The GPU smokes were not run on battery.
+On mains power the next day (the speed pass, "The island's frame time", above, alternated in one run): main at the
+forest edge 23.6 and 23.8 ms, at the slopes from 300 m 31.0 and 31.3; with that pass's land split, 22.0 and 21.9, 29.7 and
+30.4.
 
 ### The island's sea and lagoon, to standard (23 November 2026)
 
