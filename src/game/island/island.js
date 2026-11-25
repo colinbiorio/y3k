@@ -62,7 +62,7 @@ function seaRings() {
 
 // One grid as a mesh: the cells any corner of which is above `deepest`, as the two triangles ground.js stands on. What
 // each point is made of is worked out per pixel by terrain.js (life.js's cover(), the scans), not carried here.
-function gridMesh(a, w, h, x0, z0, S, deepest) {
+function gridMesh(a, w, h, x0, z0, S, deepest, level = 0) {
   const keep = new Int32Array(w * h).fill(-1), pos = [], nor = [], idx = [];
   const H = (i, j) => a[Math.max(0, Math.min(h - 1, j)) * w + Math.max(0, Math.min(w - 1, i))];
   const vert = (i, j) => {
@@ -83,10 +83,24 @@ function gridMesh(a, w, h, x0, z0, S, deepest) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   g.computeBoundingSphere();
-  return g;
+  if (!level) return g;
+  // (`level`: its triangles parted into those whose three corners all face up past it, and the rest: two meshes of the
+  // same points)
+  const lv = [], st = [];
+  for (let t = 0; t < idx.length; t += 3) { const p = idx[t], q = idx[t + 1], r = idx[t + 2]; (nor[3 * p + 1] >= level && nor[3 * q + 1] >= level && nor[3 * r + 1] >= level ? lv : st).push(p, q, r); }
+  g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(st, 1) : new THREE.Uint16BufferAttribute(st, 1));
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', g.attributes.position); lg.setAttribute('normal', g.attributes.normal);
+  lg.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(lv, 1) : new THREE.Uint16BufferAttribute(lv, 1)); lg.boundingSphere = g.boundingSphere.clone();
+  return { level: lg, steep: g };
 }
 
 const FLATS = 5;                          // levellings drawn at once (one building of each kind stands at a time)
+// the land's triangles whose three corners all face within 34 degrees of straight up (a normal's rise past LEVEL) can
+// never be steep rock or cliff, nor read from their sides (terrain.js: the sides past 35 degrees, rock from 40, cliffs
+// from 45, each with its edge's jitter): they are drawn with the land's material made without those parts. The picture
+// is the same; the shader that draws most of the land is smaller, and the GPU keeps more of its pixels in hand at once
+// (0.5 to 1 ms a frame at 2940 x 1912: GAME.md, the island's frame time)
+const LEVEL = 0.83;
 const SHORE_CELL = -1.5;                  // m: the land's cells reach this far under the mean water (the swash's floor, the sheet's edge)
 export function createIsland({ renderer, lite = false, light = 'pale', ground, shape, sky = null }) {
   const scene = new THREE.Scene(), head = ground.head, S = head.spacing, geos = [], mats = [], texs = [];
@@ -137,6 +151,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   const landMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(landMat);
   const landCutMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(landCutMat);
   landCutMat.defines = { FLATS_CUT: '' };
+  const levelMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(levelMat);
+  levelMat.defines = { ISLE_NO_STEEP: '', ISLE_NO_FACE: '' };
+  const levelCutMat = look.land(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35 }), cut); mats.push(levelCutMat);
+  levelCutMat.defines = { ISLE_NO_STEEP: '', ISLE_NO_FACE: '', FLATS_CUT: '' };
   // the levelled ground's own material: the land's, without the cut, a little toward the eye where the two meet
   const flatMat = look.flat(new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: air ? 1 : 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); mats.push(flatMat);
   const flatMeshes = new Map();
@@ -182,11 +200,16 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
     });
     flatU.uFlatN.value = list.length;
     land.material = list.length ? landCutMat : landMat;
+    if (landLevel) landLevel.material = list.length ? levelCutMat : levelMat;
   }
   // (only the cells that stand above the water or meet it: the sea's own drawing shows the floor under it. Drawn after
   // what stands on it, so the GPU skips what those hide, and before the sea, so the sea's sheet is skipped under the land)
-  const landGeo = gridMesh(ground.hts.main, head.w, head.h, head.x0, head.z0, S, SHORE_CELL); geos.push(landGeo);
+  // (the land as two meshes, its level triangles and the rest; on the lighter path, which reads neither sides nor the
+  // large face, one)
+  const landParts = gridMesh(ground.hts.main, head.w, head.h, head.x0, head.z0, S, SHORE_CELL, lite ? 0 : LEVEL), landGeo = lite ? landParts : landParts.steep; geos.push(landGeo);
   const land = new THREE.Mesh(landGeo, landMat); land.userData.isleLand = true; land.receiveShadow = true; land.renderOrder = 1; scene.add(land);
+  const landLevel = lite ? null : new THREE.Mesh(landParts.level, levelMat);
+  if (landLevel) { geos.push(landParts.level); landLevel.userData.isleLand = true; landLevel.receiveShadow = true; landLevel.renderOrder = 1; scene.add(landLevel); }
   const pyrGeo = gridMesh(ground.hts.pyramid, head.pw, head.ph, head.px0, head.pz0, S, SHORE_CELL); geos.push(pyrGeo);
   const pyramid = new THREE.Mesh(pyrGeo, landMat); pyramid.userData.isleLand = true; pyramid.receiveShadow = true; pyramid.renderOrder = 1; scene.add(pyramid);
 
