@@ -406,6 +406,8 @@ void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out 
   const mat2 I2 = mat2( 1.0 );
   #ifdef ISLE_NO_COARSE
   float layer = float( i ), far = 0.0;
+  #elif defined( ISLE_FAR ) && ! defined( ISLE_WATER )
+  float layer = float( i ), far = 1.0;
   #else
   float layer = float( i ), far = ${lite ? '0.0' : 'smoothstep( 38.0, 48.0, dist )'};
   #endif
@@ -459,14 +461,24 @@ vec3 isleN0 = normalize( vWN );
 vec3 isleDpx = dFdx( isleW ), isleDpy = dFdy( isleW );
 float isleDist = length( isleW - cameraPosition ), islePx = max( length( isleDpx ), length( isleDpy ) );
 float isleH = isleW.y;
+// (ISLE_FAR, a probe's switch: every distance's choice at its far side, as past 150 m; what a split of the land by its
+// distance from the eye could win at most. GAME.md, the island's frame time)
+#ifdef ISLE_FAR
+isleFar = true;
+#else
 isleFar = isleDist > 140.0;
+#endif
 float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * isleNy ) / isleNy;
 // the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
 vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
 isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
 float isleSkySeen = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
 // a finer jitter for edges, near the eye only (further off it is under a pixel)
+#ifdef ISLE_FAR
+float isleE2 = 0.5;
+#else
 float isleE2 = isleDist < 60.0 ? gn( isleW.xz * 0.43 + 7.0 ) : 0.5;
+#endif
 float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
 // (each class's own band is narrow, a few metres on the ground: the two surfaces' heights shape the edge within it)
 // (the island's slopes are forested up to the foot of its cliffs: the 30 m data's slopes past 0.9, 42 degrees, are walls
@@ -515,7 +527,7 @@ if ( isleWb > 0.06 ) {
   // its colour and height only, in one read from above at the scale its distance calls for (the first's finish and
   // normal carry the edge: where two meet the eye reads the colours and the edge's shape), its mean past 120 m
   isleSrfB = isleSrfA; isleNB = isleNA;
-  #ifdef ISLE_B_MEAN
+  #if defined( ISLE_B_MEAN ) || defined( ISLE_FAR )
   if ( false ) {
   #else
   if ( isleDist < 120.0 ) {
@@ -605,21 +617,27 @@ vec2 seaSw = vec2( 0.0 ); float seaSwW = seaOpen * ( 1.0 - smoothstep( 650.0, 30
 if ( seaSwW > 0.0 ) { seaSwell( vW.xz, seaSw ); seaSw *= seaSwW; }        // (the swell: over open water, away from the reef)
 // the eye's line into the water, bent by the waves as large as a few pixels (the finest, read a few levels up, only blur
 // the floor, as they do an eye's view through rippled water; read sharp, they scatter its grain into speckle)
+#ifdef SEA_NO_REFRACT
+vec2 seaSm = seaSw;
+#else
 float seaSp2; vec2 seaSm = seaD0 < 22.0 ? seaSlope( vW.xz, seaDx * 6.0, seaDy * 6.0, seaWt, seaSp2 ).xy + seaSw : seaSw;
+#endif
 vec3 seaT = refract( -seaV, normalize( vec3( -seaSm.x, 1.0, -seaSm.y ) ), 1.0 / SEA_N ); seaT = normalize( vec3( seaT.x, min( seaT.y, -0.05 ), seaT.z ) );
 vec3 seaFN = vec3( 0.0, 1.0, 0.0 ), seaP = vec3( vW.x, seaLevel - seaD0, vW.z );
+#ifndef SEA_NO_REFRACT
 if ( seaD0 < 22.0 ) {                                    // (past that the floor is not seen: straight down is enough)
   seaP = vW + seaT * ( seaD0 / -seaT.y );
   seaP = vW + seaT * ( max( 0.0, seaLevel - seaFloorAt( seaP.xz, seaFN ) ) / -seaT.y );
   seaP.y = seaFloorAt( seaP.xz, seaFN );
 }
+#endif
 float seaH = max( 0.0, seaLevel - seaP.y ), seaMuV = clamp( -seaT.y, 0.05, 1.0 ), isleFilm = seaH, isleShadeK = 1.0;
 isleW = seaP;
 // THE LIGHT'S DANCE ON THE FLOOR (caustics): where the light that falls on the floor came into the water, the short waves'
 // curvature (the slope's divergence) gathers it or spreads it: 1 / (1 + (1 - 1/n) H div). A floor under a pixel that
 // spans several of them sees their mean (one); deep, the dance blurs out
 float seaCaustic = 1.0;
-#if defined( SEA_FFT ) && NUM_DIR_LIGHTS > 0
+#if defined( SEA_FFT ) && NUM_DIR_LIGHTS > 0 && ! defined( SEA_NO_CAUSTIC )
 {
   vec3 kl = inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix ), lt = refract( -kl, vec3( 0.0, 1.0, 0.0 ), 1.0 / SEA_N );
   float px = max( length( dFdx( seaP.xz ) ), length( dFdy( seaP.xz ) ) ), fade = smoothstep( 0.16, 0.05, px ) * smoothstep( 7.0, 2.5, seaH ) * smoothstep( 0.03, 0.25, seaH ) * step( 0.0, kl.y );
@@ -647,6 +665,7 @@ int isleB = isleA == ${ROCK} ? ( wS >= wD ? ${SHORE} : ${SAND} ) : isleA == ${SH
 vec4 isleColA = vec4( uIsleMean[ isleA ], 0.5 ), isleSrfA = vec4( 0.5, 0.5, 0.9, 1.0 ), isleColB = isleColA, isleSrfB = isleSrfA; vec3 isleNA = isleN0, isleNB = isleN0;
 float isleK = 1.0;
 // (twenty metres down the floor's own light is a twentieth of itself in blue, nothing in red: its mean is enough)
+#ifndef SEA_NO_BED
 if ( seaH < 22.0 ) {
   isleLayer( isleA, isleDist, isleDpx, isleDpy, isleN0, false, isleColA, isleSrfA, isleNA );
   if ( isleWb > 0.06 ) {
@@ -655,6 +674,7 @@ if ( seaH < 22.0 ) {
     float ba = max( ha - top, 0.0 ), bb = max( hb - top, 0.0 ); isleK = ba / max( ba + bb, 1.0e-5 );
   }
 }
+#endif
 vec3 isleAlb = mix( mix( uIsleMean[ isleB ], uIsleMean[ isleA ], isleK ), mix( isleColB.rgb, isleColA.rgb, isleK ), uIsleLook.x );
 vec4 isleSrf = mix( isleSrfB, isleSrfA, isleK );
 vec3 isleNw = normalize( mix( isleN0, normalize( mix( isleNB, isleNA, isleK ) ), uIsleLook.x ) );
@@ -779,6 +799,7 @@ if ( isleFilm > 0.0 ) {
 #endif
 `;
 // a probe's shader switches (material defines, which three folds into the program's key), to measure what each part costs
+// (among them the sea's floor in parts: SEA_NO_BED its splat, SEA_NO_CAUSTIC, SEA_NO_REFRACT the floor straight below)
 const VARIANT = { defines: {} };
 // the sea's sheet is moved by the waves: the swell, the swell at the reef (where the sheet is fine enough to carry it),
 // the wind's largest band near the eye (its smaller ones only shade it: a program has sixteen texture units in all, and

@@ -119,6 +119,112 @@ the house, the workshop, the tower, the hall) are in the bar's build list. **The
 something to fight** came forward at Colin's word the same day: press **bots**,
 call one up, and throw the ring at it.
 
+### The island's frame time: where it goes, and what was won back (25 November 2026)
+
+The ground, the sea and the plants made the island look real, and each added to the GPU's time a frame: at the pixel
+cap (2,940 x 1,912, a full 1,470 x 956 window at two pixels a point) on the M2 Air the forest edge had taken about 24 ms
+and the slopes from 300 m about 33 (the plants' figures, on battery). This pass measured where the time goes, part by
+part, at the five views the island's parts were measured at; kept what won time back without changing the picture; and
+wrote down what was tried and did not pay ([`island.js`](src/game/island/island.js), [`terrain.js`](src/game/island/terrain.js);
+the true sky's [`sky.js`](src/game/sky.js)).
+
+- **How a part's cost was measured.** A timer round each render call is no measure on this GPU: the M2 works on
+  several passes at once, and the calls' times summed to 51 ms in a frame of 21. So a part's cost is the frame's own
+  time with it, less the time without it: one GPU timer from one animation tick to the next, the mean of the frames
+  without hitches (a frame past 1.3 times the middle one is not the drawing), each part switched off and on three or
+  four times at the same view and the median of the differences kept. With nothing changing, that mean wanders by 0.05
+  to 0.2 ms; 3 ms of the page's own work in the middle of a frame does not move it (the timer counts the GPU's work, not
+  its waiting). Mains power; the branch and main alternated at each view. (One pass was spoilt by another program
+  drawing on the same GPU, its frames twice as long as they are: it was run again.)
+- **Where the time goes** (ms of the GPU's time a frame saved by switching the part off; ?sky=true, noon; the frame in
+  all 21 to 31 ms):
+
+  | | the beach as played | the lagoon shore | the forest edge | Lidgbird's foot | the slopes from 300 m |
+  |---|---|---|---|---|---|
+  | the frame, main | 21.8, 20.9 | 24.8, 24.8 | 22.7, 22.7 | 23.5, 23.5 | 31.1, 31.3 |
+  | the sea's drawing | 1.5 | 3.8 | 0.3 | 0 | 10.7 |
+  | (of it: the floor, its splat, caustics and refraction) | 0.8 | 2.3 | | | 6.0 |
+  | the far forest's crowns | 2.2 | 2.6 | 2.8 | 2.0 | 5.0 |
+  | the true sky's dome | 1.5 | 0.6 | 1.5 | 0.6 | 0 |
+  | the shadow maps, drawn and read | 1.3 | 1.1 | 1.1 | 1.5 | 0.8 |
+  | (of it: drawing all three, palms and all) | 0.2 | 0.2 | 0.55 | 0.55 | 0.45 |
+  | the whole palms | 1.1 | 0.2 | 1.1 | 2.4 | 0 |
+  | the cards, fine and coarse | 0.5 | 0.8 | 2.8 | 1.6 | 0 |
+  | the wind's sea's bands | 0.9 | 1.0 | 0.8 | 0.5 | 0.6 |
+  | the land: its second surface, large face, coarse scale, sides (each) | 0.7-1.1 | 0.9-1.2 | 0.5-1.1 | 1.0-1.8 | 0.2-1.0 |
+  | the sky's tables | 0.3 | 0.3 | 0.2 | 0 | 0.4 |
+
+  The GPU's time goes to pixels, not triangles: the shadow maps draw 0.5 to 1 million triangles each and all three
+  together cost under 0.6 ms; what they cost is their reading, in every lit pixel within 220 m.
+- **What was won back:**
+  1. **The land drawn in two parts.** A triangle of the land whose three corners all face within 34 degrees of straight
+     up can never be steep rock or cliff, nor be read from its sides (the sides start at 35 degrees, rock at 40, cliffs
+     at 45, each with its edge's jitter). So the land is two meshes of the same points: those triangles, drawn with the
+     land's material built without its sides and its large face (ISLE_NO_STEEP and ISLE_NO_FACE), and the rest, drawn as
+     before. Each pixel of it is worked out by the same numbers, but the shader that draws most of the land is smaller,
+     and the GPU keeps more of its pixels in hand at once (the land's parts cost about a millisecond each mostly by being
+     in the shader at all, as the ground's own measure found). It saves 1.0, 1.0, 0.55, 0.8 and 0.6 ms at the five views.
+     The lighter path, which reads neither, keeps one mesh.
+  2. **The true sky's point veils** (behind ?sky=true). sky.js draws each veil out to where it falls under a
+     two-hundredth of the sky's brightness as shown; a point whose veil was under that even at its own place (0.1
+     degree) was still sent, and the dome's loop over the eight brightest points ran for every pixel of the sky. By day
+     every point is so (a planet's veil at its own place at noon is about a ten-thousandth of the sky's light: worked
+     out, T-II), and now none is sent by day; the night's are as they were. 1.1 to 1.2 ms looking at the horizon. It is
+     the true sky's own cost (SOLAR.md has it too).
+  3. **Probe switches**, for whoever measures next: the sea's floor in parts (SEA_NO_BED its splat, SEA_NO_CAUSTIC,
+     SEA_NO_REFRACT the floor straight below) beside the sea's own SEA_NO_* switches, and ISLE_FAR (every distance's
+     choice at its far side). Nothing in the game sets them.
+- **Measured, and not built** (each switched on in the same page against itself, four cycles; the ms a frame it would
+  save, at the five views):
+  - the whole palms cast as their cards into the second and third shadow maps: 0.05, 0.09, 0, 0.2, 0.1 (noise);
+  - each palm's vertices left at once where its instance is out of its band (a vertex early-out): 0, -0.1, 0.1, 0.05, 0.3
+    (noise), and the crowds' counts cut to their bands' reach: -0.1, -0.2, 0.4, 0.2, -0.6 (noise);
+  - the far crowns' squares discarded where no sample is leaf: -0.1, -0.3, 0.1, -0.2, 0.2, and cut to what their three
+    pictures can show (each picture's content box seen along the eye's line, widened by how far its smaller levels
+    spread it there): 0.1, -0.2, 0.5, -0.2, 0.2. Widened enough to hold the picture, the squares are nearly whole again;
+  - the far crowns drawn before the land (so the land under them is not shaded): -0.9, -0.8, -0.4, -2.9, -0.2 (slower:
+    crowns behind the hills are shaded instead);
+  - the maps past the first not drawn again for what moves (birds, the body, bots): 0.25, 0.2, 0.4, -0.1, 0.2, and it
+    would freeze the shadows of what moves past 15 m;
+  - the wind's sea's bands made only every fourth frame while no sea is seen, by a query round the sea's drawing: up to
+    13 ms slower (the query used, ANY_SAMPLES_PASSED_CONSERVATIVE, round the largest draw of the picture; why, not
+    found). The sky's own seven marks round the key light use the plain query and cost nothing measurable (0.04 ms at
+    golden hour, facing the Sun, all seven asking); a gate with that query might pay, but only where no sea at all is in
+    sight (about 0.5 ms; of the five views, only Lidgbird's foot);
+  - the land also split by distance (tiles wholly past 150 m drawn with every distance's choice at its far side): at
+    most 0.75, 0.8 and 0.5 ms at the beach, the shore and the slopes on top of the split above (ISLE_FAR on all the
+    land, the bound), and a tile split would win only part of that; at the forest edge and Lidgbird's foot the bound
+    was lost in another program's use of the GPU;
+  - the sea split into deep and shallow water: Lord Howe's water is clear enough that its floor shows everywhere (at
+    22 m, where the floor's splat already gives way to its mean, the brightest floor still gives back 3 to 5 times the
+    water's own light; at 48 m, the shelf, half of it), so no term of the floor can be left out by depth; over the
+    lagoon the floor is the picture.
+- **The picture is the same.** The same instant on both (each page's game clock driven to one time and held, the Sun
+  pinned; the body, the animals and the ring in hand put out of sight, their own motions not the island's), per pixel:
+  under the true sky at ten views (noon and golden hour, among the palms, the lagoon from 50 m) the largest difference
+  is 8 of 255, on one pixel at the far shore, and no view has more than 3 pixels over 2; under the present sky at four,
+  8 of 255 and at most 10 pixels over 2. Main against itself: 13 of 255, up to 36 pixels over 2.
+
+**Measured** (25 November 2026, the M2 MacBook Air on mains power, headless Chromium on the Mac's own chip, the GPU's own
+timer from one animation tick to the next, the mean without hitches; this branch against main at the same view,
+alternated two or three times; main in brackets). Under the true sky at noon, at 2,940 x 1,912: the beach as played
+21.6, 21.3 and 22.1 ms (23.0, 23.1, 23.3); the lagoon shore 26.1 and 26.4 (27.4, 27.5, 27.3); the forest edge 22.0 and
+21.9 (23.6, 23.8); Lidgbird's foot 22.9 and 23.0 (23.8, 23.8); the slopes from 300 m 29.7 and 30.4 (31.0, 31.3); toward
+the Sun under the beach's palms 17.2 and 17.4 (18.5, 18.5); the open sea off the east reef 20.7 and 20.7 (21.2, 21.5).
+So 0.65 to 1.75 ms a frame back. Under the present sky (the land's split alone): 17.9 and 17.7 (18.4, 18.1), 22.3 and
+21.7 (22.8, 22.5), 19.1 and 18.8 (19.7, 19.5), 20.7 and 20.6 (20.9, 20.6), 27.8 and 27.8 (28.0, 28.3): 0.1 to 0.6 ms (that
+build of the land holds no air, and fewer of the GPU's registers to begin with: T-II). fine.js's own choice, a fresh
+page at each view on a screen of sixty a second, after 90 s: at the forest edge the full 2,940 x 1,912 (main steps down
+to 2,205 x 1,434); at the beach the full pixels on both; at the shore and Lidgbird's foot 2,205 x 1,434 on both; at the
+slopes 1,837 x 1,195 on both. The lighter path (?gfx=low, 1,837 x 1,195): the beach 6.9 and 6.8 ms (7.1, 7.1), the shore
+8.6 and 8.6 (8.7, 8.8), the forest edge 8.0 and 7.9 (8.2, 8.3), a steady sixty; the slopes from 300 m swing between 12 and
+31 ms from one window to the next on both (the GPU's own clock at so light a load: T-II). A phone's size, 780 x 1,688
+(touch, the lighter path, on this Mac's GPU): 5.7 and 5.9 (5.9, 5.9), 6.5 and 6.5 (6.5, 6.5), 6.4 and 6.6 (6.7, 6.6), and
+the slopes 8.0 and 7.8 (8.1, 8.3): a steady sixty. `npm test`: 2,516 checks, all pass (`test/ground.test.mjs` 1 new: the
+level triangles against terrain.js's own thresholds). The GPU smokes: island 15, build 39, light 23, ship 39, fight 35
+checks, all pass, no errors or warnings. The harness, its tables and the contact sheets are in the scratch folder
+`island-real/perf`.
+
 ### The island's own plants: the Kentia palm, near and far (24 November 2026)
 
 The third of the four parts the island is being brought to standard in (the ground and its light; the sea and the
@@ -174,10 +280,11 @@ that are palm forest crown by crown instead of a green colour.
 
 **What is rough:**
 
-- **The cost** (below): about 8 ms of the GPU's time a frame at the pixel cap at the forest edge, 5 ms from 300 m up; the
-  shadow maps draw 0.8 to 1.2 million triangles each, most of them the whole crowns (drawn into all three maps). Not
-  yet done: the whole crowns' cards in the second and third maps (their texels, 8 and 43 cm, hold no leaflet), fewer
-  whole palms, the far crowns' squares cut to each picture's own outline.
+- **The cost** (below; part by part in "The island's frame time", above): about 8 ms of the GPU's time a frame at the
+  pixel cap at the forest edge, 5 ms from 300 m up. It is in the pixels: the cards 2.8 ms at the forest edge, the far
+  crowns 2 to 5 ms, the whole palms up to 2.4. The shadow maps draw 0.8 to 1.2 million triangles each, but all three
+  together cost under 0.6 ms: the whole crowns' cards in the second and third maps, fewer whole palms by their
+  instances' bands, and the far crowns' squares cut to what their pictures show were each tried there, and none pays.
 - **The forest is a park near the eye**: one palm to each 68 m^2 (life.js's 7 m cells) and nothing under them; the
   island's own forest is denser, with seedlings and ferns everywhere. No banyan, no screw pine, no ground cover yet.
 - The far crowns' coverage is taken as layers, 1 - (1 - c)^4 (a crown far off is many fronds overlapping): chosen by
@@ -193,6 +300,9 @@ faster and these want measuring again there): at 2,940 x 1,912, the pixel cap, t
 million triangles in 88 calls; 779 palms stand within 170 m of the body there, 40 of them whole. `npm test`: 2,515
 checks, all pass (`test/plants.test.mjs` 6 new: the palm's numbers against the botanists', its leaflets hang, the far
 forest plants the near forest's palms, the shaders' numbers are the modules'). The GPU smokes were not run on battery.
+On mains power the next day (the speed pass, "The island's frame time", above, alternated in one run): main at the
+forest edge 23.6 and 23.8 ms, at the slopes from 300 m 31.0 and 31.3; with that pass's land split, 22.0 and 21.9, 29.7 and
+30.4.
 
 ### The island's sea and lagoon, to standard (23 November 2026)
 
@@ -402,7 +512,8 @@ plants; the rocks and the beach's life). The ground had been flat colour: three 
 **What is rough, seen in the pictures:**
 
 - **The frame time at the pixel cap** (below): the ground costs about 2.5 ms of the GPU's time a frame at 2940 x 1912
-  over main; main itself takes 13.6 ms at the beach as played and more at some places.
+  over main; main itself takes 13.6 ms at the beach as played and more at some places. (25 November: the land's level
+  triangles are now drawn with a smaller build of its material, 0.55 to 1 ms of it back: "The island's frame time".)
 - Steep rock at 200 to 400 m shows the basalt scan's strata repeating every 13 m in rows (read as lava flows, but
   regular); the canopy past the palms is colour, not crowns; the large aerial scan's plants are one green.
 - (The wet strip's swash and the waterline drawn per pixel came with the sea, below.) The palms' sway is not in their
