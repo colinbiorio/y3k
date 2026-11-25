@@ -98,4 +98,19 @@ ok('the land\'s own lines and sky share, and the shadow maps: what the shader re
   assert.deepEqual(C.far, [15, 60, 220]); assert.ok(C.margin >= 14.5 / Math.tan((4 * Math.PI) / 180), 'a 14.5 m palm with the light 4 degrees up casts into a map from behind it');
 });
 
+ok('the land\'s level triangles can never take what their build leaves out: no sides, no rock, no cliff, no large face (island.js LEVEL against terrain.js\'s own thresholds, edges\' jitter and all)', () => {
+  const island = read('src/game/island/island.js'), level = +island.match(/const LEVEL = ([\d.]+);/)[1];
+  // a triangle whose corners all face up past LEVEL: its normal, interpolated and made unit again, faces up past it too
+  const slope = Math.sqrt(1 - level * level) / level;
+  const sides = +terrain.match(/bool isleSteep = \$\{lite \? 'false' : 'isleN0\.y < ([\d.]+)'\};/)[1];
+  const rock = terrain.match(/float wRockS = smoothstep\( ([\d.]+), [\d.]+, isleSlope \+ ([\d.]+) \* \( isleCtl\.a - 0\.5 \) \);/), cliff = terrain.match(/float wCliff = smoothstep\( ([\d.]+), [\d.]+, isleSlope \+ ([\d.]+) \* \( isleE2 - 0\.5 \) \);/);
+  assert.ok(level > sides, `the sides are read only under ${sides}: ${level}`);
+  assert.ok(slope < +rock[1] - +rock[2] / 2, `rock from a slope of ${+rock[1] - +rock[2] / 2}: ${slope.toFixed(3)}`);
+  assert.ok(slope < +cliff[1] - +cliff[2] / 2, `cliffs from ${+cliff[1] - +cliff[2] / 2}: ${slope.toFixed(3)}`);
+  // the large face is the cliffs' and the steep rock's alone, and the level build leaves out only the sides and the face
+  assert.match(terrain, /float k = i == \$\{CLIFF\} \? [^:]+ : i == \$\{ROCK\} \? [^:]+ : 0\.0;/);
+  assert.match(island, /levelMat\.defines = \{ ISLE_NO_STEEP: '', ISLE_NO_FACE: '' \};/);
+  assert.match(island, /levelCutMat\.defines = \{ ISLE_NO_STEEP: '', ISLE_NO_FACE: '', FLATS_CUT: '' \};/);
+});
+
 console.log(`\n${passed} checks passed.`);

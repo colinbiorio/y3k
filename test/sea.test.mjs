@@ -148,8 +148,8 @@ ok('the sheet round the eye reaches past 45 km, fine near the eye (a sixteenth o
 
 ok('the island draws its sea so: the land only where it stands above the water or meets it, then the sea over the floor in one drawing, not over what stands in the water; the true sky hands it its light', () => {
   const island = read('src/game/island/island.js'), terrain = read('src/game/island/terrain.js'), sky = read('src/game/sky.js');
-  assert.match(island, /const SHORE_CELL = -1\.5;/); assert.match(island, /gridMesh\(ground\.hts\.main, head\.w, head\.h, head\.x0, head\.z0, S, SHORE_CELL\)/);
-  assert.match(island, /land\.renderOrder = 1;/); assert.match(island, /sea\.renderOrder = 2;/);
+  assert.match(island, /const SHORE_CELL = -1\.5;/); assert.match(island, /gridMesh\(ground\.hts\.main, head\.w, head\.h, head\.x0, head\.z0, S, SHORE_CELL[,)]/);
+  assert.match(island, /land\.renderOrder = 1;/); assert.match(island, /landLevel\.renderOrder = 1;/, 'the land\'s level part too'); assert.match(island, /sea\.renderOrder = 2;/);
   assert.match(island, /sea\.position\.set\(camera\.position\.x, 0, camera\.position\.z\);/, 'the sheet follows the eye');
   assert.match(terrain, /stencilFunc: THREE\.NotEqualStencilFunc, stencilRef: 2/, 'the sea is not drawn over what stands in the water');
   assert.match(terrain, /stencilRef: 2, stencilFunc: THREE\.AlwaysStencilFunc, stencilZPass: THREE\.ReplaceStencilOp/, 'which marks itself');
