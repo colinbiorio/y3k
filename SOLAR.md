@@ -732,6 +732,13 @@ little faint, the plane a little bright: the map draws a star as its flux to the
   functions as the dome's), its thresholds and its colour; its pixels only lay the light.
 - The night's glow is skipped where the exposure makes it a hundred-thousandth of white (by day), the Moon's table
   where its light in the air is under a thousandth of the sky's, the Sun's table at night.
+- A bright point's veil is sent to the GPU only if it reaches a two-hundredth of the sky's brightness somewhere (its
+  value at its own place, 0.1 degree, over that), the rule each veil is drawn out by. By day none does (a planet's veil
+  at its own place is about a ten-thousandth of the daytime sky), and the dome's loop over the points, which runs for
+  every pixel of the sky, is left out (25 November 2026: it had cost 1.1 to 1.2 ms a frame at 2,940 x 1,912 looking at
+  the horizon; in the same-instant pictures against the sky before it, ten views, the largest difference anywhere is 8
+  of 255 on single pixels, and no view has more than 3 pixels over 2). This is the true sky's own cost, behind
+  ?sky=true (GAME.md, "The island's frame time").
 
 ### What was measured
 

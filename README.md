@@ -263,7 +263,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-24** (latest) — **Lord Howe Island's own plants: the Kentia palm, near and far**
+- **2026-11-25** (latest) — **The island's frame time: where it goes, and what was won back**
+  (`src/game/island/island.js`, `terrain.js`; `src/game/sky.js`). The island's ground, sea and plants measured part by
+  part at five views at the pixel cap (each part's cost the frame's own GPU time with it, less without it: a timer round
+  each render call is no measure on the M2, whose passes overlap). The time is in the pixels, not the triangles. The
+  land is now drawn in two parts, its level triangles with its material built without the sides and the large face they
+  can never use: the same picture, 0.55 to 1 ms a frame back. Under the true sky the bright points' veils are sent only
+  where they reach a two-hundredth of the sky, so none by day: 1.1 ms back looking at the horizon. Same-instant pictures
+  against main: the largest difference 8 of 255, on single pixels. What was tried and did not pay (the palms in the
+  shadow maps, the far crowns' squares, the sea by depth, the land by distance), with its numbers, is in GAME.md "The
+  island's frame time".
+
+- **2026-11-24** — **Lord Howe Island's own plants: the Kentia palm, near and far**
   (`src/game/island/kentia.js`, `plants.js`, `far.js`, new; `life.js`, `creatures.js`, `terrain.js`, `island.js`;
   `test/plants.test.mjs`, 6 checks). The third of four parts of the island brought to standard. The island's own palm
   (Howea forsteriana) is built from the botanists' numbers, wholly the game's own: a grey trunk with oblique raised ring
