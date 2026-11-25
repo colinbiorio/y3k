@@ -46,6 +46,8 @@ const D2R = Math.PI / 180;
 const f = (x) => { const s = Number(x).toPrecision(9); return /[.e]/.test(s) ? s : s + '.0'; };
 // a point's veil is the CIE's equation from where it is defined (0.1 degrees) out: a point has no disc to hold it in
 const POINT_HELD = 0.1;
+// …so its veil is at its most there (luminance per lux at the eye: the dome's airVeilAt at POINT_HELD)
+const POINT_PEAK = (() => { const t = POINT_HELD, k = 1 + (GLARE.age / 62.5) ** 4; return 10 / (t * t * t) + (5 / (t * t) + 0.1 * GLARE.pigment / t) * k + 0.0025 * GLARE.pigment; })();
 // how far out a veil is worth drawing: the angle (degrees, at most 60) where a light of `glare` (lux times the
 // exposure) lays less than `least` (a scene value) over the sky
 function reach(glare, least, held) {
@@ -698,8 +700,12 @@ export function createTrueSky({ renderer, lite = false, lat, lon, ground = null 
       }
       brightList = list.sort((a, b) => b[3] - a[3]).slice(0, BRIGHT);
     }
-    BRIGHT_U.uBrightN.value = api.debug.veils ? brightList.length : 0;
-    brightList.forEach((b, i) => { BRIGHT_U.uBright.value[i].set(b[0], b[1], b[2], b[3] * exposure); BRIGHT_U.uBrightReach.value[i] = 2 * Math.sin(reach(b[3] * exposure, least, POINT_HELD) * D2R / 2); });
+    // (a point whose veil falls under that two-hundredth even at its own place is not drawn at all: by day, none is drawn.
+    // The list is brightest first, and the dome's loop over it runs for every pixel of the sky: 1.1 ms a frame at
+    // 2940 x 1912 looking at the horizon, by day, for veils of a ten-thousandth of the sky's light)
+    let nb = 0; while (nb < brightList.length && brightList[nb][3] * exposure * POINT_PEAK > least) nb += 1;
+    BRIGHT_U.uBrightN.value = api.debug.veils ? nb : 0;
+    for (let i = 0; i < nb; i += 1) { const b = brightList[i]; BRIGHT_U.uBright.value[i].set(b[0], b[1], b[2], b[3] * exposure); BRIGHT_U.uBrightReach.value[i] = 2 * Math.sin(reach(b[3] * exposure, least, POINT_HELD) * D2R / 2); }
     // the lights: the key is the brightest light that comes straight, through the air; the fill is half of the whole
     // sky's light on level ground (the other half comes by the wrapped sky), and from below, what the ground gives back
     const d0 = K.direct[0] * exposure, d1 = K.direct[1] * exposure, d2 = K.direct[2] * exposure, top = Math.max(d0, d1, d2, 1e-9);
@@ -797,7 +803,7 @@ void main() {
         moon: { alt: M.alt, az: M.az, phase: M.phase, magnitude: M.magnitude, lux: M.lux, direct: luminance(M.direct), sky: luminance(M.sky),
           face: { alpha: face.face.alpha, sunLux: face.face.sunLux, earthLux: face.face.earthLux, earthPhase: face.face.earthPhase, alphaEarth: face.face.alphaEarth, litMean: face.face.litMean, earthMean: face.face.earthMean, subLon: face.face.subLon, subLat: face.face.subLat, maps: { ...moonState } },
           seen: { ...moonView } },
-        night: { level: luminance(N.level), mean: luminance(N.mean), stars: luminance(N.starsLevel), sunLon: N.sunLon }, milkyWay: mwState, points: api.stars, bright: brightList.length,
+        night: { level: luminance(N.level), mean: luminance(N.mean), stars: luminance(N.starsLevel), sunLon: N.sunLon }, milkyWay: mwState, points: api.stars, bright: brightList.length, veils: BRIGHT_U.uBrightN.value,
         tables: { sky: [SW, SH], air: [AN, AW], made: Math.round(made) } };
     },
     dispose() {
