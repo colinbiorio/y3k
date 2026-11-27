@@ -604,6 +604,12 @@ export function createOnboard(env) {
       const login = loginCommand(p) || 'its sign-in command';
       return h('div.ob-setup.ob-signin',
         h('div.cv-small', 'Sign in to ', h('b', name), ' first: open Terminal, run ', h('code.cm', login), ', sign in, then come back.'),
+        // WHOSE SIGN-IN (2026-11-27). Claude Code in the terminal keeps a sign-in
+        // of its own. A person who works in the Claude app all day IS signed in,
+        // there, and reads this step as y3kode having lost it; and the
+        // terminal's can lapse on its own while the app's goes on. One line
+        // says which sign-in is meant.
+        p.id === 'claude' ? h('div.muted.cv-small.ob-whose', 'This is the terminal\'s own sign-in. Being signed in to the Claude app or claude.ai does not count here, and it can lapse while those stay signed in.') : null,
         h('div.cv-acts.ob-left', copyButton(login), refreshBtn()));
     }
     if (st === 'needs-key') {

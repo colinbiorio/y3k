@@ -263,7 +263,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-25** (latest) — **The island's frame time: where it goes, and what was won back**
+- **2026-11-27** (latest) — **A lapsed sign-in is called that (y3kode 0.3.23)** (`y3k-code/adapters/claude.mjs`,
+  `brain.mjs`, `engine.mjs`; `src/own-brain.js`, `src/brain.js`, `src/code/onboard.js`). Colin's presence stopped
+  answering and kode said "Sign in to Claude Code first" while he was signed in to the Claude app. Found on his
+  computer: the terminal's Claude Code keeps a sign-in of its own, and that one had lapsed (its refresh token no
+  longer accepted, from 26 Nov; `claude` then `/login` mends it). y3kode was reporting the truth, with three faults
+  of its own on top, all one cause: Claude Code 2.1.312 and later say "Failed to authenticate: OAuth session expired
+  and could not be refreshed", and the engine's pattern for a sign-in failure knew only the older words. So **a
+  thought of the presence that failed that way was filed as a refusal** (four in that morning's activity log, none
+  telling anyone to sign in), **a session's turn ended without saying it was the sign-in**, and **the look before a
+  turn went on saying "signed in"** because what is kept on the computer still looked whole. Now the pattern knows
+  the sentence; a thought that fails in words nobody knows asks `claude auth status` before it is called a refusal
+  (only a clear "no" counts: the reply is read strictly now, where anything falsy used to mean signed out); a turn
+  that comes back signed out tells the catalog at once; and the page reads an older engine's "refused" the same way,
+  so engines in the field are covered before their people update. Every place that says "sign in" says whose
+  sign-in it is: the terminal's own, apart from the Claude app's. Tests in `code-claude`, `own-brain-page` and
+  `code-client` (each part broken on purpose and caught). Not known: why the refresh token stopped being accepted;
+  that is on Anthropic's side of the sign-in.
+- **2026-11-25** — **The island's frame time: where it goes, and what was won back**
   (`src/game/island/island.js`, `terrain.js`; `src/game/sky.js`). The island's ground, sea and plants measured part by
   part at five views at the pixel cap (each part's cost the frame's own GPU time with it, less without it: a timer round
   each render call is no measure on the M2, whose passes overlap). The time is in the pixels, not the triangles. The

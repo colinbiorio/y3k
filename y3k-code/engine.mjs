@@ -35,7 +35,7 @@ import { parseUnified } from './diff.mjs';
 import { spawnChild, killTree } from './proc.mjs';
 
 const SHELL_MS = 60_000, SHELL_MAX = 64 * 1024;   // shell.run: a minute, 64KB (the terminal's own line, 0.3.10)
-export const VERSION = '0.3.22';   // 0.3.22: the reader's second list (a shell line read to its close; a renamed second opinion stays one; a thought that threw is over; conflicts listed; burn's switch written whole, and its rest when there is nothing to do)   // 0.3.21: a second reader's ten (shell.run asks about what runs; previews read only inside the folder; refusals as the disk spells them; live once while starting; keep going keeps a stop, waits on a question)   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.23';   // 0.3.23: a lapsed sign-in is called that — Claude Code's new words for it ("OAuth session expired and could not be refreshed") are known, a thought that fails in words nobody knows asks `claude auth status` before it is called a refusal, and a turn that comes back signed out tells the catalog at once   // 0.3.22: the reader's second list (a shell line read to its close; a renamed second opinion stays one; a thought that threw is over; conflicts listed; burn's switch written whole, and its rest when there is nothing to do)   // 0.3.21: a second reader's ten (shell.run asks about what runs; previews read only inside the folder; refusals as the disk spells them; live once while starting; keep going keeps a stop, waits on a question)   // 0.3.20: the relay — an update no longer leaves the old version waiting behind it (update.mjs RELAY_CODE)   // 0.3.19: burn coverage — minutes covered and gaps, from the watchdog's heartbeat   // 0.3.18: agents.list — the agent panel: every live Claude Code session and subagent on this computer, and what each is doing   // 0.3.17: burn.status carries the turn's live feed, drawn as a strip in kode   // 0.3.16: the burn switch — burn.set / burn.status, the switch for ~/orion/bin/burn, set only from kode   // 0.3.15: a spent model is not the end of a turn — "You've reached your Fable limit" is the plan's limit, and the next model thinks (brain.mjs MODEL_FALLBACK)   // 0.3.14: files.put — a file the person drops in the room, saved for the coder in the conversation's folder (.y3k/attachments)   // 0.3.13: 0.3.13: the conversation's name — session.rename; a name the person gave is carried by every resume, revival and going back, and is the coder's own session name (-n)   // 0.3.12: 0.3.12: a conversation is live once — a resume of one that is live answers the live session (`already`); the door closes every connection when the engine leaves (http.mjs)   // 0.3.11: keep going — the switch in the room (keep.mjs)   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
@@ -241,6 +241,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (ev.type === 'session.started' && s.named) ev = { ...ev, title: s.title, named: true };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
+      // a session told that nobody is signed in: the catalog learns it too
+      if (ev.type === 'notice' && ev.code === 'signed-out' && s.auth === 'subscription') sawSignedOut(s.provider);
       keeper.onEvent(s, ev);
       // the models the client offered this plan: kept, so a screen with no
       // session open (Settings → Brain) can list them too (models.list)
@@ -279,6 +281,21 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   // signed in since the page was drawn — and only then refuse, saying exactly
   // what to run. Anything short of a clear "signed out" goes ahead: a session
   // that cannot get in says so in the client's own words.
+  // A TURN THAT CAME BACK SIGNED OUT KNOWS MORE THAN THE LAST LOOK DID
+  // (2026-11-27). `claude auth status` reads what is kept on the computer, and
+  // a sign-in the server has stopped accepting can still look kept: on the
+  // morning Colin's lapsed, the look said yes and four turns in a row were
+  // sent to fail. When a turn is told no, the catalog says so at once (the
+  // folder screen and Settings → Brain stop offering a way in that is not
+  // there), and the next attempt asks the client again first (cannotGetIn), in
+  // case they have signed in since. Only for the client's own sign-in: a key
+  // the person chose that is refused is the key's fault, and says so itself.
+  function sawSignedOut(id) {
+    const d = detected[id];
+    if (!d?.installed || d.account?.state === 'signed-out') return;
+    detected[id] = { ...d, account: { state: 'signed-out', method: d.account?.method ?? null } };
+    emit({ type: 'provider.status', providers: catalog() });
+  }
   async function cannotGetIn(id) {
     const state = () => authState(id, { config: store.config(), secrets: store.secrets(), detected });
     if (state() !== 'signed-out' && state() !== 'needs-key') return null;
@@ -345,6 +362,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort, image,
         ...(keyed ? { onPart: (t) => partials.set(keyed, t) } : {}) });
       audit.write('brain.complete', { provider, chars: prompt.length, ok: r.ok, code: r.code || null });
+      if (r.code === 'signed-out' && auth.method === 'subscription') sawSignedOut(provider);
       return r;
     } finally {
       thinking--;

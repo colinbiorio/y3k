@@ -13,6 +13,18 @@
 // once the file at $FAKE_CLAUDE_GATE exists (so a test can look in between).
 // FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
 // authentication_failed and ends in the real CLI's synthetic "API Error: 401".
+// FAKE_CLAUDE_SCENARIO=expired is the same lapse as Claude Code 2.1.312 and
+// later say it (heard on Colin's computer, 2026-11-26 and -27): "Failed to
+// authenticate: OAuth session expired and could not be refreshed", no 401, no
+// "token", no "/login". `expired-bare` says only the sentence, without the
+// stream's `authentication_failed` code beside it. `strange` fails in words
+// nobody knows.
+// FAKE_CLAUDE_AUTH=out makes `claude auth status` say nobody is signed in, the
+// real CLI's way (the JSON, and exit 1); `mute` is a client that will not say.
+// FAKE_CLAUDE_AUTH_FLIP=<file> is the morning it happened: the look says
+// "signed in" (what is kept on the computer looks whole) until a turn has
+// actually tried and been refused, and "signed out" from then on. The failing
+// turn leaves the file; `auth status` reads it.
 // With CLAUDE_CONFIG_DIR set it keeps transcripts there as the real CLI does,
 // and a --resume of an id it has no transcript of fails the real CLI's way.
 import { readFileSync, writeFileSync, appendFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
@@ -22,7 +34,15 @@ import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 if (args[0] === '--version') { process.stdout.write('2.1.283 (Claude Code)\n'); process.exit(0); }
-if (args[0] === 'auth') { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max' }) + '\n'); process.exit(0); }
+const EXPIRED = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+const STRANGE = 'Your session could not be continued (code 7).';
+if (args[0] === 'auth') {
+  const flip = process.env.FAKE_CLAUDE_AUTH_FLIP;
+  const a = flip && existsSync(flip) ? 'out' : process.env.FAKE_CLAUDE_AUTH;
+  if (a === 'out') { process.stdout.write(JSON.stringify({ loggedIn: false, authMethod: 'none', apiProvider: 'firstParty' }) + '\n'); process.exit(1); }
+  if (a === 'mute') { process.stdout.write(JSON.stringify({ apiProvider: 'firstParty' }) + '\n'); process.exit(0); }
+  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max' }) + '\n'); process.exit(0);
+}
 
 const LOG = process.env.FAKE_CLAUDE_LOG;
 const log = (rec) => { if (LOG) appendFileSync(LOG, JSON.stringify(rec) + '\n'); };
@@ -40,6 +60,14 @@ if (args.includes('-p') && args.includes('--system-prompt-file')) {
     log({ kind: 'think', system, input, cwdFiles: readdirSync(process.cwd()) });
     if (process.env.FAKE_CLAUDE_SCENARIO === 'signedout') {
       process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate. API Error: 401 OAuth access token has expired.' }) + '\n');
+      process.exit(1);
+    }
+    // the same lapse in the newer words, and a failure in words nobody knows:
+    // each the real shape (an error result, exit 1)
+    const sc = process.env.FAKE_CLAUDE_SCENARIO;
+    if (sc === 'expired' || sc === 'expired-bare' || sc === 'strange') {
+      if (process.env.FAKE_CLAUDE_AUTH_FLIP) writeFileSync(process.env.FAKE_CLAUDE_AUTH_FLIP, 'a turn tried, and was refused\n');
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: sc === 'strange' ? STRANGE : EXPIRED, terminal_reason: 'api_error' }) + '\n');
       process.exit(1);
     }
     const last = input.split('\n').filter(Boolean).pop() || '';
@@ -104,6 +132,15 @@ async function turn(text) {
     for (const attempt of [1, 2]) out({ type: 'system', subtype: 'api_retry', attempt, max_retries: 10, retry_delay_ms: 500, error_status: 401, error: 'authentication_failed', session_id: sessionId });
     out({ type: 'assistant', message: { id: `msg_err_${turns}`, model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: err }] }, parent_tool_use_id: null, error: 'authentication_failed', session_id: sessionId });
     out({ type: 'result', subtype: 'success', is_error: true, result: err, session_id: sessionId, usage: {}, total_cost_usd: 0, duration_ms: 1200 });
+    return;
+  }
+  // the newer words for it: one synthetic message and an error result, no
+  // retries. `expired` carries the stream's code beside the sentence, as the
+  // real one did on 2026-11-26; `expired-bare` is the sentence alone.
+  if (process.env.FAKE_CLAUDE_SCENARIO === 'expired' || process.env.FAKE_CLAUDE_SCENARIO === 'expired-bare') {
+    const coded = process.env.FAKE_CLAUDE_SCENARIO === 'expired';
+    out({ type: 'assistant', message: { id: `msg_err_${turns}`, model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: EXPIRED }] }, parent_tool_use_id: null, ...(coded ? { error: 'authentication_failed' } : {}), session_id: sessionId });
+    out({ type: 'result', subtype: 'success', is_error: true, result: EXPIRED, terminal_reason: 'api_error', session_id: sessionId, usage: {}, total_cost_usd: 0, duration_ms: 400 });
     return;
   }
   // FAKE_CLAUDE_LIMIT_TURNS=n: the n turns after the first are refused by the
