@@ -4760,12 +4760,24 @@ console.log('\ny3kode\'s front door:');
   });
 
   const claudeOut = { id: 'claude', label: 'Claude Code', vendor: 'Anthropic', ready: true, installed: true, auth: 'signed-out', loginCommand: 'claude', keySet: false, keyUrl: 'https://console.anthropic.com/settings/keys' };
+  await ok('the line about whose sign-in is Claude Code\'s alone: another tool\'s step does not carry it', async () => {
+    const t = mkOb();
+    t.show(() => t.ob.toolRow({ id: 'codex', label: 'Codex', vendor: 'OpenAI', ready: true, installed: true, auth: 'signed-out', loginCommand: 'codex login', keySet: false }));
+    assert.match(t.box.textContent, /Sign in to Codex first/);
+    assert.equal(byClass(t.box, 'ob-whose').length, 0);
+  });
   await ok('a signed-out Claude Code shows the sign-in steps with `claude` — and no key field', async () => {
     const t = mkOb();
     t.show(() => t.ob.toolRow(claudeOut));
     const text = t.box.textContent;
     assert.match(text, /Sign in to Claude Code first: open Terminal, run claude, sign in, then come back\./);
     assert.equal(byClass(byClass(t.box, 'ob-signin')[0], 'cm')[0].textContent, 'claude');
+    // whose sign-in: a person signed in to the Claude app all day reads "sign
+    // in to Claude Code" as y3kode having lost it (Colin, 2026-11-27)
+    const whose = byClass(t.box, 'ob-whose');
+    assert.equal(whose.length, 1, 'nothing says this is the terminal\'s own sign-in');
+    assert.match(whose[0].textContent, /terminal's own sign-in/);
+    assert.match(whose[0].textContent, /Claude app or claude\.ai does not count here/);
     assert.equal(all(t.box, (e) => e.tagName === 'INPUT').length, 0, 'no key field');
     assert.equal(byText(t.box, 'BUTTON', 'Check again').length, 1);
     assert.equal(byText(t.box, 'BUTTON', 'Copy').length, 1);

@@ -18,7 +18,10 @@
 // said with every turn, so another page of the account cannot override it.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { ownChoice, ownChoiceFor, setOwnChoice, ownDeclined, mayDefault, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive } from '../src/own-brain.js';
+import { ownChoice, ownChoiceFor, setOwnChoice, ownDeclined, mayDefault, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive, SIGNED_OUT_WORDS, SIGNED_OUT_HERE, readOwnFailure, recentOwnFailure, noteOwnFailure } from '../src/own-brain.js';
+import { AUTH_FAIL } from '../y3k-code/adapters/claude.mjs';
+import { SIGNED_OUT } from '../y3k-code/brain.mjs';
+import { ownFailedLine } from '../src/brain.js';
 import { pair, movePairing, forgetPairing, savedPairing } from '../src/code/transport.js';
 import { watchForEngine } from '../src/code/onboard.js';
 
@@ -816,6 +819,63 @@ await ok('whether this page thinks for the site is the stream the site took, not
   assert.equal(ownState().state, 'ready');
   stop();
   assert.equal(ownLive(), false);
+});
+
+// A LAPSED SIGN-IN, AS AN ENGINE BEFORE 0.3.23 SAYS IT (2026-11-27). Colin's
+// y3kode was 0.3.22, his terminal's Claude Code sign-in had lapsed, and Claude
+// Code's newer sentence for that was one the engine did not know: every turn
+// of his presence came back { code: 'refused', error: 'Failed to authenticate:
+// OAuth session expired and could not be refreshed' }. The page passed it on
+// as it was, and nothing anywhere said "sign in".
+const LAPSED = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+await ok('the page and the engine read a sign-in failure by the same pattern and say the same fix', () => {
+  assert.equal(SIGNED_OUT_WORDS.source, AUTH_FAIL.source, 'the page\'s copy of the pattern has drifted from the engine\'s');
+  assert.equal(SIGNED_OUT_WORDS.flags, AUTH_FAIL.flags);
+  assert.equal(SIGNED_OUT_HERE, SIGNED_OUT, 'the page words the fix differently from the engine');
+});
+await ok('an older engine\'s "refused" that is really the sign-in is read as that; a real refusal is left alone', () => {
+  assert.deepEqual(readOwnFailure({ ok: false, code: 'refused', error: LAPSED }), { ok: false, code: 'signed-out', error: SIGNED_OUT_HERE });
+  assert.equal(readOwnFailure({ ok: false, code: 'failed', error: 'Not logged in · Please run /login' }).code, 'signed-out');
+  assert.equal(readOwnFailure({ ok: false, error: LAPSED }).code, 'signed-out', 'a failure with no code at all');
+  // left exactly as they came
+  for (const r of [
+    { ok: false, code: 'refused', error: 'I cannot help with that request.' },
+    { ok: false, code: 'limit', error: "You've hit your session limit · resets 9pm", resets: '9pm' },
+    { ok: false, code: 'declined', error: 'Not allowed on the computer.' },
+    { ok: false, code: 'busy', error: 're-authenticate' },          // only a refusal or a failure is re-read
+    { ok: false, code: 'signed-out', error: 'already said by a newer engine' },
+    { ok: true, text: 'Failed to authenticate, said the presence, quoting it' },
+  ]) assert.deepEqual(readOwnFailure(r), r);
+  assert.equal(readOwnFailure(null), null);
+  assert.equal(readOwnFailure(undefined), undefined);
+});
+await ok('through an older engine the site hears "signed out", the orb says the fix, and the default looks again later', async () => {
+  const { ES, made } = fakeES();
+  const t = clock();
+  const cmd = async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'ok' })   // the look said yes: what is kept on the computer looked whole
+    : c.cmd === 'brain.complete' ? { ok: false, code: 'refused', error: LAPSED } : { ok: false });
+  const posted = [];
+  noteOwnFailure(null);
+  const stop = startOwnBrain({ ES, timer: t, auto: () => true, cmd, fetchFn: async (u, o) => { posted.push(JSON.parse(o.body)); return {}; } });
+  await settle();
+  made[0].emit('ready', {});
+  made[0].emit('job', { id: 'f'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.deepEqual([posted[0].ok, posted[0].code], [false, 'signed-out'], 'the site still hears a refusal');
+  assert.ok(!/OAuth/.test(posted[0].error || ''), 'the raw sentence is passed on as the reason');
+  // what the orb says of it: the fix, and whose sign-in it is
+  assert.equal(recentOwnFailure()?.code, 'signed-out');
+  const line = ownFailedLine();
+  assert.match(line, /signed out on this computer/);
+  assert.match(line, /apart from the Claude app/);
+  assert.match(line, /run `claude` in a terminal, then \/login/);
+  assert.ok(!/it said/.test(line), 'the orb still quotes the raw sentence instead of saying what to do');
+  // and it is treated as a computer that cannot think here: let go, look again
+  assert.ok(made[0].closed, 'every turn after would have failed the same way');
+  assert.equal(ownLive(), false);
+  assert.equal(t.count(), 1, 'and it looks again (they may sign in)');
+  stop();
+  noteOwnFailure(null);
 });
 
 await ok('the default lets go of a computer whose turn shows it cannot think there, and looks again later', async () => {

@@ -57,12 +57,23 @@ export async function detect({ override, env } = {}) {
   return { installed: v.code === 0, bin, version: (v.stdout.match(/\d+\.\d+\.\d+/) || [null])[0] };
 }
 
+// WHAT `claude auth status --json` SAYS, READ STRICTLY (2026-11-27). Only a
+// boolean is an answer. This used to take anything falsy for "signed out", so a
+// reply that carried neither field (a newer client renaming one, or some other
+// object on stdout) would have told a signed-in person to sign in. A reply
+// that does not say either way is 'unknown', and unknown goes ahead: a session
+// that cannot get in says so in the client's own words.
+export function readAuthStatus(stdout) {
+  try {
+    const j = JSON.parse(stdout);
+    const said = typeof j?.loggedIn === 'boolean' ? j.loggedIn : typeof j?.authenticated === 'boolean' ? j.authenticated : null;
+    if (said === null) return { state: 'unknown', method: null };
+    return { state: said ? 'signed-in' : 'signed-out', method: j.authMethod || j.method || null, account: j.email || j.account || null, raw: j };
+  } catch { return { state: 'unknown', method: null }; } // an older CLI without `auth status` says nothing either way
+}
 export async function authStatus(bin, env) {
   const r = await run(bin, ['auth', 'status', '--json'], { env, timeout: 15000 });
-  try {
-    const j = JSON.parse(r.stdout);
-    return { state: j.loggedIn || j.authenticated ? 'signed-in' : 'signed-out', method: j.authMethod || j.method || null, account: j.email || j.account || null, raw: j };
-  } catch { return { state: 'unknown', method: null }; } // an older CLI without `auth status` says nothing either way
+  return readAuthStatus(r.stdout);
 }
 
 // The folders every session is kept out of, whatever mode: keys, cloud
@@ -206,8 +217,24 @@ export function claudeEnv(base, { auth, apiKey } = {}) {
 // raw "API Error: 401 OAuth access token has expired". Retrying cannot fix it
 // and a status code tells nobody what to do, so it is said once, in words,
 // with the fix — which is Claude Code's own, on the computer.
-export const AUTH_FAIL = /authentication_failed|\bAPI Error: 401\b|OAuth (?:access )?token|invalid (?:x-)?api[ -]?key|please run \/login|re-?authenticate/i;
-export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expired, so your message never reached Claude. To fix it: open Terminal, type claude and press Return, then type /login and sign in. Then send your message again here.';
+//
+// AND THE WORDS CHANGE (2026-11-27). Claude Code 2.1.312 and later end such a
+// turn with "Failed to authenticate: OAuth session expired and could not be
+// refreshed": no 401, no "token", no "/login", so nothing in the pattern knew
+// it. Colin's sign-in in the terminal had lapsed (its refresh token was no
+// longer accepted; the Claude app, which keeps a sign-in of its own, was fine)
+// and on the orb screen every turn of his presence was filed as a plain
+// refusal: four in that morning's activity log, none of them saying "sign in".
+// A session was spared only because the stream also carries the code
+// `authentication_failed`; a thought (`claude -p`) carries the sentence alone.
+// The sentence is here now, with the debug log's "refresh token is no longer
+// valid" and the plain "Not logged in". And because the next rewording will not
+// be here either, a thought no longer trusts the wording alone: brain.mjs asks
+// `claude auth status` before it calls a failed turn a refusal.
+export const AUTH_FAIL = /authentication_failed|failed to authenticate|\bAPI Error: 401\b|OAuth (?:access |refresh )?(?:token|session)|could not be refreshed|not logged in|invalid (?:x-)?api[ -]?key|\brun \/login\b|re-?authenticate/i;
+// (its own, apart from the Claude app's: a person who uses the app all day is
+// signed in THERE and reads "sign in to Claude Code" as a fault in y3kode)
+export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expired, so your message never reached Claude. It is the terminal\'s own sign-in, kept apart from the Claude app\'s. To fix it: open Terminal, type claude and press Return, then type /login and sign in. Then send your message again here.';
 
 // THE PLAN'S WINDOWS, AS CLAUDE CODE ITSELF SHOWS THEM. get_usage's
 // rate_limits carries the 5-hour and weekly windows, a weekly window for each

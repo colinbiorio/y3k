@@ -14,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine, handoffBlock } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows, hasTranscript, projectDirName, transcriptHome, NO_TRANSCRIPT } from '../y3k-code/adapters/claude.mjs';
+import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows, hasTranscript, projectDirName, transcriptHome, NO_TRANSCRIPT, AUTH_FAIL, readAuthStatus } from '../y3k-code/adapters/claude.mjs';
+import { thinkWithClaude, LIMIT_HIT } from '../y3k-code/brain.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = join(ROOT, 'test', 'fakes', 'claude.mjs');
@@ -566,6 +567,74 @@ await ok('a second failed turn does not say it again', async () => {
 await engine5.handle({ cmd: 'session.stop', sid: s5.sid });
 engine5.shutdown();
 
+// THE SAME LAPSE, IN THE WORDS CLAUDE CODE USES NOW (2026-11-27). On Colin's
+// computer the terminal's sign-in had lapsed, and Claude Code 2.1.312 said
+// "Failed to authenticate: OAuth session expired and could not be refreshed":
+// no 401, no "token", no "/login". The old pattern knew none of it. A session
+// still said the notice (the stream carries the code `authentication_failed`
+// beside the sentence) but its turn ended without saying why, and a thought,
+// which has the sentence alone, was filed as a refusal four times that morning.
+console.log('\na sign-in that lapsed, in the newer words:');
+await ok('the pattern knows what the client says now, and does not take a limit or an outage for it', () => {
+  for (const said of [
+    'Failed to authenticate: OAuth session expired and could not be refreshed',   // 2.1.312+, the turn's own words
+    'OAuth refresh token is no longer valid; run /login to re-authenticate',      // the same failure in its debug log
+    'Failed to authenticate. API Error: 401 OAuth access token has expired.',     // the older words
+    'Not logged in · Please run /login',
+    'Invalid API key · Fix external API key',
+    'authentication_failed',
+  ]) assert.ok(AUTH_FAIL.test(said), 'not known as a sign-in failure: ' + said);
+  // and what it must NOT swallow: these have fixes of their own, and "sign in"
+  // would send the person to mend something that is not broken
+  for (const said of [
+    "You've hit your session limit · resets 9pm (America/New_York)",
+    "You've reached your Fable limit. Switch to another model",
+    'API Error: 529 Overloaded', 'API Error: 500 Internal server error',
+    'I cannot help with that request.', 'exit 1', '',
+  ]) assert.ok(!AUTH_FAIL.test(said), 'taken for a sign-in failure: ' + said);
+  // the two patterns must not both claim a sentence: the first one asked wins
+  for (const said of ["You've hit your weekly limit · resets Nov 26 at 3pm (America/New_York)"]) assert.ok(LIMIT_HIT.test(said) && !AUTH_FAIL.test(said));
+});
+await ok('`claude auth status` is read strictly: only a boolean is an answer', () => {
+  assert.equal(readAuthStatus('{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}').state, 'signed-out');   // the real reply, 2.1.332
+  assert.equal(readAuthStatus('{"loggedIn":true,"authMethod":"claude.ai"}').state, 'signed-in');
+  assert.equal(readAuthStatus('{"authenticated":false}').state, 'signed-out');
+  // anything that does not say either way is not a "no": it used to be
+  for (const mute of ['{}', '{"apiProvider":"firstParty"}', 'null', '[]', '"signed out"', 'not json at all', '']) assert.equal(readAuthStatus(mute).state, 'unknown', 'read as an answer: ' + mute);
+});
+for (const scenario of ['expired', 'expired-bare']) {
+  const evs = [];
+  const eng = createEngine({ store, consent: fixedConsent(true), env: { ...env, FAKE_CLAUDE_SCENARIO: scenario }, bins: { claude: FAKE } });
+  eng.subscribe((e) => evs.push(e));
+  const until = (pred, ms = 10000) => new Promise((resolve, reject) => {
+    const f = evs.find(pred); if (f) return resolve(f);
+    const t = setTimeout(() => { un(); reject(new Error('timed out')); }, ms);
+    const un = eng.subscribe((e) => { if (pred(e)) { clearTimeout(t); un(); resolve(e); } });
+  });
+  const sx = await eng.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  await eng.handle({ cmd: 'session.send', sid: sx.sid, text: 'hello' });
+  const endx = await until((e) => e.type === 'turn.ended' && e.sid === sx.sid);
+  await ok(`${scenario}: said once with the fix, and the turn says why it ended`, () => {
+    const mine = evs.filter((e) => e.sid === sx.sid);
+    const said = mine.filter((e) => e.type === 'notice' && e.code === 'signed-out');
+    assert.equal(said.length, 1, 'said ' + said.length + ' times');
+    assert.match(said[0].text, /type claude and press Return, then type \/login/);
+    assert.match(said[0].text, /apart from the Claude app/, 'nothing tells a person signed in to the app that this sign-in is another');
+    assert.equal(endx.status, 'error');
+    assert.equal(endx.auth, true, 'the turn ended without saying it was the sign-in — keep going and the page read it as any error');
+    assert.ok(!mine.some((e) => e.type === 'message.block' && /Failed to authenticate/.test(e.text || '')), 'the raw sentence is shown as Claude\'s reply');
+  });
+  await ok(`${scenario}: the catalog learns it from the turn, without being asked to look again`, () => {
+    // `auth status` here still says "signed in" (the fake's default: what is
+    // kept on the computer looks whole), which is exactly the morning it happened
+    const st = evs.filter((e) => e.type === 'provider.status' && Array.isArray(e.providers)).pop();
+    assert.ok(st, 'no provider.status after the sign-out');
+    assert.equal(st.providers.find((p) => p.id === 'claude').auth, 'signed-out');
+  });
+  await eng.handle({ cmd: 'session.stop', sid: sx.sid });
+  eng.shutdown();
+}
+
 // YOUR PRESENCE, THINKING ON YOUR OWN SIGN-IN (y3k-code/brain.mjs): one turn
 // through `claude -p`, with no tools, in an empty folder, asked once.
 console.log('\nyour presence, on your own sign-in:');
@@ -636,6 +705,70 @@ console.log('\nyour presence, on your own sign-in:');
     assert.equal(o.code, 'signed-out');
     assert.match(o.error, /\/login/);
     engineS.shutdown();
+  });
+  await ok('signed out in the newer words: the same answer, and the page is told at once', async () => {
+    const storeE = createStore(join(base, 'config-think-expired'));
+    storeE.setConfig({ signIn: true, ownBrain: { claude: true } });
+    const engineE = createEngine({ store: storeE, consent: async () => true, env: { ...env, FAKE_CLAUDE_SCENARIO: 'expired' }, bins: { claude: FAKE } });
+    const seen = [];
+    engineE.subscribe((e) => seen.push(e));
+    const o = await engineE.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y' });
+    assert.deepEqual([o.ok, o.code], [false, 'signed-out'], 'a lapsed sign-in is filed as: ' + o.code);
+    assert.match(o.error, /\/login/);
+    assert.match(o.error, /apart from the Claude app/);
+    assert.ok(!/OAuth/.test(o.error), 'the client\'s raw sentence is passed on as the fix');
+    // the look at start said "signed in" (what is kept on the computer looks
+    // whole); the turn knows better, and the catalog says so without a refresh
+    const st = seen.filter((e) => e.type === 'provider.status' && Array.isArray(e.providers)).pop();
+    assert.equal(st?.providers.find((p) => p.id === 'claude').auth, 'signed-out', 'the folder screen would still offer a way in');
+    engineE.shutdown();
+  });
+  await ok('words nobody knows: the client is asked, and only a clear no is a sign-out', async () => {
+    const think = async (extra) => {
+      const st = createStore(join(base, 'config-think-' + Math.random().toString(36).slice(2)));
+      st.setConfig({ signIn: true, ownBrain: { claude: true } });
+      const e = createEngine({ store: st, consent: async () => true, env: { ...env, FAKE_CLAUDE_SCENARIO: 'strange', ...extra }, bins: { claude: FAKE } });
+      const seen = [];
+      e.subscribe((ev) => seen.push(ev));
+      const thoughts = () => fakeLog().filter((x) => x.kind === 'think').length;
+      const before = thoughts();
+      try { const r = await e.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y' }); return { r, ran: thoughts() - before, seen }; } finally { e.shutdown(); }
+    };
+    // THE MORNING IT HAPPENED: the look says "signed in" until a turn has
+    // tried. The turn RUNS (the fake records the thought), fails in words this
+    // file has never heard, and only then is the client asked — and says no.
+    const flip = join(base, 'auth-flip');
+    const lapsed = await think({ FAKE_CLAUDE_AUTH_FLIP: flip });
+    assert.equal(lapsed.ran, 1, 'the turn never ran: the answer came from the look before it, not from the question after');
+    assert.equal(lapsed.r.code, 'signed-out', 'the next rewording would be a refusal again: ' + lapsed.r.code);
+    assert.match(lapsed.r.error, /\/login/);
+    assert.equal(lapsed.seen.filter((ev) => ev.type === 'provider.status' && Array.isArray(ev.providers)).pop()?.providers.find((p) => p.id === 'claude').auth, 'signed-out');
+    // the client says someone IS signed in → a refusal, in its own words, as before
+    const inn = await think({});
+    assert.equal(inn.ran, 1);
+    assert.deepEqual([inn.r.code, inn.r.error], ['refused', 'Your session could not be continued (code 7).']);
+    // the client will not say → not a "no"
+    const mute = await think({ FAKE_CLAUDE_AUTH: 'mute' });
+    assert.deepEqual([mute.ran, mute.r.code], [1, 'refused']);
+  });
+  await ok('the second opinion is asked only of a client that ran, and never throws the turn away', async () => {
+    const tmpDir = join(base, 'brain-unit');
+    const strange = { code: 1, stdout: JSON.stringify({ type: 'result', is_error: true, result: 'Your session could not be continued (code 7).' }) + '\n', stderr: '' };
+    let asked = 0;
+    const no = async () => { asked++; return { state: 'signed-out' }; };
+    assert.equal((await thinkWithClaude({ bin: FAKE, env, tmpDir, system: 's', prompt: 'p', runner: async () => strange, status: no })).code, 'signed-out');
+    assert.equal(asked, 1);
+    // a client that never ran (killed by the clock, or not there) is 'failed', and is not asked
+    asked = 0;
+    for (const code of [null, -1]) assert.equal((await thinkWithClaude({ bin: FAKE, env, tmpDir, system: 's', prompt: 'p', runner: async () => ({ code, stdout: '', stderr: 'gone' }), status: no })).code, 'failed');
+    assert.equal(asked, 0, 'a client that did not run was asked whether it is signed in');
+    // a limit is a limit: never asked, never a sign-out
+    assert.equal((await thinkWithClaude({ bin: FAKE, env, tmpDir, system: 's', prompt: 'p', runner: async () => ({ code: 1, stdout: JSON.stringify({ type: 'result', is_error: true, result: "You've hit your session limit · resets 9pm" }) + '\n', stderr: '' }), status: no })).code, 'limit');
+    assert.equal(asked, 0);
+    // the question itself failing leaves the turn what it was
+    assert.equal((await thinkWithClaude({ bin: FAKE, env, tmpDir, system: 's', prompt: 'p', runner: async () => strange, status: async () => { throw new Error('boom'); } })).code, 'refused');
+    // and a test that brings a runner and no status asks nothing (no real process is started behind its back)
+    assert.equal((await thinkWithClaude({ bin: '/nowhere/claude', env, tmpDir, system: 's', prompt: 'p', runner: async () => strange })).code, 'refused');
   });
   engineT.shutdown();
 }

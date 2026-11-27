@@ -203,6 +203,26 @@ function notHere(hello, provider) {
 // nothing here can think until something changes (y3k-code/engine.mjs think).
 // A plan's own limit is not one of these: it is the limit, and is waited out.
 const CANNOT = new Set(['not-installed', 'signed-out', 'needs-key', 'unsupported']);
+
+// AN OLDER y3kode CALLS A LAPSED SIGN-IN A REFUSAL (2026-11-27). Until 0.3.23
+// the engine knew the sign-in had lapsed only by Claude Code's old words. The
+// newer ones ("Failed to authenticate: OAuth session expired and could not be
+// refreshed") came through as code 'refused' with the sentence beside it, and
+// the page passed that on as it was: the site heard a refusal, the orb said
+// "it said: Failed to authenticate…", and nothing said sign in. Colin, signed
+// in to the Claude app all day, took it for y3kode breaking. Every engine in
+// the field says it that way until its person updates, so the page reads the
+// sentence too, and answers as a newer engine would. The pattern is the
+// engine's own (y3k-code/adapters/claude.mjs AUTH_FAIL), held equal by test:
+// two readers of one sentence must not disagree about it.
+export const SIGNED_OUT_WORDS = /authentication_failed|failed to authenticate|\bAPI Error: 401\b|OAuth (?:access |refresh )?(?:token|session)|could not be refreshed|not logged in|invalid (?:x-)?api[ -]?key|\brun \/login\b|re-?authenticate/i;
+export const SIGNED_OUT_HERE = 'Claude Code is signed out on this computer (the terminal\'s sign-in is its own, apart from the Claude app\'s): run `claude`, then /login.';
+export function readOwnFailure(r) {
+  if (!r || r.ok) return r;
+  const code = r.code || 'failed';
+  if ((code === 'refused' || code === 'failed') && SIGNED_OUT_WORDS.test(String(r.error || ''))) return { ...r, code: 'signed-out', error: SIGNED_OUT_HERE };
+  return r;
+}
 // Why a page stopped offering when newer pages of the same account took over.
 const REPLACED = 'Another page of yours is thinking for your presence now. Check again to think from this one.';
 // AN ANSWER REFUSED FOR NOW IS SENT AGAIN (2026-10-12). What the site said to
@@ -411,6 +431,7 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
       }
       const wanted = !letGoNow.delete(job.id);
       if (stopped) return;
+      r = readOwnFailure(r);   // an older engine's "refused" that is really the sign-in
       // speed: how fast it wrote, as y3kode timed it (0.3.3+; the site checks it)
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null, ...(r.speed ? { speed: r.speed } : {}) } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
       // what y3kode last said when it could not think, for the page's own line

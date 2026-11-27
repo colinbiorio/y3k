@@ -312,7 +312,10 @@ export const ownLimitLine = (resets) => `Your Claude plan has reached its usage 
 export const OWN_LINES = {
   unpaired: 'This browser is no longer connected to y3kode (it restarted, or this tab was paired before). Open kode once in this browser to connect it again; your presence answers right after.',
   offline: 'y3kode is not running on this computer. Open the y3k app, or set it up from kode, and your presence answers again.',
-  'signed-out': 'Claude Code is signed out on this computer: run `claude` in a terminal, then /login, and your presence answers again.',
+  // (its own sign-in: on 2026-11-27 Colin, signed in to the Claude app all day,
+  // read "signed out" as y3kode failing. The terminal's Claude Code keeps a
+  // sign-in apart from the app's, and that one had lapsed.)
+  'signed-out': 'Claude Code is signed out on this computer. The terminal keeps its own sign-in, apart from the Claude app\'s: run `claude` in a terminal, then /login, and your presence answers again.',
   'not-installed': 'Claude Code is not installed on this computer. Settings → Brain can install it.',
   'needs-key': 'Claude Code on this computer is set to use a key it does not have. Settings → Brain shows where it stands.',
   busy: 'Claude Code on your computer is already thinking as much as it can at once; a moment, and ask again.',

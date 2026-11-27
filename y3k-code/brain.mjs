@@ -29,7 +29,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { run } from './proc.mjs';
-import { AUTH_FAIL, isModel, EFFORTS } from './adapters/claude.mjs';
+import { AUTH_FAIL, authStatus, isModel, EFFORTS } from './adapters/claude.mjs';
 
 // The clients that can think for a presence: those whose tool-less mode has
 // been checked. Codex and Gemini CLI run tools from their own sandboxes, and
@@ -168,7 +168,14 @@ export function imageTurn(prompt, image) {
   ] } }) + '\n';
 }
 
-export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model, effort, timeoutMs = TIMEOUT_MS, runner, onPart, image }) {
+// What a thought says when the sign-in is the reason: the fix, and the one
+// fact that makes it make sense to someone signed in to the Claude app.
+export const SIGNED_OUT = 'Claude Code is signed out on this computer (the terminal\'s sign-in is its own, apart from the Claude app\'s): run `claude`, then /login.';
+
+// `status` is the second opinion (below): how to ask the client whether anyone
+// is signed in. The real one by default; a test that brings its own `runner`
+// brings its own `status` too, or none is asked.
+export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model, effort, timeoutMs = TIMEOUT_MS, runner, onPart, image, status }) {
   mkdirSync(tmpDir, { recursive: true });
   const dir = mkdtempSync(join(tmpDir, 'brain-'));
   try {
@@ -191,7 +198,7 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
     }
     if (!res || res.is_error || r.code !== 0) {
       const why = said || r.stderr || `exit ${r.code}`;
-      if (AUTH_FAIL.test(why)) return { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer: run `claude`, then /login.' };
+      if (AUTH_FAIL.test(why)) return { ok: false, code: 'signed-out', error: SIGNED_OUT };
       // THE PLAN'S LIMIT, NAMED (2026-10-25). Claude Code says "You've hit your
       // session limit · resets 9pm (America/New_York)" (or weekly, or usage);
       // the page used to show the general line for it, which told the person
@@ -201,7 +208,23 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
         const resets = String(why).match(/resets?\s+([^\n.]+?)(?:[.\n]|$)/i)?.[1]?.trim() || '';
         return { ok: false, code: 'limit', error: String(why).slice(0, 400), ...(resets ? { resets } : {}) };
       }
-      return { ok: false, code: r.code === null || r.code === -1 ? 'failed' : 'refused', error: String(why).slice(0, 400) };
+      // THE SECOND OPINION (2026-11-27). The patterns above are guesses at
+      // another program's sentences, and that program rewrites them: the day
+      // Claude Code began saying "OAuth session expired and could not be
+      // refreshed", every thought of a signed-out presence was called a
+      // refusal, and the page told nobody to sign in. So a turn the client RAN
+      // and refused, in words that are neither a sign-out nor a limit this
+      // file knows, is not called a refusal until the client has been asked
+      // the question itself. One short process, and only after a failure.
+      // Only a clear "no" counts (readAuthStatus): a client that cannot say
+      // leaves the turn a refusal, with its own words, as before.
+      const ran = r.code !== null && r.code !== -1;
+      if (ran) {
+        const ask = status === undefined ? (runner ? null : authStatus) : status;
+        const st = ask ? await Promise.resolve().then(() => ask(bin, env)).catch(() => null) : null;
+        if (st?.state === 'signed-out') return { ok: false, code: 'signed-out', error: SIGNED_OUT };
+      }
+      return { ok: false, code: ran ? 'refused' : 'failed', error: String(why).slice(0, 400) };
     }
     const u = res.usage || {};
     return { ok: true, text: said.slice(0, MAX_TEXT), usage: { in: u.input_tokens | 0, out: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0 },
