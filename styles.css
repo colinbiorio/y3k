@@ -1911,6 +1911,16 @@ body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the 
 body.dancing #chat-dance::after,
 body.alive:not(.dancing) #brain-toggle::after { opacity: 1; animation: rec-blink 1.15s ease-in-out infinite; }
 @keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.22; } }
+/* THE MIC'S DOT STAYS WHILE ITS MODE IS ON (2026-11-27). "A red dot above each
+   mark whose mode is on" was not true of the microphone: its dot followed the
+   LISTEN (.active), which goes dark every time the presence thinks or speaks.
+   So a spoken conversation that was still on looked switched off for the
+   length of every reply, and pressing the mark to "turn it back on" turned it
+   off. The mode is aria-pressed (main.js startVoiceMode): while it is on and
+   the mic is waiting its turn the dot holds steady, dimmer, and it blinks
+   again the moment listening does. Steady is also the truer signal: the
+   microphone is kept open for the whole conversation (voice.js ensureMic). */
+#chat-voice[aria-pressed="true"]:not(.active)::after { opacity: 0.55; }
 /* AIRDEN'S MARK (src/airden.js) — your presence, speaking on its own. It has
    no seat in the row (two marks, the box, two marks; a third on either side
    would tip it), and set into the box's rim it was jammed where it did not

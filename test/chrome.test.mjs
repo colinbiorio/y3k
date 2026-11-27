@@ -262,6 +262,159 @@ await (async () => {
   });
 })();
 
+console.log('\nthe camera and the microphone together:');
+
+// Colin, 2026-11-27: "mic and camera don't seem to be able to be served at the
+// same time". Seen in Chromium with a stand-in camera and microphone: with a
+// spoken conversation on, pressing the camera opened the lens and, 460 ms
+// later, sent the camera's own greeting turn — and every turn closes the
+// microphone. The mic's mark then looked off for the whole reply, so pressing
+// it "back on" switched the conversation off.
+await (async () => {
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+  const at = (name) => { const i = main.search(new RegExp('\\n(async )?function ' + name + '\\(')); assert.ok(i >= 0, name + ' is gone from main.js'); return i; };
+  const fn = (name) => main.slice(at(name), main.indexOf('\n}\n', at(name)) + 3);
+  const els = { 'chat-camera': fakeEl(), 'chat-voice': fakeEl(), chat: fakeEl() };
+  let lens = false, hearing = false;
+  const toasts = [];
+  const rig = new Function('d', `
+    const { $, camera, perceive, syncHands, voice, toast, document } = d;
+    const camOwners = new Set();
+    let opening = null, camViewWanted = false, voiceMode = false;
+    ${['wantCam', 'dropCam', 'applyCam', 'camEnded', 'camMayGreet'].map(fn).join('\n')}
+    return { wantCam, dropCam, camEnded, camMayGreet, owners: camOwners, voiceMode: (v) => { voiceMode = v; } };
+  `)({
+    $: (id) => els[id] || null,
+    camera: { isOn: () => lens, on: async () => { lens = true; return true; }, off: () => { lens = false; } },
+    perceive: { sync() {} }, syncHands() {},
+    voice: { isListening: () => hearing },
+    toast: (said) => toasts.push(said),
+    document: { body: { classList: { toggle() {} } } },
+  });
+  const cam = els['chat-camera'].attrs;
+  await rig.wantCam('chat');
+  ok('the camera coming on speaks for itself only when the microphone is not the person\'s', () => {
+    assert.equal(rig.camMayGreet(), true, 'pressed with no microphone on: the presence should look up');
+    rig.voiceMode(true);
+    assert.equal(rig.camMayGreet(), false, 'a spoken conversation is on, and the camera would take its microphone for a whole turn');
+    rig.voiceMode(false); hearing = true;
+    assert.equal(rig.camMayGreet(), false, 'a microphone opened by a hand is someone speaking too');
+    hearing = false;
+    assert.equal(rig.camMayGreet(), true);
+  });
+  // (this file's ok() does not wait: every await is taken out here, and only the looking is inside)
+  rig.dropCam('chat'); await rig.wantCam('track');             // the lens is open for the room's tracking only
+  const trackOnly = [lens, rig.camMayGreet()];
+  await rig.wantCam('chat'); lens = false;
+  const shut = rig.camMayGreet();
+  lens = true;
+  ok('"you can see me now" is not said when the chat no longer holds the camera, or the lens is shut', () => {
+    assert.deepEqual(trackOnly, [true, false], 'the greeting would say the presence can see, with no picture beside it');
+    assert.equal(shut, false);
+  });
+  ok('the greeting asks first, on every try, and re-reads the lease', () => {
+    const click = main.slice(main.indexOf("$('chat-camera').addEventListener('click'"), main.indexOf("$('cam-min').addEventListener"));
+    const greet = click.slice(click.indexOf('const greet = () => {'), click.indexOf('setTimeout(greet, 200)'));
+    assert.ok(greet.length > 100, 'the greeting cannot be located in the camera button');
+    const ask = greet.indexOf('if (!camMayGreet()) return;'), send = greet.indexOf("handle('(I just turned my camera on");
+    assert.ok(ask > 0 && send > ask, 'the camera\'s greeting is sent without asking whether the microphone is the person\'s');
+    assert.ok(greet.indexOf("if (!camera.isOn() || !camOwners.has('chat')) return;") >= 0 && greet.indexOf("if (!camera.isOn() || !camOwners.has('chat')) return;") < greet.indexOf('if (busy)'), 'a lease given back while a turn was running is not noticed');
+    // waiting out a turn comes BEFORE the question, so the answer is read when it matters
+    assert.ok(greet.indexOf('if (busy)') < ask, 'the question is asked before the turn in flight has ended, and its answer goes stale');
+  });
+  const held = [[...rig.owners].sort(), cam['aria-pressed']];
+  lens = false;                                                // the track ended: unplugged, taken, or stopped from the browser's bar
+  rig.camEnded();
+  const after = [rig.owners.size, cam['aria-pressed']];
+  lens = true; await rig.wantCam('track'); lens = false;       // tracking alone, and it ends too
+  rig.camEnded();
+  ok('a lens that closes on its own lets every lease go, darkens the button and says what happened', () => {
+    assert.deepEqual(held, [['chat', 'track'], 'true']);
+    assert.equal(after[0], 0, 'a lease is still held on a camera that is not there');
+    assert.equal(after[1], 'false', 'the button goes on saying the presence can see');
+    assert.equal(toasts.length, 2);
+    assert.match(toasts[0], /cannot see you now/);
+    assert.match(toasts[0], /Press the camera to open it again/);
+    // tracking alone: the other sentence, and nothing about being seen
+    assert.ok(!/see you/.test(toasts[1]) && /Settings/.test(toasts[1]), toasts[1]);
+    assert.ok(/createCamera\(\$\('cam'\), \{ onEnded: \(\) => camEnded\(\) \}\)/.test(main), 'the camera is not told whom to tell');
+  });
+})();
+
+// THE CAMERA ITSELF (src/camera.js), against a stand-in device.
+await (async () => {
+  const g = globalThis;
+  const saved = { navigator: Object.getOwnPropertyDescriptor(g, 'navigator'), window: g.window, document: g.document };
+  const mkTrack = (kind) => { const hs = {}; const t = { kind, readyState: 'live', stopped: 0, stop() { t.stopped++; t.readyState = 'ended'; }, addEventListener(ev, f) { (hs[ev] = hs[ev] || []).push(f); }, end() { t.readyState = 'ended'; for (const f of hs.ended || []) f(); } }; return t; };
+  const mkStream = () => { const tracks = [mkTrack('video')]; return { tracks, getTracks: () => tracks, getVideoTracks: () => tracks.filter((t) => t.kind === 'video') }; };
+  const opened = [];
+  let playFails = false;
+  Object.defineProperty(g, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => { const s = mkStream(); opened.push(s); return s; } } } });
+  g.window = {}; g.document = { documentElement: { dataset: {} } };
+  try {
+    const { createCamera } = await import('../src/camera.js?standin');
+    const video = () => ({ srcObject: null, classList: { add() {}, remove() {} }, async play() { if (playFails) throw new Error('NotAllowedError'); } });
+    await (async () => {
+      const told = [];
+      const camera = createCamera(video(), { onEnded: () => told.push('ended') });
+      assert.equal(camera.isOn(), false);
+      assert.equal(await camera.on(), true);
+      ok('on is a live track, not a kept object', () => {
+        assert.equal(camera.isOn(), true);
+        opened[0].tracks[0].readyState = 'ended';             // the device went, and no event has come yet
+        assert.equal(camera.isOn(), false, 'the camera says it is on with no live track behind it');
+        opened[0].tracks[0].readyState = 'live';
+      });
+      opened[0].tracks[0].end();                               // ...and now the browser says so
+      ok('a track that ends by itself closes the camera and tells the room, once', () => {
+        assert.equal(camera.isOn(), false);
+        assert.deepEqual(told, ['ended']);
+        assert.equal(opened[0].tracks[0].stopped, 1, 'the ended stream is still held');
+      });
+      assert.equal(await camera.on(), true);
+      ok('and it opens again afterwards, on a new stream', () => {
+        assert.equal(opened.length, 2, 'a dead stream was "already on", so nothing could open it again');
+        assert.equal(camera.isOn(), true);
+      });
+      camera.off();
+      opened[1].tracks[0].end();                               // a stream closed on purpose ending later is not news
+      ok('a camera closed on purpose tells nobody when its old track ends', () => {
+        assert.deepEqual(told, ['ended']);
+        assert.equal(opened[1].tracks[0].stopped, 1);
+      });
+    })();
+    await (async () => {
+      playFails = true;
+      const camera = createCamera(video());
+      const before = opened.length;
+      const r = await camera.on();
+      ok('a stream that opened and could not be shown is closed, not orphaned with the light on', () => {
+        assert.equal(r, false);
+        assert.equal(opened.length, before + 1);
+        assert.equal(opened.at(-1).tracks[0].stopped, 1, 'the device is still held by a stream nothing can stop');
+        assert.equal(camera.isOn(), false);
+      });
+      playFails = false;
+    })();
+  } finally {
+    if (saved.navigator) Object.defineProperty(g, 'navigator', saved.navigator); else delete g.navigator;
+    if (saved.window === undefined) delete g.window; else g.window = saved.window;
+    if (saved.document === undefined) delete g.document; else g.document = saved.document;
+  }
+})();
+
+ok('the mic\'s dot holds while the conversation is on and the presence is speaking', () => {
+  const css = readFileSync(new URL('styles.css', ROOT), 'utf8');
+  // the rule: pressed (the mode) and not active (the listen) still shows a dot, steady
+  const m = css.match(/#chat-voice\[aria-pressed="true"\]:not\(\.active\)::after\s*\{([^}]*)\}/);
+  assert.ok(m, 'between listens the microphone\'s mark looks switched off, and pressing it to get it back switches it off');
+  const op = Number((m[1].match(/opacity:\s*([\d.]+)/) || [])[1]);
+  assert.ok(op >= 0.4 && op < 1, 'the waiting dot is invisible, or cannot be told from the listening one: ' + op);
+  assert.ok(!/animation/.test(m[1]), 'the waiting dot blinks like the listening one');
+  // and the listening rule still wins while listening (it must come from .active, with its blink)
+  assert.ok(/#chat-voice\.active::after,[\s\S]{0,200}\{ opacity: 1; animation: rec-blink/.test(css), 'the listening dot lost its blink');
+});
+
 console.log('\nwhat the page hides stays hidden:');
 
 // A class or id rule that sets display outranks the browser's own [hidden]
