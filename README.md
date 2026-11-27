@@ -263,7 +263,25 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
-- **2026-11-27** (latest) — **A lapsed sign-in is called that (y3kode 0.3.23)** (`y3k-code/adapters/claude.mjs`,
+- **2026-11-27** (latest) — **The camera does not take the microphone** (`src/main.js`, `src/camera.js`,
+  `src/voice.js`, `styles.css`). Colin: "mic and camera don't seem to be able to be served at the same time". Seen
+  in Chromium with a stand-in camera and microphone: with a spoken conversation on, pressing the camera opened the
+  lens and, 460 ms later, sent the camera's own greeting turn ("I just turned my camera on"), and every turn closes
+  the microphone so the presence does not hear its own reply. The mic was gone for the whole reply, whatever was
+  being said was cut off and answered out of order, and the mic's mark went dark though its mode was still on, so
+  pressing it to get the microphone back switched the conversation off. Now **the camera coming on speaks for
+  itself only when the microphone is not the person's** (their next words carry the first frame; the presence is
+  already told an image is the person, live), and **the mic's dot holds, steady and dimmer, while the conversation
+  is on and the presence is answering**. Found on the way, each what makes a dead camera or mic stay dead:
+  **"on" is a live track, not a kept object** (a lens the browser or system closed left the button lit and every
+  message carrying the last still; it now lets its leases go and says so); **a stream that opened and could not be
+  shown is closed** (it kept the light on with nothing left to put it out); **the meter's microphone is asked for
+  again when its track has ended**; and **an error listening again cannot mend ends the spoken conversation and says
+  why** (a blocked microphone was started three times a second for ever). Before and after traced in the browser
+  (the mic is never stopped by the camera now, and the spoken turn after it carries a picture); tests in `chrome`
+  and `voice`, twelve breaks on purpose, each caught. Not reproduced here: Safari's own limits on two captures at
+  once, which would need his browser to see.
+- **2026-11-27** — **A lapsed sign-in is called that (y3kode 0.3.23)** (`y3k-code/adapters/claude.mjs`,
   `brain.mjs`, `engine.mjs`; `src/own-brain.js`, `src/brain.js`, `src/code/onboard.js`). Colin's presence stopped
   answering and kode said "Sign in to Claude Code first" while he was signed in to the Claude app. Found on his
   computer: the terminal's Claude Code keeps a sign-in of its own, and that one had lapsed (its refresh token no

@@ -868,6 +868,85 @@ console.log('\nthe mic waits for a longer pause:');
   } finally { globalThis.window = was; }
 }
 
+// --- a microphone that cannot listen says so, and one that died is opened again (2026-11-27) ---
+// The recogniser's error was taken for silence whatever it carried, and the room listens again
+// after a silence: a microphone the browser had blocked was started three times a second for
+// ever. And the meter's stream was kept "for the session" whether or not it was still a
+// microphone. (Found looking into Colin's "mic and camera don't seem to be able to be served at
+// the same time": neither was that fault, both are what makes a dead mic stay dead.)
+console.log('\na microphone that cannot listen, and one that went away:');
+{
+  const recs = [];
+  class FakeRec { constructor() { recs.push(this); } start() {} stop() { this.stopped = true; setTimeout(() => this.onend?.(), 0); } }
+  const was = globalThis.window;
+  const wasNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const mkTrack = () => { const t = { kind: 'audio', readyState: 'live', stopped: 0, stop() { t.stopped++; t.readyState = 'ended'; } }; return t; };
+  const opened = [];
+  class FakeCtx { get sampleRate() { return 48000; } createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { return { fftSize: 512, frequencyBinCount: 256, connect() {}, disconnect() {}, getByteTimeDomainData() {}, getByteFrequencyData() {} }; } }
+  globalThis.window = { ...(was || {}), SpeechRecognition: FakeRec, AudioContext: FakeCtx };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => { const tr = [mkTrack()]; const st = { tr, getTracks: () => tr, getAudioTracks: () => tr }; opened.push(st); return st; } } } });
+  globalThis.requestAnimationFrame = globalThis.requestAnimationFrame || (() => 1);
+  globalThis.cancelAnimationFrame = globalThis.cancelAnimationFrame || (() => {});
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const V = await import('../src/voice.js?micerr');
+    await ok('an error that listening again cannot mend is said once, with why; a silence is still a silence', async () => {
+      assert.deepEqual([...V.MIC_FATAL].sort(), ['audio-capture', 'language-not-supported', 'not-allowed', 'service-not-allowed']);
+      for (const code of V.MIC_FATAL) assert.ok(V.MIC_WHY[code]?.length > 30, 'no words for ' + code);
+      const said = []; const on = [];
+      const voice = V.createVoice({ onTranscript: () => {}, onListeningChange: (x) => on.push(x), onMicError: (code, why) => said.push([code, why]) });
+      await voice.startListening();
+      recs.at(-1).onerror({ error: 'not-allowed' });
+      assert.deepEqual(said, [['not-allowed', V.MIC_WHY['not-allowed']]]);
+      assert.equal(voice.isListening(), false, 'the listen goes on after an error');
+      assert.deepEqual(on, [true, false]);
+      recs.at(-1).onerror({ error: 'not-allowed' });           // the browser repeats itself: said once for the listen
+      recs.at(-1).onend?.();
+      assert.equal(said.length, 1);
+      // the errors that ARE a silence: nothing is said, and the room listens again as it always did
+      for (const code of ['no-speech', 'aborted', 'network', '', undefined]) {
+        await voice.startListening();
+        recs.at(-1).onerror({ error: code });
+        assert.equal(voice.isListening(), false);
+      }
+      assert.equal(said.length, 1, 'a pause was reported as a broken microphone');
+      // and a room that throws in its reaction does not leave the mic stuck listening
+      const rude = V.createVoice({ onTranscript: () => {}, onMicError: () => { throw new Error('the room fell over'); } });
+      await rude.startListening();
+      recs.at(-1).onerror({ error: 'audio-capture' });
+      assert.equal(rude.isListening(), false);
+    });
+    await ok('the meter\'s microphone is kept only while it is one: an ended track is let go and asked for again', async () => {
+      const voice = V.createVoice({ onTranscript: () => {} });
+      const before = opened.length;
+      await voice.startListening();
+      assert.equal(opened.length, before + 1);
+      voice.stopListening();
+      await voice.startListening();                            // the same conversation: the same microphone, not asked twice
+      assert.equal(opened.length, before + 1, 'the microphone is asked for again on every listen (the system\'s mic light flickers)');
+      voice.stopListening();
+      opened.at(-1).tr[0].readyState = 'ended';                // the system took it: unplugged, or another capture
+      await voice.startListening();
+      assert.equal(opened.length, before + 2, 'a dead stream was "already open", and the meter read nothing for the rest of the session');
+      assert.equal(opened.at(-2).tr[0].stopped, 1, 'the dead stream was not let go');
+      voice.stopListening(); voice.releaseMic();
+      assert.equal(opened.at(-1).tr[0].stopped, 1);
+    });
+    await ok('the room ends the spoken conversation on such an error, and says why once', () => {
+      const main = readFileSync(join(ROOT, 'src', 'main.js'), 'utf8');
+      const h = main.slice(main.indexOf('onMicError: (code, why) => {'), main.indexOf('});', main.indexOf('onMicError: (code, why) => {')));
+      assert.ok(h.length > 60, 'the room does not hear a microphone error at all');
+      assert.ok(/if \(voiceMode\) stopVoiceMode\(\);/.test(h), 'the mode stays on, and the room asks a blocked microphone again three times a second');
+      assert.ok(/if \(why\) toast\(why/.test(h), 'nothing tells the person why the microphone went dark');
+      // the restart loop it ends: a listen that ends in voice mode is armed again (that is right for a silence)
+      assert.ok(/setTimeout\(\(\) => \{ if \(voiceMode && !busy\) armListen\(\); \}, 300\);/.test(main));
+    });
+  } finally {
+    globalThis.window = was;
+    if (wasNav) Object.defineProperty(globalThis, 'navigator', wasNav); else delete globalThis.navigator;
+  }
+}
+
 // THE FREE VOICE, CHOSEN (2026-11-18; src/voice-pick.mjs). The rows are the
 // start of what Chrome lists on a Mac set to Spanish, read on the day, and its
 // English voices; then a premium Apple voice, Edge's and Google's names.

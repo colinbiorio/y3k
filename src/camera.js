@@ -3,8 +3,17 @@
 // brain can actually see — privacy-forward: the user turns the eye on, never the
 // reverse, and frames are only captured while it's on.
 
-export function createCamera(videoEl) {
+export function createCamera(videoEl, { onEnded } = {}) {
   let stream = null;
+  // IS THE LENS ACTUALLY OPEN (2026-11-27). This was Boolean(stream): true for
+  // as long as the object was kept, whatever had happened to the camera behind
+  // it. A track the browser or the system ended (the device unplugged, another
+  // capture taking it, "stop sharing" pressed in the browser's own bar) left
+  // isOn() saying yes for ever: the button lit, the trackers reading a frame
+  // that never changed, every message carrying the last still, and no press
+  // able to open it again because it was "already on". A camera is on while
+  // one of its video tracks is live, and not otherwise.
+  const live = () => !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live');
 
   // Current video frame as base64 JPEG (no data: prefix), downscaled for cheap
   // vision tokens + low latency. Null if the camera is off or not ready yet.
@@ -45,7 +54,8 @@ export function createCamera(videoEl) {
   }
 
   async function on() {
-    if (stream) return true;
+    if (live()) return true;
+    if (stream) off();   // kept, and no longer a camera: let go of it and open another
     try {
       try {
         stream = await navigator.mediaDevices.getUserMedia(wants());
@@ -56,12 +66,27 @@ export function createCamera(videoEl) {
           audio: false,
         });
       }
+      // THE LENS CAN CLOSE WITHOUT BEING ASKED, and then everything is told:
+      // the stream is let go here, and whoever holds the leases hears of it
+      // (main.js camEnded), so no button goes on claiming a camera that is
+      // not there. Only for the stream that is still the camera: one that was
+      // closed on purpose, or replaced, ends too, and that is not news.
+      const mine = stream;
+      for (const t of mine.getVideoTracks()) {
+        t.addEventListener('ended', () => { if (stream !== mine) return; off(); try { onEnded?.(); } catch { /* the room's reaction is its own */ } });
+      }
       videoEl.srcObject = stream;
       await videoEl.play();
       videoEl.classList.add('on');
       return true;
     } catch {
+      // A STREAM THAT OPENED AND COULD NOT BE SHOWN IS STILL HOLDING THE
+      // DEVICE. This used to drop the reference and nothing else: the light
+      // stayed on with nothing left that could put it out, the orphan the
+      // one-opening rule in main.js exists to prevent.
+      try { stream?.getTracks().forEach((t) => t.stop()); } catch { /* already stopped */ }
       stream = null;
+      try { videoEl.srcObject = null; } catch { /* no element, no harm */ }
       return false;
     }
   }
@@ -74,7 +99,7 @@ export function createCamera(videoEl) {
   }
 
   return {
-    isOn: () => Boolean(stream),
+    isOn: live,
     captureFrame,
     on,
     off,

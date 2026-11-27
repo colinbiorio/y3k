@@ -542,7 +542,7 @@ $('login-travel')?.addEventListener('click', () => openTravel()); // the three p
 // A way through to the other world. It lights itself when it is first seen.
 createPortal();
 
-const camera = createCamera($('cam'));
+const camera = createCamera($('cam'), { onEnded: () => camEnded() });
 // THE EYE GATE. Nothing here fetches a byte or touches the GPU until the
 // camera is actually on — see perceive.js, where the reason (about 15 MB) and
 // the teardown promise both live. It is a pull API: features poll a snapshot
@@ -698,6 +698,36 @@ function dropCam(who) {
   if (!camOwners.size && camera.isOn()) camera.off();
   applyCam();
 }
+// THE LENS CLOSED ON ITS OWN (camera.js: the track ended and nobody here asked
+// it to). Every lease is let go, since each was a claim on a camera that is no
+// longer there: the button goes dark, the presence is not told it can see, and
+// the trackers stop with the lens (perceive's watchdog). It is not opened
+// again from here: the person may have stopped it from the browser's own bar,
+// and a room that reopens a camera someone just closed is the wrong room. One
+// line says what happened, because a camera that goes dark by itself is
+// otherwise a fault they would have to guess at.
+function camEnded() {
+  const seen = camOwners.has('chat');
+  camOwners.clear();
+  applyCam();
+  toast(seen ? 'The camera stopped, so your presence cannot see you now. Press the camera to open it again.' : 'The camera stopped. Its switches in Settings open it again.', 7000);
+}
+// DOES THE CAMERA COMING ON GET A TURN OF ITS OWN? (2026-11-27, Colin: "mic
+// and camera don't seem to be able to be served at the same time".) Pressing
+// the camera sends "(I just turned my camera on, so you can see me now.)" so
+// the presence looks up, and every turn closes the microphone so the presence
+// does not hear its own reply. Together: in a spoken conversation the camera
+// took the microphone away for a whole turn, cut off whatever was being said
+// and answered it out of order, and left the mic's mark dark, so pressing it
+// to get the microphone back switched the conversation off instead. A person
+// who is talking does not need the camera to speak for them. Their next words
+// carry the first frame, and the presence is already told that an image is
+// the person, live (server.mjs SYSTEM). Nor when the chat's lease was given
+// back before the greeting could go: "you can see me now" with no picture
+// beside it is not true.
+function camMayGreet() {
+  return camera.isOn() && camOwners.has('chat') && !voiceMode && !voice.isListening();
+}
 function applyCam() {
   const on = camera.isOn();
   const seeMe = camOwners.has('chat');
@@ -831,6 +861,15 @@ const voice = createVoice({
   // read the sentence, about a second for every sixteen characters, and never
   // less than nine.
   onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
+  // THE MICROPHONE CANNOT LISTEN, AND LISTENING AGAIN WILL NOT MEND IT
+  // (voice.js MIC_FATAL): the spoken conversation is switched off, which is
+  // what stops the room asking three times a second, and the reason is said
+  // once. Code's own dictation ends the same way, through its lease.
+  onMicError: (code, why) => {
+    if (dictation) { const d = dictation; dictation = null; try { d.onState?.(false); } catch { /* ignore */ } }
+    if (voiceMode) stopVoiceMode();
+    if (why) toast(why, 10000);
+  },
 });
 // THE WORLDS MAY SOUND THROUGH THE VOICE (2026-10-22): the sand plate's note
 // when it is struck, through the voice's own context and only while that is
@@ -2422,8 +2461,9 @@ $('chat-camera').addEventListener('click', async () => {
   if (on) {
     let tries = 0;
     const greet = () => {
-      if (!camera.isOn()) return;
+      if (!camera.isOn() || !camOwners.has('chat')) return;
       if (busy) { setTimeout(greet, 300); return; }
+      if (!camMayGreet()) return;   // the microphone is the person's: the camera does not take it
       if (camera.captureFrame()) { handle('(I just turned my camera on, so you can see me now.)'); return; }
       if (++tries < 10) setTimeout(greet, 180);
     };

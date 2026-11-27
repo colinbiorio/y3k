@@ -112,7 +112,23 @@ export function refusalLine(no) {
 // how long the mic waits after the last word before it lets go (startListening, below)
 export const END_SILENCE_MS = 3000;
 
-export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice, endSilenceMs = END_SILENCE_MS }) {
+// WHY THE MICROPHONE CANNOT LISTEN, when the recogniser says so (2026-11-27).
+// Its `onerror` was treated as silence whatever it carried, and the room
+// listens again after a silence: so a microphone the browser had blocked, or
+// a recogniser with no service behind it (the desktop app's), was started
+// again three times a second for ever, the dot flickering over a mic that
+// heard nothing, and nothing said why. These are the errors that listening
+// again cannot mend; the rest ('no-speech', 'aborted', a 'network' blip) are
+// the silences they always were.
+export const MIC_FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported']);
+export const MIC_WHY = {
+  'not-allowed': 'The microphone is blocked for this page. Allow it from the address bar (or the system\'s privacy settings), then press the microphone again.',
+  'service-not-allowed': 'This browser will not run speech recognition here. Chrome or Edge will; you can type to me meanwhile.',
+  'audio-capture': 'No microphone answered. If another app or page is using it, close that, then press the microphone again.',
+  'language-not-supported': 'This browser\'s speech recognition does not have English here. You can type to me instead.',
+};
+
+export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice, onMicError, endSilenceMs = END_SILENCE_MS }) {
   const sttSupported = Boolean(SpeechRecognition);
   let recog = null;
   let listening = false;
@@ -133,7 +149,11 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // many times, and re-getUserMedia every utterance flickers the OS mic
   // indicator. releaseMic() frees it when voice mode ends.
   async function ensureMic() {
-    if (micStream) return true;
+    // kept for the session, but only while it is still a microphone: a track
+    // the browser or the system ended is let go and asked for again, where it
+    // used to be "already open" for ever, with a meter reading nothing
+    if (micStream && micStream.getAudioTracks().some((t) => t.readyState === 'live')) return true;
+    if (micStream) releaseMic();
     try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch { return false; }
     const ctx = getCtx();
@@ -219,7 +239,13 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
       hush();
       onTranscript?.({ text: (finalText + interim).trim(), final: false });
     };
-    recog.onerror = () => finish();
+    // an error that listening again cannot mend is said, once, before the
+    // listen ends; whoever holds the mode decides what to do with it
+    recog.onerror = (e) => {
+      const code = String(e?.error || '');
+      if (!done && MIC_FATAL.has(code)) { try { onMicError?.(code, MIC_WHY[code] || ''); } catch { /* the room's reaction is its own */ } }
+      finish();
+    };
     recog.onend = () => finish();
     recog.start();
   }
