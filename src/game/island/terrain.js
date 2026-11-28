@@ -72,7 +72,7 @@ export const CONTROL = { per: 2, lite: 1 };
 export const FLOWS = { every: 11, shift: 0.8 };
 // the swash's front on the land: the lace at the film's edge lies where the film is thinner than `deep` (m); on ground
 // steeper than `slope` it fades, and from three times that there is none (there it would be a wire along the shore)
-export const FRONT = { deep: 0.035, slope: 0.1 };
+export const FRONT = { deep: 0.035, slope: 0.15 };
 // the white water near the eye (where a pixel is finer than `far` m, wholly where finer than `near`): the lace's measure is
 // held to `most` (so its thickest still has holes); it lies in rafts with dark water between them, each raft `web` of its
 // cell's half-width (the oldest, a web of threads; the freshest, with cracks between the rafts), and the oldest is no

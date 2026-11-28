@@ -31,9 +31,11 @@ export const ROCKS = {
   far: 480,                  // a rock is drawn out to this many of its own lengths (a few pixels high there); a small one less
   solid: 0.9,                // m: a rock this long or longer is in a body's way
   scale: 1.5,                // a sea-rounded scan is drawn at no more than this many times its true size
+  scoured: 0.35,             // and keeps this much of a rock's leaning toward rust (the sea wears the rind off: grey, not tan)
 };
 // the models (rocks-build.mjs MODELS, by name) and each one's three sides as scanned (m: across, up, along; it stands on
-// y = 0, its middle over the origin); a rock's size is its longest side
+// y = 0 to within three centimetres, its middle within an eighth of its length of the origin); a rock's size is its
+// longest side
 export const MODELS = ['slab', 'chunk', 'shard', 'boulder', 'cobble', 'stick', 'log', 'shell', 'coral'];
 export const DIMS = { slab: [2.41, 1.47, 3.07], chunk: [0.17, 0.14, 0.32], shard: [0.074, 0.033, 0.145], boulder: [0.67, 0.65, 1.21], cobble: [1.36, 0.54, 0.75],
   stick: [0.25, 0.44, 0.23], log: [3.05, 0.29, 0.28], shell: [0.14, 0.05, 0.07], coral: [0.15, 0.07, 0.09] };
@@ -135,7 +137,7 @@ function rock(ground, i, j, salt, x, z, y, size, model, o = {}) {
     // how far along its upright its model's origin stands from the ground: less what is sunk, and for a rolled one the
     // lift that sets it on its new foot
     lift: (roll === 1 ? 0.5 * tall : roll === 2 ? tall : 0) - sink * tall,
-    tint: 0.62 + 0.46 * u(10), rust: u(11) < 0.14 ? 0.3 + 0.5 * u(12) : 0.1 * u(12), moss: o.moss ?? 0, foot: o.foot || 'rock', slope: [sx, sz], kind: o.kind || 'talus', id: (i * 73856093) ^ (j * 19349663) ^ (salt * 83492791),
+    tint: 0.62 + 0.46 * u(10), rust: (ROUND.has(model) ? ROCKS.scoured : 1) * (u(11) < 0.14 ? 0.3 + 0.5 * u(12) : 0.1 * u(12)), moss: o.moss ?? 0, foot: o.foot || 'rock', slope: [sx, sz], kind: o.kind || 'talus', id: (i * 73856093) ^ (j * 19349663) ^ (salt * 83492791),
   };
 }
 
