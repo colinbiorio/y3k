@@ -1,0 +1,230 @@
+{
+ "layers": 6,
+ "models": [
+  {
+   "name": "slab",
+   "scan": "namaqualand_boulder_03",
+   "page": "https://polyhaven.com/a/namaqualand_boulder_03",
+   "layer": 0,
+   "cell": [
+    0,
+    0,
+    1
+   ],
+   "albedo_scan": [
+    0.1686,
+    0.0989,
+    0.0491
+   ],
+   "albedo_graded": [
+    0.104,
+    0.094,
+    0.082
+   ],
+   "texels_over_one": 0.0,
+   "covered": 0.648,
+   "rough_mean": 0.763,
+   "ao_mean": 0.941
+  },
+  {
+   "name": "chunk",
+   "scan": "rock_07",
+   "page": "https://polyhaven.com/a/rock_07",
+   "layer": 1,
+   "cell": [
+    0,
+    0,
+    1
+   ],
+   "albedo_scan": [
+    0.1509,
+    0.0905,
+    0.05
+   ],
+   "albedo_graded": [
+    0.097,
+    0.088,
+    0.077
+   ],
+   "texels_over_one": 0.0,
+   "covered": 0.518,
+   "rough_mean": 0.298,
+   "ao_mean": 0.946
+  },
+  {
+   "name": "shard",
+   "scan": "rock_09",
+   "page": "https://polyhaven.com/a/rock_09",
+   "layer": 2,
+   "cell": [
+    0,
+    0,
+    1
+   ],
+   "albedo_scan": [
+    0.0771,
+    0.0452,
+    0.0221
+   ],
+   "albedo_graded": [
+    0.088,
+    0.081,
+    0.073
+   ],
+   "texels_over_one": 0.0,
+   "covered": 0.533,
+   "rough_mean": 0.507,
+   "ao_mean": 0.903
+  },
+  {
+   "name": "boulder",
+   "scan": "namaqualand_boulder_06",
+   "page": "https://polyhaven.com/a/namaqualand_boulder_06",
+   "layer": 3,
+   "cell": [
+    0,
+    0,
+    1
+   ],
+   "albedo_scan": [
+    0.1896,
+    0.103,
+    0.0491
+   ],
+   "albedo_graded": [
+    0.138,
+    0.131,
+    0.12
+   ],
+   "texels_over_one": 2e-05,
+   "covered": 0.759,
+   "rough_mean": 0.917,
+   "ao_mean": 0.902
+  },
+  {
+   "name": "cobble",
+   "scan": "namaqualand_boulder_05",
+   "page": "https://polyhaven.com/a/namaqualand_boulder_05",
+   "layer": 4,
+   "cell": [
+    0,
+    0,
+    1
+   ],
+   "albedo_scan": [
+    0.3786,
+    0.2646,
+    0.153
+   ],
+   "albedo_graded": [
+    0.128,
+    0.122,
+    0.112
+   ],
+   "texels_over_one": 0.0,
+   "covered": 0.631,
+   "rough_mean": 0.785,
+   "ao_mean": 0.62
+  },
+  {
+   "name": "stick",
+   "scan": "dead_quiver_branch_01",
+   "page": "https://polyhaven.com/a/dead_quiver_branch_01",
+   "layer": 5,
+   "cell": [
+    0,
+    0,
+    2
+   ],
+   "albedo_scan": [
+    0.2737,
+    0.1674,
+    0.0955
+   ],
+   "albedo_graded": [
+    0.4,
+    0.37,
+    0.32
+   ],
+   "texels_over_one": 0.00037,
+   "covered": 0.592,
+   "rough_mean": 0.761,
+   "ao_mean": 0.899
+  },
+  {
+   "name": "log",
+   "scan": "dead_tree_trunk",
+   "page": "https://polyhaven.com/a/dead_tree_trunk",
+   "layer": 5,
+   "cell": [
+    1,
+    0,
+    2
+   ],
+   "albedo_scan": [
+    0.0456,
+    0.0329,
+    0.0163
+   ],
+   "albedo_graded": [
+    0.36,
+    0.335,
+    0.29
+   ],
+   "texels_over_one": 0.01494,
+   "covered": 0.821,
+   "rough_mean": 0.899,
+   "ao_mean": 0.88
+  },
+  {
+   "name": "shell",
+   "scan": "lambis_shell",
+   "page": "https://polyhaven.com/a/lambis_shell",
+   "layer": 5,
+   "cell": [
+    0,
+    1,
+    2
+   ],
+   "albedo_scan": [
+    0.4426,
+    0.2854,
+    0.2137
+   ],
+   "albedo_graded": [
+    0.5927,
+    0.3822,
+    0.2861
+   ],
+   "texels_over_one": 0.04257,
+   "covered": 0.765,
+   "rough_mean": 0.405,
+   "ao_mean": 0.788
+  },
+  {
+   "name": "coral",
+   "scan": "stone_01",
+   "page": "https://polyhaven.com/a/stone_01",
+   "layer": 5,
+   "cell": [
+    1,
+    1,
+    2
+   ],
+   "albedo_scan": [
+    0.2292,
+    0.1213,
+    0.0734
+   ],
+   "albedo_graded": [
+    0.5,
+    0.48,
+    0.42
+   ],
+   "texels_over_one": 0.10304,
+   "covered": 0.658,
+   "rough_mean": 0.648,
+   "ao_mean": 0.888
+  }
+ ]
+}

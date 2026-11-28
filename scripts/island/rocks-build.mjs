@@ -27,16 +27,18 @@
 // WHICH SCANS (judged against photographs of Lord Howe: the basalt talus under Mount Lidgbird's walls is angular blocks,
 // its boulder shores sea-rounded grey cobbles and boulders, black where wet; the beaches clean coral sand with a few
 // bleached sticks, a shell, a lump of coral):
-//   block    boulder_01               1.3 x 1.8 x 1.0 m   a jagged, fractured boulder: the talus's blocks
-//   slab     namaqualand_boulder_03   2.4 x 3.1 x 1.5 m   a great angular block, flat-faced: the largest near the walls, the shore's ledges
-//   chunk    rock_07                  0.17 x 0.32 x 0.14  a blocky fragment: the smaller talus
+//   slab     namaqualand_boulder_03   2.4 x 3.1 x 1.5 m   a great angular block, flat-faced: the largest under the walls, the shore's ledges
+//   chunk    rock_07                  0.17 x 0.32 x 0.14  a blocky fragment: the talus's blocks (a rock's shape has no size of its own)
+//   shard    rock_09                  0.07 x 0.14 x 0.03  a flat-faced splinter: the talus's smaller pieces, the scree
 //   boulder  namaqualand_boulder_06   0.7 x 1.2 x 0.65 m  a rounded boulder: the boulder shores
 //   cobble   namaqualand_boulder_05   1.4 x 0.75 x 0.5 m  a rounded, flatter one: the shores, the lagoon's edge
 //   stick    dead_quiver_branch_01    0.44 m              a bleached, forked branch
 //   log      dead_tree_trunk          3.05 m              a drift log
 //   shell    lambis_shell             0.14 m              a spider conch
 //   coral    stone_01                 0.15 m              a pitted lump: coral rubble
-// (their colours are not the island's: rock-textures.py grades each to it.)
+// (their colours are not the island's: rock-textures.py grades each to it. boulder_01, a jagged boulder, was the first
+// choice for the talus and cannot be used this way: its picture is in 270 ragged islands, and no collapse that keeps
+// their seams takes it under 54,000 triangles.)
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
@@ -47,9 +49,9 @@ import { pathToFileURL } from 'node:url';
 // name, Poly Haven id, the triangles each level is cut to, its texture layer and its cell there ([column, row, cells a
 // side]: the beach's small things share one layer, a quarter each), the texels a side its frame is drawn at
 export const MODELS = [
-  { name: 'block', id: 'boulder_01', lods: [3200, 640, 130], layer: 0, cell: [0, 0, 1], bake: 2048 },
-  { name: 'slab', id: 'namaqualand_boulder_03', lods: [3200, 640, 130], layer: 1, cell: [0, 0, 1], bake: 2048 },
-  { name: 'chunk', id: 'rock_07', lods: [1800, 360, 90], layer: 2, cell: [0, 0, 1], bake: 2048 },
+  { name: 'slab', id: 'namaqualand_boulder_03', lods: [3200, 640, 130], layer: 0, cell: [0, 0, 1], bake: 2048 },
+  { name: 'chunk', id: 'rock_07', lods: [2400, 480, 110], layer: 1, cell: [0, 0, 1], bake: 2048 },
+  { name: 'shard', id: 'rock_09', lods: [1800, 360, 90], layer: 2, cell: [0, 0, 1], bake: 2048 },
   { name: 'boulder', id: 'namaqualand_boulder_06', lods: [2400, 480, 110], layer: 3, cell: [0, 0, 1], bake: 2048 },
   { name: 'cobble', id: 'namaqualand_boulder_05', lods: [2200, 440, 100], layer: 4, cell: [0, 0, 1], bake: 2048 },
   { name: 'stick', id: 'dead_quiver_branch_01', lods: [700, 160], layer: 5, cell: [0, 0, 2], bake: 1024 },
@@ -132,10 +134,10 @@ function frame(m, R) {
 
 // ---- one level: the scan's triangles cut to `target`, its points gathered
 function level(S, m, target, last) {
-  const attrs = new Float32Array((m.pos.length / 3) * 2); attrs.set(m.uv);
-  // (the texture coordinates weigh in the collapses, so the picture is not dragged across the rock; the last level may
-  // cross its seams: it is a few pixels high)
-  const [idx, err] = S.simplifyWithAttributes(m.idx, m.pos, 3, attrs, 2, [0.6, 0.6], null, target * 3, 1.0, last ? ['Prune', 'Permissive'] : ['Prune']);
+  // (the texture coordinates weigh in the collapses, so the picture is not dragged across the rock, and its seams are
+  // kept; only the last level, a few pixels high, may cross them, where that keeps its shape better or its count)
+  let [idx, err] = S.simplifyWithAttributes(m.idx, m.pos, 3, m.uv, 2, [0.6, 0.6], null, target * 3, 1.0, []);
+  if (last) { const [i2, e2] = S.simplifyWithAttributes(m.idx, m.pos, 3, m.uv, 2, [0.6, 0.6], null, target * 3, 1.0, ['Permissive']); if (e2 < err || idx.length > target * 3 * 1.25) { idx = i2; err = e2; } }
   const map = new Map(), pos = [], nor = [], uv = [], out = new Uint16Array(idx.length);
   for (let k = 0; k < idx.length; k++) {
     let v = map.get(idx[k]);
@@ -158,7 +160,7 @@ async function make(dl, work, out) {
     const m = readModel(dl, M.id), n = m.pos.length / 3, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (let k = 0; k < n; k++) for (let c = 0; c < 3; c++) { const v = m.pos[3 * k + c]; if (v < min[c]) min[c] = v; if (v > max[c]) max[c] = v; }
     let uvLo = Infinity, uvHi = -Infinity; for (const v of m.uv) { if (v < uvLo) uvLo = v; if (v > uvHi) uvHi = v; }
-    if (uvLo < -1e-4 || uvHi > 1 + 1e-4) throw new Error(`${M.id}: its texture coordinates leave the picture (${uvLo}, ${uvHi})`);
+    if (uvLo < -0.01 || uvHi > 1.01) throw new Error(`${M.id}: its texture coordinates leave the picture (${uvLo}, ${uvHi})`);
     writeFileSync(join(work, `${M.name}-frame.f32`), Buffer.from(frame(m, M.bake).buffer));
     const [cx, cy, cn] = M.cell, lods = [];
     M.lods.forEach((target, li) => {
