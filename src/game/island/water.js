@@ -178,6 +178,7 @@ float seaFloorAt( vec2 xz, out vec3 n ) {
 // McKee's explicit dispersion), breaks where it would stand over 0.78 of the depth and from there in is held to that (a
 // bore, lower as it runs into the lagoon), its crest sharpening as it nears breaking (Stokes' second harmonic). Its sets
 // come as a slow swing drifting along the reef; each stretch of reef a little out of step with the next.
+float seaBroke = 1.0;       // how far inside the break the last point asked of seaShore lies: 0 at its outer edge, 1 from where the water is half as deep
 float seaShore( vec2 xz, vec4 m, float d, vec2 grad, out vec2 slope, out float white ) {
   slope = vec2( 0.0 ); white = 0.0;
   if ( m.x > 900.0 || m.x < -600.0 ) return 0.0;
@@ -193,6 +194,7 @@ float seaShore( vec2 xz, vec4 m, float d, vec2 grad, out vec2 slope, out float w
   // the white water: the lip where it breaks, the bore behind each broken crest (most just behind it), what is left
   // between the waves; into the lagoon it thins out over a hundred metres or so
   float broken = m.x < 0.0 ? 1.0 : smoothstep( 0.92, 1.12, br );
+  seaBroke = m.x < 0.0 ? 1.0 : smoothstep( 1.0, 2.2, br );
   float lip = smoothstep( 0.8, 0.98, u ) * smoothstep( 0.85, 1.05, br ) * ( 1.0 - smoothstep( 1.25, 1.7, br ) ) * step( 0.0, m.x );
   float churn = 0.35 * smoothstep( -90.0, -10.0, m.x ) * smoothstep( 20.0, -5.0, m.x );
   white = ( broken * ( exp( -u * 2.6 ) + 0.18 + churn ) + lip ) * ( m.x < 0.0 ? exp( m.x / 170.0 ) : 1.0 ) * smoothstep( 0.0, 0.25, H0 );

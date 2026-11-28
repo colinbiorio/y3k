@@ -70,6 +70,15 @@ export const CONTROL = { per: 2, lite: 1 };
 // the walls' lava flows: a flow's foot every `every` m of height, each moved by up to `shift` of that either way together
 // (so a flow is 1 - shift to 1 + shift of it thick: 2.2 to 19.8 m)
 export const FLOWS = { every: 11, shift: 0.8 };
+// the swash's front on the land: the lace at the film's edge lies where the film is thinner than `deep` (m); on ground
+// steeper than `slope` it fades, and from three times that there is none (there it would be a wire along the shore)
+export const FRONT = { deep: 0.035, slope: 0.1 };
+// the white water near the eye (where a pixel is finer than `far` m, wholly where finer than `near`): the lace's measure is
+// held to `most` (so its thickest still has holes); it lies in rafts with dark water between them, each raft `web` of its
+// cell's half-width (the oldest, a web of threads; the freshest, with cracks between the rafts), and the oldest is no
+// more opaque than `veil`; on a steep shore it thins to nothing over the last `thin` m of water; and toward the break's
+// outer edge it thins to `outer` of itself (water.js seaBroke), so that edge is torn, not ruled
+export const FOAM = { most: 0.6, web: [0.1, 0.5], veil: 0.55, thin: 0.2, outer: 0.3, near: 0.4, far: 1.6 };
 
 // ---- the maps, fetched once for the page (both arrays together, transcoded off the page's thread) and kept: going to
 // the void and back does not fetch them again
@@ -820,8 +829,24 @@ const SEA_AFTER = `
   #ifdef SEA_NO_LACE
   float foam = 0.0;
   #else
-  float wIn = clamp( white + smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85 + seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7, 0.0, 1.0 );
-  float foam = wIn > 0.004 ? seaLace( vW.xz, wIn, max( length( seaDx ), length( seaDy ) ) ) : 0.0;
+  // THE WHITE WATER. From afar a bore's white water is a white band along the reef or the shore: the share of it under each
+  // pixel. Near the eye it is foam, and never a flat sheet: at its thickest it is lace with holes in it (no more than
+  // FOAM.most of the lace's own measure), in patches a couple of metres across that drift, so its outer edge is ragged;
+  // as it ages it drains to the lines between its rafts of bubbles: holes open in it, cell by cell, until a web of threads
+  // is left (FOAM.web), and the water shows through what is left (FOAM.veil); it thins toward the break's outer edge
+  // (FOAM.outer), and on a steep shore to nothing where the water does (on a beach's gentle slope the swash's own front
+  // is its edge, as it was)
+  float lacePx = max( length( seaDx ), length( seaDy ) ), wCaps = smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85, wBore = white + wCaps, wEdge = seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7;
+  float wIn = clamp( wBore + wEdge, 0.0, 1.0 ), veil = 1.0, laceNear = smoothstep( ${num(FOAM.far)}, ${num(FOAM.near)}, lacePx );
+  if ( laceNear > 0.0 && wIn > 0.004 ) {
+    float steepK = smoothstep( ${num(FRONT.slope)}, ${num(3 * FRONT.slope)}, isleSlope ), ft = uSeaClock.x, rag = gn( vW.xz * 0.45 + vec2( 0.13, -0.08 ) * ft );
+    float body = ( white * ( ${num(FOAM.outer)} + ${num(1 - FOAM.outer)} * seaBroke ) + wCaps ) * ( 0.45 + 1.1 * rag ) * mix( 1.0, smoothstep( 0.0, ${num(FOAM.thin)}, seaD0 ), steepK ), edge = wEdge * ( 1.0 - steepK );
+    float fresh = smoothstep( 0.35, 1.1, max( body, 4.0 * edge ) );
+    float cell = abs( 0.65 * gn( vW.xz * 2.3 + vec2( -0.21, 0.16 ) * ft ) + 0.35 * gn( vW.xz * 6.1 + vec2( 0.3, 0.22 ) * ft ) - 0.5 ) * 2.0, keep = mix( ${num(FOAM.web[0])}, ${num(FOAM.web[1])}, fresh );
+    veil = mix( 1.0, ( 1.0 - smoothstep( keep - 0.2, keep + 0.08, cell ) ) * ( ${num(FOAM.veil)} + ${num(1 - FOAM.veil)} * fresh ), laceNear );
+    wIn = mix( wIn, min( body + edge, ${num(FOAM.most)} ), laceNear );
+  }
+  float foam = wIn > 0.004 ? seaLace( vW.xz, wIn, lacePx ) * veil : 0.0;
   #endif
   vec3 wc = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - isleShadeK ), vec3( 0.0 ) );
   #ifdef SEA_NO_SKY
@@ -843,7 +868,11 @@ if ( isleFilm > 0.0 ) {
   #if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
   lit = isleShade;
   #endif
-  float foam = seaLace( vW.xz * 1.6, smoothstep( 0.035, 0.0, isleFilm ) * ( 0.25 + 0.6 * seaRise ), 1.6 * max( length( dFdx( vW.xz ) ), length( dFdy( vW.xz ) ) ) );
+  // (the front: the film's last few centimetres, some forty across on a beach's gentle slope. On steep ground the same
+  // centimetres are a hand across, and their lace a white wire ruled along the shore, through a boulder shore's rocks: on
+  // ground steeper than FRONT.slope it fades, and from three times that there is none: the film's edge is the wet
+  // ground's, and the white water is the sea's own, torn, and the collars at the rocks' feet, stones.js)
+  float foam = seaLace( vW.xz * 1.6, smoothstep( ${num(FRONT.deep)}, 0.0, isleFilm ) * ( 0.25 + 0.6 * seaRise ) * ( 1.0 - smoothstep( ${num(FRONT.slope)}, ${num(3 * FRONT.slope)}, isleSlope ) ), 1.6 * max( length( dFdx( vW.xz ) ), length( dFdy( vW.xz ) ) ) );
   vec3 white = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - lit ), vec3( 0.0 ) );
   outgoingLight = mix( up, seaSkyIn( v, n, 0.002 ), F ) + seaGlitter( v, kl, ke * uSeaLight.y, vec2( 0.0 ), 0.004 ) * lit * ( 1.0 - foam );
   outgoingLight = mix( outgoingLight, white, foam );

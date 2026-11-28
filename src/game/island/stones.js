@@ -41,6 +41,12 @@ export const STONES = {
   moss: [0.034, 0.052, 0.016],
 };
 const WRACK = new Set(['stick', 'log', 'shell', 'coral']);
+// WET ROCK: how much of its colour it keeps soaked (the ground's sand keeps as much: terrain.js WET); how far over the
+// swash's reach it is wet at the least and the most of a wandering line (m): `hand` in the lagoon's shelter, `spray` on a
+// shore open to the swell; its film's roughness (drying, and with the swash on it now); the foam's collar at its foot (m
+// high: the least, and what the wandering adds) and the foam's own colour (the sea's white water's)
+export const WET = { dark: 0.45, hand: 0.06, spray: 0.75, gloss: [0.22, 0.08], collar: [0.015, 0.04], foam: 0.62 };
+const num = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
 // ---- the models, fetched once for the page and kept (rocks.bin: 'ROK1', then deflated: a head and each level's numbers)
 let file = null;
@@ -142,7 +148,8 @@ const FRAG_BODY = `
   float h00 = texelFetch( uIsleHt, rkI, 0 ).r, h10 = texelFetch( uIsleHt, rkI + ivec2( 1, 0 ), 0 ).r, h01 = texelFetch( uIsleHt, rkI + ivec2( 0, 1 ), 0 ).r, h11 = texelFetch( uIsleHt, rkI + ivec2( 1, 1 ), 0 ).r;
   bool rkLow = rkF.x + rkF.y <= 1.0;
   vec2 rkRise = ( rkLow ? vec2( h10 - h00, h01 - h00 ) : vec2( h11 - h01, h11 - h10 ) ) / uIsleGrid.z;
-  float rkOver = ( vRockW.y - ( rkLow ? h00 + ( h10 - h00 ) * rkF.x + ( h01 - h00 ) * rkF.y : h11 + ( h01 - h11 ) * ( 1.0 - rkF.x ) + ( h10 - h11 ) * ( 1.0 - rkF.y ) ) ) / sqrt( 1.0 + dot( rkRise, rkRise ) );
+  float rkGnd = rkLow ? h00 + ( h10 - h00 ) * rkF.x + ( h01 - h00 ) * rkF.y : h11 + ( h01 - h11 ) * ( 1.0 - rkF.x ) + ( h10 - h11 ) * ( 1.0 - rkF.y );
+  float rkOver = ( vRockW.y - rkGnd ) / sqrt( 1.0 + dot( rkRise, rkRise ) );
   float rkN = gn( vRockW.xz * 2.3 + vRockW.y * 1.7 ), rkN2 = gn( vRockW.xz * 9.0 + vRockW.y * 7.0 );
   // the land's own shape in its colour, as in the ground's (a gully sees less sky and is damper and darker than a ridge)
   rockSky = mix( 1.0, texture2D( uRockSky, ( rkG + 0.5 ) / uIsleN ).r, uIsleGrid.w );
@@ -158,15 +165,30 @@ const FRAG_BODY = `
   alb = mix( alb, vFoot.rgb * ( 0.8 + 0.4 * rkN2 ), foot * 0.92 );
   rockRough = mix( rockRough, 0.9, max( foot, mossy ) );
   rockOcc *= mix( 0.3, 1.0, smoothstep( 0.0, 0.1 + 0.24 * rkSize, rkOver ) );
-  // WET: as high as the swash reaches here (water.js), and as high as the spray wets an open shore; the water in its
-  // pores (darker: Lekner and Dorf's film on a dark, porous rock), glossy, most where the swash is on it now
+  // WET, where the sea reaches. Soaked as high as the swash runs here (water.js), and above that as high as the sea throws
+  // its water: a hand in the lagoon, a rock's own height on an open shore; drying upward, raggedly. The water in its
+  // pores takes more than half its colour (Lekner and Dorf's film on a dark, porous rock: grey dry, black wet); its film
+  // is glossy, most where the swash is on it now.
   if ( vRockW.y < 3.6 ) {
-    vec4 sm = seaMapAt( vRockW.xz ); float rise, sw = seaSwash( vRockW.xz, sm, rise ), line = seaReach( sm ) + 0.08 * ( rkN - 0.5 );
-    float wet = smoothstep( line + 0.1, line - 0.05, vRockW.y );
-    wet = max( wet, 0.85 * smoothstep( -420.0, -90.0, sm.x ) * smoothstep( 1.9 + 1.2 * rkN, 0.45, vRockW.y ) * ( 0.7 + 0.3 * rkN2 ) );
-    float now = max( step( vRockW.y, sw + 0.01 ), smoothstep( line, line - 0.12, vRockW.y ) );
-    alb *= mix( 1.0, 0.5, wet ); alb = mix( alb, alb * alb / max( dot( alb, vec3( 0.333 ) ), 1.0e-4 ), wet * 0.3 );
-    rockRough = mix( rockRough, mix( 0.36, 0.1, now ), wet );
+    vec4 sm = seaMapAt( vRockW.xz ); float rise, sw = seaSwash( vRockW.xz, sm, rise ), reach = seaReach( sm ), open = smoothstep( -420.0, -90.0, sm.x );
+    float line = reach + mix( ${num(WET.hand)}, ${num(WET.spray)}, open ) * ( 0.5 + rkN ) + 0.12 * open * ( rkN2 - 0.5 );
+    float wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y );
+    float now = max( step( vRockW.y, sw + 0.01 ), smoothstep( reach + 0.05, reach - 0.1, vRockW.y ) );
+    alb *= mix( 1.0, ${num(WET.dark)}, wet ); alb = mix( alb, alb * alb / max( dot( alb, vec3( 0.333 ) ), 1.0e-4 ), wet * 0.3 );
+    rockRough = mix( rockRough, mix( ${num(WET.gloss[0])}, ${num(WET.gloss[1])}, now ), wet );
+    // THE FOAM AT ITS FOOT, on a shore the swell reaches: where the swash's film stands round it (the land draws the
+    // film, terrain.js) or the sea's own sheet does, the water breaks on it: a thin, ragged collar of lace a few fingers
+    // high on its sides (not on what faces up), drifting, whitest as the swash runs up and at the film's front
+    float lap = max( rkGnd, 0.02 ), film = sw - rkGnd;
+    float on = step( 0.0, film ) * smoothstep( -700.0, -60.0, sm.x ) * ( 0.25 + 0.6 * rise ) * ( 0.5 + 0.5 * smoothstep( 0.21, 0.0, film ) );
+    if ( on > 0.0 ) {
+      float up = ( vRockW.y - lap ) / ( ${num(WET.collar[0])} + ${num(WET.collar[1])} * rkN );
+      if ( up > -0.5 && up < 1.0 ) {
+        float lace = gn( vRockW.xz * 14.0 + vRockW.y * 11.0 + 0.5 * uSeaClock.x );
+        float collar = 0.85 * on * ( 1.0 - smoothstep( 0.2, 1.0, up ) ) * smoothstep( 0.4, 0.6, 0.75 * lace + 0.2 * ( 1.0 - up ) ) * ( 1.0 - smoothstep( 0.45, 0.8, rockNw.y ) );
+        alb = mix( alb, vec3( ${num(WET.foam)} ), collar ); rockRough = mix( rockRough, 0.9, collar );
+      }
+    }
   }
   diffuseColor.rgb = alb * uRockLook.y;
 }`;

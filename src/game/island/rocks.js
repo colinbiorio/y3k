@@ -30,6 +30,7 @@ export const ROCKS = {
   small: 0.28, great: 4.6,   // m: the smallest block drawn as a block (smaller is the ground's own texture), the greatest
   far: 480,                  // a rock is drawn out to this many of its own lengths (a few pixels high there); a small one less
   solid: 0.9,                // m: a rock this long or longer is in a body's way
+  scale: 1.5,                // a sea-rounded scan is drawn at no more than this many times its true size
 };
 // the models (rocks-build.mjs MODELS, by name) and each one's three sides as scanned (m: across, up, along; it stands on
 // y = 0, its middle over the origin); a rock's size is its longest side
@@ -37,6 +38,12 @@ export const MODELS = ['slab', 'chunk', 'shard', 'boulder', 'cobble', 'stick', '
 export const DIMS = { slab: [2.41, 1.47, 3.07], chunk: [0.17, 0.14, 0.32], shard: [0.074, 0.033, 0.145], boulder: [0.67, 0.65, 1.21], cobble: [1.36, 0.54, 0.75],
   stick: [0.25, 0.44, 0.23], log: [3.05, 0.29, 0.28], shell: [0.14, 0.05, 0.07], coral: [0.15, 0.07, 0.09] };
 export const LONGEST = Object.fromEntries(Object.entries(DIMS).map(([k, d]) => [k, Math.max(...d)]));
+// the sea-rounded ones. An angular block's shape has no size of its own (the talus's are a hand-sized fragment's); a
+// rounded boulder's has: its skin of fine cracks and its roundness are a boulder's of about its size, so it is drawn no
+// larger than ROCKS.scale of the scan (`fit`); and the long one comes to rest on a side or on its back, never on its end
+// (stood on its end it is an egg: from three metres, a great seed)
+export const ROUND = new Set(['boulder', 'cobble']);
+export const fit = (model, size) => (ROUND.has(model) ? Math.min(size, ROCKS.scale * LONGEST[model]) : size);
 // what the ground is at a rock's foot, as terrain.js's surfaces' mean colours (linear): it climbs the foot
 export const FOOT = { sand: [0.55, 0.5, 0.41], litter: [0.085, 0.066, 0.042], grass: [0.07, 0.115, 0.036], rock: [0.125, 0.116, 0.104], shore: [0.15, 0.142, 0.128] };
 
@@ -116,7 +123,8 @@ export function anyIn(F, x0, z0, x1, z1) {
 // dug in, not perched), its shade and its leaning toward rust, the moss on it, and what is at its foot
 function rock(ground, i, j, salt, x, z, y, size, model, o = {}) {
   const u = (q) => hash(i, j, salt + q), k = size / LONGEST[model], D = DIMS[model];
-  const roll = o.roll ?? (u(4) < (o.rolled ?? 0.3) ? (u(5) < 0.5 ? 1 : 2) : 0);
+  let roll = o.roll ?? (u(4) < (o.rolled ?? 0.3) ? (u(5) < 0.5 ? 1 : 2) : 0);
+  if (roll === 1 && model === 'boulder') roll = u(5) < 0.25 ? 2 : 0;                  // (the long rounded one: not on its end)
   // (the splinter is a hand-sized flake as scanned: as a block it is given more body)
   const stretch = [0.88 + 0.26 * u(6), (o.flat ?? (model === 'shard' ? 1.7 : 1)) * (0.85 + 0.3 * u(7)), 0.88 + 0.26 * u(8)];
   const tall = roll === 1 ? D[2] * k * stretch[2] : D[1] * k * stretch[1];
@@ -187,8 +195,8 @@ export function rocksIn(F, ground, x0, z0, x1, z1, min = 0) {
     if (hash(i, j, 33) > thick * 1.15) continue;
     const pick = hash(i, j, 35), u = hash(i, j, 34);
     if (pick < 0.03 && y > -0.5 && y < 0.7) { out.push(rock(ground, i, j, 200, x, z, y, 2.6 + 3.4 * u, 'slab', { flat: 0.42, sink: 0.4, lean: 0.1, rolled: 0, foot: 'shore', kind: 'ledge' })); continue; }
-    const size = 0.7 * Math.pow(2.4 / 0.7, Math.pow(u, 1.6));
-    if (size >= min) out.push(rock(ground, i, j, 200, x, z, y, size, round(pick, size), { sink: 0.26, lean: 0.8, rolled: 0.5, foot: 'shore', kind: 'shore' }));
+    const model = round(pick, 0.7 * Math.pow(2.4 / 0.7, Math.pow(u, 1.6))), size = fit(model, 0.7 * Math.pow(2.4 / 0.7, Math.pow(u, 1.6)));
+    if (size >= min) out.push(rock(ground, i, j, 200, x, z, y, size, model, { sink: 0.26, lean: 0.8, rolled: 0.5, foot: 'shore', kind: 'shore' }));
     if (size * 0.6 < min) continue;
     const n = 4 + Math.floor((3 + 9 * thick) * hash(i, j, 36));
     for (let q = 0; q < n; q++) {
