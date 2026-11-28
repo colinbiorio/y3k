@@ -20,28 +20,35 @@
 // at most), each square's largest first. A rock is drawn out to ROCKS.far of its own lengths (a few pixels high there:
 // past that the ground's own texture carries it), at the level its distance over its length calls for; which level each
 // is at is worked out again when the eye has moved a few metres. Each model's each level is one instanced drawing.
-// Past STONES.speck of its lengths (under some eighteen pixels high) a rock is a SPECK: a blob of twenty triangles in its
-// scan's box and its scan's mean colour. (A scan's last level, a hundred triangles, on a rock ten pixels high is a
+// Past STONES.speck of its lengths (under some twenty-five pixels high) a rock is a SPECK: twenty triangles or twelve in
+// its scan's box, in its scan's mean colour. (A scan's last level, a hundred triangles, on a rock ten pixels high is a
 // hundred triangles each smaller than a pixel, and the GPU shades a pixel again for each of them that touches it:
 // measured, a boulder shore's far rocks cost more than all the land under them.)
 import * as THREE from 'three';
-import { ROCKS, MODELS, FOOT, rocksIn, wrackIn, placeOf, clearOfPalms, farOf } from './rocks.js';
+import { ROCKS, MODELS, ROUND, FOOT, rocksIn, wrackIn, placeOf, clearOfPalms, farOf } from './rocks.js';
 import { SEA_EDGE_GLSL } from './water.js';
 import { loadArrays } from './terrain.js';
 
 // each way of drawing: its square (m), how far out its squares are planted, the most of each model's each level drawn
 export const STONES = {
-  rocks: { tile: 64, reach: 900, most: [160, 1500, 4000, 14000], lite: { reach: 480, most: [0, 800, 2000, 6000] } },
+  rocks: { tile: 64, reach: 900, most: [160, 900, 1500, 2500, 4000, 12000], lite: { reach: 480, most: [0, 0, 800, 1200, 2000, 5000] } },
   wrack: { tile: 32, reach: 64, most: [260, 1500], lite: { reach: 40, most: [0, 700] } },
-  // a rock of length s at d metres is drawn whole within near * s (some three hundred pixels high and over, at the most
-  // pixels the page draws), at its middle level within mid * s (seventy-five and over), at its scan's last out to
-  // speck * s (eighteen), and as a speck from there to ROCKS.far * s: by its size on the screen, a pebble's levels as a
-  // great block's (a level's triangles a few pixels across each: finer, the GPU shades each pixel once for every
-  // triangle that touches it, and a boulder shore's pebbles cost more than its boulders)
-  near: 6.5, mid: 26, speck: 110,
+  // a rock of length s at d metres is drawn whole within near * s (three hundred pixels high and over, at the most
+  // pixels the page draws), at its middle level within mid * s (seventy-five and over), at its scan's last within
+  // last * s with its scan's shape in the light (fifty and over) and out to speck * s without (twenty-five), and as a
+  // speck from there to ROCKS.far * s (eight): by its size on the screen, a pebble's levels as a great block's. What a
+  // level costs is its triangles: measured, a GPU that smooths edges shades a pixel once for every triangle that
+  // touches it, and the same rocks through the same shader with a quarter of the triangles cost a third (so a boulder
+  // shore's pebbles, drawn whole at thirteen lengths, cost more than its boulders)
+  near: 6.5, mid: 26, last: 40, speck: 80,
+  // the land's own grain is read over a rock's whole and middle levels within this many metres of the eye (fading in
+  // over the last eight); past that, and at its last level, it is drawn by a smaller shader without it, and past
+  // STONES.last by one smaller still: its scan's colour and its own foot, its triangles' own normals, no mirrored sky,
+  // wet by its height alone
+  grain: 15,
   // a square is asked only for the rocks long enough to be drawn from where the eye is: all of them within the first
   // distance (m), then those at least each length (rocks.js farOf)
-  classes: [[150, 0], [340, 0.5], [580, 0.7], [1e9, 1.2]],
+  classes: [[130, 0], [175, 0.52], [250, 0.7], [350, 1.0], [1e9, 1.4]],
   force: -1,                  // a probe's switch: every rock drawn at this level (-1: as its distance calls for)
   again: 2.5,                 // m the eye may move before each rock's level is worked out again
   budget: 3,                  // ms a frame, at most, for planting
@@ -82,14 +89,25 @@ function loadModels() {
   return file;
 }
 
-// a speck's shape: twenty triangles (an icosahedron's) drawn out to nine tenths of its scan's box, each corner moved a
-// little by the scan's own number, so no two scans' specks are one shape
-function speckOf(min, max, salt) {
+// a speck's shape, in its scan's own box: a sea-rounded scan's is twenty triangles (an icosahedron's) drawn out to five
+// sixths of the box; an angular one's is twelve, a block with six flat faces, three quarters of the box (a fallen block
+// is faces and edges, at any size; and no scan fills its box); each corner moved a little by the scan's own number, so
+// no two scans' specks are one shape
+function speckOf(min, max, salt, angular) {
+  const jig = (k) => { const x = Math.sin(salt * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); }, g = new THREE.BufferGeometry();
+  const at = (v, k, c, r, L) => (min[c] + max[c]) / 2 + (v / L) * r * (max[c] - min[c]) * (0.82 + 0.36 * jig(3 * k + c));
+  if (angular) {
+    const corner = Array.from({ length: 8 }, (_, k) => [0, 1, 2].map((c) => at((k >> c) & 1 ? 1 : -1, k, c, 0.37, 1)));
+    const faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]], pos = [];
+    for (const [a, b, c, d] of faces) for (const q of [a, b, c, a, c, d]) pos.push(...corner[q]);
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals();
+    return g;
+  }
   const t = (1 + Math.sqrt(5)) / 2, v = [-1, t, 0, 1, t, 0, -1, -t, 0, 1, -t, 0, 0, -1, t, 0, 1, t, 0, -1, -t, 0, 1, -t, t, 0, -1, t, 0, 1, -t, 0, -1, -t, 0, 1], L = Math.hypot(1, t);
   const idx = [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1];
-  const pos = new Float32Array(36), jig = (k) => { const x = Math.sin(salt * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
-  for (let k = 0; k < 12; k++) for (let c = 0; c < 3; c++) pos[3 * k + c] = (min[c] + max[c]) / 2 + (v[3 * k + c] / L) * 0.45 * (max[c] - min[c]) * (0.82 + 0.36 * jig(3 * k + c));
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(new Uint16Array(idx), 1)); g.computeVertexNormals();
+  const pos = new Float32Array(36);
+  for (let k = 0; k < 12; k++) for (let c = 0; c < 3; c++) pos[3 * k + c] = at(v[3 * k + c], k, c, 0.42, L);
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(new Uint16Array(idx), 1)); g.computeVertexNormals();
   return g;
 }
 
@@ -133,14 +151,15 @@ ${SEA_EDGE_GLSL}`;
 const FRAG_BODY = `
 #ifdef ROCK_SPECK
 {
-  // A SPECK (a rock under some eighteen pixels high): its scan's mean colour (its picture's smallest level) with a little
-  // of the ground's at its foot, its own shade and rust, the land's shape in it, moss on what faces up, wet by its height
-  vec3 alb = textureLod( uRockCol, vec3( 0.5, 0.5, vRock.x ), 16.0 ).rgb * vRock.y;
+  // A SPECK (a rock under some twenty-five pixels high): its scan's mean colour (its picture's smallest level; less a
+  // fifth, for the hollows and the shaded sides its flat faces do not have) with a little of the ground's at its foot,
+  // its own shade and rust, the land's shape in it, moss on what faces up, wet by its height
+  vec3 alb = textureLod( uRockCol, vec3( 0.5, 0.5, vRock.x ), 16.0 ).rgb * ( 0.78 * vRock.y );
   alb = mix( alb, dot( alb, vec3( 0.3333 ) ) * vec3( 1.2, 0.97, 0.8 ), vRock.z );
-  rockNw = inverseTransformDirection( normalize( vNormal ), viewMatrix ); rockOcc = 0.7; rockRough = vFoot.w < 0.0 ? - vFoot.w : 0.9;
+  rockNw = inverseTransformDirection( normalize( vNormal ), viewMatrix ); rockOcc = 0.6; rockRough = vFoot.w < 0.0 ? - vFoot.w : 0.9;
   rockSky = mix( 1.0, texture2D( uRockSky, ( ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r, uIsleGrid.w );
   alb = mix( alb, vFoot.rgb, 0.12 ) * mix( 1.0, 0.78 + 0.3 * rockSky, uIsleGrid.w );
-  alb = mix( alb, uRockMoss, 0.6 * max( vFoot.w, 0.0 ) * smoothstep( 0.2, 0.8, rockNw.y ) );
+  alb = mix( alb, uRockMoss, 0.75 * max( vFoot.w, 0.0 ) * smoothstep( 0.2, 0.8, rockNw.y ) );
   if ( vRockW.y < ${num(WET.top)} ) {
     vec4 sm = seaMapAt( vRockW.xz ); float open = smoothstep( -420.0, -90.0, sm.x );
     float line = seaReach( sm ) + mix( ${num(WET.hand)}, ${num(WET.spray)}, open ), wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y );
@@ -165,7 +184,7 @@ const FRAG_BODY = `
   {
     // THE GRAIN, within a few metres: the land's scanned basalt read from the two sides the pixel faces most (as the land
     // reads its own steep rock), its shape laid over the rock's and its hollows darkened
-    vec3 dpx = dFdx( vRockW ), dpy = dFdy( vRockW ); float dk = 1.0 - smoothstep( 7.0, 15.0, rkDist );
+    vec3 dpx = dFdx( vRockW ), dpy = dFdy( vRockW ); float dk = 1.0 - smoothstep( ${num(STONES.grain - 8)}, ${num(STONES.grain)}, rkDist );
     if ( dk > 0.0 ) {
       float side = clamp( 0.45 * rkSize, 0.45, 1.5 ); vec3 a = abs( rockNw );
       int ma = a.x > a.y && a.x > a.z ? 0 : a.y > a.z ? 1 : 2;
@@ -221,6 +240,7 @@ const FRAG_BODY = `
     float line = reach + mix( ${num(WET.hand)}, ${num(WET.spray)}, open ) * ( 0.5 + rkN ) + 0.12 * open * ( rkN2 - 0.5 );
     float wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y ), now = smoothstep( reach + 0.05, reach - 0.1, vRockW.y );
     alb *= mix( 1.0, ${num(WET.dark)}, wet ); alb = mix( alb, alb * alb / max( dot( alb, vec3( 0.333 ) ), 1.0e-4 ), wet * 0.3 );
+    #ifndef ROCK_FAR
     if ( vRockW.y < reach + 0.12 ) {
       // THE FOAM AT ITS FOOT, on a shore the swell reaches: where the swash's film stands round it (the land draws the
       // film, terrain.js) or the sea's own sheet does, the water breaks on it: a thin, ragged collar of lace a few
@@ -235,6 +255,7 @@ const FRAG_BODY = `
         alb = mix( alb, vec3( ${num(WET.foam)} ), collar ); rockRough = mix( rockRough, 0.9, collar ); wet *= 1.0 - collar;
       }
     }
+    #endif
     rockRough = mix( rockRough, mix( ${num(WET.gloss[0])}, ${num(WET.gloss[1])}, now ), wet );
   }
   #endif
@@ -268,7 +289,7 @@ function stoneMaterial({ far = false, grain = false, speck = false, uniforms, en
       // (dry rock is rough: what it gives back of the wrapped sky along the reflection is what it gives back about its
       // normal, as terrain.js reads the ground's; so a dark rock is not greyed by a mirror of the sky. Wet, it mirrors it.)
       .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps.replace('\t\tradiance += getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );',
-        '\t\tradiance += material.roughness > 0.7 ? iblIrradiance * RECIPROCAL_PI : getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );'))
+        far ? '\t\tradiance += iblIrradiance * RECIPROCAL_PI;' : '\t\tradiance += material.roughness > 0.7 ? iblIrradiance * RECIPROCAL_PI : getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );'))
       // (three's own last lines written out, so the island's adoption does not put its wading look before them: a body's
       // part under the mean water is drawn as seen through it, and the sea is not drawn over it; a rock is simply stood
       // in the sea, whose own surface closes over what is under it)
@@ -288,10 +309,12 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
   const col0 = blank(true), surf0 = blank(false);
   const uniforms = { uRockCol: { value: col0 }, uRockSurf: { value: surf0 }, uRockGrain: U.uIsleSurf, uRockSky: U.uIsleSky, uRockLook: U.uIsleLook, uRockMoss: { value: new THREE.Vector3(...STONES.moss) },
     uSeaMap: W.uSeaMap, uSeaGrid: W.uSeaGrid, uSeaN: W.uSeaN, uSeaClock: W.uSeaClock };
-  // (three materials: a rock's whole and middle levels, with the land's grain near the eye; its last level and the beach's
-  // things, without; a speck)
-  const mats = { near: stoneMaterial({ grain: !lite, uniforms, env }), small: stoneMaterial({ uniforms, env }), speck: stoneMaterial({ far: true, speck: true, uniforms, env }) };
-  const geos = [], state = { models: 'fetching', maps: 'fetching', planted: 0, shown: [0, 0, 0, 0], squares: 0, ms: 0 };
+  // (four materials: a rock's whole level and its middle one within the grain's reach; its middle level past that, and
+  // the beach's things; its last level; a speck)
+  const mats = { near: stoneMaterial({ grain: !lite, uniforms, env }), small: stoneMaterial({ uniforms, env }), light: stoneMaterial({ far: true, uniforms, env }), speck: stoneMaterial({ far: true, speck: true, uniforms, env }) };
+  const geos = [], state = { models: 'fetching', maps: 'fetching', planted: 0, shown: [0, 0, 0, 0, 0, 0], squares: 0, ms: 0 };
+  // a rock's six ways of being drawn, nearest first, and the level of its scan each takes (the last: a speck, no scan's)
+  const LOD_OF = [0, 1, 1, 2, 2, 3], MAT_OF = [mats.near, mats.near, mats.small, mats.small, mats.light, mats.speck];
   // ---- each model's each level: an instanced mesh, empty until the models have come
   const sets = {};                                     // name -> [mesh of each level]
   const cfg = (name) => { const C = WRACK.has(name) ? STONES.wrack : STONES.rocks; return lite ? { ...C, ...C.lite } : C; };
@@ -302,9 +325,9 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
       const g = new THREE.BufferGeometry(); geos.push(g);
       g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
       for (const [k, size] of [['aRock', 4], ['aFoot', 4]]) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size); a.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, a); }
-      const m = new THREE.InstancedMesh(g, WRACK.has(name) || li === 2 ? mats.small : li === 3 ? mats.speck : mats.near, n);
+      const m = new THREE.InstancedMesh(g, WRACK.has(name) ? mats.small : MAT_OF[li], n);
       m.count = 0; m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.name = `${name}-${li}`;
-      if (li >= 2 && !WRACK.has(name)) m.userData.isleTwin = true;     // (its last level and its speck cast into no shadow map: a rock some tens of pixels high at most)
+      if (li >= 4 && !WRACK.has(name)) m.userData.isleTwin = true;     // (under some fifty pixels high it casts into no shadow map)
       // (the nearer levels are drawn first, each nearest first, and all of them before the land: on this GPU a pixel
       // drawn and then hidden has been paid for, and a boulder shore seen along its length is rocks behind rocks)
       m.renderOrder = -8 + li;
@@ -319,9 +342,9 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
     if (gone) return;
     for (const name of MODELS) sets[name].forEach((m, li) => {
       if (!m) return;
-      const g = m.geometry; m.userData.layer = got[name].layer;
-      if (li >= got[name].lods.length) { const sp = speckOf(got[name].min, got[name].max, got[name].layer + 1); g.setAttribute('position', sp.attributes.position); g.setAttribute('normal', sp.attributes.normal); g.setIndex(sp.index); m.userData.tris = 20; return; }
-      const L = got[name].lods[li];
+      const g = m.geometry, lod = WRACK.has(name) ? li : LOD_OF[li]; m.userData.layer = got[name].layer;
+      if (lod >= got[name].lods.length) { const sp = speckOf(got[name].min, got[name].max, got[name].layer + 1, !ROUND.has(name)); g.setAttribute('position', sp.attributes.position); g.setAttribute('normal', sp.attributes.normal); g.setIndex(sp.index); m.userData.tris = ROUND.has(name) ? 20 : 12; return; }
+      const L = got[name].lods[lod];
       g.setAttribute('position', new THREE.BufferAttribute(L.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(L.nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(L.uv, 2, true));
       g.setIndex(new THREE.BufferAttribute(L.idx, 1)); m.userData.tris = L.tris;
     });
@@ -386,16 +409,19 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
           const x = sq.at[4 * k], z = sq.at[4 * k + 2], d = Math.hypot(x - ex, sq.at[4 * k + 1] - ey, z - ez), P = picks[MODELS[sq.model[k]]];
           let li;
           if (wrack) { li = d < 7 + 22 * s ? 0 : d < Math.min(110, 24 + 60 * s) ? 1 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
-          else { li = STONES.force >= 0 ? (d < K.far * farOf(s) ? STONES.force : -1) : d < STONES.near * s ? 0 : d < STONES.mid * s ? 1 : d >= K.far * farOf(s) ? -1 : d < STONES.speck * s ? 2 : 3; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
-          if (li < 0 || (li < 2 && built && built(x, z))) continue;
+          else {
+            li = d >= K.far * farOf(s) ? -1 : STONES.force >= 0 ? STONES.force : d < STONES.near * s ? 0 : d < STONES.mid * s ? (d - 0.6 * s < STONES.grain ? 1 : 2) : d < STONES.last * s ? 3 : d < STONES.speck * s ? 4 : 5;
+            while (li >= 0 && li < 2 && !sets[MODELS[sq.model[k]]][li]) li += 1;       // (the lighter path draws no whole level and reads no grain)
+          }
+          if (li < 0 || (li < 4 && built && built(x, z))) continue;
           P[li].push(sq, k, d);
         }
       }
     }
-    state.shown = [0, 0, 0, 0];
+    state.shown = [0, 0, 0, 0, 0, 0];
     for (const name of MODELS) sets[name].forEach((m, li) => {
       if (!m) return;
-      const P = picks[name][li], cap = m.instanceMatrix.count, far = li >= 2;
+      const P = picks[name][li], cap = m.instanceMatrix.count, far = !WRACK.has(name) && li >= 4;
       // (nearest first, across the ground, where it casts into the shadow maps: terrain.js draws only those its maps can
       // reach; the squares come nearest first, so what a level cannot hold is its furthest)
       const idx = Array.from({ length: P.length / 3 }, (_, q) => q), hd = far ? null : idx.map((q) => Math.hypot(P[3 * q].at[4 * P[3 * q + 1]] - ex, P[3 * q].at[4 * P[3 * q + 1] + 2] - ez));

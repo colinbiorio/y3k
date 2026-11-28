@@ -28,7 +28,7 @@ export const ROCKS = {
   shoreBand: [-1.3, 3.3],    // m over the mean water: from knee-deep to the storm ridge; thickest at the water's edge
   wrackCell: 0.8,            // the beach's things
   small: 0.28, great: 4.6,   // m: the smallest block drawn as a block (smaller is the ground's own texture), the greatest
-  far: 480,                  // a rock is drawn out to this many of its own lengths (a few pixels high there); a small one less
+  far: 250, farSmall: 480,   // a rock is drawn out to `far` of its own lengths (some eight pixels high there: past that the ground's own texture carries the field); a pebble by `farSmall`, less
   solid: 0.9,                // m: a rock this long or longer is in a body's way
   scale: 1.5,                // a sea-rounded scan is drawn at no more than this many times its true size
   scoured: 0.35,             // and keeps this much of a rock's leaning toward rust (the sea wears the rind off: grey, not tan)
@@ -50,9 +50,9 @@ export const fit = (model, size) => (ROUND.has(model) ? Math.min(size, ROCKS.sca
 export const FOOT = { sand: [0.55, 0.5, 0.41], litter: [0.085, 0.066, 0.042], grass: [0.07, 0.115, 0.036], rock: [0.125, 0.116, 0.104], shore: [0.15, 0.142, 0.128] };
 
 const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-// how far off a rock of length s (m) is still drawn (m): ROCKS.far of its lengths, a small one much less (a pebble shore
-// is the ground's own texture from a little way off; a boulder field is seen from across the lagoon)
-export const farOf = (s) => ROCKS.far * s * Math.min(1, Math.max(0.3, (s - 0.2) / 0.5));
+// how far off a rock of length s (m) is still drawn (m): ROCKS.far of its lengths, a small one less (a pebble shore is
+// the ground's own texture from a little way off; a boulder field is seen from across the lagoon by its great ones)
+export const farOf = (s) => s * Math.min(ROCKS.far, ROCKS.farSmall * Math.min(1, Math.max(0.3, (s - 0.2) / 0.5)));
 // how high the swash reaches over the mean water where the sea's map says a point is (water.js seaReach, the same numbers)
 export const reachOf = (sd) => 0.08 + (0.34 - 0.08) * sm(-700, -60, sd);
 

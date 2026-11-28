@@ -21,7 +21,7 @@ const bytes = new Uint8Array(readFileSync(join(ROOT, 'src/game/island/lordhowe.b
 const head = parseHead(bytes), ground = createGround(head, heightsOf(head, inflateSync(bytes.subarray(HEAD))));
 const F = rockField(ground, SHAPE), a = ground.hts.main, W = F.w, H = F.h, S = F.S;
 // a constant of a module that node cannot load (it draws: three), read from its text
-const constOf = (text, name) => new Function('return ' + text.match(new RegExp(`(?:export )?const ${name} = (\\{[^;]*\\}|\\[[^;]*\\]);`))[1])();
+const constOf = (text, name) => new Function('return ' + (text.match(new RegExp(`(?:export )?const ${name} = (\\{[^;\\n]*\\}|\\[[^;\\n]*\\]);`)) || text.match(new RegExp(`(?:export )?const ${name} = (\\{\\n[\\s\\S]*?\\n\\});`)))[1])();
 // the places looked at: under Mount Lidgbird's west wall and on the boulder shore below it; under Mount Gower; the
 // lagoon's beach (clean coral sand); the north's cliffs
 const LIDGBIRD = [-262, 2400], SHORE = [-314, 2406], GOWER = [-480, 3900], LAGOON = [-300, -1400, -200, -1200];
@@ -157,8 +157,9 @@ ok('the counts and the bounds: the island\'s rocks by kind, no block larger than
   assert.ok(wr.wrack > 4000 && wr.wrack < 25000 && wr.rubble > 10000 && wr.rubble < 80000, 'the beaches\' things: ' + JSON.stringify(wr));
   assert.equal(rusty, 0, 'a sea-rounded rock keeps a third of the lean toward rust');
   assert.equal(fit('boulder', 9), ROCKS.scale * LONGEST.boulder); assert.equal(fit('cobble', 1), 1); assert.equal(fit('slab', 9), 9);
-  // how far off a rock is drawn: by its length, a pebble a few tens of metres, a great block across the lagoon
-  assert.ok(farOf(ROCKS.small) < 60 && farOf(1) > 400 && farOf(1 + ROCKS.great) > 2000);
+  // how far off a rock is drawn: by its length (ROCKS.far of them: some eight pixels high there), a pebble a few tens
+  // of metres, a great block across the lagoon
+  assert.ok(farOf(ROCKS.small) < 60 && farOf(1) === ROCKS.far && Math.abs(farOf(1 + ROCKS.great) - ROCKS.far * (1 + ROCKS.great)) < 1e-9 && farOf(1 + ROCKS.great) > 1200);
   for (let s = 0.3; s < 5.6; s += 0.1) assert.ok(farOf(s + 0.1) > farOf(s));
   // what is in a body's way under the wall: the great ones only, each a trunk-like round (life.js's), none a ledge
   const blocks = blocksNear(F, ground, ...LIDGBIRD), near = rocksIn(F, ground, ...around(LIDGBIRD, 9)).filter((r) => r.size >= ROCKS.solid && r.kind !== 'ledge' && Math.hypot(r.x - LIDGBIRD[0], r.z - LIDGBIRD[1]) <= 6);
@@ -208,7 +209,16 @@ ok('the shaders\' numbers are the module\'s: the swash\'s reach, the open shore,
   // wet rock keeps what wet sand keeps (terrain.js WET's first); its numbers reach the shader as the module's
   const WET = constOf(stones, 'WET'), wetGround = constOf(terrain, 'WET');
   assert.equal(WET.dark, wetGround[0]); assert.ok(WET.dark > 0.4 && WET.dark < 0.5 && WET.gloss[1] < WET.gloss[0] && WET.gloss[0] < 0.4 && WET.hand < WET.spray);
-  for (const k of ['WET.hand', 'WET.spray', 'WET.dark', 'WET.gloss[0]', 'WET.gloss[1]', 'WET.collar[0]', 'WET.collar[1]', 'WET.foam']) assert.ok(stones.includes('${num(' + k + ')}'), k + ' in the shader');
+  for (const k of ['WET.hand', 'WET.spray', 'WET.dark', 'WET.gloss[0]', 'WET.gloss[1]', 'WET.collar[0]', 'WET.collar[1]', 'WET.foam', 'WET.top']) assert.ok(stones.includes('${num(' + k + ')}'), k + ' in the shader');
+  // (no rock is wet above WET.top: the swash's most reach, the most spray of the wandering line, its finer wander and its edge)
+  assert.ok(WET.top >= reachOf(0) + WET.spray * 1.5 + 0.06 + 0.45 && WET.top < 2.5, 'the sea\'s part of a rock\'s shader reaches as high as a rock can be wet');
+  // how fine a rock is drawn: by its size on the screen (lengths from the eye), each level further than the one before,
+  // the last of them where rocks.js stops drawing it; the grain's reach in the shader is the module's
+  const STONES = constOf(stones, 'STONES');
+  assert.ok(STONES.near < STONES.mid && STONES.mid < STONES.last && STONES.last < STONES.speck && STONES.speck < ROCKS.far);
+  assert.equal(STONES.rocks.most.length, 6); assert.equal(STONES.rocks.lite.most.length, 6); assert.equal(STONES.rocks.lite.most[0], 0);
+  assert.ok(stones.includes('smoothstep( ${num(STONES.grain - 8)}, ${num(STONES.grain)}, rkDist )') && stones.includes('d - 0.6 * s < STONES.grain'));
+  for (let c = 1; c < STONES.classes.length; c++) assert.ok(farOf(STONES.classes[c][1]) <= STONES.classes[c - 1][0] + 1e-9, 'a square asked for its great ones holds every rock that can be drawn from there');
   // what climbs a rock's foot is the ground's own colour there (terrain.js's surfaces' means, to within a fifth)
   const MEAN = constOf(terrain, 'MEAN'), LAYERS = constOf(terrain, 'LAYERS');
   for (const [name, c] of Object.entries(FOOT)) { const m = MEAN[LAYERS.indexOf(name)]; for (let q = 0; q < 3; q++) assert.ok(Math.abs(c[q] - m[q]) <= 0.2 * m[q], `${name}'s foot against the ground's mean`); }
