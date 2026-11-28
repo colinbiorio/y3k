@@ -476,6 +476,7 @@ void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out 
     // ITS LAVA FLOWS (isleFlows, above): each its own shade; a dark seam under each flow's foot where the one below has
     // weathered back, some with the red of baked soil in it; its top a ledge, rubbly and paler, the island's dark green
     // on it in patches; columns down the thick ones. A flow thinner than a pixel or two gives way to the wall's mean.
+    #ifndef ISLE_NO_FLOWS
     if ( isleFlow.y > 0.0 ) {
       float T = isleFlow.y, f = isleFlow.x, px = max( length( dpx ), length( dpy ) ), seen = 1.0 - smoothstep( 0.25 * T, 0.8 * T, px ), al = dot( isleW.xz, along );
       float seam = ( 1.0 - smoothstep( 0.0, 0.5 + 1.2 * px, f * T ) ) * seen, top = smoothstep( T - 1.3 - px, T - 0.3, f * T ) * seen;
@@ -488,6 +489,7 @@ void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out 
       if ( cols > 0.0 ) { float u = fract( al * ( 0.7 + 0.5 * isleFlow.z ) + 0.6 * gn( vec2( al * 0.4, isleFlow.w * 9.0 ) ) ); c *= 1.0 - 0.34 * cols * ( 1.0 - smoothstep( 0.0, 0.16, min( u, 1.0 - u ) ) ); }
       col.rgb = c;
     }
+    #endif
   }
   #endif`}
 }
@@ -534,7 +536,7 @@ float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
 // (the island's slopes are forested up to the foot of its cliffs: the 30 m data's slopes past 0.9, 42 degrees, are walls
 // it has smoothed; life.js plants no palm past 0.8, so the floor between 0.8 and 0.9 is forest floor without palms)
 float wCliff = smoothstep( 1.06, 1.14, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
-#ifndef ISLE_NO_STEEP
+#if ! defined( ISLE_NO_STEEP ) && ! defined( ISLE_NO_FLOWS )
 // (a wall's flows lie nearly level: their feet wander a few metres along it, by the island's own slow noise)
 if ( wCliff > 0.0 ) isleFlows( isleH + 7.0 * ( isleCtl.g - 0.5 ) + 2.5 * ( isleCtl.r - 0.5 ) );
 #endif
@@ -838,6 +840,7 @@ const SEA_AFTER = `
   // is its edge, as it was)
   float lacePx = max( length( seaDx ), length( seaDy ) ), wCaps = smoothstep( 0.42, 0.08, b.z ) * seaOpen * 0.85, wBore = white + wCaps, wEdge = seaRise * smoothstep( 0.06, 0.0, seaD0 ) * 0.7;
   float wIn = clamp( wBore + wEdge, 0.0, 1.0 ), veil = 1.0, laceNear = smoothstep( ${num(FOAM.far)}, ${num(FOAM.near)}, lacePx );
+  #ifndef SEA_FLAT_FOAM
   if ( laceNear > 0.0 && wIn > 0.004 ) {
     float steepK = smoothstep( ${num(FRONT.slope)}, ${num(3 * FRONT.slope)}, isleSlope ), ft = uSeaClock.x, rag = gn( vW.xz * 0.45 + vec2( 0.13, -0.08 ) * ft );
     float body = ( white * ( ${num(FOAM.outer)} + ${num(1 - FOAM.outer)} * seaBroke ) + wCaps ) * ( 0.45 + 1.1 * rag ) * mix( 1.0, smoothstep( 0.0, ${num(FOAM.thin)}, seaD0 ), steepK ), edge = wEdge * ( 1.0 - steepK );
@@ -846,6 +849,7 @@ const SEA_AFTER = `
     veil = mix( 1.0, ( 1.0 - smoothstep( keep - 0.2, keep + 0.08, cell ) ) * ( ${num(FOAM.veil)} + ${num(1 - FOAM.veil)} * fresh ), laceNear );
     wIn = mix( wIn, min( body + edge, ${num(FOAM.most)} ), laceNear );
   }
+  #endif
   float foam = wIn > 0.004 ? seaLace( vW.xz, wIn, lacePx ) * veil : 0.0;
   #endif
   vec3 wc = 0.6 * ${num(1 / Math.PI)} * max( uSeaE - ke * max( kl.y, 0.0 ) * ( 1.0 - isleShadeK ), vec3( 0.0 ) );
@@ -880,7 +884,8 @@ if ( isleFilm > 0.0 ) {
 #endif
 `;
 // a probe's shader switches (material defines, which three folds into the program's key), to measure what each part costs
-// (among them the sea's floor in parts: SEA_NO_BED its splat, SEA_NO_CAUSTIC, SEA_NO_REFRACT the floor straight below)
+// (among them the sea's floor in parts: SEA_NO_BED its splat, SEA_NO_CAUSTIC, SEA_NO_REFRACT the floor straight below;
+// ISLE_NO_FLOWS the walls' lava flows; SEA_FLAT_FOAM the white water as its share alone)
 const VARIANT = { defines: {} };
 // the sea's sheet is moved by the waves: the swell, the swell at the reef (where the sheet is fine enough to carry it),
 // the wind's largest band near the eye (its smaller ones only shade it: a program has sixteen texture units in all, and

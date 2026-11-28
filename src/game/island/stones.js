@@ -20,6 +20,10 @@
 // at most), each square's largest first. A rock is drawn out to ROCKS.far of its own lengths (a few pixels high there:
 // past that the ground's own texture carries it), at the level its distance over its length calls for; which level each
 // is at is worked out again when the eye has moved a few metres. Each model's each level is one instanced drawing.
+// Past STONES.speck of its lengths (under some eighteen pixels high) a rock is a SPECK: a blob of twenty triangles in its
+// scan's box and its scan's mean colour. (A scan's last level, a hundred triangles, on a rock ten pixels high is a
+// hundred triangles each smaller than a pixel, and the GPU shades a pixel again for each of them that touches it:
+// measured, a boulder shore's far rocks cost more than all the land under them.)
 import * as THREE from 'three';
 import { ROCKS, MODELS, FOOT, rocksIn, wrackIn, placeOf, clearOfPalms, farOf } from './rocks.js';
 import { SEA_EDGE_GLSL } from './water.js';
@@ -27,11 +31,14 @@ import { loadArrays } from './terrain.js';
 
 // each way of drawing: its square (m), how far out its squares are planted, the most of each model's each level drawn
 export const STONES = {
-  rocks: { tile: 64, reach: 900, most: [160, 1500, 7000], lite: { reach: 480, most: [0, 800, 3000] } },
+  rocks: { tile: 64, reach: 900, most: [160, 1500, 4000, 14000], lite: { reach: 480, most: [0, 800, 2000, 6000] } },
   wrack: { tile: 32, reach: 64, most: [260, 1500], lite: { reach: 40, most: [0, 700] } },
-  // a rock of length s at d metres is drawn whole within near[0] * s + near[1], at its middle level within
-  // mid[0] * s + mid[1], at its last out to ROCKS.far * s
-  near: [4.5, 2.5], mid: [22, 8],
+  // a rock of length s at d metres is drawn whole within near * s (some three hundred pixels high and over, at the most
+  // pixels the page draws), at its middle level within mid * s (seventy-five and over), at its scan's last out to
+  // speck * s (eighteen), and as a speck from there to ROCKS.far * s: by its size on the screen, a pebble's levels as a
+  // great block's (a level's triangles a few pixels across each: finer, the GPU shades each pixel once for every
+  // triangle that touches it, and a boulder shore's pebbles cost more than its boulders)
+  near: 6.5, mid: 26, speck: 110,
   // a square is asked only for the rocks long enough to be drawn from where the eye is: all of them within the first
   // distance (m), then those at least each length (rocks.js farOf)
   classes: [[150, 0], [340, 0.5], [580, 0.7], [1e9, 1.2]],
@@ -44,8 +51,9 @@ const WRACK = new Set(['stick', 'log', 'shell', 'coral']);
 // WET ROCK: how much of its colour it keeps soaked (the ground's sand keeps as much: terrain.js WET); how far over the
 // swash's reach it is wet at the least and the most of a wandering line (m): `hand` in the lagoon's shelter, `spray` on a
 // shore open to the swell; its film's roughness (drying, and with the swash on it now); the foam's collar at its foot (m
-// high: the least, and what the wandering adds) and the foam's own colour (the sea's white water's)
-export const WET = { dark: 0.45, hand: 0.06, spray: 0.75, gloss: [0.22, 0.08], collar: [0.015, 0.04], foam: 0.62 };
+// high: the least, and what the wandering adds) and the foam's own colour (the sea's white water's); `top`: no rock is
+// wet above this height (m over the mean water: the swash's most reach, the most spray and the line's wander)
+export const WET = { dark: 0.45, hand: 0.06, spray: 0.75, gloss: [0.22, 0.08], collar: [0.015, 0.04], foam: 0.62, top: 2.1 };
 const num = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
 // ---- the models, fetched once for the page and kept (rocks.bin: 'ROK1', then deflated: a head and each level's numbers)
@@ -62,7 +70,7 @@ function loadModels() {
     const cut = (T, at, len) => new T(raw.buffer.slice(base + at, base + at + len * T.BYTES_PER_ELEMENT));
     const models = {};
     for (const m of head.models) {
-      models[m.name] = { layer: m.layer, lods: m.lods.map((l) => {
+      models[m.name] = { layer: m.layer, min: m.min, max: m.max, lods: m.lods.map((l) => {
         const q = cut(Uint16Array, l.pos, l.verts * 3), nq = cut(Int8Array, l.nor, l.verts * 4), pos = new Float32Array(l.verts * 3), nor = new Float32Array(l.verts * 3);
         for (let k = 0; k < l.verts; k++) for (let c = 0; c < 3; c++) { pos[3 * k + c] = m.min[c] + (q[3 * k + c] / 65535) * (m.max[c] - m.min[c]); nor[3 * k + c] = nq[4 * k + c] / 127; }
         return { pos, nor, uv: cut(Uint16Array, l.uv, l.verts * 2), idx: cut(Uint16Array, l.idx, l.tris * 3), tris: l.tris };
@@ -72,6 +80,17 @@ function loadModels() {
   })();
   file.catch(() => { file = null; });
   return file;
+}
+
+// a speck's shape: twenty triangles (an icosahedron's) drawn out to nine tenths of its scan's box, each corner moved a
+// little by the scan's own number, so no two scans' specks are one shape
+function speckOf(min, max, salt) {
+  const t = (1 + Math.sqrt(5)) / 2, v = [-1, t, 0, 1, t, 0, -1, -t, 0, 1, -t, 0, 0, -1, t, 0, 1, t, 0, -1, -t, 0, 1, -t, t, 0, -1, t, 0, 1, -t, 0, -1, -t, 0, 1], L = Math.hypot(1, t);
+  const idx = [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1];
+  const pos = new Float32Array(36), jig = (k) => { const x = Math.sin(salt * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
+  for (let k = 0; k < 12; k++) for (let c = 0; c < 3; c++) pos[3 * k + c] = (min[c] + max[c]) / 2 + (v[3 * k + c] / L) * 0.45 * (max[c] - min[c]) * (0.82 + 0.36 * jig(3 * k + c));
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(new Uint16Array(idx), 1)); g.computeVertexNormals();
+  return g;
 }
 
 // ---- the shaders' own lines (a MeshStandardMaterial's, with the island's adoption (terrain.js) and the sky's over them)
@@ -85,7 +104,10 @@ varying vec3 vRockN0; varying vec3 vRockN1; varying vec3 vRockN2;
 // (a direction in the model's own space goes to the world by the instance's matrix made right for normals: each column
 // over its own length squared, so a stretched rock's normals are still square to it)
 const VERT_BODY = `
-vRockUv = uv; vRock = aRock; vFoot = aFoot;
+vRock = aRock; vFoot = aFoot;
+#ifndef ROCK_SPECK
+vRockUv = uv;
+#endif
 vRockW = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xyz;
 #ifndef ROCK_FAR
 { mat3 rm = mat3( instanceMatrix ); vRockN0 = rm[ 0 ] / dot( rm[ 0 ], rm[ 0 ] ); vRockN1 = rm[ 1 ] / dot( rm[ 1 ], rm[ 1 ] ); vRockN2 = rm[ 2 ] / dot( rm[ 2 ], rm[ 2 ] ); }
@@ -109,12 +131,30 @@ float gn( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0 - 2.
 ${SEA_EDGE_GLSL}`;
 // what a pixel of it is made of (in place of three's vertex colour: it sets diffuseColor)
 const FRAG_BODY = `
+#ifdef ROCK_SPECK
+{
+  // A SPECK (a rock under some eighteen pixels high): its scan's mean colour (its picture's smallest level) with a little
+  // of the ground's at its foot, its own shade and rust, the land's shape in it, moss on what faces up, wet by its height
+  vec3 alb = textureLod( uRockCol, vec3( 0.5, 0.5, vRock.x ), 16.0 ).rgb * vRock.y;
+  alb = mix( alb, dot( alb, vec3( 0.3333 ) ) * vec3( 1.2, 0.97, 0.8 ), vRock.z );
+  rockNw = inverseTransformDirection( normalize( vNormal ), viewMatrix ); rockOcc = 0.7; rockRough = vFoot.w < 0.0 ? - vFoot.w : 0.9;
+  rockSky = mix( 1.0, texture2D( uRockSky, ( ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r, uIsleGrid.w );
+  alb = mix( alb, vFoot.rgb, 0.12 ) * mix( 1.0, 0.78 + 0.3 * rockSky, uIsleGrid.w );
+  alb = mix( alb, uRockMoss, 0.6 * max( vFoot.w, 0.0 ) * smoothstep( 0.2, 0.8, rockNw.y ) );
+  if ( vRockW.y < ${num(WET.top)} ) {
+    vec4 sm = seaMapAt( vRockW.xz ); float open = smoothstep( -420.0, -90.0, sm.x );
+    float line = seaReach( sm ) + mix( ${num(WET.hand)}, ${num(WET.spray)}, open ), wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y );
+    alb *= mix( 1.0, ${num(WET.dark)}, wet ); rockRough = mix( rockRough, ${num(WET.gloss[0])}, wet );
+  }
+  diffuseColor.rgb = alb * uRockLook.y;
+}
+#else
 {
   vec3 rkAt = vec3( vRockUv, vRock.x );
   vec3 alb = texture( uRockCol, rkAt ).rgb * vRock.y;
   alb = mix( alb, dot( alb, vec3( 0.3333 ) ) * vec3( 1.2, 0.97, 0.8 ), vRock.z );           // some a little rustier: weathered, oxidised
   float rkSize = vRock.w, rkDist = length( vRockW - cameraPosition );
-  #ifdef ROCK_FAR
+  #if defined( ROCK_FAR ) || defined( ROCK_NO_SHAPE )
   rockNw = inverseTransformDirection( normalize( vNormal ), viewMatrix ); rockOcc = 1.0;
   #else
   vec4 rkS = texture( uRockSurf, rkAt ); vec3 rkO = rkS.rgb * 2.0 - 1.0;
@@ -145,7 +185,11 @@ const FRAG_BODY = `
   // THE GROUND UNDER THIS PIXEL (the grid's own triangle, as the land is drawn): how far the pixel is from it, square to
   // it (on a slope the ground is nearer than the height over it says), and which way it rises
   vec2 rkG = ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z, rkC = clamp( floor( rkG ), vec2( 0.0 ), uIsleN - 2.0 ), rkF = rkG - rkC; ivec2 rkI = ivec2( rkC );
+  #ifdef ROCK_NO_FOOT
+  float h00 = vRockW.y - 9.0, h10 = h00, h01 = h00, h11 = h00;
+  #else
   float h00 = texelFetch( uIsleHt, rkI, 0 ).r, h10 = texelFetch( uIsleHt, rkI + ivec2( 1, 0 ), 0 ).r, h01 = texelFetch( uIsleHt, rkI + ivec2( 0, 1 ), 0 ).r, h11 = texelFetch( uIsleHt, rkI + ivec2( 1, 1 ), 0 ).r;
+  #endif
   bool rkLow = rkF.x + rkF.y <= 1.0;
   vec2 rkRise = ( rkLow ? vec2( h10 - h00, h01 - h00 ) : vec2( h11 - h01, h11 - h10 ) ) / uIsleGrid.z;
   float rkGnd = rkLow ? h00 + ( h10 - h00 ) * rkF.x + ( h01 - h00 ) * rkF.y : h11 + ( h01 - h11 ) * ( 1.0 - rkF.x ) + ( h10 - h11 ) * ( 1.0 - rkF.y );
@@ -169,29 +213,34 @@ const FRAG_BODY = `
   // its water: a hand in the lagoon, a rock's own height on an open shore; drying upward, raggedly. The water in its
   // pores takes more than half its colour (Lekner and Dorf's film on a dark, porous rock: grey dry, black wet); its film
   // is glossy, most where the swash is on it now.
-  if ( vRockW.y < 3.6 ) {
-    vec4 sm = seaMapAt( vRockW.xz ); float rise, sw = seaSwash( vRockW.xz, sm, rise ), reach = seaReach( sm ), open = smoothstep( -420.0, -90.0, sm.x );
+  // (worked out only as high as the sea can wet a rock, and the swash's own run only as high as it reaches: the rest of a
+  // boulder shore pays nothing for it)
+  #ifndef ROCK_NO_SEA
+  if ( vRockW.y < ${num(WET.top)} ) {
+    vec4 sm = seaMapAt( vRockW.xz ); float reach = seaReach( sm ), open = smoothstep( -420.0, -90.0, sm.x );
     float line = reach + mix( ${num(WET.hand)}, ${num(WET.spray)}, open ) * ( 0.5 + rkN ) + 0.12 * open * ( rkN2 - 0.5 );
-    float wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y );
-    float now = max( step( vRockW.y, sw + 0.01 ), smoothstep( reach + 0.05, reach - 0.1, vRockW.y ) );
+    float wet = smoothstep( line + mix( 0.1, 0.45, open ), line - 0.05, vRockW.y ), now = smoothstep( reach + 0.05, reach - 0.1, vRockW.y );
     alb *= mix( 1.0, ${num(WET.dark)}, wet ); alb = mix( alb, alb * alb / max( dot( alb, vec3( 0.333 ) ), 1.0e-4 ), wet * 0.3 );
-    rockRough = mix( rockRough, mix( ${num(WET.gloss[0])}, ${num(WET.gloss[1])}, now ), wet );
-    // THE FOAM AT ITS FOOT, on a shore the swell reaches: where the swash's film stands round it (the land draws the
-    // film, terrain.js) or the sea's own sheet does, the water breaks on it: a thin, ragged collar of lace a few fingers
-    // high on its sides (not on what faces up), drifting, whitest as the swash runs up and at the film's front
-    float lap = max( rkGnd, 0.02 ), film = sw - rkGnd;
-    float on = step( 0.0, film ) * smoothstep( -700.0, -60.0, sm.x ) * ( 0.25 + 0.6 * rise ) * ( 0.5 + 0.5 * smoothstep( 0.21, 0.0, film ) );
-    if ( on > 0.0 ) {
+    if ( vRockW.y < reach + 0.12 ) {
+      // THE FOAM AT ITS FOOT, on a shore the swell reaches: where the swash's film stands round it (the land draws the
+      // film, terrain.js) or the sea's own sheet does, the water breaks on it: a thin, ragged collar of lace a few
+      // fingers high on its sides (not on what faces up), drifting, whitest as the swash runs up and at the film's front
+      float rise, sw = seaSwash( vRockW.xz, sm, rise ), lap = max( rkGnd, 0.02 ), film = sw - rkGnd;
+      now = max( now, step( vRockW.y, sw + 0.01 ) );
+      float on = step( 0.0, film ) * smoothstep( -700.0, -60.0, sm.x ) * ( 0.25 + 0.6 * rise ) * ( 0.5 + 0.5 * smoothstep( 0.21, 0.0, film ) );
       float up = ( vRockW.y - lap ) / ( ${num(WET.collar[0])} + ${num(WET.collar[1])} * rkN );
-      if ( up > -0.5 && up < 1.0 ) {
+      if ( on > 0.0 && up > -0.5 && up < 1.0 ) {
         float lace = gn( vRockW.xz * 14.0 + vRockW.y * 11.0 + 0.5 * uSeaClock.x );
         float collar = 0.85 * on * ( 1.0 - smoothstep( 0.2, 1.0, up ) ) * smoothstep( 0.4, 0.6, 0.75 * lace + 0.2 * ( 1.0 - up ) ) * ( 1.0 - smoothstep( 0.45, 0.8, rockNw.y ) );
-        alb = mix( alb, vec3( ${num(WET.foam)} ), collar ); rockRough = mix( rockRough, 0.9, collar );
+        alb = mix( alb, vec3( ${num(WET.foam)} ), collar ); rockRough = mix( rockRough, 0.9, collar ); wet *= 1.0 - collar;
       }
     }
+    rockRough = mix( rockRough, mix( ${num(WET.gloss[0])}, ${num(WET.gloss[1])}, now ), wet );
   }
+  #endif
   diffuseColor.rgb = alb * uRockLook.y;
-}`;
+}
+#endif`;
 const FRAG_NORMAL = `
 #ifndef ROCK_FAR
 normal = normalize( ( viewMatrix * vec4( rockNw, 0.0 ) ).xyz );
@@ -205,9 +254,9 @@ reflectedLight.indirectDiffuse *= ambientOcclusion;
   reflectedLight.indirectSpecular *= computeSpecularOcclusion( dotNV, ambientOcclusion, material.roughness );
 #endif`;
 
-function stoneMaterial({ far = false, grain = false, uniforms, env }) {
+function stoneMaterial({ far = false, grain = false, speck = false, uniforms, env }) {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, envMapIntensity: env });
-  m.defines = { ...(far ? { ROCK_FAR: '' } : {}), ...(grain ? { ROCK_GRAIN: '' } : {}) };
+  m.defines = { ...(far ? { ROCK_FAR: '' } : {}), ...(grain ? { ROCK_GRAIN: '' } : {}), ...(speck ? { ROCK_SPECK: '' } : {}) };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + VERT_PARS).replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT_BODY);
@@ -225,7 +274,7 @@ function stoneMaterial({ far = false, grain = false, uniforms, env }) {
       // in the sea, whose own surface closes over what is under it)
       .replace('#include <opaque_fragment>', THREE.ShaderChunk.opaque_fragment);
   };
-  m.customProgramCacheKey = () => `stone|${far ? 1 : 0}|${grain ? 1 : 0}`;
+  m.customProgramCacheKey = () => `stone|${far ? 1 : 0}|${grain ? 1 : 0}|${speck ? 1 : 0}`;
   return m;
 }
 
@@ -239,8 +288,10 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
   const col0 = blank(true), surf0 = blank(false);
   const uniforms = { uRockCol: { value: col0 }, uRockSurf: { value: surf0 }, uRockGrain: U.uIsleSurf, uRockSky: U.uIsleSky, uRockLook: U.uIsleLook, uRockMoss: { value: new THREE.Vector3(...STONES.moss) },
     uSeaMap: W.uSeaMap, uSeaGrid: W.uSeaGrid, uSeaN: W.uSeaN, uSeaClock: W.uSeaClock };
-  const mats = { near: stoneMaterial({ grain: !lite, uniforms, env }), far: stoneMaterial({ far: true, uniforms, env }), small: stoneMaterial({ uniforms, env }) };
-  const geos = [], state = { models: 'fetching', maps: 'fetching', planted: 0, shown: [0, 0, 0], squares: 0, ms: 0 };
+  // (three materials: a rock's whole and middle levels, with the land's grain near the eye; its last level and the beach's
+  // things, without; a speck)
+  const mats = { near: stoneMaterial({ grain: !lite, uniforms, env }), small: stoneMaterial({ uniforms, env }), speck: stoneMaterial({ far: true, speck: true, uniforms, env }) };
+  const geos = [], state = { models: 'fetching', maps: 'fetching', planted: 0, shown: [0, 0, 0, 0], squares: 0, ms: 0 };
   // ---- each model's each level: an instanced mesh, empty until the models have come
   const sets = {};                                     // name -> [mesh of each level]
   const cfg = (name) => { const C = WRACK.has(name) ? STONES.wrack : STONES.rocks; return lite ? { ...C, ...C.lite } : C; };
@@ -251,9 +302,12 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
       const g = new THREE.BufferGeometry(); geos.push(g);
       g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
       for (const [k, size] of [['aRock', 4], ['aFoot', 4]]) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size); a.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, a); }
-      const last = li === levels - 1, m = new THREE.InstancedMesh(g, WRACK.has(name) ? mats.small : last ? mats.far : mats.near, n);
+      const m = new THREE.InstancedMesh(g, WRACK.has(name) || li === 2 ? mats.small : li === 3 ? mats.speck : mats.near, n);
       m.count = 0; m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.name = `${name}-${li}`;
-      if (last && !WRACK.has(name)) m.userData.isleTwin = true;        // (the last level casts into no shadow map: a rock a few pixels high)
+      if (li >= 2 && !WRACK.has(name)) m.userData.isleTwin = true;     // (its last level and its speck cast into no shadow map: a rock some tens of pixels high at most)
+      // (the nearer levels are drawn first, each nearest first, and all of them before the land: on this GPU a pixel
+      // drawn and then hidden has been paid for, and a boulder shore seen along its length is rocks behind rocks)
+      m.renderOrder = -8 + li;
       group.add(m);
       return m;
     });
@@ -265,9 +319,11 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
     if (gone) return;
     for (const name of MODELS) sets[name].forEach((m, li) => {
       if (!m) return;
-      const L = got[name].lods[Math.min(li, got[name].lods.length - 1)], g = m.geometry;
+      const g = m.geometry; m.userData.layer = got[name].layer;
+      if (li >= got[name].lods.length) { const sp = speckOf(got[name].min, got[name].max, got[name].layer + 1); g.setAttribute('position', sp.attributes.position); g.setAttribute('normal', sp.attributes.normal); g.setIndex(sp.index); m.userData.tris = 20; return; }
+      const L = got[name].lods[li];
       g.setAttribute('position', new THREE.BufferAttribute(L.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(L.nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(L.uv, 2, true));
-      g.setIndex(new THREE.BufferAttribute(L.idx, 1)); m.userData.tris = L.tris; m.userData.layer = got[name].layer;
+      g.setIndex(new THREE.BufferAttribute(L.idx, 1)); m.userData.tris = L.tris;
     });
     models = got; state.models = 'drawn'; moved = true;
   }, (e) => { state.models = 'failed'; console.error('[island] the rocks could not be fetched', e); });
@@ -330,16 +386,16 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
           const x = sq.at[4 * k], z = sq.at[4 * k + 2], d = Math.hypot(x - ex, sq.at[4 * k + 1] - ey, z - ez), P = picks[MODELS[sq.model[k]]];
           let li;
           if (wrack) { li = d < 7 + 22 * s ? 0 : d < Math.min(110, 24 + 60 * s) ? 1 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
-          else { li = STONES.force >= 0 ? (d < K.far * farOf(s) ? STONES.force : -1) : d < STONES.near[0] * s + STONES.near[1] ? 0 : d < STONES.mid[0] * s + STONES.mid[1] ? 1 : d < K.far * farOf(s) ? 2 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
+          else { li = STONES.force >= 0 ? (d < K.far * farOf(s) ? STONES.force : -1) : d < STONES.near * s ? 0 : d < STONES.mid * s ? 1 : d >= K.far * farOf(s) ? -1 : d < STONES.speck * s ? 2 : 3; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
           if (li < 0 || (li < 2 && built && built(x, z))) continue;
           P[li].push(sq, k, d);
         }
       }
     }
-    state.shown = [0, 0, 0];
+    state.shown = [0, 0, 0, 0];
     for (const name of MODELS) sets[name].forEach((m, li) => {
       if (!m) return;
-      const P = picks[name][li], cap = m.instanceMatrix.count, far = li === 2;
+      const P = picks[name][li], cap = m.instanceMatrix.count, far = li >= 2;
       // (nearest first, across the ground, where it casts into the shadow maps: terrain.js draws only those its maps can
       // reach; the squares come nearest first, so what a level cannot hold is its furthest)
       const idx = Array.from({ length: P.length / 3 }, (_, q) => q), hd = far ? null : idx.map((q) => Math.hypot(P[3 * q].at[4 * P[3 * q + 1]] - ex, P[3 * q].at[4 * P[3 * q + 1] + 2] - ez));
