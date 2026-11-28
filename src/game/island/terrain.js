@@ -67,6 +67,9 @@ export const LINES = { far: 16000, step: 8, grow: 0.012, steps: 420, bands: 8, m
 export const SKYSHARE = { ways: 16, steps: 18, first: 12, grow: 1.32 };
 // the ground's control texture: texels to each 16 m cell (life.js's noise and the slow variations, made once)
 export const CONTROL = { per: 2, lite: 1 };
+// the walls' lava flows: a flow's foot every `every` m of height, each moved by up to `shift` of that either way together
+// (so a flow is 1 - shift to 1 + shift of it thick: 2.2 to 19.8 m)
+export const FLOWS = { every: 11, shift: 0.8 };
 
 // ---- the maps, fetched once for the page (both arrays together, transcoded off the page's thread) and kept: going to
 // the void and back does not fetch them again
@@ -323,8 +326,9 @@ void main() {
     float h2 = min( 1.5707963 - atan( e1 ), gam + 1.5707963 ), h1 = max( -( 1.5707963 - atan( e2 ) ), gam - 1.5707963 );
     sum += len * 0.25 * ( -cos( 2.0 * h1 - gam ) + cos( gam ) + 2.0 * h1 * sin( gam ) + -cos( 2.0 * h2 - gam ) + cos( gam ) + 2.0 * h2 * sin( gam ) );
   }
-  // (its second number: how rocky the shore is here, rocks.js's field as it is: the land's drawing reads both at once)
-  gl_FragColor = vec4( clamp( sum / ${(SKYSHARE.ways / 2).toFixed(1)}, 0.0, 1.0 ), texelFetch( uRocky, i0, 0 ).r, 0.0, 1.0 );
+  // (its second and third numbers: how rocky the shore is here and how thick the walls' talus lies, rocks.js's field as
+  // it is: the land's drawing reads all three at once)
+  gl_FragColor = vec4( clamp( sum / ${(SKYSHARE.ways / 2).toFixed(1)}, 0.0, 1.0 ), texelFetch( uRocky, i0, 0 ).rg, 1.0 );
 }`;
 // life.js's hash and vnoise, bit for bit (Math.imul is a 32-bit multiply; >>> an unsigned shift), and a cheaper noise
 const NOISE_GLSL = `
@@ -370,6 +374,21 @@ uniform vec4 uIsleLayer[ 7 ];    // each surface's fine and coarse side (m), how
 uniform vec3 uIsleMean[ 7 ];     // and its mean colour
 uniform float uIsleFloor[ 7 ];   // and the roughest it is at least (dry)
 bool isleFar;                      // past 140 m (set by the splat before any read)
+vec2 isleFlowOff = vec2( 0.0 );    // a wall's lava flow: how far its own rock is read aside (m: along the wall, up it)
+vec4 isleFlow = vec4( 0.0 );       // and where the pixel is in it: its share up the flow (0 its foot, 1 its top), its thickness (m; 0: no wall), its own two numbers
+// THE WALLS' LAVA FLOWS. Lord Howe's walls are stacked basalt flows of uneven thickness, a few metres to twenty, each its
+// own shade, with a seam where one lies on the next (some on a red band of baked soil), ledges at their tops where plants
+// hold, and columns in the thick ones. The flows' feet are every FLOWS.x m with each moved up or down by up to
+// FLOWS.y of that (so one is 0.2 to 1.8 of it thick), and lie nearly level, wandering a few metres along the wall.
+void isleFlows( float y ) {
+  float B = ${num(FLOWS.every)}, k0 = floor( y / B );
+  float ya = B * ( k0 - 1.0 + ${num(FLOWS.shift)} * ( lhHash( int( k0 ) - 1, 71 ) - 0.5 ) ), yb = B * ( k0 + ${num(FLOWS.shift)} * ( lhHash( int( k0 ), 71 ) - 0.5 ) );
+  float yc = B * ( k0 + 1.0 + ${num(FLOWS.shift)} * ( lhHash( int( k0 ) + 1, 71 ) - 0.5 ) ), yd = B * ( k0 + 2.0 + ${num(FLOWS.shift)} * ( lhHash( int( k0 ) + 2, 71 ) - 0.5 ) );
+  float lo = yc <= y ? yc : yb <= y ? yb : ya, hi = yb > y ? yb : yc > y ? yc : yd, id = yc <= y ? k0 + 1.0 : yb <= y ? k0 : k0 - 1.0;
+  float h1 = lhHash( int( id ), 73 ), h2 = lhHash( int( id ), 79 );
+  isleFlow = vec4( ( y - lo ) / ( hi - lo ), hi - lo, h1, h2 );
+  isleFlowOff = vec2( h1 * 37.0, h2 * 13.0 + lo * 0.37 );
+}
 float isleFaceMix;                 // a slow noise over the island (the canopy's colour by region)
 vec2 isleWarp;                     // how far the large-scale face is drawn aside here (m)
 vec3 isleTan( vec4 s ) { vec2 xy = s.xy * 2.0 - 1.0; return vec3( xy, sqrt( max( 0.0, 1.0 - dot( xy, xy ) ) ) ); }
@@ -380,6 +399,7 @@ vec3 isleTan( vec4 s ) { vec2 xy = s.xy * 2.0 - 1.0; return vec3( xy, sqrt( max(
 void isleRead( int axis, float layer, float side, mat2 R, vec3 dpx, vec3 dpy, vec3 n0, out vec4 col, out vec4 srf, out vec3 nw ) {
   vec2 uv = axis == 0 ? isleW.zy : axis == 1 ? isleW.xz : isleW.xy, gx = axis == 0 ? dpx.zy : axis == 1 ? dpx.xz : dpx.xy, gy = axis == 0 ? dpy.zy : axis == 1 ? dpy.xz : dpy.xy;
   if ( side > 9.0 ) uv += isleWarp;                                          // every large-scale read, drawn aside (no grid from afar)
+  if ( axis != 1 && side < 40.0 ) uv += isleFlowOff;                         // a wall's rock, each flow its own stretch of the scan
   vec3 at = vec3( R * uv / side, layer ); gx = R * gx / side; gy = R * gy / side;
   col = textureGrad( uIsleCol, at, gx, gy );
   if ( isleFar && side < 40.0 ) { srf = vec4( 0.5, 0.5, 0.8, 0.9 ); nw = n0; return; }
@@ -444,6 +464,21 @@ void isleLayer( int i, float dist, vec3 dpx, vec3 dpy, vec3 n0, bool steep, out 
     vec2 along = normalize( vec2( -n0.z, n0.x ) + 1.0e-4 );
     float st = gn( vec2( dot( isleW.xz, along ) * 0.33, isleW.y * 0.022 ) ) * 0.7 + gn( vec2( dot( isleW.xz, along ) * 1.1 + 9.0, isleW.y * 0.06 ) ) * 0.3;
     col.rgb *= 0.72 + 0.56 * st;
+    // ITS LAVA FLOWS (isleFlows, above): each its own shade; a dark seam under each flow's foot where the one below has
+    // weathered back, some with the red of baked soil in it; its top a ledge, rubbly and paler, the island's dark green
+    // on it in patches; columns down the thick ones. A flow thinner than a pixel or two gives way to the wall's mean.
+    if ( isleFlow.y > 0.0 ) {
+      float T = isleFlow.y, f = isleFlow.x, px = max( length( dpx ), length( dpy ) ), seen = 1.0 - smoothstep( 0.25 * T, 0.8 * T, px ), al = dot( isleW.xz, along );
+      float seam = ( 1.0 - smoothstep( 0.0, 0.5 + 1.2 * px, f * T ) ) * seen, top = smoothstep( T - 1.3 - px, T - 0.3, f * T ) * seen;
+      vec3 c = col.rgb * mix( 1.0, 0.74 + 0.5 * isleFlow.z, seen );
+      c *= 1.0 - 0.5 * seam; c = mix( c, c * vec3( 1.9, 0.9, 0.6 ), seam * step( 0.78, isleFlow.w ) * 0.8 );
+      c *= 1.0 + 0.22 * top;
+      c = mix( c, vec3( 0.026, 0.052, 0.017 ), top * 0.8 * smoothstep( 0.42, 0.62, gn( vec2( al * 0.22 + isleFlow.z * 31.0, isleFlow.w * 17.0 ) ) ) );
+      // (columns: cooling joints a metre or so apart down the middle of a thick flow, seen only where a pixel is finer than them)
+      float cols = smoothstep( 7.0, 11.0, T ) * smoothstep( 0.12, 0.3, f ) * smoothstep( 0.92, 0.7, f ) * ( 1.0 - smoothstep( 0.25, 0.7, px ) );
+      if ( cols > 0.0 ) { float u = fract( al * ( 0.7 + 0.5 * isleFlow.z ) + 0.6 * gn( vec2( al * 0.4, isleFlow.w * 9.0 ) ) ); c *= 1.0 - 0.34 * cols * ( 1.0 - smoothstep( 0.0, 0.16, min( u, 1.0 - u ) ) ); }
+      col.rgb = c;
+    }
   }
   #endif`}
 }
@@ -477,7 +512,7 @@ float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * is
 // the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
 vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
 isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
-vec2 isleSkyRd = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).rg;
+vec3 isleSkyRd = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).rgb;
 float isleSkySeen = isleSkyRd.r;
 // a finer jitter for edges, near the eye only (further off it is under a pixel)
 #ifdef ISLE_FAR
@@ -490,7 +525,14 @@ float isleBeach = 2.9 + 0.9 * ( isleCtl.a - 0.5 ) + 0.3 * ( isleE2 - 0.5 );
 // (the island's slopes are forested up to the foot of its cliffs: the 30 m data's slopes past 0.9, 42 degrees, are walls
 // it has smoothed; life.js plants no palm past 0.8, so the floor between 0.8 and 0.9 is forest floor without palms)
 float wCliff = smoothstep( 1.06, 1.14, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
+#ifndef ISLE_NO_STEEP
+// (a wall's flows lie nearly level: their feet wander a few metres along it, by the island's own slow noise)
+if ( wCliff > 0.0 ) isleFlows( isleH + 7.0 * ( isleCtl.g - 0.5 ) + 2.5 * ( isleCtl.r - 0.5 ) );
+#endif
 float wRockS = smoothstep( 0.88, 0.97, isleSlope + 0.1 * ( isleCtl.a - 0.5 ) );
+// (under a wall, where its talus lies (rocks.js's field), the band of bare weathered rock at its foot is broken up: litter
+// and soil lodge among the fallen blocks, in patches a few metres across)
+if ( wRockS > 0.0 ) wRockS *= 1.0 - min( 1.0, 1.7 * isleSkyRd.b * uIsleLook.w ) * smoothstep( 0.3, 0.52, gn( isleW.xz * 0.21 + 11.0 ) * 0.7 + isleE2 * 0.3 );
 float wSand = smoothstep( isleBeach + 0.22, isleBeach - 0.22, isleH ) * ( 1.0 - smoothstep( 0.4, 0.5, isleSlope ) );
 float wShore = smoothstep( isleBeach + 0.9, isleBeach - 0.2, isleH ) * smoothstep( 0.42, 0.52, isleSlope );
 // a boulder shore (rocks.js's field, where the mountains and the headlands meet the open sea): its ground is the shore's
@@ -895,8 +937,10 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   // the control texture and the sky's share, once (the control needs nothing more than eight bits a channel)
   const cw = (W - 1) * per + 1, ch = (H - 1) * per + 1;
   const ctlRT = rt(cw, ch, THREE.UnsignedByteType, THREE.RGBAFormat); disposables.push(ctlRT);
-  // how rocky each grid point's shore is (rocks.js's field; none, where there is no field): read by the two passes below
-  const rocky = new THREE.DataTexture(rocks ? rocks.shore : new Uint8Array(W * H), W, H, THREE.RedFormat, THREE.UnsignedByteType);
+  // how rocky each grid point's shore is and how thick the talus lies there (rocks.js's field; none, where there is no
+  // field): read by the two passes below
+  const rockyData = new Uint8Array(W * H * 2); if (rocks) for (let k = 0; k < W * H; k++) { rockyData[2 * k] = rocks.shore[k]; rockyData[2 * k + 1] = rocks.talus[k]; }
+  const rocky = new THREE.DataTexture(rockyData, W, H, THREE.RGFormat, THREE.UnsignedByteType);
   rocky.magFilter = rocky.minFilter = THREE.LinearFilter; rocky.generateMipmaps = false; rocky.needsUpdate = true; disposables.push(rocky);
   { const t0 = performance.now(); run(pass(CONTROL_FRAG, { uGrid: { value: new THREE.Vector4(head.x0, head.z0, S, 0) }, uPer: { value: per }, uRocky: { value: rocky }, uN: { value: new THREE.Vector2(W, H) } }), ctlRT); times.control = performance.now() - t0; }
   let skyRT = null;

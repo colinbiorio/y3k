@@ -27,11 +27,15 @@ import { loadArrays } from './terrain.js';
 
 // each way of drawing: its square (m), how far out its squares are planted, the most of each model's each level drawn
 export const STONES = {
-  rocks: { tile: 128, reach: 1250, most: [140, 900, 7000], lite: { reach: 620, most: [0, 520, 3000] } },
+  rocks: { tile: 64, reach: 900, most: [160, 1500, 7000], lite: { reach: 480, most: [0, 800, 3000] } },
   wrack: { tile: 32, reach: 64, most: [260, 1500], lite: { reach: 40, most: [0, 700] } },
   // a rock of length s at d metres is drawn whole within near[0] * s + near[1], at its middle level within
   // mid[0] * s + mid[1], at its last out to ROCKS.far * s
-  near: [9, 5], mid: [42, 18],
+  near: [4.5, 2.5], mid: [22, 8],
+  // a square is asked only for the rocks long enough to be drawn from where the eye is: all of them within the first
+  // distance (m), then those at least each length (rocks.js farOf)
+  classes: [[150, 0], [340, 0.5], [580, 0.7], [1e9, 1.2]],
+  force: -1,                  // a probe's switch: every rock drawn at this level (-1: as its distance calls for)
   again: 2.5,                 // m the eye may move before each rock's level is worked out again
   budget: 3,                  // ms a frame, at most, for planting
   moss: [0.034, 0.052, 0.016],
@@ -93,7 +97,7 @@ varying vec3 vRockW; varying vec4 vRock; varying vec4 vFoot; varying vec2 vRockU
 #ifndef ROCK_FAR
 varying vec3 vRockN0; varying vec3 vRockN1; varying vec3 vRockN2;
 #endif
-float rockRough; float rockOcc; vec3 rockNw;
+float rockRough; float rockOcc; float rockSky; vec3 rockNw;
 float gh( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }
 float gn( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0 - 2.0 * f ); return mix( mix( gh( i ), gh( i + vec2( 1, 0 ) ), u.x ), mix( gh( i + vec2( 0, 1 ) ), gh( i + vec2( 1, 1 ) ), u.x ), u.y ); }
 ${SEA_EDGE_GLSL}`;
@@ -102,7 +106,7 @@ const FRAG_BODY = `
 {
   vec3 rkAt = vec3( vRockUv, vRock.x );
   vec3 alb = texture( uRockCol, rkAt ).rgb * vRock.y;
-  alb = mix( alb, dot( alb, vec3( 0.3333 ) ) * vec3( 1.42, 0.95, 0.66 ), vRock.z );         // some rustier: weathered, oxidised
+  alb = mix( alb, dot( alb, vec3( 0.3333 ) ) * vec3( 1.2, 0.97, 0.8 ), vRock.z );           // some a little rustier: weathered, oxidised
   float rkSize = vRock.w, rkDist = length( vRockW - cameraPosition );
   #ifdef ROCK_FAR
   rockNw = inverseTransformDirection( normalize( vNormal ), viewMatrix ); rockOcc = 1.0;
@@ -110,7 +114,7 @@ const FRAG_BODY = `
   vec4 rkS = texture( uRockSurf, rkAt ); vec3 rkO = rkS.rgb * 2.0 - 1.0;
   rockNw = normalize( vRockN0 * rkO.x + vRockN1 * rkO.y + vRockN2 * rkO.z ); rockOcc = rkS.a;
   #endif
-  rockRough = vFoot.w < 0.0 ? - vFoot.w : 0.84;
+  rockRough = vFoot.w < 0.0 ? - vFoot.w : 0.9;
   #ifdef ROCK_GRAIN
   {
     // THE GRAIN, within a few metres: the land's scanned basalt read from the two sides the pixel faces most (as the land
@@ -132,19 +136,28 @@ const FRAG_BODY = `
     }
   }
   #endif
-  // how high over the ground this pixel is (the grid's own triangles, as the land is drawn)
-  float rkOver = vRockW.y - isleGround( uIsleHt, uIsleN, ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z );
+  // THE GROUND UNDER THIS PIXEL (the grid's own triangle, as the land is drawn): how far the pixel is from it, square to
+  // it (on a slope the ground is nearer than the height over it says), and which way it rises
+  vec2 rkG = ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z, rkC = clamp( floor( rkG ), vec2( 0.0 ), uIsleN - 2.0 ), rkF = rkG - rkC; ivec2 rkI = ivec2( rkC );
+  float h00 = texelFetch( uIsleHt, rkI, 0 ).r, h10 = texelFetch( uIsleHt, rkI + ivec2( 1, 0 ), 0 ).r, h01 = texelFetch( uIsleHt, rkI + ivec2( 0, 1 ), 0 ).r, h11 = texelFetch( uIsleHt, rkI + ivec2( 1, 1 ), 0 ).r;
+  bool rkLow = rkF.x + rkF.y <= 1.0;
+  vec2 rkRise = ( rkLow ? vec2( h10 - h00, h01 - h00 ) : vec2( h11 - h01, h11 - h10 ) ) / uIsleGrid.z;
+  float rkOver = ( vRockW.y - ( rkLow ? h00 + ( h10 - h00 ) * rkF.x + ( h01 - h00 ) * rkF.y : h11 + ( h01 - h11 ) * ( 1.0 - rkF.x ) + ( h10 - h11 ) * ( 1.0 - rkF.y ) ) ) / sqrt( 1.0 + dot( rkRise, rkRise ) );
   float rkN = gn( vRockW.xz * 2.3 + vRockW.y * 1.7 ), rkN2 = gn( vRockW.xz * 9.0 + vRockW.y * 7.0 );
+  // the land's own shape in its colour, as in the ground's (a gully sees less sky and is damper and darker than a ridge)
+  rockSky = mix( 1.0, texture2D( uRockSky, ( rkG + 0.5 ) / uIsleN ).r, uIsleGrid.w );
+  alb *= mix( 1.0, 0.78 + 0.3 * rockSky, uIsleGrid.w );
   // moss and lichen on what faces up, in the forest's shade and the mist's
   float mossy = max( vFoot.w, 0.0 ) * smoothstep( 0.2, 0.8, rockNw.y + 0.6 * ( rkN - 0.5 ) ) * ( 0.5 + 0.5 * rkN2 );
   alb = mix( alb, uRockMoss * ( 0.7 + 0.6 * rkN2 ), mossy * 0.8 );
   // THE GROUND CLIMBING ITS FOOT (sand blown against it, litter and soil, the shore's rubble): higher on a larger rock, no
   // two stretches of it alike; and pressed into the ground its foot sees less of the sky
-  float footH = clamp( 0.1 * rkSize, 0.015, 0.26 ) * ( 0.3 + 1.4 * rkN );
+  // (and banked up its uphill side: what creeps down a slope lodges against the face that looks up it)
+  float footH = clamp( 0.1 * rkSize, 0.015, 0.26 ) * ( 0.3 + 1.4 * rkN ) * ( 1.0 + 2.4 * clamp( dot( rockNw.xz, rkRise ), 0.0, 1.3 ) );
   float foot = 1.0 - smoothstep( 0.0, footH, rkOver + 0.3 * footH * ( rkN2 - 0.5 ) );
   alb = mix( alb, vFoot.rgb * ( 0.8 + 0.4 * rkN2 ), foot * 0.92 );
   rockRough = mix( rockRough, 0.9, max( foot, mossy ) );
-  rockOcc *= mix( 0.5, 1.0, smoothstep( 0.0, 0.12 + 0.22 * rkSize, rkOver ) );
+  rockOcc *= mix( 0.3, 1.0, smoothstep( 0.0, 0.1 + 0.24 * rkSize, rkOver ) );
   // WET: as high as the swash reaches here (water.js), and as high as the spray wets an open shore; the water in its
   // pores (darker: Lekner and Dorf's film on a dark, porous rock), glossy, most where the swash is on it now
   if ( vRockW.y < 3.6 ) {
@@ -163,7 +176,7 @@ normal = normalize( ( viewMatrix * vec4( rockNw, 0.0 ) ).xyz );
 #endif`;
 // the sky's share at its place (the land round it: terrain.js) and its own occlusion, on what the sky and the wrapped sky give
 const FRAG_AO = `
-float ambientOcclusion = rockOcc * mix( 1.0, texture2D( uRockSky, ( ( vRockW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r, uIsleGrid.w );
+float ambientOcclusion = rockOcc * rockSky;
 reflectedLight.indirectDiffuse *= ambientOcclusion;
 #if defined( USE_ENVMAP ) && defined( STANDARD )
   float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
@@ -181,6 +194,10 @@ function stoneMaterial({ far = false, grain = false, uniforms, env }) {
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = rockRough;')
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <aomap_fragment>', FRAG_AO)
+      // (dry rock is rough: what it gives back of the wrapped sky along the reflection is what it gives back about its
+      // normal, as terrain.js reads the ground's; so a dark rock is not greyed by a mirror of the sky. Wet, it mirrors it.)
+      .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps.replace('\t\tradiance += getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );',
+        '\t\tradiance += material.roughness > 0.7 ? iblIrradiance * RECIPROCAL_PI : getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );'))
       // (three's own last lines written out, so the island's adoption does not put its wading look before them: a body's
       // part under the mean water is drawn as seen through it, and the sea is not drawn over it; a rock is simply stood
       // in the sea, whose own surface closes over what is under it)
@@ -241,13 +258,14 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
 
   // ---- the squares: each one's rocks as numbers (its largest first), planted nearest the eye first
   const kinds = [
-    { C: cfg('slab'), list: (x0, z0, x1, z1) => rocksIn(field, ground, x0, z0, x1, z1).filter((r) => r.size < 1.2 || r.kind !== 'talus' || clearOfPalms(ground, r)), squares: new Map(), far: lite ? 0.55 : 1 },
+    { C: cfg('slab'), list: (x0, z0, x1, z1, min) => rocksIn(field, ground, x0, z0, x1, z1, min).filter((r) => r.size < 1.2 || r.kind !== 'talus' || clearOfPalms(ground, r)), squares: new Map(), far: lite ? 0.55 : 1 },
     { C: cfg('coral'), list: (x0, z0, x1, z1) => wrackIn(field, ground, x0, z0, x1, z1), squares: new Map(), far: 0 },
   ];
   const M16 = new Float32Array(16);
-  function plant(K, i, j) {
-    const T = K.C.tile, rocks = K.list(i * T, j * T, (i + 1) * T, (j + 1) * T).sort((a, b) => b.size - a.size), n = rocks.length;
-    const sq = { i, j, n, mat: new Float32Array(n * 16), at: new Float32Array(n * 4), rock: new Float32Array(n * 4), foot: new Float32Array(n * 4), model: new Uint8Array(n) };
+  function plant(K, i, j, cls = 0) {
+    const T = K.C.tile, rocks = K.list(i * T, j * T, (i + 1) * T, (j + 1) * T, STONES.classes[cls][1]).sort((a, b) => b.size - a.size), n = rocks.length;
+    const was = K.squares.get(i + ',' + j); if (was) { state.planted -= was.n; state.squares -= 1; }
+    const sq = { i, j, n, cls, mat: new Float32Array(n * 16), at: new Float32Array(n * 4), rock: new Float32Array(n * 4), foot: new Float32Array(n * 4), model: new Uint8Array(n) };
     rocks.forEach((r, k) => {
       placeOf(r, M16); sq.mat.set(M16, k * 16);
       sq.at.set([r.x, r.y, r.z, r.size], k * 4); sq.model[k] = MODELS.indexOf(r.model);
@@ -261,9 +279,14 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
     const t0 = performance.now(); let did = false;
     for (const K of kinds) {
       const T = K.C.tile, R = K.C.reach, i0 = Math.floor((ex - R) / T), i1 = Math.floor((ex + R) / T), j0 = Math.floor((ez - R) / T), j1 = Math.floor((ez + R) / T), want = [];
-      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { if (K.squares.has(i + ',' + j)) continue; const d = Math.hypot((i + 0.5) * T - ex, (j + 0.5) * T - ez); if (d < R + T * 0.71) want.push([d, i, j]); }
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        // (how near the square comes to the eye says how small a rock it must hold: asked again, finer, as the eye nears it)
+        const d = Math.hypot(Math.max(i * T - ex, 0, ex - (i + 1) * T), Math.max(j * T - ez, 0, ez - (j + 1) * T)); if (d > R) continue;
+        const cls = K.far === 0 ? 0 : STONES.classes.findIndex((c) => d - 25 < c[0]), had = K.squares.get(i + ',' + j);
+        if (!had || had.cls > cls) want.push([d, i, j, cls]);
+      }
       want.sort((a, b) => a[0] - b[0]);
-      for (const [, i, j] of want) { if (performance.now() - t0 > STONES.budget) return true; plant(K, i, j); did = true; }
+      for (const [, i, j, cls] of want) { if (performance.now() - t0 > STONES.budget) return true; plant(K, i, j, cls); did = true; }
       // (a square far behind the eye is let go)
       if (K.squares.size > 1.6 * (i1 - i0 + 1) * (j1 - j0 + 1)) for (const [key, sq] of K.squares) if (Math.hypot((sq.i + 0.5) * T - ex, (sq.j + 0.5) * T - ez) > 1.5 * R + T) { K.squares.delete(key); state.planted -= sq.n; state.squares -= 1; }
     }
@@ -285,7 +308,7 @@ export function createStones(scene, { renderer, lite = false, ground, field, loo
           const x = sq.at[4 * k], z = sq.at[4 * k + 2], d = Math.hypot(x - ex, sq.at[4 * k + 1] - ey, z - ez), P = picks[MODELS[sq.model[k]]];
           let li;
           if (wrack) { li = d < 7 + 22 * s ? 0 : d < Math.min(110, 24 + 60 * s) ? 1 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
-          else { li = d < STONES.near[0] * s + STONES.near[1] ? 0 : d < STONES.mid[0] * s + STONES.mid[1] ? 1 : d < K.far * farOf(s) ? 2 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
+          else { li = STONES.force >= 0 ? (d < K.far * farOf(s) ? STONES.force : -1) : d < STONES.near[0] * s + STONES.near[1] ? 0 : d < STONES.mid[0] * s + STONES.mid[1] ? 1 : d < K.far * farOf(s) ? 2 : -1; if (li === 0 && !sets[MODELS[sq.model[k]]][0]) li = 1; }
           if (li < 0 || (li < 2 && built && built(x, z))) continue;
           P[li].push(sq, k, d);
         }
