@@ -25,6 +25,8 @@ import { createLife } from './creatures.js';
 import { createGroundLook } from './terrain.js';
 import { PLANTS } from './plants.js';
 import { FAR } from './far.js';
+import { rockField } from './rocks.js';
+import { createStones } from './stones.js';
 
 export const ISLAND_LIGHTS = {
   pale: { sun: [0.55, 0.62, -0.56], sunCol: [1.0, 0.95, 0.86], sunAmt: 2.4, zenith: [0.16, 0.38, 0.74], horizon: [0.68, 0.80, 0.92], sky: [0.58, 0.70, 0.92], ground: [0.32, 0.30, 0.25], hemi: 0.9, env: 0.9, stars: 0, fog: 3.6e-5 },
@@ -123,7 +125,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   const phone = !!globalThis.matchMedia?.('(pointer: coarse)')?.matches && Math.min(globalThis.screen?.width || 1e4, globalThis.screen?.height || 1e4) < 900;
   // ---- the sea's waves and map (water.js): on the lighter path one band of the wind's sea, made once
   const water = createWater({ renderer, lite: lite || phone, ground, shape });
-  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key, water });
+  // ---- where the island's rocks lie (rocks.js: the talus under the walls, the rocky shores), worked out once for the
+  // ground (a plainer island made after this one reads the same)
+  const field = (ground.rocks ||= rockField(ground, shape, water.map));
+  const look = createGroundLook({ renderer, lite: lite || phone, phone, ground, scene, key, water, rocks: field });
   // ---- the land and the shallows round it, and Ball's Pyramid. Under the true sky the land takes the whole of the
   // wrapped sky's light (the other half of the sky's fill: sky.js); under the present one, as it was painted (0.35).
   // ground levelled for a building (../plinth.js levelFor, ground.flats): the land's own triangles are let go of where
@@ -229,6 +234,10 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   // the floor under the far forest's crowns, and the canopy's colour past where they fade (far.js)
   { const B = lite || phone ? PLANTS.lite : PLANTS, F = lite || phone ? FAR.lite : FAR; look.forest = life.far ? [B.mid, F.end - F.fade, F.end] : [1e9, 130, 165]; }
 
+  // ---- the rocks and what the sea leaves on the beaches (stones.js, from rocks.js)
+  const stones = createStones(scene, { renderer, lite: lite || phone, ground, field, look, env: air ? 1 : 0.35 });
+  let built = null, sites = '';                                 // where buildings stand: no rock is drawn in one (live)
+
   // ---- the lights, by name
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null, lightName = 'pale', indoor = 1;
@@ -269,7 +278,7 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
   let bodyAt = null, adoptN = 0;        // where the body is (live): the palms are drawn round it, the canopy beyond them
 
   return {
-    scene, drops, place: 'island', ground, shape, life,
+    scene, drops, place: 'island', ground, shape, life, stones,
     get light() { return lightName; },
     setLight,
     setIndoor(k) { indoor = k; if (air) return; const L = ISLAND_LIGHTS[lightName]; key.intensity = L.sunAmt * k; fill.intensity = L.hemi * k; presentSea(L); },
@@ -296,13 +305,17 @@ export function createIsland({ renderer, lite = false, light = 'pale', ground, s
       // the ground's shadows: the land's own lines toward the key light, the shadow maps round the eye; and whatever lit
       // thing has come into the scene takes them (terrain.js adoptAll)
       life.frame(camera);                               // the palms as the eye sees them (plants.js), before the shadow maps are drawn
+      stones.frame(camera, built, sites);               // the rocks round the eye, each at the level its distance calls for
       look.update({ camera, dir: skyU.uSun.value, body: bodyAt });
       if (adoptN++ % 10 === 0) look.adoptAll(scene);           // a walk over the whole scene: a sixth of a second is soon enough for a new thing
     },
     // the island's life, a frame on: the palms round the body, the birds, the woodhens, the turtles
-    live(dt, t, body, world) { bodyAt = body.p; life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world); },
+    live(dt, t, body, world) {
+      bodyAt = body.p; life.live(dt, t, body, (x, z, a) => drops.add(x, z, time.value, a), world);
+      built = world ? world.built : null; sites = world ? world.buildings.filter((b) => b.down < 0).map((b) => `${b.kind}${Math.round(b.x)},${Math.round(b.z)}`).join(';') : '';
+    },
     renderMirror() {},
     setScale() {},
-    dispose() { look.dispose(); water.dispose(); air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
+    dispose() { stones.dispose(); look.dispose(); water.dispose(); air?.dispose(); for (const mesh of flatMeshes.values()) mesh.geometry.dispose(); flatMeshes.clear(); life.dispose(); envRT?.dispose(); pmrem.dispose(); for (const g of geos) g.dispose(); for (const m of mats) m.dispose(); for (const t of texs) t.dispose(); },
   };
 }

@@ -72,7 +72,9 @@ export const CONTROL = { per: 2, lite: 1 };
 // the void and back does not fetch them again
 const MAP_FILES = { full: ['ground-colour.ktx2', 'ground-surface.ktx2'], lite: ['ground-colour-lite.ktx2', 'ground-surface-lite.ktx2'] };
 const fetched = new Map();
-function loadMaps(renderer, which) {
+const loadMaps = (renderer, which) => loadArrays(renderer, which, MAP_FILES[which].map((f) => new URL('./ground/' + f, import.meta.url).href));
+// (any of the island's KTX2 arrays, by a name they are kept under and their addresses: the rocks' are fetched the same way)
+export function loadArrays(renderer, which, urls) {
   if (fetched.has(which)) return fetched.get(which);
   const p = (async () => {
     const { KTX2Loader } = await import('three/addons/loaders/KTX2Loader.js');
@@ -93,8 +95,7 @@ function loadMaps(renderer, which) {
     }
     const loader = new IsleLoader().detectSupport(renderer);
     try {
-      const base = new URL('./ground/', import.meta.url).href;
-      const maps = await Promise.all(MAP_FILES[which].map((f) => loader.loadAsync(base + f)));
+      const maps = await Promise.all(urls.map((u) => loader.loadAsync(u)));
       const aniso = Math.min(4, renderer.capabilities.getMaxAnisotropy());
       for (const t of maps) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; }
       return maps;
@@ -299,7 +300,7 @@ void main() {
 // each way, and the cosine-weighted visible arc about the point's own normal between them (Jimenez et al. 2016, GTAO's
 // slice integral, about the vertical)
 const SKYSHARE_FRAG = `
-uniform sampler2D uHf; uniform highp sampler2D uH; uniform vec2 uN; uniform float uS;
+uniform sampler2D uHf; uniform highp sampler2D uH; uniform vec2 uN; uniform float uS; uniform sampler2D uRocky;
 float hAt( vec2 g ) { return texture2D( uHf, ( g + 0.5 ) / uN ).r; }
 void main() {
   ivec2 i0 = ivec2( gl_FragCoord.xy ); vec2 g0 = vec2( i0 );
@@ -322,7 +323,8 @@ void main() {
     float h2 = min( 1.5707963 - atan( e1 ), gam + 1.5707963 ), h1 = max( -( 1.5707963 - atan( e2 ) ), gam - 1.5707963 );
     sum += len * 0.25 * ( -cos( 2.0 * h1 - gam ) + cos( gam ) + 2.0 * h1 * sin( gam ) + -cos( 2.0 * h2 - gam ) + cos( gam ) + 2.0 * h2 * sin( gam ) );
   }
-  gl_FragColor = vec4( clamp( sum / ${(SKYSHARE.ways / 2).toFixed(1)}, 0.0, 1.0 ), 0.0, 0.0, 1.0 );
+  // (its second number: how rocky the shore is here, rocks.js's field as it is: the land's drawing reads both at once)
+  gl_FragColor = vec4( clamp( sum / ${(SKYSHARE.ways / 2).toFixed(1)}, 0.0, 1.0 ), texelFetch( uRocky, i0, 0 ).r, 0.0, 1.0 );
 }`;
 // life.js's hash and vnoise, bit for bit (Math.imul is a 32-bit multiply; >>> an unsigned shift), and a cheaper noise
 const NOISE_GLSL = `
@@ -335,11 +337,14 @@ float gn( vec2 p ) { vec2 i = floor( p ), f = fract( p ), u = f * f * ( 3.0 - 2.
 // THE CONTROL TEXTURE, made once: at each of its texels (CONTROL.per to a 16 m cell), life.js's own cover noise (the
 // grass's), a slow variation of the colour, the lagoon's patches of rubble, and a jitter for the beach's edge
 const CONTROL_FRAG = `
-uniform vec4 uGrid; uniform float uPer;
+uniform vec4 uGrid; uniform float uPer; uniform sampler2D uRocky; uniform vec2 uN;
 ${NOISE_GLSL}
 void main() {
   vec2 xz = uGrid.xy + ( gl_FragCoord.xy - 0.5 ) * uGrid.z / uPer;
-  gl_FragColor = vec4( lhNoise( xz / 70.0 ) * 0.7 + lhNoise( xz / 17.0 ) * 0.3, gn( xz * 0.011 ) * 0.6 + gn( xz * 0.037 + 5.0 ) * 0.4, gn( xz * 0.06 + 3.0 ), gn( xz * 0.09 ) );
+  // (off a rocky shore (rocks.js's field) the floor under the water is rubble too, as in the lagoon's patches: the third
+  // number is raised over their threshold there, and is the lagoon's own noise everywhere else)
+  float rocky = texture2D( uRocky, ( ( xz - uGrid.xy ) / uGrid.z + 0.5 ) / uN ).r;
+  gl_FragColor = vec4( lhNoise( xz / 70.0 ) * 0.7 + lhNoise( xz / 17.0 ) * 0.3, gn( xz * 0.011 ) * 0.6 + gn( xz * 0.037 + 5.0 ) * 0.4, max( gn( xz * 0.06 + 3.0 ), rocky > 0.3 ? 0.72 + 0.28 * rocky : 0.0 ), gn( xz * 0.09 ) );
 }`;
 
 // ---- the land's own drawing (island.js's landMat and flatMat): the vertex hands on where it is and its own normal
@@ -357,7 +362,7 @@ vec3 isleW;                        // where the splat reads: the land's own plac
 varying float vEarth;
 #endif
 uniform mediump sampler2DArray uIsleCol; uniform mediump sampler2DArray uIsleSurf; uniform sampler2D uIsleSky; uniform sampler2D uIsleCtl;
-uniform vec4 uIsleLook;      // the maps' weight (0 until they come, then 1), the present light's raise of the colours, the control's texels to a cell
+uniform vec4 uIsleLook;      // the maps' weight (0 until they come, then 1), the present light's raise of the colours, the control's texels to a cell, 1 where the rocky shores are known
 uniform vec3 uIsleBody;      // where the body is
 uniform vec4 uIsleForest;    // the far forest (far.js): where its crowns begin (m from the eye), where they fade out to the canopy's colour, and end
 ${NOISE_GLSL}
@@ -472,7 +477,8 @@ float isleNy = clamp( isleN0.y, 0.03, 1.0 ), isleSlope = sqrt( 1.0 - isleNy * is
 // the control texture: life.js's cover noise, the slow variation, the lagoon's patches, the edge's jitter
 vec4 isleCtl = texture2D( uIsleCtl, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z * uIsleLook.z + 0.5 ) / ( ( uIsleN - 1.0 ) * uIsleLook.z + 1.0 ) );
 isleFaceMix = isleCtl.g; isleWarp = vec2( isleCtl.g - 0.5, isleCtl.r - 0.5 ) * 24.0;
-float isleSkySeen = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).r;
+vec2 isleSkyRd = texture2D( uIsleSky, ( ( isleW.xz - uIsleGrid.xy ) / uIsleGrid.z + 0.5 ) / uIsleN ).rg;
+float isleSkySeen = isleSkyRd.r;
 // a finer jitter for edges, near the eye only (further off it is under a pixel)
 #ifdef ISLE_FAR
 float isleE2 = 0.5;
@@ -487,6 +493,10 @@ float wCliff = smoothstep( 1.06, 1.14, isleSlope + 0.12 * ( isleE2 - 0.5 ) );
 float wRockS = smoothstep( 0.88, 0.97, isleSlope + 0.1 * ( isleCtl.a - 0.5 ) );
 float wSand = smoothstep( isleBeach + 0.22, isleBeach - 0.22, isleH ) * ( 1.0 - smoothstep( 0.4, 0.5, isleSlope ) );
 float wShore = smoothstep( isleBeach + 0.9, isleBeach - 0.2, isleH ) * smoothstep( 0.42, 0.52, isleSlope );
+// a boulder shore (rocks.js's field, where the mountains and the headlands meet the open sea): its ground is the shore's
+// pebbles and rubble between the boulders, to the storm ridge, not coral sand
+float isleRocky = smoothstep( 0.24, 0.5, isleSkyRd.g * uIsleLook.w + 0.2 * ( isleCtl.a - 0.5 ) ) * smoothstep( isleBeach + 1.1, isleBeach - 0.1, isleH );
+wShore = max( wShore, isleRocky ); wSand *= 1.0 - isleRocky;
 float isleSea = smoothstep( 0.05, -0.35, isleH );
 // under the sea: the lagoon's sand, with rubble and coral heads in patches where it is shallow
 float isleReef = smoothstep( 0.64, 0.7, isleCtl.b ) * smoothstep( -4.0, -0.6, isleH );
@@ -859,7 +869,7 @@ function landMaterial(base, { lite, flat, uniforms, cut = null, water = false })
 // createGroundLook({ renderer, lite, phone, ground, scene }): the land's materials (`land`, `flat`), the passes and the
 // shadow maps. update({ camera, dir, body }) once a frame (dir: toward the key light) draws the shadow maps; adoptAll
 // (scene) makes whatever lit thing has come into the scene take the shadows; read() is the probes' numbers.
-export function createGroundLook({ renderer, lite = false, phone = false, ground, scene, water = null }) {
+export function createGroundLook({ renderer, lite = false, phone = false, ground, scene, water = null, rocks = null }) {
   const head = ground.head, W = head.w, H = head.h, S = head.spacing;
   const C = lite ? CASCADES.lite : CASCADES, nC = C.far.length, per = lite || phone ? CONTROL.lite : CONTROL.per;
   const spare = spareDepth(renderer);
@@ -885,12 +895,15 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   // the control texture and the sky's share, once (the control needs nothing more than eight bits a channel)
   const cw = (W - 1) * per + 1, ch = (H - 1) * per + 1;
   const ctlRT = rt(cw, ch, THREE.UnsignedByteType, THREE.RGBAFormat); disposables.push(ctlRT);
-  { const t0 = performance.now(); run(pass(CONTROL_FRAG, { uGrid: { value: new THREE.Vector4(head.x0, head.z0, S, 0) }, uPer: { value: per } }), ctlRT); times.control = performance.now() - t0; }
+  // how rocky each grid point's shore is (rocks.js's field; none, where there is no field): read by the two passes below
+  const rocky = new THREE.DataTexture(rocks ? rocks.shore : new Uint8Array(W * H), W, H, THREE.RedFormat, THREE.UnsignedByteType);
+  rocky.magFilter = rocky.minFilter = THREE.LinearFilter; rocky.generateMipmaps = false; rocky.needsUpdate = true; disposables.push(rocky);
+  { const t0 = performance.now(); run(pass(CONTROL_FRAG, { uGrid: { value: new THREE.Vector4(head.x0, head.z0, S, 0) }, uPer: { value: per }, uRocky: { value: rocky }, uN: { value: new THREE.Vector2(W, H) } }), ctlRT); times.control = performance.now() - t0; }
   let skyRT = null;
   if (canDraw) {
-    skyRT = rt(W, H, THREE.UnsignedByteType, THREE.RedFormat); disposables.push(skyRT);
+    skyRT = rt(W, H, THREE.UnsignedByteType, THREE.RGBAFormat); disposables.push(skyRT);
     const t0 = performance.now();
-    run(pass(SKYSHARE_FRAG, { uHf: { value: hf }, uH: { value: ht }, uN: { value: new THREE.Vector2(W, H) }, uS: { value: S } }), skyRT);
+    run(pass(SKYSHARE_FRAG, { uHf: { value: hf }, uH: { value: ht }, uN: { value: new THREE.Vector2(W, H) }, uS: { value: S }, uRocky: { value: rocky } }), skyRT);
     times.skyShare = performance.now() - t0;
   }
   // the land's lines: two targets, one shown while the other is made, a band of rows a frame
@@ -981,7 +994,7 @@ export function createGroundLook({ renderer, lite = false, phone = false, ground
   const [col0, surf0] = standIns(); disposables.push(col0, surf0);
   const uniforms = { uIsleCol: { value: col0 }, uIsleSurf: { value: surf0 }, uIsleSky: { value: skyRT ? skyRT.texture : null }, uIsleCtl: { value: ctlRT.texture },
     uIsleLayer: { value: LAYERS.map((_, i) => new THREE.Vector4(FINE[i], COARSE[i], WET[i], RISE[i])) }, uIsleMean: { value: MEAN.map((m) => new THREE.Vector3(...m)) }, uIsleFloor: { value: FLOOR },
-    uIsleLook: { value: new THREE.Vector4(0, 1, per, 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) }, uIsleForest: { value: new THREE.Vector4(1e9, 1e9, 2e9, 0) }, ...(water ? water.uniforms : {}) };
+    uIsleLook: { value: new THREE.Vector4(0, 1, per, skyRT && rocks ? 1 : 0) }, uIsleBody: { value: new THREE.Vector3(1e6, 0, 1e6) }, uIsleForest: { value: new THREE.Vector4(1e9, 1e9, 2e9, 0) }, ...(water ? water.uniforms : {}) };
   const which = lite || phone ? 'lite' : 'full';
   let mapsState = 'fetching', mapsAt = 0, fade = 0;
   const t0 = performance.now();

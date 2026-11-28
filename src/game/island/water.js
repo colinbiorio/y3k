@@ -90,6 +90,27 @@ void main() {
 }`;
 
 // what the shaders read: the bands' textures, the sea's map, the swell, the time
+// (two pieces of the text below, kept apart so that a thing standing at the water's edge (stones.js: a rock, a stick) can
+// read the same map and the same swash without the rest of the sea's drawing)
+const MAP_AT = `vec4 seaMapAt( vec2 xz ) {
+  vec2 g = ( xz - uSeaGrid.xy ) / uSeaGrid.z;
+  if ( any( lessThan( g, vec2( 0.0 ) ) ) || any( greaterThan( g, uSeaN - 1.0 ) ) ) return vec4( 4000.0, 0.0, 4000.0, 0.6 );
+  return texture( uSeaMap, ( g + 0.5 ) / uSeaN );
+}`;
+const SWASH = `float seaReach( vec4 m ) { return mix( 0.08, 0.34, smoothstep( -700.0, -60.0, m.x ) ); }
+float seaSwash( vec2 xz, vec4 m, out float rising ) {
+  float exposed = smoothstep( -700.0, -60.0, m.x ), T = mix( 3.6, 11.5, exposed );
+  float ph = uSeaClock.x / T + 0.8 * gn( xz * 0.013 ) + 0.25 * gn( xz * 0.07 + 3.0 ), u = fract( ph );
+  rising = 1.0 - smoothstep( 0.22, 0.34, u );
+  float up = u < 0.3 ? sqrt( u / 0.3 ) : 1.0 - smoothstep( 0.3, 1.0, u );
+  return seaReach( m ) * up * ( 0.55 + 0.45 * gn( vec2( floor( ph ) * 0.37 + xz.x * 0.004, xz.y * 0.004 ) ) );
+}`;
+// THE WATER'S EDGE, for what stands in it (after a `float gn( vec2 )`: terrain.js's noise): the sea's map at a point, how
+// high the swash reaches there and how high it has run now
+export const SEA_EDGE_GLSL = `
+uniform sampler2D uSeaMap; uniform vec4 uSeaGrid; uniform vec2 uSeaN; uniform vec4 uSeaClock;
+${MAP_AT}
+${SWASH}`;
 export const SEA_WAVES_GLSL = `
 uniform sampler2D uSeaA0; uniform sampler2D uSeaA1; uniform sampler2D uSeaB0; uniform sampler2D uSeaB1; uniform sampler2D uSeaB2; uniform sampler2D uSeaMap;
 uniform vec3 uSeaL;          // each band's square (m)
@@ -101,11 +122,7 @@ uniform vec4 uSeaSlide;      // the lighter path: where its one band has slid to
 uniform float uSeaDebug;     // a probe's view of one part (0: as drawn)
 // the sea's map at a point (how far outside the crest, the swell's phase, how far from dry land, how square it faces the
 // swell); off the island's grid, the open sea
-vec4 seaMapAt( vec2 xz ) {
-  vec2 g = ( xz - uSeaGrid.xy ) / uSeaGrid.z;
-  if ( any( lessThan( g, vec2( 0.0 ) ) ) || any( greaterThan( g, uSeaN - 1.0 ) ) ) return vec4( 4000.0, 0.0, 4000.0, 0.6 );
-  return texture( uSeaMap, ( g + 0.5 ) / uSeaN );
-}
+${MAP_AT}
 // the swell over open water at a point: how far it moves the surface (x, up, z), and its slope
 vec3 seaSwell( vec2 xz, out vec2 slope ) {
   vec3 d = vec3( 0.0 ); slope = vec2( 0.0 );
@@ -201,14 +218,7 @@ vec2 seaRipples( vec2 p ) {
 // THE SWASH: how high the sea's edge has run up the beach at a point (m over the mean): the swell's bores where the reef
 // lets them through, the lagoon's small waves elsewhere; up quickly and back down slower, each stretch of beach out of
 // step with the next and no two alike. And how high it reaches at most (the wet sand above the water is wet to there).
-float seaReach( vec4 m ) { return mix( 0.08, 0.34, smoothstep( -700.0, -60.0, m.x ) ); }
-float seaSwash( vec2 xz, vec4 m, out float rising ) {
-  float exposed = smoothstep( -700.0, -60.0, m.x ), T = mix( 3.6, 11.5, exposed );
-  float ph = uSeaClock.x / T + 0.8 * gn( xz * 0.013 ) + 0.25 * gn( xz * 0.07 + 3.0 ), u = fract( ph );
-  rising = 1.0 - smoothstep( 0.22, 0.34, u );
-  float up = u < 0.3 ? sqrt( u / 0.3 ) : 1.0 - smoothstep( 0.3, 1.0, u );
-  return seaReach( m ) * up * ( 0.55 + 0.45 * gn( vec2( floor( ph ) * 0.37 + xz.x * 0.004, xz.y * 0.004 ) ) );
-}
+${SWASH}
 // foam's lace (bubbles drawn out into threads): three scales of noise, drifting; covered where it is over 1 - white. A
 // pixel that spans more of it than its finest threads (px: metres a pixel) sees their mean, and far off the share itself
 float seaLace( vec2 p, float white, float px ) {
@@ -328,6 +338,7 @@ export function createWater({ renderer, lite = false, ground, shape = null }) {
   let clock = 0;
   const api = {
     uniforms, gpu, defines: gpu ? { SEA_FFT: '' } : {},
+    map,                                // the sea's own map as numbers (sea.js seaMap): rocks.js places the shores' rocks by it
     debug: { bands: true },             // a probe's switch: the bands not made again (to measure what they cost)
     // the time the sea is at (s, within SEA.loop): the swell's phase, for whatever floats on it (nothing yet)
     get clock() { return clock; },

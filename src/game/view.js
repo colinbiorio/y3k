@@ -1141,6 +1141,7 @@ export function createGameView({ toast = () => {}, toSocieties = null, storage =
     // (x, z) on the island (up in the air, flying, if `up` metres are asked), the eye turned to `yaw`, `pitch` and
     // stood `zoom` back: the fixed views the island's contact sheets are drawn from. Nothing in the game calls either.
     globalThis.Y3K.game.ground = () => K?.void?.ground || null;
+    globalThis.Y3K.game.stones = () => K?.void?.stones?.read?.() || null;      // the island's rocks (stones.js): what is planted, what is drawn
     globalThis.Y3K.game.put = ({ x, z, up = 0, yaw = null, pitch = null, zoom = null } = {}) => {
       if (!K || K.place !== 'island' || !K.island || !Number.isFinite(x) || !Number.isFinite(z)) return null;
       if (K.aboard) { leave(K.aboard, K.body); K.aboard = null; }
